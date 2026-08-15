@@ -5,7 +5,8 @@ export type PlaybackListener = (event: PlaybackEvent) => void;
 export interface Player {
   attach(host: HTMLElement): void;
   detach(): void;
-  play(source: PlaybackSource, positionMs?: number): Promise<void>;
+  /** Start a source and report whether playback actually began (autoplay may be blocked). */
+  play(source: PlaybackSource, positionMs?: number): Promise<boolean>;
   pause(): void;
   resume(): void;
   seek(positionMs: number): void;

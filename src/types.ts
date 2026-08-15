@@ -107,6 +107,7 @@ export type PlaybackMode = 'direct' | 'remux' | 'transcode';
 export interface PlaybackSource {
   mediaId: string;
   url: string;
+  subtitleUrl?: string;
   mimeType?: string;
   mode: PlaybackMode;
   durationMs?: number;

@@ -4,26 +4,25 @@
                           Macha node
                  distributed media + catalogue
                              |
-             /api/v1/catalogue JSON + artwork
-                             |
-                    MachaCatalogueApi
-                             |
-                      MachaMediaApi
-                  browse/search hierarchy
-                             |
-                     React application
-                 + browser-history router
-                             |
-              +--------------+--------------+
-              |              |              |
-             Web          Android          Tizen
-         HTML video       Media3 stub     AVPlay stub
-              \              |              /
-               +------ PlaybackResolver ----+
-                           interface
+       /api/v1/catalogue       /api/v1/playback
+          JSON + artwork       sessions + streams
+                |                    |
+       MachaCatalogueApi     MachaPlaybackResolver
+                |                    |
+          MachaMediaApi       PlaybackResolver
+                |                    |
+                +---------+----------+
+                          |
+                  React application
+              + browser-history router
+                          |
+           +--------------+--------------+
+           |              |              |
+          Web          Android          Tizen
+    video + hls.js     Media3 stub     AVPlay stub
 ```
 
-`PlaybackResolver` has no production HTTP implementation yet because the current Macha server has no streaming API. Demo mode uses a local sample file.
+The server owns playback negotiation and media transformation. The client owns controls and reports platform capabilities. Demo mode still uses a local sample file through the same resolver/player seam.
 
 ## Catalogue loading
 
@@ -42,7 +41,7 @@ Production web hosting must fall back to `index.html` for unknown application pa
 - The client does not know about DHT extents, replicas, peers or routing.
 - The catalogue wire model mirrors Macha rather than inventing a client-specific server API.
 - The client never transcodes.
-- When server playback exists, the server should choose Direct Play first, Remux second and Transcode only when required.
+- The server chooses Direct Play first, Remux second and Transcode only when required.
 - Platform-specific code is restricted to capabilities, playback, application lifecycle and remote-key integration.
 - React owns catalogue browsing, routes, search, hierarchy, focus navigation and playback chrome.
 - Continue Watching is installation-local state, bounded to three unfinished items and never uploaded.

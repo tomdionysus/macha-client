@@ -3,17 +3,16 @@ import { EpisodeRail } from '../components/EpisodeRail';
 import { ErrorMessage, Loading } from '../components/Status';
 import { useArtworkUrl } from '../hooks/useArtworkUrl';
 import { useAsync } from '../hooks/useAsync';
-import type { Episode, SeasonDetails, ShowDetails } from '../types';
+import type { SeasonDetails, ShowDetails } from '../types';
 
 interface Props {
   api: MediaApi;
   seriesId: string;
   seasonId: string;
   onBack: () => void;
-  onOpenEpisode: (episode: Episode) => void;
 }
 
-export function SeasonScreen({ api, seriesId, seasonId, onBack, onOpenEpisode }: Props) {
+export function SeasonScreen({ api, seriesId, seasonId, onBack }: Props) {
   const result = useAsync(async () => {
     const [seriesResult, seasonResult] = await Promise.all([api.details(seriesId), api.details(seasonId)]);
     if (seriesResult.kind !== 'show' || !('seasons' in seriesResult)) throw new Error('Parent catalogue item is not a series.');
@@ -46,7 +45,7 @@ export function SeasonScreen({ api, seriesId, seasonId, onBack, onOpenEpisode }:
         {season.synopsis && <p className="synopsis">{season.synopsis}</p>}
         <section className="episode-section">
           <h2>Episodes</h2>
-          <EpisodeRail api={api} episodes={season.episodes} onOpen={onOpenEpisode} />
+          <EpisodeRail api={api} episodes={season.episodes} />
         </section>
       </div>
     </section>

@@ -1,12 +1,13 @@
 import { useRef, type MouseEvent, type PointerEvent, type WheelEvent } from 'react';
+import { Link } from 'react-router-dom';
 import type { MediaApi } from '../api/MediaApi';
 import { useArtworkUrl } from '../hooks/useArtworkUrl';
+import { routes } from '../routing';
 import type { Episode } from '../types';
 
 interface Props {
   api: MediaApi;
   episodes: Episode[];
-  onOpen: (episode: Episode) => void;
 }
 
 interface DragState {
@@ -14,6 +15,7 @@ interface DragState {
   startX: number;
   startScrollLeft: number;
   moved: boolean;
+  captured: boolean;
 }
 
 function displayDate(value?: string): string {
@@ -23,22 +25,24 @@ function displayDate(value?: string): string {
   return new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'short', year: 'numeric' }).format(parsed);
 }
 
-function EpisodeCard({ api, episode, onOpen }: { api: MediaApi; episode: Episode; onOpen: (episode: Episode) => void }) {
+function EpisodeCard({ api, episode }: { api: MediaApi; episode: Episode }) {
   const image = useArtworkUrl(api, episode.artwork?.thumbnail ?? episode.artwork?.backdrop);
   return (
-    <button
-      className="episode-card"
-      data-tv-focusable="true"
-      aria-label={`Play ${episode.title}`}
-      onClick={() => onOpen(episode)}
-      type="button"
-    >
-      <div className="episode-still">
-        {image
-          ? <img src={image} alt="" loading="lazy" />
-          : <div className="episode-still-placeholder">{episode.episodeNumber}</div>}
-        <span className="episode-play-mark" aria-hidden="true">▶</span>
-      </div>
+    <article className="episode-card">
+      <Link
+        className="episode-still-link"
+        to={routes.player(episode.id)}
+        data-tv-focusable="true"
+        aria-label={`Play ${episode.title}`}
+        draggable={false}
+      >
+        <div className="episode-still">
+          {image
+            ? <img src={image} alt="" loading="lazy" draggable={false} />
+            : <div className="episode-still-placeholder">{episode.episodeNumber}</div>}
+          <span className="episode-play-mark" aria-hidden="true">▶</span>
+        </div>
+      </Link>
       <div className="episode-copy">
         <div className="episode-heading">
           <strong>{episode.episodeNumber}. {episode.title}</strong>
@@ -46,11 +50,11 @@ function EpisodeCard({ api, episode, onOpen }: { api: MediaApi; episode: Episode
         </div>
         <p>{episode.synopsis || 'No description available.'}</p>
       </div>
-    </button>
+    </article>
   );
 }
 
-export function EpisodeRail({ api, episodes, onOpen }: Props) {
+export function EpisodeRail({ api, episodes }: Props) {
   const railRef = useRef<HTMLDivElement | null>(null);
   const drag = useRef<DragState>();
   const suppressClick = useRef(false);
@@ -63,8 +67,8 @@ export function EpisodeRail({ api, episodes, onOpen }: Props) {
       startX: event.clientX,
       startScrollLeft: rail.scrollLeft,
       moved: false,
+      captured: false,
     };
-    rail.setPointerCapture(event.pointerId);
   };
 
   const onPointerMove = (event: PointerEvent<HTMLDivElement>) => {
@@ -73,10 +77,14 @@ export function EpisodeRail({ api, episodes, onOpen }: Props) {
     if (!rail || !state || state.pointerId !== event.pointerId) return;
     const delta = event.clientX - state.startX;
     if (Math.abs(delta) > 6) state.moved = true;
-    if (state.moved) {
-      event.preventDefault();
-      rail.scrollLeft = state.startScrollLeft - delta;
+    if (!state.moved) return;
+
+    if (!state.captured) {
+      rail.setPointerCapture(event.pointerId);
+      state.captured = true;
     }
+    event.preventDefault();
+    rail.scrollLeft = state.startScrollLeft - delta;
   };
 
   const finishDrag = (event: PointerEvent<HTMLDivElement>) => {
@@ -85,7 +93,7 @@ export function EpisodeRail({ api, episodes, onOpen }: Props) {
     if (!rail || !state || state.pointerId !== event.pointerId) return;
     suppressClick.current = state.moved;
     drag.current = undefined;
-    if (rail.hasPointerCapture(event.pointerId)) rail.releasePointerCapture(event.pointerId);
+    if (state.captured && rail.hasPointerCapture(event.pointerId)) rail.releasePointerCapture(event.pointerId);
     if (suppressClick.current) {
       window.setTimeout(() => { suppressClick.current = false; }, 0);
     }
@@ -121,7 +129,7 @@ export function EpisodeRail({ api, episodes, onOpen }: Props) {
     >
       {episodes.map((episode) => (
         <div key={episode.id} className="episode-rail-item" role="listitem">
-          <EpisodeCard api={api} episode={episode} onOpen={onOpen} />
+          <EpisodeCard api={api} episode={episode} />
         </div>
       ))}
     </div>

@@ -3,7 +3,7 @@
 Macha Client is a small React/TypeScript television and web client for Macha.
 It browses the catalogue exposed by a Macha node and keeps platform-specific playback behind a narrow adapter.
 
-The web catalogue client is implemented. The current Macha server catalogue API does not yet expose media streaming, remuxing or transcoding, so production playback is deliberately not faked: the playback resolver is present as an interface and the web demo supplies a local implementation. Android/Google TV and Samsung Tizen are wired as later platform targets.
+The web client is implemented against the Macha 0.7 catalogue and playback APIs, including Direct Play, remux/transcode HLS, seeking and stream selection. Android/Google TV and Samsung Tizen remain wired as later platform-player targets behind the same playback boundary.
 
 The product is intentionally narrow. It exists to browse and play your own media. There are no accounts, cloud dependencies, adverts, recommendations, social features, other-viewer activity or global watchlists.
 
@@ -11,13 +11,13 @@ Developed with substantial use of AI-assisted implementation
 
 ## What it does
 
-- 3 second Macha logo-mask splash on initial load, with only the moving highlight visible through the logo.
+- 2 second Macha logo-mask splash on initial load, with only the moving highlight visible through the logo.
 - Home screen with Movies, TV Shows and Music.
 - Per-client Continue Watching, limited to the last three unfinished items.
 - Proper browser-history routes for movies, series, seasons and episodes.
 - Separate series and season pages.
 - Season-specific artwork where the catalogue provides it, with series artwork as fallback.
-- Interactive horizontal episode browsing with still artwork, title, date slot and synopsis.
+- Interactive horizontal episode browsing with still artwork, title, date slot and synopsis; the complete still is a direct link to the player route.
 - First-class Movie, TV and Music libraries, including artist → album → track navigation.
 - Catalogue search.
 - Macha artwork retrieval, including authenticated artwork requests.
@@ -25,7 +25,10 @@ Developed with substantial use of AI-assisted implementation
 - Keyboard and television D-pad focus navigation.
 - Mouse, trackpad and touch episode scrolling.
 - Shared React UI with Web, Android and Tizen platform/player interfaces.
-- Routable player page with auto-hiding lower chrome, transport controls and progress scrubbing; it runs as an interactive preview until the server-side playback resolver exists.
+- Routable player page with auto-hiding translucent-black lower chrome, uniform circular transport controls and progress scrubbing.
+- Macha 0.7 playback-session negotiation with Direct Play, remux and transcode modes.
+- In-session quality, audio, subtitle and media-representation switching.
+- Browser HLS playback through native HLS where available or hls.js otherwise.
 - Android Media3 and Samsung AVPlay host stubs.
 
 Continue Watching is local browser/application state. It is never sent to Macha.
@@ -34,7 +37,7 @@ Continue Watching is local browser/application state. It is never sent to Macha.
 
 - Node.js 20 or later.
 - npm.
-- A Macha node with the catalogue HTTP API enabled, or demo mode.
+- Macha 0.7 with the catalogue and streaming HTTP APIs enabled, or demo mode.
 
 ## Build
 
@@ -46,7 +49,7 @@ npm run build
 
 The production web bundle is written to `dist/`.
 
-Source Sans 3 Variable is pulled at build time through Fontsource and bundled with the application. Source Sans 3 is released under the SIL Open Font License 1.1. The running client does not fetch fonts from a cloud service.
+Roboto Variable is pulled at build time through Fontsource and bundled with the application. Roboto is released under the Apache License 2.0. The running client does not fetch fonts from a cloud service.
 
 ## Development
 
@@ -58,7 +61,7 @@ npm install
 npm run dev
 ```
 
-`.env.example` configures Vite to proxy same-origin `/api` requests to the Macha node. This avoids requiring CORS support from the deliberately small Macha HTTP server.
+`.env.example` configures Vite to proxy same-origin `/api` requests to the Macha node. Macha 0.7 also emits CORS headers, so a separately hosted client may talk to the API directly.
 
 For the self-contained UI/playback demo:
 
@@ -93,13 +96,13 @@ Small presentation delays live in `src/settings.ts`:
 
 ```ts
 export const uiSettings = {
-  splashDurationMs: 3_000,
+  splashDurationMs: 2_000,
   loadingIndicatorDelayMs: 1_000,
   playerControlsHideDelayMs: 3_500,
 } as const;
 ```
 
-The splash runs before React is mounted. `src/bootSplash.ts` measures its lifetime with `performance.now()` and does not create the React application until at least `splashDurationMs` has elapsed. The visible masked sweep occupies most of that configured lifetime, so the transparent logo does not collapse perceptually into a sub-second flash. The loading spinner is a transparent full-page overlay and is not shown unless an async screen remains loading beyond `loadingIndicatorDelayMs`.
+The splash runs before React is mounted. `src/bootSplash.ts` measures its lifetime with `performance.now()` and does not create the React application until at least `splashDurationMs` has elapsed. The visible masked sweep occupies almost all of that configured lifetime, moves linearly, starts within the right side of the mask and exits fully beyond the left edge. The loading spinner is a transparent full-page overlay and is not shown unless an async screen remains loading beyond `loadingIndicatorDelayMs`.
 
 ## Macha integration
 
@@ -123,31 +126,38 @@ The client reserves an optional full date field for season/episode presentation,
 
 See [`docs/server-api.md`](docs/server-api.md).
 
-## Playback boundary
+## Playback
 
-Macha's current catalogue API exposes `media_ids`, but it does not expose a media byte-stream or playback negotiation endpoint. `src/playback/PlaybackResolver.ts` is therefore an interface, not an invented HTTP contract.
+Macha 0.7 playback is implemented through `MachaPlaybackResolver`. Opening `/play/:id` creates a server playback session with the platform capability profile. The server selects Direct Play, remux or transcode and returns a capability URL for the media.
 
-The intended later server path remains:
+The player can update the same logical session to seek, change playback mode or quality, select audio/subtitles, or switch media representation. Transformed seeks and option changes may return a new HLS generation; the client reloads it while preserving the absolute media position. Leaving the player explicitly deletes the session.
 
-```text
-catalogue item + media_ids
-        |
-playback resolver
-        |
-Direct Play -> Remux -> Transcode
-        |
-HTTP media/HLS
-        |
-Platform Player
+Direct streams use the platform player directly. On Web, transformed fragmented-MP4 HLS uses native HLS where the browser provides it and hls.js otherwise. Permanent API Bearer authentication is used only for playback-session control; the returned stream/subtitle capability URLs are loaded directly by the player.
+
+The React screen depends only on `PlaybackResolver` and `Platform.Player`, so Android Media3 and Tizen AVPlay can implement the same session/control model without changing the UI.
+
+
+### Playback diagnostics
+
+Playback diagnostics are enabled in this development-stage client and written to the browser console with a `[macha ...]` prefix. The same structured entries are retained in a bounded in-memory ring buffer.
+
+After reproducing a playback problem, use the browser console:
+
+```js
+machaDiagnostics.dump()       // newline-delimited JSON
+await machaDiagnostics.copy() // copy the same trace to the clipboard
+machaDiagnostics.clear()      // start a fresh trace
 ```
 
-The player page already exists and uses the same platform/player boundary. Until that server API is added it renders interactive preview controls rather than inventing a streaming endpoint. The React application and Android/Tizen platform adapters do not need structural changes when real playback is wired in.
+The trace includes playback-session POST/PATCH/DELETE timing and status, autoplay results, starting/resume position, media ready/network state, buffered and seekable ranges, `waiting`/`stalled`/seek events, HLS manifest/fragment activity and hls.js recovery/error events. Playback capability tokens and authentication-like fields are redacted before console/export output.
+
+Diagnostic verbosity is configured in `src/settings.ts` with `diagnosticsSettings`. The buffer is deliberately memory-only and is lost on a full page reload.
 
 ## Platform targets
 
 ### Web
 
-`WebPlatform` uses the browser's native video element and reports browser codec/container capabilities. It is complete as the client-side player; production playback waits only for the Macha streaming resolver.
+`WebPlatform` reports browser codec/container capabilities, uses the browser video element for direct/native-HLS playback, and uses hls.js for fragmented-MP4 HLS when native HLS is unavailable.
 
 ### Android TV / Google TV
 

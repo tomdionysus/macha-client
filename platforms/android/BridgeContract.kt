@@ -6,7 +6,7 @@ package media.macha.client
  */
 interface MachaBridge {
     fun capabilitiesJson(): String
-    fun play(playbackSourceJson: String, positionMs: Long)
+    fun play(playbackSourceJson: String, positionMs: Long): Boolean
     fun pause()
     fun resume()
     fun seek(positionMs: Long)

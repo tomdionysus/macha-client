@@ -9,7 +9,7 @@ import { useTvNavigation } from './hooks/useTvNavigation';
 import type { Platform } from './platform/Platform';
 import type { PlaybackResolver } from './playback/PlaybackResolver';
 import { DemoPlaybackResolver } from './playback/DemoPlaybackResolver';
-import { UnavailablePlaybackResolver } from './playback/UnavailablePlaybackResolver';
+import { MachaPlaybackResolver } from './playback/MachaPlaybackResolver';
 import type { MediaSummary, PlaybackProgress, SeasonSummary } from './types';
 import { ContinueWatchingStore } from './state/continueWatching';
 import {
@@ -83,7 +83,7 @@ function SeriesRoute({ api, onOpenSeason }: { api: MediaApi; onOpenSeason: (seas
   );
 }
 
-function SeasonRoute({ api, onPlay }: { api: MediaApi; onPlay: (item: MediaSummary) => void }) {
+function SeasonRoute({ api }: { api: MediaApi }) {
   const { seriesId, seasonId } = useParams();
   const navigate = useNavigate();
   const resolvedSeriesId = required(seriesId, 'seriesId');
@@ -93,7 +93,6 @@ function SeasonRoute({ api, onPlay }: { api: MediaApi; onPlay: (item: MediaSumma
       seriesId={resolvedSeriesId}
       seasonId={required(seasonId, 'seasonId')}
       onBack={() => navigate(-1)}
-      onOpenEpisode={onPlay}
     />
   );
 }
@@ -173,8 +172,8 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
 
   const playbackResolver = useMemo<PlaybackResolver>(() => {
     if (playbackOverride) return playbackOverride;
-    return demo ? new DemoPlaybackResolver() : new UnavailablePlaybackResolver();
-  }, [demo, playbackOverride]);
+    return demo ? new DemoPlaybackResolver() : new MachaPlaybackResolver(serverUrl, apiToken);
+  }, [apiToken, demo, playbackOverride, serverUrl]);
 
   const open = useCallback((item: MediaSummary) => navigate(pathForMedia(item)), [navigate]);
   const openPlayer = useCallback((item: MediaSummary) => navigate(routes.player(item.id)), [navigate]);
@@ -196,6 +195,7 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
       <header className="topbar">
         <NavLink to={routes.home} className="brand-link" aria-label="Macha home">
           <AppLogo />
+          <span className="brand-name">Macha</span>
         </NavLink>
         <nav aria-label="Main navigation">
           {navItems.map((item) => (
@@ -210,7 +210,7 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
             </NavLink>
           ))}
         </nav>
-        <div className="platform-badge">{platform.name}</div>
+        <div className="platform-badge">{platform.name.toUpperCase()}</div>
       </header>
       <main>
         <Routes>
@@ -219,7 +219,7 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
           <Route path="/movies/:movieId" element={<DetailRoute api={api} onPlay={openPlayer} parameter="movieId" />} />
           <Route path={routes.series} element={<LibraryScreen api={api} kind="shows" onOpen={open} />} />
           <Route path="/series/:seriesId" element={<SeriesRoute api={api} onOpenSeason={open} />} />
-          <Route path="/series/:seriesId/seasons/:seasonId" element={<SeasonRoute api={api} onPlay={openPlayer} />} />
+          <Route path="/series/:seriesId/seasons/:seasonId" element={<SeasonRoute api={api} />} />
           <Route path="/episodes/:episodeId" element={<DetailRoute api={api} onPlay={openPlayer} parameter="episodeId" />} />
           <Route path={routes.music} element={<MusicScreen api={api} onOpen={open} />} />
           <Route path="/music/artists/:artistId" element={<ArtistRoute api={api} onOpenAlbum={open} />} />

@@ -1,5 +1,46 @@
 # Changelog
 
+## 0.3.9 - 2026-08-15
+
+- add structured client-side playback diagnostics covering session control, browser media state, buffering, HLS fragment activity and failures;
+- retain an in-memory diagnostic ring buffer and expose `machaDiagnostics.dump()`, `copy()` and `clear()` in the browser console;
+- redact playback capability tokens and authentication-like fields from exported diagnostics;
+- log Macha playback request latency, status and error bodies, including `503 playback_unavailable` responses;
+- log startup/resume position, autoplay outcome, direct/transformed seek latency and stream reconfiguration timing;
+- log HTML media `waiting`, `stalled`, `seeking`, `seeked` and error state with buffered/seekable ranges;
+- log hls.js manifest, fragment, level-switch, recovery and fatal/non-fatal error events;
+- remove the React StrictMode wrapper because development effect replay duplicated side-effectful playback-session creation/cleanup.
+
+## 0.3.8 - 2026-08-15
+
+- integrated the player with Macha 0.7 playback sessions instead of the preview-only production resolver;
+- send browser codec/container/display capabilities and let Macha negotiate Direct Play, remux or transcode;
+- added Web fragmented-MP4 HLS playback through native HLS or hls.js;
+- added in-session playback mode, quality, audio, subtitle and media-representation controls;
+- use Macha session PATCH for transformed seeks and stream changes, preserving absolute playback position across HLS generations;
+- explicitly delete server playback sessions when leaving the player;
+- report direct-play support for browser MP4/WebM and supported MP3/FLAC/Ogg containers;
+- keep permanent Bearer authentication on session control requests while loading returned stream capability URLs directly.
+
+## 0.3.7 - 2026-08-15
+
+- reduce the application-wide type scale while retaining the existing Roboto hierarchy;
+- make player chrome flush to the left, right and bottom edges with no border or radius and a more transparent black surface;
+- change the masked splash highlight to linear motion;
+- move the splash highlight start further into the right side of the mask and its end farther beyond the left edge so the band fully clears the logo.
+
+## 0.3.6 - 2026-08-15
+
+- rebase the client changes directly onto the supplied 0.3.5 source archive;
+- reduce the configurable splash to two seconds, shorten the masked flash travel and keep only a small lead-in/out around the sweep;
+- switch the self-hosted UI font to Roboto Variable;
+- show `Macha` beside the toolbar logo and centre the platform label within the right-hand toolbar column;
+- make headings and main text neutral grey, keeping crimson exclusively as an interaction/accent colour;
+- replace the player's red gradient/fuzz with crisp, bordered, semi-transparent black control chrome;
+- make every player transport button the same circular size and replace ten-second arrow labels with standard SVG back/rewind/play-pause/fast-forward/options icons;
+- fix episode playback navigation by making the complete episode still a real `/play/:id` link and delaying rail pointer capture until an actual drag begins;
+- show the episode play overlay only on hover or keyboard/TV focus.
+
 ## 0.3.5 - 2026-08-15
 
 - moved the initial splash completely outside React; the application is not mounted until the configured minimum splash lifetime has elapsed;
