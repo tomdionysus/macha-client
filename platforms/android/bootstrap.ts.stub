@@ -1,0 +1,9 @@
+import type { AndroidBridge } from '../../src/platform/AndroidPlatform';
+
+/**
+ * The Android TV shell installs a concrete Kotlin/Media3 bridge here before
+ * the React bundle starts. The shared UI does not otherwise know it is Android.
+ */
+export function installAndroidBridge(bridge: AndroidBridge): void {
+  window.__MACHA_ANDROID__ = bridge;
+}

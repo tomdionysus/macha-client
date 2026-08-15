@@ -1,0 +1,7 @@
+import type { TizenBridge } from '../../src/platform/TizenPlatform';
+
+// Skeleton only. This file is deliberately not part of the current web build.
+// The Tizen package will implement TizenBridge with webapis.avplay.
+export function createTizenBridge(): TizenBridge {
+  throw new Error('Tizen AVPlay adapter not implemented yet');
+}

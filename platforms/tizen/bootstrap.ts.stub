@@ -1,0 +1,6 @@
+import type { TizenBridge } from '../../src/platform/TizenPlatform';
+
+/** Install the Samsung AVPlay bridge before bootstrapping the shared React UI. */
+export function installTizenBridge(bridge: TizenBridge): void {
+  window.__MACHA_TIZEN__ = bridge;
+}
