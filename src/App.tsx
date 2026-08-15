@@ -139,14 +139,16 @@ function PlayerRoute({
   const { itemId } = useParams();
   const navigate = useNavigate();
   const resolvedItemId = required(itemId, 'itemId');
-  const existing = progressStore.list().find((entry) => entry.mediaId === resolvedItemId);
+  const startPositionMs = useMemo(() => (
+    progressStore.list().find((entry) => entry.mediaId === resolvedItemId)?.positionMs ?? 0
+  ), [progressStore, resolvedItemId]);
   return (
     <PlayerScreen
       api={api}
       itemId={resolvedItemId}
       platform={platform}
       playbackResolver={playbackResolver}
-      startPositionMs={existing?.positionMs ?? 0}
+      startPositionMs={startPositionMs}
       onProgress={onProgress}
       onBack={() => navigate(-1)}
     />

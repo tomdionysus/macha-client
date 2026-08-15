@@ -256,12 +256,13 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
   const hostRef = useRef<HTMLDivElement | null>(null);
   const player = useMemo(() => platform.createPlayer(), [platform]);
   const log = useMemo(() => createClientLogger('playback.screen', { mediaId: media.id }), [media.id]);
+  const initialStartPositionMs = useRef(Math.max(0, startPositionMs)).current;
   const initialEvent = useMemo<PlaybackEvent>(() => ({
-    positionMs: Math.max(0, startPositionMs),
+    positionMs: initialStartPositionMs,
     durationMs: media.durationMs ?? 0,
     paused: true,
     ended: false,
-  }), [media.durationMs, startPositionMs]);
+  }), [initialStartPositionMs, media.durationMs]);
   const latestRef = useRef(initialEvent);
   const sessionRef = useRef<PlaybackSession>();
   const streamOffsetRef = useRef(0);
@@ -364,7 +365,7 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
     log.info('player-mount', {
       itemId: media.id,
       mediaKind: media.kind,
-      startPositionMs,
+      startPositionMs: initialStartPositionMs,
       catalogueDurationMs: media.durationMs,
       platform: platform.name,
     });
@@ -393,13 +394,13 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
           sessionId: resolved.sessionId,
           mode: resolved.mode,
           durationMs: resolved.durationMs,
-          startPositionMs,
+          startPositionMs: initialStartPositionMs,
         });
         if (!mountedRef.current) {
           await playbackResolver.stop(resolved.sessionId);
           return;
         }
-        let absolutePosition = Math.min(startPositionMs, resolved.durationMs || startPositionMs);
+        let absolutePosition = Math.min(initialStartPositionMs, resolved.durationMs || initialStartPositionMs);
         if (absolutePosition > 0 && resolved.mode !== 'direct' && resolved.options.canSeek) {
           const initialSeekStartedAt = performance.now();
           log.info('initial-server-seek-begin', { sessionId: resolved.sessionId, positionMs: absolutePosition, mode: resolved.mode });
@@ -433,7 +434,7 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
       const activeSession = sessionRef.current;
       if (activeSession) void playbackResolver.stop(activeSession.sessionId).catch(() => undefined);
     };
-  }, [loadSession, log, media, platform, playbackResolver, player, publish, startPositionMs]);
+  }, [initialStartPositionMs, loadSession, log, media, platform, playbackResolver, player, publish]);
 
   useEffect(() => {
     showControls();
@@ -717,5 +718,5 @@ export function PlayerScreen(props: Props) {
   if (!details.value) return null;
   if (!canPlay(details.value)) return <ErrorMessage error={new Error('This catalogue item is not directly playable.')} />;
 
-  return <PlayerSession {...props} media={details.value} />;
+  return <PlayerSession key={details.value.id} {...props} media={details.value} />;
 }
