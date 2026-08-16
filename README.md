@@ -11,7 +11,7 @@ Developed with substantial use of AI-assisted implementation
 
 ## What it does
 
-- 2 second Macha logo-mask splash on initial load, with only the moving highlight visible through the logo.
+- 1 second Macha logo-mask splash on initial load, with only the moving highlight visible through the logo.
 - Home screen with Movies, TV Shows and Music.
 - Movie detail pages with prominent poster artwork and circular Play / Play from start controls.
 - Per-client Continue Watching, limited to the last three unfinished items.
@@ -26,7 +26,8 @@ Developed with substantial use of AI-assisted implementation
 - Keyboard and television D-pad focus navigation.
 - Mouse, trackpad and touch episode scrolling.
 - Shared React UI with Web, Android and Tizen platform/player interfaces.
-- Routable player page with auto-hiding translucent-black lower chrome, uniform circular transport controls, Play from start and progress scrubbing.
+- Subtle centred Macha watermark behind normal application screens, excluded from playback.
+- Routable player page with auto-hiding translucent-black lower chrome, uniform circular transport controls, Play from start and transactional progress scrubbing.
 - Macha 0.7 playback-session negotiation with Direct Play, remux and transcode modes.
 - In-session quality, audio, subtitle and media-representation switching.
 - Browser HLS playback through native HLS where available or hls.js otherwise.
@@ -97,13 +98,14 @@ Small presentation delays live in `src/settings.ts`:
 
 ```ts
 export const uiSettings = {
-  splashDurationMs: 2_000,
+  splashDurationMs: 1_000,
   loadingIndicatorDelayMs: 1_000,
   playerControlsHideDelayMs: 3_500,
+  playerSeekSpinnerDelayMs: 750,
 } as const;
 ```
 
-The splash runs before React is mounted. `src/bootSplash.ts` measures its lifetime with `performance.now()` and does not create the React application until at least `splashDurationMs` has elapsed. The visible masked sweep occupies almost all of that configured lifetime, moves linearly, starts within the right side of the mask and exits fully beyond the left edge. The loading spinner is a transparent full-page overlay and is not shown unless an async screen remains loading beyond `loadingIndicatorDelayMs`.
+The splash runs before React is mounted. `src/bootSplash.ts` measures its lifetime with `performance.now()` and does not create the React application until at least `splashDurationMs` has elapsed. The visible masked sweep occupies almost all of that configured lifetime, moves linearly, starts within the right side of the mask and exits fully beyond the left edge. The ordinary loading spinner is not shown unless an async screen remains loading beyond `loadingIndicatorDelayMs`. Server-backed seeks use the shorter `playerSeekSpinnerDelayMs` grace period: the old picture pauses immediately, fast replacement streams resume without a spinner, and slower replacements show it until playback starts.
 
 ## Macha integration
 

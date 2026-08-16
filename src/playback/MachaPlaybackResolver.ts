@@ -59,6 +59,7 @@ interface WireSession {
   source_format: string;
   duration_ms: number;
   source_bitrate: number;
+  seek_ms: number;
 }
 
 export class MachaPlaybackError extends Error {
@@ -201,6 +202,7 @@ export class MachaPlaybackResolver implements PlaybackResolver {
       mimeType: wire.mime_type,
       source,
       durationMs: wire.duration_ms,
+      seekMs: wire.seek_ms,
       sourceFormat: wire.source_format,
       sourceBitrate: wire.source_bitrate,
       selected: {
@@ -222,6 +224,7 @@ export class MachaPlaybackResolver implements PlaybackResolver {
       mode: session.mode,
       mimeType: session.mimeType,
       durationMs: session.durationMs,
+      seekMs: session.seekMs,
       sourceFormat: session.sourceFormat,
       sourceBitrate: session.sourceBitrate,
       sourceUrl: session.source.url,

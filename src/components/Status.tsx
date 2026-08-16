@@ -2,13 +2,13 @@ import { useEffect, useState } from 'react';
 import errorIconUrl from '../assets/error.svg?url';
 import { uiSettings } from '../settings';
 
-export function Loading() {
+export function Loading({ delayMs = uiSettings.loadingIndicatorDelayMs }: { delayMs?: number } = {}) {
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => setVisible(true), uiSettings.loadingIndicatorDelayMs);
+    const timer = window.setTimeout(() => setVisible(true), Math.max(0, delayMs));
     return () => window.clearTimeout(timer);
-  }, []);
+  }, [delayMs]);
 
   if (!visible) return null;
 

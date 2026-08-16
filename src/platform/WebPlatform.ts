@@ -98,6 +98,7 @@ class WebPlayer implements Player {
   private readonly log = createClientLogger('playback.web', { playerId: this.playerId });
   private lastTimeLogMs = 0;
   private lastProgressLogMs = 0;
+  private pendingInitialPositionMs = 0;
 
   attach(host: HTMLElement): void {
     this.host = host;
@@ -121,29 +122,48 @@ class WebPlayer implements Player {
       requestedPositionMs: positionMs,
       hls: isHls(source),
     });
-    this.stop();
+    this.pendingInitialPositionMs = positionMs;
+    this.hls?.destroy();
+    this.hls = undefined;
 
-    const video = document.createElement('video');
-    video.className = 'native-video';
-    video.autoplay = true;
-    video.controls = false;
-    video.playsInline = true;
-    video.preload = 'auto';
-    video.crossOrigin = 'anonymous';
-    this.attachMediaDiagnostics(video);
+    let video = this.video;
+    if (video) {
+      // Keep the media element itself across transformed seek generations.
+      // Recreating it forces the browser to rebuild the entire playback DOM
+      // and can also drop element-scoped state such as fullscreen/PiP.
+      video.pause();
+      video.querySelectorAll('track').forEach((track) => track.remove());
+      video.removeAttribute('src');
+      video.load();
+      this.log.debug('media-element-reused');
+    } else {
+      video = document.createElement('video');
+      video.className = 'native-video';
+      video.autoplay = true;
+      video.controls = false;
+      video.playsInline = true;
+      video.preload = 'auto';
+      video.crossOrigin = 'anonymous';
+      this.attachMediaDiagnostics(video);
 
-    const publish = () => this.publish(video);
-    video.addEventListener('timeupdate', publish);
-    video.addEventListener('pause', publish);
-    video.addEventListener('play', publish);
-    video.addEventListener('ended', publish);
-    video.addEventListener('loadedmetadata', () => {
-      if (positionMs > 0) {
-        this.log.info('initial-local-seek', { requestedPositionMs: positionMs, before: videoState(video) });
-        video.currentTime = positionMs / 1000;
-      }
-      publish();
-    });
+      const publish = () => this.publish(video!);
+      video.addEventListener('timeupdate', publish);
+      video.addEventListener('pause', publish);
+      video.addEventListener('play', publish);
+      video.addEventListener('ended', publish);
+      video.addEventListener('loadedmetadata', () => {
+        const requestedPositionMs = this.pendingInitialPositionMs;
+        if (requestedPositionMs > 0) {
+          this.log.info('initial-local-seek', { requestedPositionMs, before: videoState(video!) });
+          video!.currentTime = requestedPositionMs / 1000;
+        }
+        publish();
+      });
+      this.video = video;
+      this.host.replaceChildren(video);
+    }
+
+    const publish = () => this.publish(video!);
 
     if (source.subtitleUrl) {
       const track = document.createElement('track');
@@ -158,9 +178,6 @@ class WebPlayer implements Player {
       track.addEventListener('error', () => this.log.warn('subtitle-error', { url: source.subtitleUrl }));
       video.append(track);
     }
-
-    this.video = video;
-    this.host.replaceChildren(video);
 
     if (isHls(source)) {
       if (nativeHlsSupported(video)) {

@@ -42,6 +42,7 @@ export interface PlaybackSession {
   mimeType: string;
   source: PlaybackSource;
   durationMs: number;
+  seekMs: number;
   sourceFormat: string;
   sourceBitrate: number;
   selected: PlaybackSelection;

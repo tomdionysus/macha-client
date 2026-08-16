@@ -41,7 +41,7 @@ function formatBitrate(bitrate: number): string {
   return bitrate >= 1_000_000 ? `${(bitrate / 1_000_000).toFixed(1)} Mb/s` : `${Math.round(bitrate / 1000)} kb/s`;
 }
 
-type PlayerIconName = 'back' | 'rewind' | 'pause' | 'forward' | 'options';
+type PlayerIconName = 'back' | 'rewind' | 'pause' | 'forward' | 'options' | 'fullscreen' | 'fullscreen-exit';
 
 function PlayerIcon({ name }: { name: PlayerIconName }) {
   const common = {
@@ -64,6 +64,10 @@ function PlayerIcon({ name }: { name: PlayerIconName }) {
       return <svg {...common}><path d="m13.5 6 6 6-6 6V6Zm-8 0 6 6-6 6V6Z" fill="currentColor" /></svg>;
     case 'options':
       return <svg {...common}><circle cx="6" cy="12" r="1.5" fill="currentColor" /><circle cx="12" cy="12" r="1.5" fill="currentColor" /><circle cx="18" cy="12" r="1.5" fill="currentColor" /></svg>;
+    case 'fullscreen':
+      return <svg {...common}><path d="M8.5 4.5h-4v4M15.5 4.5h4v4M8.5 19.5h-4v-4M15.5 19.5h4v-4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>;
+    case 'fullscreen-exit':
+      return <svg {...common}><path d="M9 4.5v4.5H4.5M15 4.5V9h4.5M9 19.5V15H4.5M15 19.5V15h4.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>;
   }
 }
 
@@ -252,6 +256,7 @@ function PlayerOptions({
 }
 
 function PlayerSession({ api, media, platform, playbackResolver, startPositionMs, onProgress, onBack }: Omit<Props, 'itemId'> & { media: MediaSummary }) {
+  const pageRef = useRef<HTMLElement | null>(null);
   const hostRef = useRef<HTMLDivElement | null>(null);
   const player = useMemo(() => platform.createPlayer(), [platform]);
   const log = useMemo(() => createClientLogger('playback.screen', { mediaId: media.id }), [media.id]);
@@ -268,6 +273,8 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
   const reloadingRef = useRef(false);
   const lastReportRef = useRef(0);
   const hideTimerRef = useRef<number>();
+  const scrubValueRef = useRef<number>();
+  const committedSeekRef = useRef<number>();
   const mountedRef = useRef(true);
   const [event, setEvent] = useState(initialEvent);
   const [session, setSession] = useState<PlaybackSession>();
@@ -275,8 +282,10 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
   const [fatalError, setFatalError] = useState<Error>();
   const [playbackNotice, setPlaybackNotice] = useState<string>();
   const [controlsVisible, setControlsVisible] = useState(true);
+  const [fullscreen, setFullscreen] = useState(false);
   const [optionsVisible, setOptionsVisible] = useState(false);
   const [controlBusy, setControlBusy] = useState(false);
+  const [seekInFlight, setSeekInFlight] = useState(false);
   const [qualityLimit, setQualityLimit] = useState<number | null>(null);
   const [scrubValue, setScrubValue] = useState<number>();
   const backdrop = useArtworkUrl(api, media.artwork?.backdrop ?? media.artwork?.thumbnail ?? media.artwork?.poster);
@@ -311,10 +320,22 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
     }
   }, [controlBusy, optionsVisible]);
 
-  const loadSession = useCallback(async (next: PlaybackSession, absolutePositionMs: number) => {
+  const setScrubPosition = useCallback((positionMs: number | undefined) => {
+    scrubValueRef.current = positionMs;
+    setScrubValue(positionMs);
+  }, []);
+
+  const clearCommittedSeek = useCallback(() => {
+    committedSeekRef.current = undefined;
+    setScrubPosition(undefined);
+  }, [setScrubPosition]);
+
+  const loadSession = useCallback(async (next: PlaybackSession, absolutePositionMs: number, resumeAfterLoad = true) => {
     const bounded = Math.max(0, Math.min(next.durationMs || Number.MAX_SAFE_INTEGER, absolutePositionMs));
+    const serverSeek = Math.max(0, Math.min(next.durationMs || Number.MAX_SAFE_INTEGER, next.seekMs));
+    const effectivePosition = next.mode === 'direct' ? bounded : serverSeek;
     const localPosition = next.mode === 'direct' ? bounded : 0;
-    streamOffsetRef.current = next.mode === 'direct' ? 0 : bounded;
+    streamOffsetRef.current = next.mode === 'direct' ? 0 : serverSeek;
     sessionRef.current = next;
     setSession(next);
     reloadingRef.current = true;
@@ -325,23 +346,27 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
       mediaId: next.mediaId,
       absolutePositionMs,
       boundedPositionMs: bounded,
+      serverSeekMs: next.seekMs,
+      effectivePositionMs: effectivePosition,
       localPlayerPositionMs: localPosition,
       streamOffsetMs: streamOffsetRef.current,
       source: next.source,
     });
     try {
       const started = await player.play(next.source, localPosition);
+      if (!resumeAfterLoad && started) player.pause();
       log.info('session-load-ready', {
         sessionId: next.sessionId,
         mode: next.mode,
         started,
+        resumeAfterLoad,
         elapsedMs: Math.round((performance.now() - startedAt) * 10) / 10,
-        absolutePositionMs: bounded,
+        absolutePositionMs: effectivePosition,
       });
       publish({
-        positionMs: bounded,
+        positionMs: effectivePosition,
         durationMs: next.durationMs,
-        paused: !started,
+        paused: resumeAfterLoad ? !started : true,
         ended: false,
       });
     } catch (error) {
@@ -373,9 +398,18 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
       if (!mountedRef.current || reloadingRef.current) return;
       const activeSession = sessionRef.current;
       const durationMs = activeSession?.durationMs || next.durationMs;
+      const absolutePositionMs = next.positionMs + streamOffsetRef.current;
+      const committedSeek = committedSeekRef.current;
+      if (committedSeek !== undefined) {
+        // A browser may emit pause/timeupdate events from the old position after
+        // a range interaction. Keep the user's committed seek authoritative
+        // until the player itself reaches the new position.
+        if (Math.abs(absolutePositionMs - committedSeek) > 1_500) return;
+        clearCommittedSeek();
+      }
       publish({
         ...next,
-        positionMs: next.positionMs + streamOffsetRef.current,
+        positionMs: absolutePositionMs,
         durationMs,
       });
     });
@@ -433,7 +467,7 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
       const activeSession = sessionRef.current;
       if (activeSession) void playbackResolver.stop(activeSession.sessionId).catch(() => undefined);
     };
-  }, [initialStartPositionMs, loadSession, log, media, platform, playbackResolver, player, publish]);
+  }, [clearCommittedSeek, initialStartPositionMs, loadSession, log, media, platform, playbackResolver, player, publish]);
 
   useEffect(() => {
     showControls();
@@ -476,24 +510,47 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
     const activeSession = sessionRef.current;
     if (!activeSession || controlBusy || !activeSession.options.canSeek) return false;
     const bounded = Math.max(0, Math.min(activeSession.durationMs, positionMs));
+    const previous = latestRef.current;
+    const resumeAfterSeek = !previous.paused;
     log.info('seek-ui-request', {
       sessionId: activeSession.sessionId,
       mode: activeSession.mode,
       requestedPositionMs: positionMs,
       boundedPositionMs: bounded,
-      currentPositionMs: latestRef.current.positionMs,
+      currentPositionMs: previous.positionMs,
+      resumeAfterSeek,
     });
-    setScrubValue(undefined);
-    showControls();
+
+    committedSeekRef.current = bounded;
+    setScrubPosition(bounded);
+    setControlsVisible(true);
+    if (hideTimerRef.current !== undefined) window.clearTimeout(hideTimerRef.current);
+
     if (activeSession.mode === 'direct') {
+      // Freeze the current picture immediately, move the media element, then
+      // resume only if playback was running before the seek. The committed
+      // scrub value prevents stale media events snapping the bar backwards.
+      player.pause();
+      publish({ ...previous, positionMs: bounded, paused: true, ended: false });
       const directSeekStartedAt = performance.now();
       player.seek(bounded);
-      log.info('seek-direct-dispatched', { elapsedMs: Math.round((performance.now() - directSeekStartedAt) * 10) / 10, positionMs: bounded });
-      publish({ ...latestRef.current, positionMs: bounded, ended: false });
+      if (resumeAfterSeek) player.resume();
+      log.info('seek-direct-dispatched', {
+        elapsedMs: Math.round((performance.now() - directSeekStartedAt) * 10) / 10,
+        positionMs: bounded,
+        resumeAfterSeek,
+      });
       return true;
     }
 
+    // Server-backed seek generations can take long enough to be perceptible.
+    // Pause the old stream immediately but delay the spinner so a fast restart
+    // looks like one continuous interaction rather than a flash of loading UI.
+    reloadingRef.current = true;
+    player.pause();
+    publish({ ...previous, positionMs: bounded, paused: true, ended: false });
     setControlBusy(true);
+    setSeekInFlight(true);
     setPlaybackNotice('Seeking…');
     const seekStartedAt = performance.now();
     try {
@@ -506,14 +563,16 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
       });
       if (!mountedRef.current) {
         await playbackResolver.stop(next.sessionId).catch(() => undefined);
-        return;
+        return false;
       }
-      await loadSession(next, bounded);
+      await loadSession(next, bounded, resumeAfterSeek);
+      clearCommittedSeek();
       log.info('seek-complete', {
         sessionId: next.sessionId,
         mode: next.mode,
         positionMs: bounded,
         elapsedMs: Math.round((performance.now() - seekStartedAt) * 10) / 10,
+        resumeAfterSeek,
       });
       setPlaybackNotice(undefined);
       return true;
@@ -525,12 +584,20 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
         elapsedMs: Math.round((performance.now() - seekStartedAt) * 10) / 10,
         error,
       });
+      reloadingRef.current = false;
+      clearCommittedSeek();
+      publish(previous);
+      if (resumeAfterSeek) player.resume();
       if (mountedRef.current) setPlaybackNotice(error instanceof Error ? error.message : String(error));
       return false;
     } finally {
-      if (mountedRef.current) setControlBusy(false);
+      reloadingRef.current = false;
+      if (mountedRef.current) {
+        setSeekInFlight(false);
+        setControlBusy(false);
+      }
     }
-  }, [controlBusy, loadSession, log, playbackResolver, player, publish, showControls]);
+  }, [clearCommittedSeek, controlBusy, loadSession, log, playbackResolver, player, publish, setScrubPosition]);
 
   const playFromStart = useCallback(async () => {
     const activeSession = sessionRef.current;
@@ -591,7 +658,27 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
   }, [controlBusy, loadSession, log, playbackResolver]);
 
   useEffect(() => {
+    const onFullscreenChange = () => {
+      setFullscreen(document.fullscreenElement === pageRef.current);
+      showControls();
+    };
+    document.addEventListener('fullscreenchange', onFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', onFullscreenChange);
+  }, [showControls]);
+
+  const toggleFullscreen = useCallback(async () => {
+    if (platform.name !== 'web' || !document.fullscreenEnabled || !pageRef.current) return;
+    try {
+      if (document.fullscreenElement) await document.exitFullscreen();
+      else await pageRef.current.requestFullscreen();
+    } catch (error) {
+      log.warn('fullscreen-failed', { error });
+    }
+  }, [log, platform.name]);
+
+  useEffect(() => {
     const onKeyDown = (keyEvent: KeyboardEvent) => {
+      if (keyEvent.key === 'Escape' && document.fullscreenElement) return;
       if (keyEvent.key === 'Escape' || keyEvent.key === 'Backspace') {
         keyEvent.preventDefault();
         keyEvent.stopPropagation();
@@ -645,6 +732,7 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
 
   return (
     <section
+      ref={pageRef}
       className={`player-page ${audio ? 'audio-player' : ''}`}
       onPointerMove={showControls}
       onPointerDown={showControls}
@@ -660,6 +748,7 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
         </div>
       )}
       {starting && <Loading />}
+      {seekInFlight && <Loading delayMs={uiSettings.playerSeekSpinnerDelayMs} />}
 
       <div className={`player-chrome ${controlsVisible ? 'visible' : ''}`}>
         <div className="player-titlebar">
@@ -691,13 +780,23 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
             value={displayedProgress}
             aria-label="Playback position"
             data-tv-focusable="true"
-            disabled={!session?.options.canSeek || controlBusy}
-            onChange={(changeEvent: ChangeEvent<HTMLInputElement>) => setScrubValue(Number(changeEvent.target.value))}
-            onPointerUp={() => { if (scrubValue !== undefined) void seek(scrubValue); }}
-            onKeyUp={(keyEvent) => {
-              if (scrubValue !== undefined && ['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(keyEvent.key)) void seek(scrubValue);
+            disabled={!session?.options.canSeek}
+            aria-busy={controlBusy || undefined}
+            onChange={(changeEvent: ChangeEvent<HTMLInputElement>) => {
+              if (!controlBusy) setScrubPosition(Number(changeEvent.target.value));
             }}
-            onBlur={() => { if (scrubValue !== undefined) void seek(scrubValue); }}
+            onPointerUp={() => {
+              const position = scrubValueRef.current;
+              if (!controlBusy && position !== undefined) void seek(position);
+            }}
+            onKeyUp={(keyEvent) => {
+              const position = scrubValueRef.current;
+              if (!controlBusy && position !== undefined && ['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(keyEvent.key)) void seek(position);
+            }}
+            onBlur={() => {
+              const position = scrubValueRef.current;
+              if (!controlBusy && position !== undefined) void seek(position);
+            }}
           />
           <span>{formatTime(duration)}</span>
         </div>
@@ -729,6 +828,17 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
           >
             <PlayerIcon name="options" />
           </button>
+          {platform.name === 'web' && document.fullscreenEnabled && (
+            <button
+              type="button"
+              data-tv-focusable="true"
+              onClick={() => void toggleFullscreen()}
+              aria-label={fullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+              title={fullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+            >
+              <PlayerIcon name={fullscreen ? 'fullscreen-exit' : 'fullscreen'} />
+            </button>
+          )}
         </div>
       </div>
     </section>

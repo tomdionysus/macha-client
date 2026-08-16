@@ -48,6 +48,7 @@ function sessionResponse(overrides: Record<string, unknown> = {}) {
     source_format: 'matroska,webm',
     duration_ms: 5_400_000,
     source_bitrate: 8_000_000,
+    seek_ms: 0,
     ...overrides,
   };
 }
@@ -81,6 +82,7 @@ describe('MachaPlaybackResolver', () => {
       }),
     }));
     expect(session.mode).toBe('remux');
+    expect(session.seekMs).toBe(0);
     expect(session.source.url).toBe('http://node.test/api/v1/playback/stream/session-1/cap/1/master.m3u8');
     expect(session.options.audioStreams[0]).toEqual(expect.objectContaining({ index: 1, language: 'eng', channels: 2 }));
   });
@@ -95,6 +97,20 @@ describe('MachaPlaybackResolver', () => {
 
     expect(fetchMock.mock.calls[0][0]).toBe('/macha/api/v1/playback/sessions');
     expect(session.source.url).toBe('/macha/api/v1/playback/stream/session-1/cap/1/master.m3u8');
+  });
+
+  it('sends seek-only PATCHes without preferences so the server can use its fast path', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(sessionResponse({ seek_ms: 42000 })));
+    vi.stubGlobal('fetch', fetchMock);
+    const resolver = new MachaPlaybackResolver('http://node.test', 'secret');
+
+    const session = await resolver.update('session-1', { seekMs: 42_000 });
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('http://node.test/api/v1/playback/sessions/session-1');
+    expect(init.method).toBe('PATCH');
+    expect(JSON.parse(String(init.body))).toEqual({ seek_ms: 42_000 });
+    expect(session.seekMs).toBe(42_000);
   });
 
   it('maps PATCH controls to the server field names', async () => {

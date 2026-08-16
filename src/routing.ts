@@ -19,6 +19,7 @@ export const routes = {
   item: (id: string) => `/items/${segment(id)}`,
   search: '/search',
   settings: '/settings',
+  sponsor: '/sponsor',
 } as const;
 
 export function pathForMedia(item: MediaSummary): string {

@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.3.15 - 2026-08-16
+
+- add a subtle centred Macha logo watermark behind every non-player screen;
+- keep the player route completely free of the application watermark;
+- make an interactive scrub position authoritative until the seek actually reaches the requested timeline position, preventing the progress bar from snapping back to stale playback state;
+- pause the visible stream immediately when a seek is committed and suppress stale events from the old transformed stream while the server prepares the replacement generation;
+- add a configurable 750 ms seek-spinner grace period so quick transformed seeks resume without flashing a loading indicator, while slower restarts show the spinner until playback starts;
+- preserve pause/play intent across seeks: playing content resumes when the new stream starts, while a seek made from pause remains paused;
+- retain opportunistic server-version detection without assuming a version when the current server does not report one.
+
+## 0.3.14 - 2026-08-16
+
+- redesign the settings page around the Macha logo and project name, with the client and connected-server versions shown prominently;
+- query the playback/server and catalogue status endpoints independently and present a compact overall health summary, catalogue item/artwork state and sync generation;
+- add a Donate / Sponsor action and local support stub page without introducing accounts, paid features or donation nags;
+- derive the displayed client version directly from `package.json` so release metadata and the UI cannot drift;
+- correct the stale splash timing regression test to match the one-second splash introduced in 0.3.12.
+
+## 0.3.13 - 2026-08-16
+
+- reuse the existing browser `<video>` element when a transformed seek switches to a new HLS generation, avoiding unnecessary playback-DOM destruction and reconstruction;
+- add a web fullscreen transport control using the Fullscreen API, with explicit exit state and Escape handling that exits fullscreen without navigating away from playback;
+- replace the previous wide logo artwork with the supplied square Macha logo in the application header, boot splash and browser favicon;
+- make the video viewport explicitly fill the complete player page while retaining `object-fit: contain`, so source aspect ratio is never changed and any required letterboxing occurs on one axis only;
+- use the server-returned aligned `seek_ms` as the transformed-generation timeline offset, so keyframe-aligned remux seeks report the position actually being played rather than the originally requested timestamp;
+- add regression coverage that seek-only session PATCHes contain only `seek_ms`, preserving the server fast-seek path.
+
 ## 0.3.12
 
 - make the series title the primary heading on season pages and demote the season title to the smaller eyebrow treatment;

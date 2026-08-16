@@ -1,15 +1,17 @@
 import { useCallback, useMemo, useState } from 'react';
-import { Navigate, NavLink, Route, Routes, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { Navigate, NavLink, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { MachaCatalogueApi } from './api/MachaCatalogueApi';
 import { MachaMediaApi } from './api/MachaMediaApi';
 import { MockMediaApi } from './api/MockMediaApi';
 import type { MediaApi } from './api/MediaApi';
 import { AppLogo } from './components/AppLogo';
+import logoUrl from './assets/macha-logo.svg?url';
 import { useTvNavigation } from './hooks/useTvNavigation';
 import type { Platform } from './platform/Platform';
 import type { PlaybackResolver } from './playback/PlaybackResolver';
 import { DemoPlaybackResolver } from './playback/DemoPlaybackResolver';
 import { MachaPlaybackResolver } from './playback/MachaPlaybackResolver';
+import { DemoServerApi, MachaServerApi, type ServerApi } from './api/MachaServerApi';
 import type { MediaSummary, PlaybackProgress, SeasonSummary } from './types';
 import { ContinueWatchingStore } from './state/continueWatching';
 import {
@@ -30,6 +32,7 @@ import { ArtistScreen } from './screens/ArtistScreen';
 import { AlbumScreen } from './screens/AlbumScreen';
 import { PlayerScreen } from './screens/PlayerScreen';
 import { SettingsScreen } from './screens/SettingsScreen';
+import { SponsorScreen } from './screens/SponsorScreen';
 import { pathForMedia, routes } from './routing';
 
 interface Props {
@@ -165,6 +168,7 @@ function PlayerRoute({
 export default function App({ platform, apiOverride, playbackOverride }: Props) {
   useTvNavigation();
   const navigate = useNavigate();
+  const location = useLocation();
 
   const [serverUrl, setServerUrl] = useState(() => getServerUrl());
   const [apiToken, setApiToken] = useState(() => getApiToken());
@@ -184,6 +188,10 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
     return demo ? new DemoPlaybackResolver() : new MachaPlaybackResolver(serverUrl, apiToken);
   }, [apiToken, demo, playbackOverride, serverUrl]);
 
+  const serverApi = useMemo<ServerApi>(() => (
+    demo ? new DemoServerApi() : new MachaServerApi(serverUrl, apiToken)
+  ), [apiToken, demo, serverUrl]);
+
   const open = useCallback((item: MediaSummary) => navigate(pathForMedia(item)), [navigate]);
   const openPlayer = useCallback((item: MediaSummary) => navigate(routes.player(item.id)), [navigate]);
   const openPlayerFromStart = useCallback((item: MediaSummary) => navigate(routes.playerFromStart(item.id)), [navigate]);
@@ -201,8 +209,11 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
     navigate(routes.home, { replace: true });
   }, [navigate]);
 
+  const playerRouteActive = location.pathname.startsWith('/play/');
+
   return (
     <div className="app-shell">
+      {!playerRouteActive && <img className="app-watermark" src={logoUrl} alt="" aria-hidden="true" />}
       <header className="topbar">
         <NavLink to={routes.home} className="brand-link" aria-label="Macha home">
           <AppLogo />
@@ -239,7 +250,8 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
           <Route path="/play/:itemId" element={<PlayerRoute api={api} platform={platform} playbackResolver={playbackResolver} progressStore={progressStore} onProgress={updateProgress} />} />
           <Route path="/items/:itemId" element={<DetailRoute api={api} onPlay={openPlayer} onPlayFromStart={openPlayerFromStart} progressById={progressById} parameter="itemId" />} />
           <Route path={routes.search} element={<SearchScreen api={api} onOpen={open} />} />
-          <Route path={routes.settings} element={<SettingsScreen serverUrl={serverUrl} apiToken={apiToken} onSave={saveServer} />} />
+          <Route path={routes.settings} element={<SettingsScreen api={api} serverApi={serverApi} serverUrl={serverUrl} apiToken={apiToken} onSave={saveServer} />} />
+          <Route path={routes.sponsor} element={<SponsorScreen />} />
           <Route path="*" element={<Navigate to={routes.home} replace />} />
         </Routes>
       </main>

@@ -19,6 +19,7 @@ export class DemoPlaybackResolver implements PlaybackResolver {
         mode: 'direct',
       },
       durationMs: media.durationMs ?? 0,
+      seekMs: 0,
       sourceFormat: 'mp4',
       sourceBitrate: 0,
       selected: { videoStream: 0, audioStream: 1, subtitleStream: -1 },
