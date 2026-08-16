@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.3.17 - 2026-08-16
+
+- stop deriving playback decoder limits from the browser display resolution; Web now leaves `max_width`/`max_height` unset, while platforms with real decoder limits may still report them explicitly;
+- probe browser codec support through both `HTMLMediaElement.canPlayType()` and `MediaSource.isTypeSupported()`, matching the direct-play and fMP4/HLS remux paths;
+- detect AC-3/E-AC-3 using the ISO-BMFF `ac-3`/`ec-3` codec identifiers, retaining raw Dolby MIME names only as compatibility fallbacks;
+- make detected codec/container capability logging explicit instead of relying on collapsed array output;
+- keep HDR unadvertised on Web until the playback protocol defines a concrete HDR profile contract rather than inferring decode support from display capability.
+
+## 0.3.16 - 2026-08-16
+
+- make page containers fully fluid instead of imposing fixed desktop max-widths, including detail, album, settings, connection and sponsor layouts;
+- let the Settings hero span the same full content width as the status cards below it;
+- right-align the platform marker to the application edge while retaining centred primary navigation;
+- simplify the Season back control to `Back`, matching the Series view;
+- expand the player stream summary with selected video resolution plus audio language, codec, channel layout and sample rate, and place it beneath the title on the left of the player chrome;
+- prefer the server's `server_version` field from `/api/v1/playback/status`, while retaining the existing compatibility fallbacks;
+- include the fullscreen cursor auto-hide behaviour from the 0.3.15 quick patch in the release tree.
+
 ## 0.3.15 - 2026-08-16
 
 - add a subtle centred Macha logo watermark behind every non-player screen;

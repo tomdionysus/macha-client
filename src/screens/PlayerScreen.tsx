@@ -19,6 +19,7 @@ import type { MediaSummary, PlaybackEvent, PlaybackMode, PlaybackProgress } from
 interface Props {
   api: MediaApi;
   itemId: string;
+  media?: MediaSummary;
   platform: Platform;
   playbackResolver: PlaybackResolver;
   startPositionMs: number;
@@ -39,6 +40,20 @@ function formatTime(ms: number): string {
 function formatBitrate(bitrate: number): string {
   if (!bitrate) return '';
   return bitrate >= 1_000_000 ? `${(bitrate / 1_000_000).toFixed(1)} Mb/s` : `${Math.round(bitrate / 1000)} kb/s`;
+}
+
+function formatChannels(channels?: number): string {
+  if (!channels) return '';
+  if (channels === 1) return 'mono';
+  if (channels === 2) return 'stereo';
+  if (channels === 6) return '5.1';
+  if (channels === 8) return '7.1';
+  return `${channels}ch`;
+}
+
+function formatSampleRate(sampleRate?: number): string {
+  if (!sampleRate) return '';
+  return sampleRate >= 1_000 ? `${Number((sampleRate / 1_000).toFixed(1))} kHz` : `${sampleRate} Hz`;
 }
 
 type PlayerIconName = 'back' | 'rewind' | 'pause' | 'forward' | 'options' | 'fullscreen' | 'fullscreen-exit';
@@ -102,13 +117,30 @@ function qualityChoices(session: PlaybackSession): number[] {
 
 function sessionDescription(session?: PlaybackSession): string | undefined {
   if (!session) return undefined;
-  const video = session.streams.find((stream) => stream.index === session.selected.videoStream);
-  const audio = session.streams.find((stream) => stream.index === session.selected.audioStream);
+  const video = session.streams.find((stream) => stream.type === 'video' && stream.index === session.selected.videoStream);
+  const audio = session.streams.find((stream) => stream.type === 'audio' && stream.index === session.selected.audioStream);
   const parts = [session.mode.toUpperCase()];
-  if (video) parts.push(video.codec.toUpperCase());
-  if (audio) parts.push(audio.codec.toUpperCase());
+
+  if (video) {
+    parts.push(video.codec.toUpperCase());
+    if (video.width && video.height) parts.push(`${video.width}×${video.height}`);
+  }
+
   const bitrate = formatBitrate(session.sourceBitrate);
   if (bitrate) parts.push(bitrate);
+
+  if (audio) {
+    const audioParts = ['AUDIO'];
+    if (audio.language) audioParts.push(audio.language.toUpperCase());
+    audioParts.push(audio.codec.toUpperCase());
+    const channels = formatChannels(audio.channels);
+    const sampleRate = formatSampleRate(audio.sampleRate);
+    if (channels) audioParts.push(channels);
+    if (sampleRate) audioParts.push(sampleRate);
+    if (audio.bitDepth) audioParts.push(`${audio.bitDepth}-bit`);
+    parts.push(audioParts.join(' '));
+  }
+
   return parts.join(' · ');
 }
 
@@ -255,7 +287,7 @@ function PlayerOptions({
   );
 }
 
-function PlayerSession({ api, media, platform, playbackResolver, startPositionMs, onProgress, onBack }: Omit<Props, 'itemId'> & { media: MediaSummary }) {
+function PlayerSession({ api, media, platform, playbackResolver, startPositionMs, onProgress, onBack }: Omit<Props, 'itemId' | 'media'> & { media: MediaSummary }) {
   const pageRef = useRef<HTMLElement | null>(null);
   const hostRef = useRef<HTMLDivElement | null>(null);
   const player = useMemo(() => platform.createPlayer(), [platform]);
@@ -725,6 +757,9 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
   const duration = session?.durationMs || event.durationMs || 1;
   const displayedProgress = scrubValue ?? Math.min(duration, event.positionMs);
   const audio = media.kind === 'track';
+  const mediaSubtitle = media.kind === 'episode'
+    ? `${media.playbackContext!.series.title} ${media.subtitle ?? ''}`.trim()
+    : media.subtitle;
 
   if (fatalError) {
     return <section className="player-page"><ErrorMessage error={fatalError} /></section>;
@@ -733,7 +768,7 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
   return (
     <section
       ref={pageRef}
-      className={`player-page ${audio ? 'audio-player' : ''}`}
+      className={`player-page ${audio ? 'audio-player' : ''} ${fullscreen && !controlsVisible ? 'cursor-hidden' : ''}`}
       onPointerMove={showControls}
       onPointerDown={showControls}
       onClick={(clickEvent: MouseEvent<HTMLElement>) => {
@@ -752,9 +787,9 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
 
       <div className={`player-chrome ${controlsVisible ? 'visible' : ''}`}>
         <div className="player-titlebar">
-          <div>
+          <div className="player-title-copy">
             <strong>{media.title}</strong>
-            {media.subtitle && <span>{media.subtitle}</span>}
+            {mediaSubtitle && <span>{mediaSubtitle}</span>}
           </div>
           <small>{playbackNotice ?? sessionDescription(session)}</small>
         </div>
@@ -846,11 +881,23 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
 }
 
 export function PlayerScreen(props: Props) {
-  const details = useAsync(() => props.api.details(props.itemId), [props.api, props.itemId]);
+  const details = useAsync(
+    () => props.media?.id === props.itemId ? Promise.resolve(props.media) : props.api.details(props.itemId),
+    [props.api, props.itemId, props.media],
+  );
   if (details.loading) return <Loading />;
   if (details.error) return <ErrorMessage error={details.error} />;
   if (!details.value) return null;
   if (!canPlay(details.value)) return <ErrorMessage error={new Error('This catalogue item is not directly playable.')} />;
+  if (details.value.kind === 'episode' && !details.value.playbackContext) {
+    return <ErrorMessage error={new Error('Episode playback hierarchy context is missing.')} />;
+  }
 
-  return <PlayerSession key={details.value.id} {...props} media={details.value} />;
+  return (
+    <PlayerSession
+      key={details.value.id}
+      {...props}
+      media={details.value}
+    />
+  );
 }

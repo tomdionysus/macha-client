@@ -27,7 +27,7 @@ function stringValue(value: unknown): string | undefined {
 }
 
 function reportedVersion(body: Record<string, unknown>, headers: Headers): string | null {
-  for (const key of ['version', 'server_version', 'macha_version']) {
+  for (const key of ['server_version', 'version', 'macha_version']) {
     const value = stringValue(body[key]);
     if (value) return value;
   }

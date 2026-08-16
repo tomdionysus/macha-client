@@ -11,8 +11,6 @@ const media: MediaSummary = {
 
 const capabilities: PlaybackCapabilities = {
   platform: 'web',
-  maxWidth: 1920,
-  maxHeight: 1080,
   videoCodecs: ['h264'],
   audioCodecs: ['aac', 'mp3'],
   containers: ['mp4', 'webm'],
@@ -77,16 +75,34 @@ describe('MachaPlaybackResolver', () => {
         video_codecs: ['h264'],
         audio_codecs: ['aac', 'mp3'],
         hls_fmp4: true,
-        max_width: 1920,
-        max_height: 1080,
       }),
     }));
+    const requestBody = JSON.parse(String(init.body)) as { capabilities: Record<string, unknown> };
+    expect(requestBody.capabilities).not.toHaveProperty('max_width');
+    expect(requestBody.capabilities).not.toHaveProperty('max_height');
     expect(session.mode).toBe('remux');
     expect(session.seekMs).toBe(0);
     expect(session.source.url).toBe('http://node.test/api/v1/playback/stream/session-1/cap/1/master.m3u8');
     expect(session.options.audioStreams[0]).toEqual(expect.objectContaining({ index: 1, language: 'eng', channels: 2 }));
   });
 
+
+
+  it('only sends decoder resolution limits when the platform explicitly reports them', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(sessionResponse(), 201));
+    vi.stubGlobal('fetch', fetchMock);
+    const resolver = new MachaPlaybackResolver('http://node.test', 'secret');
+
+    await resolver.resolve(media, { ...capabilities, maxWidth: 3840, maxHeight: 2160 });
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(String(init.body))).toEqual(expect.objectContaining({
+      capabilities: expect.objectContaining({
+        max_width: 3840,
+        max_height: 2160,
+      }),
+    }));
+  });
 
   it('keeps a configured reverse-proxy prefix on returned capability URLs', async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse(sessionResponse(), 201));

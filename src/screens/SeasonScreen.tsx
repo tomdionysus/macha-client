@@ -40,13 +40,13 @@ export function SeasonScreen({ api, seriesId, seasonId, onBack, progress }: Prop
     <section className="detail season-detail">
       {backdrop && <div className="detail-backdrop season-backdrop" style={{ backgroundImage: `url(${JSON.stringify(backdrop)})` }} />}
       <div className="detail-content season-content">
-        <button className="back-button" data-tv-focusable="true" onClick={onBack} type="button">← {series.title}</button>
+        <button className="back-button" data-tv-focusable="true" onClick={onBack} type="button">← Back</button>
         <h1>{series.title}</h1>
         <p className="eyebrow">{season.title || `Season ${season.seasonNumber}`}</p>
         {season.synopsis && <p className="synopsis">{season.synopsis}</p>}
         <section className="episode-section">
           <h2>Episodes</h2>
-          <EpisodeRail api={api} episodes={season.episodes} progress={progress} />
+          <EpisodeRail api={api} episodes={season.episodes} progress={progress} series={series} season={season} />
         </section>
       </div>
     </section>

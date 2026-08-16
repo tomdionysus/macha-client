@@ -22,7 +22,7 @@ export function HomeScreen({ api, continueWatching, onOpen, onResume }: Props) {
 
   return (
     <>
-      <MediaRow api={api} title="Continue Watching" items={progressItems} onOpen={onResume} progress={progressMap} />
+      <MediaRow api={api} title="Continue Watching" items={progressItems} onOpen={onResume} progress={progressMap} variant="continue-watching" />
       <MediaRow api={api} title="Movies" items={home.value.movies.slice(0, 14)} onOpen={onOpen} />
       <MediaRow api={api} title="TV Shows" items={home.value.shows.slice(0, 14)} onOpen={onOpen} />
       <MediaRow api={api} title="Music" items={home.value.albums.slice(0, 14)} onOpen={onOpen} />

@@ -2,6 +2,7 @@ import Hls from 'hls.js';
 import { createClientLogger } from '../diagnostics/ClientLog';
 import type { Platform, PlaybackListener, Player } from './Platform';
 import type { PlaybackCapabilities, PlaybackSource } from '../types';
+import { detectWebMediaCodecCapabilities } from './WebMediaCapabilities';
 
 function isHls(source: PlaybackSource): boolean {
   return source.mimeType === 'application/vnd.apple.mpegurl' || /\.m3u8(?:$|[?#])/i.test(source.url);
@@ -362,9 +363,11 @@ class WebPlayer implements Player {
   }
 }
 
-function supportedMime(mime: string): boolean {
-  const video = document.createElement('video');
-  return video.canPlayType(mime) !== '';
+function supportedMime(media: HTMLMediaElement, mime: string): boolean {
+  if (media.canPlayType(mime) !== '') return true;
+  return typeof MediaSource !== 'undefined'
+    && typeof MediaSource.isTypeSupported === 'function'
+    && MediaSource.isTypeSupported(mime);
 }
 
 export class WebPlatform implements Platform {
@@ -372,45 +375,30 @@ export class WebPlatform implements Platform {
   private readonly log = createClientLogger('playback.capabilities');
 
   async capabilities(): Promise<PlaybackCapabilities> {
-    const pixelRatio = window.devicePixelRatio || 1;
-    const screenWidth = Math.round((window.screen?.width || 1920) * pixelRatio);
-    const screenHeight = Math.round((window.screen?.height || 1080) * pixelRatio);
-
-    const videoCodecs: string[] = [];
-    if (supportedMime('video/mp4; codecs="avc1.42E01E"')) videoCodecs.push('h264');
-    if (supportedMime('video/mp4; codecs="hev1.1.6.L93.B0"') || supportedMime('video/mp4; codecs="hvc1.1.6.L93.B0"')) videoCodecs.push('hevc');
-    if (supportedMime('video/webm; codecs="vp9"')) videoCodecs.push('vp9');
-    if (supportedMime('video/mp4; codecs="av01.0.05M.08"')) videoCodecs.push('av1');
-
-    const audioCodecs: string[] = [];
-    if (supportedMime('video/mp4; codecs="mp4a.40.2"')) audioCodecs.push('aac');
-    if (supportedMime('video/webm; codecs="opus"')) audioCodecs.push('opus');
-    if (supportedMime('audio/ogg; codecs="vorbis"')) audioCodecs.push('vorbis');
-    if (supportedMime('audio/ac3')) audioCodecs.push('ac3');
-    if (supportedMime('audio/eac3')) audioCodecs.push('eac3');
-    if (supportedMime('audio/mpeg')) audioCodecs.push('mp3');
-    if (supportedMime('audio/flac')) audioCodecs.push('flac');
-
-    const containers: string[] = [];
-    if (supportedMime('video/mp4') || supportedMime('audio/mp4')) containers.push('mp4');
-    if (supportedMime('video/webm') || supportedMime('audio/webm')) containers.push('webm');
-    if (supportedMime('audio/mpeg')) containers.push('mp3');
-    if (supportedMime('audio/flac')) containers.push('flac');
-    if (supportedMime('audio/ogg')) containers.push('ogg');
-
     const video = document.createElement('video');
+    const probe = (mime: string) => supportedMime(video, mime);
+    const { videoCodecs, audioCodecs, containers } = detectWebMediaCodecCapabilities(probe);
+
     const capabilities: PlaybackCapabilities = {
       platform: 'web',
-      maxWidth: screenWidth,
-      maxHeight: screenHeight,
       videoCodecs,
       audioCodecs,
       containers,
       hls: nativeHlsSupported(video) || Hls.isSupported(),
       dash: false,
+      // Do not claim HDR profiles merely because the display is HDR-capable.
+      // The server needs a defined codec/profile contract before we advertise them.
       hdr: [],
     };
-    this.log.info('detected', capabilities);
+    this.log.info('detected', {
+      platform: capabilities.platform,
+      containers: capabilities.containers.join(', '),
+      videoCodecs: capabilities.videoCodecs.join(', '),
+      audioCodecs: capabilities.audioCodecs.join(', '),
+      hlsFmp4: capabilities.hls,
+      decoderResolutionLimit: 'none',
+      hdr: capabilities.hdr.length > 0 ? capabilities.hdr.join(', ') : 'not-advertised',
+    });
     return capabilities;
   }
 

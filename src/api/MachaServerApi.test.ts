@@ -4,11 +4,12 @@ import { MachaServerApi } from './MachaServerApi';
 describe('MachaServerApi', () => {
   afterEach(() => vi.unstubAllGlobals());
 
-  it('queries playback status with bearer authentication and reads a reported version', async () => {
+  it('queries playback status with bearer authentication and reads server_version from the playback status response', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
       enabled: true,
       ready: true,
-      version: '0.8.4',
+      server_version: '0.8.4',
+      version: 'legacy',
     }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
     vi.stubGlobal('fetch', fetchMock);
 

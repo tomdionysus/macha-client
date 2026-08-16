@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Navigate, NavLink, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { MachaCatalogueApi } from './api/MachaCatalogueApi';
 import { MachaMediaApi } from './api/MachaMediaApi';
@@ -14,6 +14,7 @@ import { MachaPlaybackResolver } from './playback/MachaPlaybackResolver';
 import { DemoServerApi, MachaServerApi, type ServerApi } from './api/MachaServerApi';
 import type { MediaSummary, PlaybackProgress, SeasonSummary } from './types';
 import { ContinueWatchingStore } from './state/continueWatching';
+import { migrateEpisodeContext, needsEpisodeContextMigration } from './state/continueWatchingMigration';
 import {
   getApiToken,
   getClientId,
@@ -147,8 +148,12 @@ function PlayerRoute({
   const { itemId } = useParams();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const resolvedItemId = required(itemId, 'itemId');
   const playFromStart = searchParams.get('start') === '0';
+  const routeMedia = (location.state as { media?: MediaSummary } | null)?.media;
+  const storedMedia = progressStore.list().find((entry) => entry.mediaId === resolvedItemId)?.media;
+  const media = routeMedia?.id === resolvedItemId ? routeMedia : storedMedia?.id === resolvedItemId ? storedMedia : undefined;
   const startPositionMs = useMemo(() => (
     playFromStart ? 0 : (progressStore.list().find((entry) => entry.mediaId === resolvedItemId)?.positionMs ?? 0)
   ), [playFromStart, progressStore, resolvedItemId]);
@@ -156,6 +161,7 @@ function PlayerRoute({
     <PlayerScreen
       api={api}
       itemId={resolvedItemId}
+      media={media}
       platform={platform}
       playbackResolver={playbackResolver}
       startPositionMs={startPositionMs}
@@ -174,7 +180,9 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
   const [apiToken, setApiToken] = useState(() => getApiToken());
   const clientId = useMemo(() => getClientId(), []);
   const progressStore = useMemo(() => new ContinueWatchingStore(clientId), [clientId]);
-  const [continueWatching, setContinueWatching] = useState<PlaybackProgress[]>(() => progressStore.list());
+  const [continueWatching, setContinueWatching] = useState<PlaybackProgress[]>(() => (
+    progressStore.list().filter((entry) => !needsEpisodeContextMigration(entry))
+  ));
   const demo = import.meta.env.VITE_DEMO === 'true';
 
   const api = useMemo<MediaApi>(() => {
@@ -192,9 +200,34 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
     demo ? new DemoServerApi() : new MachaServerApi(serverUrl, apiToken)
   ), [apiToken, demo, serverUrl]);
 
+  useEffect(() => {
+    let cancelled = false;
+    const legacyEntries = progressStore.list().filter(needsEpisodeContextMigration);
+    if (legacyEntries.length === 0) return undefined;
+
+    void (async () => {
+      const repaired: PlaybackProgress[] = [];
+      for (const entry of legacyEntries) {
+        try {
+          repaired.push(await migrateEpisodeContext(api, entry));
+        } catch (error) {
+          console.warn('[macha] unable to migrate legacy Continue Watching episode context', error);
+        }
+      }
+
+      if (cancelled) return;
+
+      let next = progressStore.list();
+      for (const entry of repaired) next = progressStore.update(entry);
+      setContinueWatching(next.filter((entry) => !needsEpisodeContextMigration(entry)));
+    })();
+
+    return () => { cancelled = true; };
+  }, [api, progressStore]);
+
   const open = useCallback((item: MediaSummary) => navigate(pathForMedia(item)), [navigate]);
-  const openPlayer = useCallback((item: MediaSummary) => navigate(routes.player(item.id)), [navigate]);
-  const openPlayerFromStart = useCallback((item: MediaSummary) => navigate(routes.playerFromStart(item.id)), [navigate]);
+  const openPlayer = useCallback((item: MediaSummary) => navigate(routes.player(item.id), { state: { media: item } }), [navigate]);
+  const openPlayerFromStart = useCallback((item: MediaSummary) => navigate(routes.playerFromStart(item.id), { state: { media: item } }), [navigate]);
   const progressById = useMemo(() => new Map(continueWatching.map((entry) => [entry.mediaId, entry])), [continueWatching]);
 
   const updateProgress = useCallback((progress: PlaybackProgress) => {

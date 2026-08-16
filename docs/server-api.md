@@ -115,7 +115,7 @@ PATCH  /api/v1/playback/sessions/{id}
 DELETE /api/v1/playback/sessions/{id}
 ```
 
-Session creation sends the catalogue `item_id` and the platform capability profile: direct containers/codecs, fragmented-MP4 HLS support and display limits. The server response supplies the selected media representation, actual mode, stream URL, selected streams, available controls, probe data and duration.
+Session creation sends the catalogue `item_id` and the platform capability profile: direct containers/codecs and fragmented-MP4 HLS support, plus optional decoder resolution limits when a platform can report real limits. The Web client deliberately does not use screen dimensions as decoder limits. The server response supplies the selected media representation, actual mode, stream URL, selected streams, available controls, probe data and duration.
 
 `PATCH` is used for server-side seeks of transformed streams and for changing mode, quality limits, audio stream, subtitle stream or media representation. A transformed seek/change may replace the HLS generation while retaining the same logical session. The client therefore treats every PATCH response as authoritative and reloads the returned stream URL.
 

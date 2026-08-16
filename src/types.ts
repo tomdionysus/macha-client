@@ -13,6 +13,11 @@ export interface Artwork {
   thumbnail?: ArtworkRef;
 }
 
+export interface PlaybackHierarchyContext {
+  series: { id: string; title: string };
+  season: { id: string; title: string; seasonNumber: number };
+}
+
 export interface MediaSummary {
   id: string;
   kind: MediaKind;
@@ -28,6 +33,7 @@ export interface MediaSummary {
   trackNumber?: number;
   mediaIds: string[];
   durationMs?: number;
+  playbackContext?: PlaybackHierarchyContext;
 
   /**
    * Reserved UI field for a future catalogue release/air date.
@@ -92,8 +98,9 @@ export type AudioCodec = 'aac' | 'ac3' | 'eac3' | 'opus' | 'mp3' | 'flac' | stri
 
 export interface PlaybackCapabilities {
   platform: 'web' | 'android' | 'tizen';
-  maxWidth: number;
-  maxHeight: number;
+  /** Optional decoder/platform limits. Web deliberately leaves these unset. */
+  maxWidth?: number;
+  maxHeight?: number;
   videoCodecs: VideoCodec[];
   audioCodecs: AudioCodec[];
   containers: string[];

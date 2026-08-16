@@ -4,12 +4,14 @@ import type { MediaApi } from '../api/MediaApi';
 import { useArtworkUrl } from '../hooks/useArtworkUrl';
 import { PlayIcon, RestartIcon } from './PlaybackIcons';
 import { routes } from '../routing';
-import type { Episode, PlaybackProgress } from '../types';
+import type { Episode, PlaybackProgress, SeasonDetails, ShowDetails } from '../types';
 
 interface Props {
   api: MediaApi;
   episodes: Episode[];
   progress: Map<string, PlaybackProgress>;
+  series: ShowDetails;
+  season: SeasonDetails;
 }
 
 interface DragState {
@@ -31,15 +33,30 @@ function resumable(progress?: PlaybackProgress): boolean {
   return Boolean(progress && progress.positionMs > 0 && progress.durationMs > 0);
 }
 
-function EpisodeCard({ api, episode, progress }: { api: MediaApi; episode: Episode; progress?: PlaybackProgress }) {
+function EpisodeCard({ api, episode, progress, series, season }: {
+  api: MediaApi;
+  episode: Episode;
+  progress?: PlaybackProgress;
+  series: ShowDetails;
+  season: SeasonDetails;
+}) {
   const image = useArtworkUrl(api, episode.artwork?.thumbnail ?? episode.artwork?.backdrop);
   const hasProgress = resumable(progress);
+  const playbackEpisode: Episode = {
+    ...episode,
+    playbackContext: {
+      series: { id: series.id, title: series.title },
+      season: { id: season.id, title: season.title, seasonNumber: season.seasonNumber },
+    },
+  };
+  const playbackState = { media: playbackEpisode };
   return (
     <article className={`episode-card${hasProgress ? ' has-progress' : ''}`}>
       <div className="episode-still-shell">
         <Link
           className="episode-still-link"
           to={routes.player(episode.id)}
+          state={playbackState}
           data-tv-focusable="true"
           aria-label={`${hasProgress ? 'Resume' : 'Play'} ${episode.title}`}
           draggable={false}
@@ -61,6 +78,7 @@ function EpisodeCard({ api, episode, progress }: { api: MediaApi; episode: Episo
             <Link
               className="episode-play-action episode-play-restart"
               to={routes.playerFromStart(episode.id)}
+              state={playbackState}
               data-tv-focusable="true"
               aria-label={`Play ${episode.title} from start`}
               draggable={false}
@@ -81,7 +99,7 @@ function EpisodeCard({ api, episode, progress }: { api: MediaApi; episode: Episo
   );
 }
 
-export function EpisodeRail({ api, episodes, progress }: Props) {
+export function EpisodeRail({ api, episodes, progress, series, season }: Props) {
   const railRef = useRef<HTMLDivElement | null>(null);
   const drag = useRef<DragState>();
   const suppressClick = useRef(false);
@@ -156,7 +174,7 @@ export function EpisodeRail({ api, episodes, progress }: Props) {
     >
       {episodes.map((episode) => (
         <div key={episode.id} className="episode-rail-item" role="listitem">
-          <EpisodeCard api={api} episode={episode} progress={progress.get(episode.id)} />
+          <EpisodeCard api={api} episode={episode} progress={progress.get(episode.id)} series={series} season={season} />
         </div>
       ))}
     </div>

@@ -122,17 +122,30 @@ export class MachaPlaybackResolver implements PlaybackResolver {
   }
 
   async resolve(media: MediaSummary, capabilities: PlaybackCapabilities): Promise<PlaybackSession> {
-    this.log.info('session-create', { mediaId: media.id, mediaKind: media.kind, capabilities });
+    this.log.info('session-create', {
+      mediaId: media.id,
+      mediaKind: media.kind,
+      platform: capabilities.platform,
+      containers: capabilities.containers.join(', '),
+      videoCodecs: capabilities.videoCodecs.join(', '),
+      audioCodecs: capabilities.audioCodecs.join(', '),
+      hlsFmp4: capabilities.hls,
+      maxWidth: capabilities.maxWidth ?? 'none',
+      maxHeight: capabilities.maxHeight ?? 'none',
+      hdr: capabilities.hdr.length > 0 ? capabilities.hdr.join(', ') : 'not-advertised',
+    });
+    const wireCapabilities: Record<string, unknown> = {
+      containers: capabilities.containers,
+      video_codecs: capabilities.videoCodecs,
+      audio_codecs: capabilities.audioCodecs,
+      hls_fmp4: capabilities.hls,
+    };
+    if (capabilities.maxWidth !== undefined) wireCapabilities.max_width = capabilities.maxWidth;
+    if (capabilities.maxHeight !== undefined) wireCapabilities.max_height = capabilities.maxHeight;
+
     const body = {
       item_id: media.id,
-      capabilities: {
-        containers: capabilities.containers,
-        video_codecs: capabilities.videoCodecs,
-        audio_codecs: capabilities.audioCodecs,
-        hls_fmp4: capabilities.hls,
-        max_width: capabilities.maxWidth,
-        max_height: capabilities.maxHeight,
-      },
+      capabilities: wireCapabilities,
       preferences: {
         mode: 'auto',
       },

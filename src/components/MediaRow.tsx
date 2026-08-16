@@ -8,9 +8,10 @@ interface Props {
   items: MediaSummary[];
   onOpen: (item: MediaSummary) => void;
   progress?: Map<string, PlaybackProgress>;
+  variant?: 'default' | 'continue-watching';
 }
 
-export function MediaRow({ api, title, items, onOpen, progress }: Props) {
+export function MediaRow({ api, title, items, onOpen, progress, variant = 'default' }: Props) {
   if (items.length === 0) return null;
   return (
     <section className="media-section">
@@ -19,7 +20,7 @@ export function MediaRow({ api, title, items, onOpen, progress }: Props) {
         {items.map((item) => {
           const entry = progress?.get(item.id);
           const ratio = entry && entry.durationMs > 0 ? entry.positionMs / entry.durationMs : undefined;
-          return <MediaCard key={item.id} api={api} item={item} onOpen={onOpen} progress={ratio} />;
+          return <MediaCard key={item.id} api={api} item={item} onOpen={onOpen} progress={ratio} variant={variant} />;
         })}
       </div>
     </section>
