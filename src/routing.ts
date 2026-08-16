@@ -15,6 +15,7 @@ export const routes = {
   album: (id: string) => `/music/albums/${segment(id)}`,
   track: (id: string) => `/music/tracks/${segment(id)}`,
   player: (id: string) => `/play/${segment(id)}`,
+  playerFromStart: (id: string) => `/play/${segment(id)}?start=0`,
   item: (id: string) => `/items/${segment(id)}`,
   search: '/search',
   settings: '/settings',

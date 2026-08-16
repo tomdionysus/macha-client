@@ -19,6 +19,7 @@ describe('routes', () => {
     expect(routes.album('album:one')).toBe('/music/albums/album%3Aone');
     expect(routes.track('track:one')).toBe('/music/tracks/track%3Aone');
     expect(routes.player('track:one')).toBe('/play/track%3Aone');
+    expect(routes.playerFromStart('track:one')).toBe('/play/track%3Aone?start=0');
   });
 
   it('routes season catalogue items through their parent series', () => {

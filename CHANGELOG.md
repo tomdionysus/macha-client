@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.3.12
+
+- make the series title the primary heading on season pages and demote the season title to the smaller eyebrow treatment;
+- reduce the initial boot splash duration from two seconds to one second.
+
+## 0.3.11
+
+- show movie poster artwork prominently beside the title and synopsis on movie detail pages;
+- replace movie detail text actions with the same circular Play / Play from start controls used by the player;
+- add Play from start to the in-player transport controls and only resume playback when the seek-to-zero operation succeeds.
+
+## 0.3.10
+
+- Add explicit Play from start alongside resume playback for movies and episodes with stored progress.
+- Encode start-from-zero in the player route so playback history/back-forward remains deterministic.
+- Show resume/start-over controls on episode stills while preserving the whole still as the normal play target.
+- Suppress the boot splash on browser back/forward document restoration; normal SPA navigation continues without replaying it.
+
 ## 0.3.9 - 2026-08-15
 
 - add structured client-side playback diagnostics covering session control, browser media state, buffering, HLS fragment activity and failures;

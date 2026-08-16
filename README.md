@@ -13,6 +13,7 @@ Developed with substantial use of AI-assisted implementation
 
 - 2 second Macha logo-mask splash on initial load, with only the moving highlight visible through the logo.
 - Home screen with Movies, TV Shows and Music.
+- Movie detail pages with prominent poster artwork and circular Play / Play from start controls.
 - Per-client Continue Watching, limited to the last three unfinished items.
 - Proper browser-history routes for movies, series, seasons and episodes.
 - Separate series and season pages.
@@ -25,7 +26,7 @@ Developed with substantial use of AI-assisted implementation
 - Keyboard and television D-pad focus navigation.
 - Mouse, trackpad and touch episode scrolling.
 - Shared React UI with Web, Android and Tizen platform/player interfaces.
-- Routable player page with auto-hiding translucent-black lower chrome, uniform circular transport controls and progress scrubbing.
+- Routable player page with auto-hiding translucent-black lower chrome, uniform circular transport controls, Play from start and progress scrubbing.
 - Macha 0.7 playback-session negotiation with Direct Play, remux and transcode modes.
 - In-session quality, audio, subtitle and media-representation switching.
 - Browser HLS playback through native HLS where available or hls.js otherwise.

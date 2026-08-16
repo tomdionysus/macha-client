@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { remainingSplashMs, waitForSplashMinimum, type SplashClock } from './bootSplash';
+import { remainingSplashMs, shouldShowBootSplash, waitForSplashMinimum, type SplashClock } from './bootSplash';
 
 describe('boot splash timing', () => {
+  it('shows on first navigation and reload but not browser history restoration', () => {
+    expect(shouldShowBootSplash('navigate')).toBe(true);
+    expect(shouldShowBootSplash('reload')).toBe(true);
+    expect(shouldShowBootSplash('back_forward')).toBe(false);
+  });
+
   it('never expires before the configured minimum lifetime', () => {
     expect(remainingSplashMs(100, 349, 2_000)).toBe(1_751);
     expect(remainingSplashMs(100, 2_099, 2_000)).toBe(1);

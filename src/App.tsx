@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from 'react';
-import { Navigate, NavLink, Route, Routes, useNavigate, useParams } from 'react-router-dom';
+import { Navigate, NavLink, Route, Routes, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { MachaCatalogueApi } from './api/MachaCatalogueApi';
 import { MachaMediaApi } from './api/MachaMediaApi';
 import { MockMediaApi } from './api/MockMediaApi';
@@ -52,9 +52,11 @@ function required(value: string | undefined, name: string): string {
   return value;
 }
 
-function DetailRoute({ api, onPlay, parameter }: {
+function DetailRoute({ api, onPlay, onPlayFromStart, progressById, parameter }: {
   api: MediaApi;
   onPlay: (item: MediaSummary) => void;
+  onPlayFromStart: (item: MediaSummary) => void;
+  progressById: Map<string, PlaybackProgress>;
   parameter: 'movieId' | 'episodeId' | 'trackId' | 'itemId';
 }) {
   const params = useParams();
@@ -66,6 +68,8 @@ function DetailRoute({ api, onPlay, parameter }: {
       itemId={itemId}
       onBack={() => navigate(-1)}
       onPlay={onPlay}
+      onPlayFromStart={onPlayFromStart}
+      progress={progressById.get(itemId)}
     />
   );
 }
@@ -83,7 +87,7 @@ function SeriesRoute({ api, onOpenSeason }: { api: MediaApi; onOpenSeason: (seas
   );
 }
 
-function SeasonRoute({ api }: { api: MediaApi }) {
+function SeasonRoute({ api, progress }: { api: MediaApi; progress: Map<string, PlaybackProgress> }) {
   const { seriesId, seasonId } = useParams();
   const navigate = useNavigate();
   const resolvedSeriesId = required(seriesId, 'seriesId');
@@ -93,6 +97,7 @@ function SeasonRoute({ api }: { api: MediaApi }) {
       seriesId={resolvedSeriesId}
       seasonId={required(seasonId, 'seasonId')}
       onBack={() => navigate(-1)}
+      progress={progress}
     />
   );
 }
@@ -137,11 +142,13 @@ function PlayerRoute({
   onProgress: (progress: PlaybackProgress) => void;
 }) {
   const { itemId } = useParams();
+  const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const resolvedItemId = required(itemId, 'itemId');
+  const playFromStart = searchParams.get('start') === '0';
   const startPositionMs = useMemo(() => (
-    progressStore.list().find((entry) => entry.mediaId === resolvedItemId)?.positionMs ?? 0
-  ), [progressStore, resolvedItemId]);
+    playFromStart ? 0 : (progressStore.list().find((entry) => entry.mediaId === resolvedItemId)?.positionMs ?? 0)
+  ), [playFromStart, progressStore, resolvedItemId]);
   return (
     <PlayerScreen
       api={api}
@@ -179,6 +186,8 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
 
   const open = useCallback((item: MediaSummary) => navigate(pathForMedia(item)), [navigate]);
   const openPlayer = useCallback((item: MediaSummary) => navigate(routes.player(item.id)), [navigate]);
+  const openPlayerFromStart = useCallback((item: MediaSummary) => navigate(routes.playerFromStart(item.id)), [navigate]);
+  const progressById = useMemo(() => new Map(continueWatching.map((entry) => [entry.mediaId, entry])), [continueWatching]);
 
   const updateProgress = useCallback((progress: PlaybackProgress) => {
     setContinueWatching(progressStore.update(progress));
@@ -218,17 +227,17 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
         <Routes>
           <Route path={routes.home} element={<HomeScreen api={api} continueWatching={continueWatching} onOpen={open} onResume={openPlayer} />} />
           <Route path={routes.movies} element={<LibraryScreen api={api} kind="movies" onOpen={open} />} />
-          <Route path="/movies/:movieId" element={<DetailRoute api={api} onPlay={openPlayer} parameter="movieId" />} />
+          <Route path="/movies/:movieId" element={<DetailRoute api={api} onPlay={openPlayer} onPlayFromStart={openPlayerFromStart} progressById={progressById} parameter="movieId" />} />
           <Route path={routes.series} element={<LibraryScreen api={api} kind="shows" onOpen={open} />} />
           <Route path="/series/:seriesId" element={<SeriesRoute api={api} onOpenSeason={open} />} />
-          <Route path="/series/:seriesId/seasons/:seasonId" element={<SeasonRoute api={api} />} />
-          <Route path="/episodes/:episodeId" element={<DetailRoute api={api} onPlay={openPlayer} parameter="episodeId" />} />
+          <Route path="/series/:seriesId/seasons/:seasonId" element={<SeasonRoute api={api} progress={progressById} />} />
+          <Route path="/episodes/:episodeId" element={<DetailRoute api={api} onPlay={openPlayer} onPlayFromStart={openPlayerFromStart} progressById={progressById} parameter="episodeId" />} />
           <Route path={routes.music} element={<MusicScreen api={api} onOpen={open} />} />
           <Route path="/music/artists/:artistId" element={<ArtistRoute api={api} onOpenAlbum={open} />} />
           <Route path="/music/albums/:albumId" element={<AlbumRoute api={api} onPlay={openPlayer} />} />
-          <Route path="/music/tracks/:trackId" element={<DetailRoute api={api} onPlay={openPlayer} parameter="trackId" />} />
+          <Route path="/music/tracks/:trackId" element={<DetailRoute api={api} onPlay={openPlayer} onPlayFromStart={openPlayerFromStart} progressById={progressById} parameter="trackId" />} />
           <Route path="/play/:itemId" element={<PlayerRoute api={api} platform={platform} playbackResolver={playbackResolver} progressStore={progressStore} onProgress={updateProgress} />} />
-          <Route path="/items/:itemId" element={<DetailRoute api={api} onPlay={openPlayer} parameter="itemId" />} />
+          <Route path="/items/:itemId" element={<DetailRoute api={api} onPlay={openPlayer} onPlayFromStart={openPlayerFromStart} progressById={progressById} parameter="itemId" />} />
           <Route path={routes.search} element={<SearchScreen api={api} onOpen={open} />} />
           <Route path={routes.settings} element={<SettingsScreen serverUrl={serverUrl} apiToken={apiToken} onSave={saveServer} />} />
           <Route path="*" element={<Navigate to={routes.home} replace />} />

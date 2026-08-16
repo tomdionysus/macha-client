@@ -11,6 +11,19 @@ const browserClock: SplashClock = {
   sleep: (ms) => new Promise((resolve) => window.setTimeout(resolve, ms)),
 };
 
+export type NavigationLoadType = 'navigate' | 'reload' | 'back_forward' | 'prerender' | 'unknown';
+
+export function navigationLoadType(): NavigationLoadType {
+  const entry = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined;
+  return entry?.type ?? 'unknown';
+}
+
+export function shouldShowBootSplash(type: NavigationLoadType = navigationLoadType()): boolean {
+  // BrowserRouter navigation never reaches this module again. Suppress the splash
+  // only when the browser itself restores/reloads the document via history.
+  return type !== 'back_forward';
+}
+
 export function remainingSplashMs(startedAt: number, now: number, durationMs = uiSettings.splashDurationMs): number {
   return Math.max(0, durationMs - (now - startedAt));
 }
@@ -29,7 +42,7 @@ export async function waitForSplashMinimum(startedAt: number, durationMs: number
  */
 export async function runBootSplash(root: HTMLElement, clock: SplashClock = browserClock): Promise<void> {
   const durationMs = uiSettings.splashDurationMs;
-  if (durationMs <= 0) return;
+  if (durationMs <= 0 || !shouldShowBootSplash()) return;
 
   const flash = splashFlashTiming(durationMs);
   const splash = document.createElement('div');

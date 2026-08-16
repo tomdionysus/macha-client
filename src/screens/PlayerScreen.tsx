@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type MouseEvent } from 'react';
 import type { MediaApi } from '../api/MediaApi';
+import { PlayIcon, RestartIcon } from '../components/PlaybackIcons';
 import { ErrorMessage, Loading } from '../components/Status';
 import { createClientLogger } from '../diagnostics/ClientLog';
 import { useArtworkUrl } from '../hooks/useArtworkUrl';
@@ -40,7 +41,7 @@ function formatBitrate(bitrate: number): string {
   return bitrate >= 1_000_000 ? `${(bitrate / 1_000_000).toFixed(1)} Mb/s` : `${Math.round(bitrate / 1000)} kb/s`;
 }
 
-type PlayerIconName = 'back' | 'rewind' | 'play' | 'pause' | 'forward' | 'options';
+type PlayerIconName = 'back' | 'rewind' | 'pause' | 'forward' | 'options';
 
 function PlayerIcon({ name }: { name: PlayerIconName }) {
   const common = {
@@ -57,8 +58,6 @@ function PlayerIcon({ name }: { name: PlayerIconName }) {
       return <svg {...common}><path d="M14.5 5 7.5 12l7 7M8 12h9" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>;
     case 'rewind':
       return <svg {...common}><path d="M10.5 6 4.5 12l6 6V6Zm8 0-6 6 6 6V6Z" fill="currentColor" /></svg>;
-    case 'play':
-      return <svg {...common}><path d="M8 5.5v13L18.5 12 8 5.5Z" fill="currentColor" /></svg>;
     case 'pause':
       return <svg {...common}><path d="M7.5 6h3v12h-3V6Zm6 0h3v12h-3V6Z" fill="currentColor" /></svg>;
     case 'forward':
@@ -475,7 +474,7 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
 
   const seek = useCallback(async (positionMs: number) => {
     const activeSession = sessionRef.current;
-    if (!activeSession || controlBusy || !activeSession.options.canSeek) return;
+    if (!activeSession || controlBusy || !activeSession.options.canSeek) return false;
     const bounded = Math.max(0, Math.min(activeSession.durationMs, positionMs));
     log.info('seek-ui-request', {
       sessionId: activeSession.sessionId,
@@ -491,7 +490,7 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
       player.seek(bounded);
       log.info('seek-direct-dispatched', { elapsedMs: Math.round((performance.now() - directSeekStartedAt) * 10) / 10, positionMs: bounded });
       publish({ ...latestRef.current, positionMs: bounded, ended: false });
-      return;
+      return true;
     }
 
     setControlBusy(true);
@@ -517,6 +516,7 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
         elapsedMs: Math.round((performance.now() - seekStartedAt) * 10) / 10,
       });
       setPlaybackNotice(undefined);
+      return true;
     } catch (error) {
       log.error('seek-failed', {
         sessionId: activeSession.sessionId,
@@ -526,10 +526,24 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
         error,
       });
       if (mountedRef.current) setPlaybackNotice(error instanceof Error ? error.message : String(error));
+      return false;
     } finally {
       if (mountedRef.current) setControlBusy(false);
     }
   }, [controlBusy, loadSession, log, playbackResolver, player, publish, showControls]);
+
+  const playFromStart = useCallback(async () => {
+    const activeSession = sessionRef.current;
+    if (!activeSession || controlBusy || !activeSession.options.canSeek) return;
+    log.info('restart-ui-request', {
+      sessionId: activeSession.sessionId,
+      mode: activeSession.mode,
+      currentPositionMs: latestRef.current.positionMs,
+    });
+    const restarted = await seek(0);
+    if (!restarted || !mountedRef.current) return;
+    setPaused(false);
+  }, [controlBusy, log, seek, setPaused]);
 
   const reconfigure = useCallback(async (update: PlaybackUpdate) => {
     const activeSession = sessionRef.current;
@@ -690,9 +704,19 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
 
         <div className="player-button-row">
           <button type="button" data-tv-focusable="true" onClick={onBack} aria-label="Back"><PlayerIcon name="back" /></button>
+          <button
+            type="button"
+            data-tv-focusable="true"
+            disabled={!session?.options.canSeek || controlBusy}
+            onClick={() => void playFromStart()}
+            aria-label="Play from start"
+            title="Play from start"
+          >
+            <RestartIcon />
+          </button>
           <button type="button" data-tv-focusable="true" disabled={!session?.options.canSeek || controlBusy} onClick={() => void seek(displayedProgress - 10_000)} aria-label="Seek backward"><PlayerIcon name="rewind" /></button>
           <button type="button" data-tv-focusable="true" disabled={!session || controlBusy} onClick={() => setPaused(!event.paused)} aria-label={event.paused ? 'Play' : 'Pause'}>
-            <PlayerIcon name={event.paused ? 'play' : 'pause'} />
+            {event.paused ? <PlayIcon /> : <PlayerIcon name="pause" />}
           </button>
           <button type="button" data-tv-focusable="true" disabled={!session?.options.canSeek || controlBusy} onClick={() => void seek(displayedProgress + 10_000)} aria-label="Seek forward"><PlayerIcon name="forward" /></button>
           <button
