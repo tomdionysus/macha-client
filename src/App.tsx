@@ -12,7 +12,7 @@ import type { PlaybackResolver } from './playback/PlaybackResolver';
 import { DemoPlaybackResolver } from './playback/DemoPlaybackResolver';
 import { MachaPlaybackResolver } from './playback/MachaPlaybackResolver';
 import { DemoServerApi, MachaServerApi, type ServerApi } from './api/MachaServerApi';
-import type { MediaSummary, PlaybackProgress, SeasonSummary } from './types';
+import type { Episode, MediaSummary, PlaybackProgress, SeasonSummary } from './types';
 import { ContinueWatchingStore } from './state/continueWatching';
 import { migrateEpisodeContext, needsEpisodeContextMigration } from './state/continueWatchingMigration';
 import { PlaybackQueueStore, type PlaybackQueueState } from './state/playbackQueue';
@@ -112,7 +112,11 @@ function SeriesRoute({ api, onOpenSeason }: { api: MediaApi; onOpenSeason: (seas
   );
 }
 
-function SeasonRoute({ api, progress }: { api: MediaApi; progress: Map<string, PlaybackProgress> }) {
+function SeasonRoute({ api, progress, onPlayEpisode }: {
+  api: MediaApi;
+  progress: Map<string, PlaybackProgress>;
+  onPlayEpisode: (episode: Episode, queue: Episode[], queueIndex: number, fromStart: boolean) => void;
+}) {
   const { seriesId, seasonId } = useParams();
   const navigate = useNavigate();
   const resolvedSeriesId = required(seriesId, 'seriesId');
@@ -123,6 +127,7 @@ function SeasonRoute({ api, progress }: { api: MediaApi; progress: Map<string, P
       seasonId={required(seasonId, 'seasonId')}
       onBack={() => navigate(-1)}
       progress={progress}
+      onPlayEpisode={onPlayEpisode}
     />
   );
 }
@@ -264,6 +269,9 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
   const openPlayerFromStart = useCallback((item: MediaSummary) => startPlayback(item, { fromStart: true }), [startPlayback]);
   const openAlbumTrack = useCallback((track: MediaSummary, queue: MediaSummary[], queueIndex: number) => {
     startPlayback(track, { queue, queueIndex });
+  }, [startPlayback]);
+  const openSeasonEpisode = useCallback((episode: Episode, queue: Episode[], queueIndex: number, fromStart: boolean) => {
+    startPlayback(episode, { queue, queueIndex, fromStart });
   }, [startPlayback]);
 
   // A /play URL is only a presentation request. If the application was
@@ -440,7 +448,7 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
           <Route path="/movies/:movieId" element={<DetailRoute api={api} onPlay={openPlayer} onPlayFromStart={openPlayerFromStart} progressById={progressById} parameter="movieId" />} />
           <Route path={routes.series} element={<LibraryScreen api={api} kind="shows" onOpen={open} />} />
           <Route path="/series/:seriesId" element={<SeriesRoute api={api} onOpenSeason={open} />} />
-          <Route path="/series/:seriesId/seasons/:seasonId" element={<SeasonRoute api={api} progress={progressById} />} />
+          <Route path="/series/:seriesId/seasons/:seasonId" element={<SeasonRoute api={api} progress={progressById} onPlayEpisode={openSeasonEpisode} />} />
           <Route path="/episodes/:episodeId" element={<DetailRoute api={api} onPlay={openPlayer} onPlayFromStart={openPlayerFromStart} progressById={progressById} parameter="episodeId" />} />
           <Route path={routes.music} element={<MusicScreen api={api} onOpen={open} />} />
           <Route path="/music/artists/:artistId" element={<ArtistRoute api={api} onOpenAlbum={open} />} />

@@ -24,7 +24,7 @@ export function shouldShowBootSplash(type: NavigationLoadType = navigationLoadTy
   return type !== 'back_forward';
 }
 
-export function remainingSplashMs(startedAt: number, now: number, durationMs = uiSettings.splashDurationMs): number {
+export function remainingSplashMs(startedAt: number, now: number, durationMs: number = uiSettings.splashDurationMs): number {
   return Math.max(0, durationMs - (now - startedAt));
 }
 
@@ -54,14 +54,15 @@ export async function runBootSplash(root: HTMLElement, clock: SplashClock = brow
   mask.style.setProperty('--macha-logo', `url("${logoUrl}")`);
   mask.style.setProperty('--macha-flash-duration', `${flash.durationMs}ms`);
   mask.style.setProperty('--macha-flash-delay', `${flash.delayMs}ms`);
-  splash.append(mask);
+  splash.appendChild(mask);
 
-  root.replaceChildren(splash);
+  while (root.firstChild) root.removeChild(root.firstChild);
+  root.appendChild(splash);
   const startedAt = clock.now();
 
   // Measure elapsed monotonic time after every wake-up. Timers may be delayed by
   // the browser, but they must never make the splash shorter than configured.
   await waitForSplashMinimum(startedAt, durationMs, clock);
 
-  root.replaceChildren();
+  while (root.firstChild) root.removeChild(root.firstChild);
 }

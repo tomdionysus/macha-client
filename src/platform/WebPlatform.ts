@@ -133,7 +133,7 @@ class WebPlayer implements Player {
       // Recreating it forces the browser to rebuild the entire playback DOM
       // and can also drop element-scoped state such as fullscreen/PiP.
       video.pause();
-      video.querySelectorAll('track').forEach((track) => track.remove());
+      video.querySelectorAll('track').forEach((track) => track.parentNode?.removeChild(track));
       video.removeAttribute('src');
       video.load();
       this.log.debug('media-element-reused');
@@ -161,7 +161,8 @@ class WebPlayer implements Player {
         publish();
       });
       this.video = video;
-      this.host.replaceChildren(video);
+      while (this.host.firstChild) this.host.removeChild(this.host.firstChild);
+      this.host.appendChild(video);
     }
 
     const publish = () => this.publish(video!);
@@ -177,7 +178,7 @@ class WebPlayer implements Player {
         this.log.debug('subtitle-loaded', { url: source.subtitleUrl });
       });
       track.addEventListener('error', () => this.log.warn('subtitle-error', { url: source.subtitleUrl }));
-      video.append(track);
+      video.appendChild(track);
     }
 
     if (isHls(source)) {
@@ -254,7 +255,7 @@ class WebPlayer implements Player {
     video.pause();
     video.removeAttribute('src');
     video.load();
-    video.remove();
+    video.parentNode?.removeChild(video);
     this.video = undefined;
   }
 

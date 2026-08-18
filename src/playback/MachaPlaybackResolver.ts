@@ -1,4 +1,5 @@
 import { createClientLogger } from '../diagnostics/ClientLog';
+import { parseErrorEnvelope } from '../api/errorEnvelope';
 import type { MediaSummary, PlaybackCapabilities, PlaybackMode, PlaybackSource } from '../types';
 import type {
   PlaybackOptions,
@@ -8,11 +9,6 @@ import type {
   PlaybackStreamInfo,
   PlaybackUpdate,
 } from './PlaybackResolver';
-
-interface ErrorEnvelope {
-  error?: string;
-  message?: string;
-}
 
 interface WireStream {
   index: number;
@@ -395,19 +391,19 @@ export class MachaPlaybackResolver implements PlaybackResolver {
     response: Response,
     request: { requestId: number; method: string; path: string; elapsedMs: number },
   ): Promise<never> {
-    let body: ErrorEnvelope | undefined;
+    let body: unknown;
     try {
-      body = await response.json() as ErrorEnvelope;
+      body = await response.json() as unknown;
     } catch {
       // Keep the HTTP status if the response is not JSON.
     }
-    const message = body?.message || body?.error || `${response.status} ${response.statusText}`;
+    const parsed = parseErrorEnvelope(body, `${response.status} ${response.statusText}`);
     this.log.error('http-error-response', {
       ...request,
       status: response.status,
       statusText: response.statusText,
       body,
     });
-    throw new MachaPlaybackError(`Macha playback request failed: ${message}`, response.status, body?.error);
+    throw new MachaPlaybackError(`Macha playback request failed: ${parsed.message}`, response.status, parsed.code);
   }
 }

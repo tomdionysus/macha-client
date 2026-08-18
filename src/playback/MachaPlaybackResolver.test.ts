@@ -212,4 +212,22 @@ describe('MachaPlaybackResolver', () => {
       expect.objectContaining({ method: 'DELETE' }),
     );
   });
+
+  it('surfaces structured server playback errors without object coercion', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
+      error: {
+        code: 'media_unavailable',
+        message: 'No playable media source',
+      },
+    }, 409));
+    vi.stubGlobal('fetch', fetchMock);
+    const resolver = new MachaPlaybackResolver('http://node.test', 'secret');
+
+    await expect(resolver.resolve(media, capabilities)).rejects.toMatchObject({
+      message: 'Macha playback request failed: No playable media source',
+      status: 409,
+      code: 'media_unavailable',
+    });
+  });
+
 });

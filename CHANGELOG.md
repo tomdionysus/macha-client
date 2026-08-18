@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.4.4 - 2026-08-18
+
+- add an isolated `build-samsung` Vite mode targeting the Chromium 47 engine used by 2017 Samsung Tizen televisions, emitting legacy-only JavaScript without changing the normal modern web build;
+- use hash routing only in Samsung packages so packaged widget navigation does not depend on HTTP history fallback;
+- generate the Tizen `config.xml` as build output rather than maintaining a second Tizen source tree;
+- add `npm run install-samsung` to build, Samsung-sign, install and launch the widget on the configured development TV.
+
+## 0.4.3 - 2026-08-18
+
+- route episode playback from season rails through the canonical persistent-player entry point, preserving the actual season page as the return location instead of falling back to the generic episode route;
+- allow generic episode detail pages to use episode still/thumbnail artwork when no backdrop or poster is available;
+- retry transient artwork fetch failures with bounded backoff while avoiding retries for permanent client-side HTTP errors and cancelling pending retries when artwork is no longer needed.
+
+## 0.4.2 - 2026-08-18
+
+- keep failed playback mounted in its current full, fullscreen, or mini presentation rather than implicitly navigating, exiting fullscreen, or clearing the queue;
+- keep recovery controls visible after fatal playback startup failures, with an explicit Close control in the full player;
+- show fatal playback diagnostics inside the player while disabling only controls that require a working playback session;
+- render invalid/non-playable player requests through the same recoverable player shell rather than a control-less error screen.
+
+## 0.4.1 - 2026-08-18
+
+- preserve structured server error responses in playback and catalogue diagnostics instead of coercing `error` objects to `[object Object]`;
+- extract server-provided error messages and codes where available, with JSON rendering as a fallback for unfamiliar structured errors.
+
 ## 0.4.0 - 2026-08-18
 
 - move playback ownership out of the `/play/:id` route into one persistent application-level player host; changing between full-player and bottom Now Playing presentations does not detach, reload or recreate the active media element/session;

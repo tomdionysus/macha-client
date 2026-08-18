@@ -68,7 +68,7 @@ export function useTvNavigation(): void {
 
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('load', focusFirst, { once: true });
-    queueMicrotask(focusFirst);
+    void Promise.resolve().then(focusFirst);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
 }

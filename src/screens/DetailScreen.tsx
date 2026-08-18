@@ -25,7 +25,7 @@ function canResume(media: MediaSummary, progress?: PlaybackProgress): boolean {
 
 export function DetailScreen({ api, itemId, onBack, onPlay, onPlayFromStart, progress }: Props) {
   const details = useAsync(() => api.details(itemId), [api, itemId]);
-  const backdrop = useArtworkUrl(api, details.value?.artwork?.backdrop ?? details.value?.artwork?.poster);
+  const backdrop = useArtworkUrl(api, details.value?.artwork?.backdrop ?? details.value?.artwork?.poster ?? details.value?.artwork?.thumbnail);
   const poster = useArtworkUrl(api, details.value?.kind === 'movie' ? details.value.artwork?.poster : undefined);
   if (details.loading) return <Loading />;
   if (details.error) return <ErrorMessage error={details.error} />;

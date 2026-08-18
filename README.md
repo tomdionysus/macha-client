@@ -52,6 +52,16 @@ npm run build
 
 The production web bundle is written to `dist/`.
 
+For the Samsung Tizen development target:
+
+```sh
+npm run build-samsung
+```
+
+This is a separate Vite mode. It emits a Chromium 47-compatible legacy bundle, uses hash routing, sets the current development server endpoint from `.env.samsung`, and generates `dist/config.xml`. The normal `npm run build` remains the modern web build and does not load the legacy plugin.
+
+With a Samsung TV certificate profile and development TV already provisioned, `npm run install-samsung` builds, signs, installs and launches the widget. `TV_SERIAL` and `CERT_PROFILE` may override the development defaults in `install-samsung.sh`.
+
 Roboto Variable is pulled at build time through Fontsource and bundled with the application. Roboto is released under the Apache License 2.0. The running client does not fetch fonts from a cloud service.
 
 ## Development

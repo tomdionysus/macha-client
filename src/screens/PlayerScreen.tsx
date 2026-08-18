@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent } from 'react';
 import type { MediaApi } from '../api/MediaApi';
 import { PlayIcon, RestartIcon } from '../components/PlaybackIcons';
-import { ErrorMessage, Loading } from '../components/Status';
+import { Loading } from '../components/Status';
 import { createClientLogger } from '../diagnostics/ClientLog';
 import { useArtworkUrl } from '../hooks/useArtworkUrl';
 import type { Platform } from '../platform/Platform';
@@ -255,7 +255,7 @@ function PlayerOptions({
   );
 }
 
-function PlayerSession({ api, media, platform, playbackResolver, startPositionMs, presentation, onProgress, onPosition, onMinimize, onExpand, onStop, onPrevious, onNext, onEnded, canPrevious, canNext, queuePosition }: Omit<Props, 'request'> & { media: MediaSummary; startPositionMs: number }) {
+function PlayerSession({ api, media, platform, playbackResolver, startPositionMs, presentation, onProgress, onPosition, onMinimize, onExpand, onStop, onPrevious, onNext, onEnded, canPrevious, canNext, queuePosition, initialFatalError }: Omit<Props, 'request'> & { media: MediaSummary; startPositionMs: number; initialFatalError?: Error }) {
   const pageRef = useRef<HTMLElement | null>(null);
   const hostRef = useRef<HTMLDivElement | null>(null);
   const player = useMemo(() => platform.createPlayer(), [platform]);
@@ -268,20 +268,20 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
     ended: false,
   }), [initialStartPositionMs, media.durationMs]);
   const latestRef = useRef(initialEvent);
-  const sessionRef = useRef<PlaybackSession>();
+  const sessionRef = useRef<PlaybackSession | undefined>(undefined);
   const streamOffsetRef = useRef(0);
   const reloadingRef = useRef(false);
   const lastReportRef = useRef(0);
   const lastPositionPersistRef = useRef(0);
-  const hideTimerRef = useRef<number>();
-  const scrubValueRef = useRef<number>();
-  const committedSeekRef = useRef<number>();
+  const hideTimerRef = useRef<number | undefined>(undefined);
+  const scrubValueRef = useRef<number | undefined>(undefined);
+  const committedSeekRef = useRef<number | undefined>(undefined);
   const mountedRef = useRef(true);
   const endedHandledRef = useRef(false);
   const [event, setEvent] = useState(initialEvent);
   const [session, setSession] = useState<PlaybackSession>();
-  const [starting, setStarting] = useState(true);
-  const [fatalError, setFatalError] = useState<Error>();
+  const [starting, setStarting] = useState(!initialFatalError);
+  const [fatalError, setFatalError] = useState<Error | undefined>(initialFatalError);
   const [playbackNotice, setPlaybackNotice] = useState<string>();
   const [controlsVisible, setControlsVisible] = useState(true);
   const [fullscreen, setFullscreen] = useState(false);
@@ -330,10 +330,10 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
   const showControls = useCallback(() => {
     setControlsVisible(true);
     if (hideTimerRef.current !== undefined) window.clearTimeout(hideTimerRef.current);
-    if (!latestRef.current.paused && !optionsVisible && !controlBusy) {
+    if (!fatalError && !latestRef.current.paused && !optionsVisible && !controlBusy) {
       hideTimerRef.current = window.setTimeout(() => setControlsVisible(false), uiSettings.playerControlsHideDelayMs);
     }
-  }, [controlBusy, optionsVisible]);
+  }, [controlBusy, fatalError, optionsVisible]);
 
   const setScrubPosition = useCallback((positionMs: number | undefined) => {
     scrubValueRef.current = positionMs;
@@ -430,6 +430,10 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
     });
 
     void (async () => {
+      if (initialFatalError) {
+        setStarting(false);
+        return;
+      }
       let resolved: PlaybackSession | undefined;
       try {
         const capabilitiesStartedAt = performance.now();
@@ -482,7 +486,7 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
       const activeSession = sessionRef.current;
       if (activeSession) void playbackResolver.stop(activeSession.sessionId).catch(() => undefined);
     };
-  }, [clearCommittedSeek, initialStartPositionMs, loadSession, log, media, platform, playbackResolver, player, publish]);
+  }, [clearCommittedSeek, initialFatalError, initialStartPositionMs, loadSession, log, media, platform, playbackResolver, player, publish]);
 
   useEffect(() => {
     showControls();
@@ -490,6 +494,13 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
       if (hideTimerRef.current !== undefined) window.clearTimeout(hideTimerRef.current);
     };
   }, [showControls]);
+
+  useEffect(() => {
+    if (!fatalError) return;
+    setControlsVisible(true);
+    setOptionsVisible(false);
+    if (hideTimerRef.current !== undefined) window.clearTimeout(hideTimerRef.current);
+  }, [fatalError]);
 
   useEffect(() => () => {
     if (!shouldTrackProgress(media)) return;
@@ -748,19 +759,16 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
   const audio = media.kind === 'track';
   const streamStatus = describePlaybackSession(session);
   const mediaSubtitle = media.kind === 'episode'
-    ? `${media.playbackContext!.series.title} ${media.subtitle ?? ''}`.trim()
+    ? `${media.playbackContext?.series.title ?? ''} ${media.subtitle ?? ''}`.trim()
     : media.subtitle;
+  const playbackAvailable = Boolean(session) && !fatalError;
   const queueLabel = queuePosition && queuePosition.total > 1 ? `${queuePosition.index + 1} of ${queuePosition.total}` : undefined;
   const playerSubtitle = [mediaSubtitle, queueLabel].filter(Boolean).join(' · ');
-
-  if (fatalError) {
-    return <section className={`player-page player-presentation-${presentation}`}><ErrorMessage error={fatalError} /></section>;
-  }
 
   return (
     <section
       ref={pageRef}
-      className={`player-page player-presentation-${presentation} ${audio ? 'audio-player' : ''} ${fullscreen && !controlsVisible ? 'cursor-hidden' : ''}`}
+      className={`player-page player-presentation-${presentation} ${audio ? 'audio-player' : ''} ${fullscreen && !controlsVisible && !fatalError ? 'cursor-hidden' : ''} ${fatalError ? 'player-failed' : ''}`}
       onPointerMove={() => { if (presentation === 'full') showControls(); }}
       onPointerDown={() => { if (presentation === 'full') showControls(); }}
       onClick={(clickEvent: MouseEvent<HTMLElement>) => {
@@ -782,7 +790,14 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
       {starting && <Loading />}
       {seekInFlight && <Loading delayMs={uiSettings.playerSeekSpinnerDelayMs} />}
 
-      <div className={`player-chrome ${controlsVisible ? 'visible' : ''}`}>
+      {fatalError && (
+        <div className="player-fatal-error" role="alert">
+          <strong>Playback failed</strong>
+          <span>{fatalError.message}</span>
+        </div>
+      )}
+
+      <div className={`player-chrome ${controlsVisible || fatalError ? 'visible' : ''}`}>
         <div className="player-titlebar">
           <div className="player-title-copy">
             <strong>{media.title}</strong>
@@ -848,25 +863,25 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
           <button
             type="button"
             data-tv-focusable="true"
-            disabled={!session?.options.canSeek || controlBusy}
+            disabled={!playbackAvailable || !session?.options.canSeek || controlBusy}
             onClick={() => void playFromStart()}
             aria-label="Play from start"
             title="Play from start"
           >
             <RestartIcon />
           </button>
-          <button type="button" data-tv-focusable="true" disabled={!session?.options.canSeek || controlBusy} onClick={() => void seek(displayedProgress - 10_000)} aria-label="Seek backward"><PlayerIcon name="rewind" /></button>
-          <button type="button" data-tv-focusable="true" disabled={!session || controlBusy} onClick={() => setPaused(!event.paused)} aria-label={event.paused ? 'Play' : 'Pause'}>
+          <button type="button" data-tv-focusable="true" disabled={!playbackAvailable || !session?.options.canSeek || controlBusy} onClick={() => void seek(displayedProgress - 10_000)} aria-label="Seek backward"><PlayerIcon name="rewind" /></button>
+          <button type="button" data-tv-focusable="true" disabled={!playbackAvailable || controlBusy} onClick={() => setPaused(!event.paused)} aria-label={event.paused ? 'Play' : 'Pause'}>
             {event.paused ? <PlayIcon /> : <PlayerIcon name="pause" />}
           </button>
-          <button type="button" data-tv-focusable="true" disabled={!session?.options.canSeek || controlBusy} onClick={() => void seek(displayedProgress + 10_000)} aria-label="Seek forward"><PlayerIcon name="forward" /></button>
+          <button type="button" data-tv-focusable="true" disabled={!playbackAvailable || !session?.options.canSeek || controlBusy} onClick={() => void seek(displayedProgress + 10_000)} aria-label="Seek forward"><PlayerIcon name="forward" /></button>
           {queuePosition && queuePosition.total > 1 && (
             <button type="button" data-tv-focusable="true" disabled={!canNext || controlBusy} onClick={onNext} aria-label="Next item"><PlayerIcon name="next" /></button>
           )}
           <button
             type="button"
             data-tv-focusable="true"
-            disabled={!session || controlBusy}
+            disabled={!playbackAvailable || controlBusy}
             className={optionsVisible ? 'selected' : undefined}
             onClick={() => { setOptionsVisible((visible) => !visible); setControlsVisible(true); }}
             aria-label="Playback options"
@@ -884,6 +899,7 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
               <PlayerIcon name={fullscreen ? 'fullscreen-exit' : 'fullscreen'} />
             </button>
           )}
+          <button type="button" data-tv-focusable="true" onClick={onStop} aria-label="Stop playback and close player" title="Close player"><PlayerIcon name="close" /></button>
         </div>
       </div>
 
@@ -891,7 +907,7 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
         <button className="player-mini-copy" type="button" data-tv-focusable="true" onClick={onExpand} aria-label={`Open player for ${media.title}`}>
           <span className="player-mini-title">{media.title}</span>
           <span className="player-mini-subtitle">
-            {playerSubtitle || 'Now playing'}
+            {fatalError ? `Playback failed · ${fatalError.message}` : playerSubtitle || 'Now playing'}
           </span>
           <span className="player-mini-time">{formatTime(displayedProgress)} / {formatTime(duration)}</span>
           <span className="player-mini-progress" aria-hidden="true"><span style={{ width: `${Math.min(100, displayedProgress / Math.max(1, duration) * 100)}%` }} /></span>
@@ -900,7 +916,7 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
           {queuePosition && queuePosition.total > 1 && (
             <button type="button" data-tv-focusable="true" disabled={!canPrevious || controlBusy} onClick={onPrevious} aria-label="Previous item"><PlayerIcon name="previous" /></button>
           )}
-          <button type="button" data-tv-focusable="true" disabled={!session || controlBusy} onClick={() => setPaused(!event.paused)} aria-label={event.paused ? 'Play' : 'Pause'}>
+          <button type="button" data-tv-focusable="true" disabled={!playbackAvailable || controlBusy} onClick={() => setPaused(!event.paused)} aria-label={event.paused ? 'Play' : 'Pause'}>
             {event.paused ? <PlayIcon /> : <PlayerIcon name="pause" />}
           </button>
           {queuePosition && queuePosition.total > 1 && (
@@ -917,10 +933,11 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
 export function PlayerHost(props: Props) {
   const { request, ...sessionProps } = props;
   const media = request.media;
-  if (!canPlay(media)) return <ErrorMessage error={new Error('This catalogue item is not directly playable.')} />;
-  if (media.kind === 'episode' && !media.playbackContext) {
-    return <ErrorMessage error={new Error('Episode playback hierarchy context is missing.')} />;
-  }
+  const initialFatalError = !canPlay(media)
+    ? new Error('This catalogue item is not directly playable.')
+    : media.kind === 'episode' && !media.playbackContext
+      ? new Error('Episode playback hierarchy context is missing.')
+      : undefined;
 
   return (
     <PlayerSession
@@ -928,6 +945,7 @@ export function PlayerHost(props: Props) {
       {...sessionProps}
       media={media}
       startPositionMs={request.startPositionMs}
+      initialFatalError={initialFatalError}
     />
   );
 }

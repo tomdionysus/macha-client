@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { MediaApi } from '../api/MediaApi';
 import type { ArtworkRef } from '../types';
+import { fetchArtworkWithRetry } from './artworkRetry';
 
 export function useArtworkUrl(api: MediaApi, ref?: ArtworkRef): string | undefined {
   const [url, setUrl] = useState<string>();
@@ -8,10 +9,11 @@ export function useArtworkUrl(api: MediaApi, ref?: ArtworkRef): string | undefin
   useEffect(() => {
     let active = true;
     let objectUrl: string | undefined;
+    const controller = typeof AbortController === 'undefined' ? undefined : new AbortController();
     setUrl(undefined);
     if (!ref) return;
 
-    void api.artwork(ref).then((blob) => {
+    void fetchArtworkWithRetry(() => api.artwork(ref), controller?.signal).then((blob) => {
       if (!active) return;
       objectUrl = URL.createObjectURL(blob);
       setUrl(objectUrl);
@@ -21,6 +23,7 @@ export function useArtworkUrl(api: MediaApi, ref?: ArtworkRef): string | undefin
 
     return () => {
       active = false;
+      controller?.abort();
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
   }, [api, ref?.id]);

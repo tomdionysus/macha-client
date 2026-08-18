@@ -1,9 +1,7 @@
 import { useRef, type MouseEvent, type PointerEvent, type WheelEvent } from 'react';
-import { Link } from 'react-router-dom';
 import type { MediaApi } from '../api/MediaApi';
 import { useArtworkUrl } from '../hooks/useArtworkUrl';
 import { PlayIcon, RestartIcon } from './PlaybackIcons';
-import { routes, type PlaybackRouteState } from '../routing';
 import type { Episode, PlaybackProgress, SeasonDetails, ShowDetails } from '../types';
 
 interface Props {
@@ -12,6 +10,7 @@ interface Props {
   progress: Map<string, PlaybackProgress>;
   series: ShowDetails;
   season: SeasonDetails;
+  onPlayEpisode: (episode: Episode, queue: Episode[], queueIndex: number, fromStart: boolean) => void;
 }
 
 interface DragState {
@@ -33,27 +32,26 @@ function resumable(progress?: PlaybackProgress): boolean {
   return Boolean(progress && progress.positionMs > 0 && progress.durationMs > 0);
 }
 
-function EpisodeCard({ api, episode, progress, playbackEpisode, queue, queueIndex }: {
+function EpisodeCard({ api, episode, progress, playbackEpisode, queue, queueIndex, onPlayEpisode }: {
   api: MediaApi;
   episode: Episode;
   progress?: PlaybackProgress;
   playbackEpisode: Episode;
   queue: Episode[];
   queueIndex: number;
+  onPlayEpisode: (episode: Episode, queue: Episode[], queueIndex: number, fromStart: boolean) => void;
 }) {
   const image = useArtworkUrl(api, episode.artwork?.thumbnail ?? episode.artwork?.backdrop);
   const hasProgress = resumable(progress);
-  const playbackState: PlaybackRouteState = { media: playbackEpisode, queue, queueIndex };
   return (
     <article className={`episode-card${hasProgress ? ' has-progress' : ''}`}>
       <div className="episode-still-shell">
-        <Link
+        <button
           className="episode-still-link"
-          to={routes.player(episode.id)}
-          state={playbackState}
           data-tv-focusable="true"
           aria-label={`${hasProgress ? 'Resume' : 'Play'} ${episode.title}`}
-          draggable={false}
+          onClick={() => onPlayEpisode(playbackEpisode, queue, queueIndex, false)}
+          type="button"
         >
           <div className="episode-still">
             {image
@@ -65,20 +63,19 @@ function EpisodeCard({ api, episode, progress, playbackEpisode, queue, queueInde
               </div>
             )}
           </div>
-        </Link>
+        </button>
         <div className="episode-play-actions" aria-hidden={!hasProgress}>
           <span className="episode-play-action episode-play-resume" aria-hidden="true"><PlayIcon /></span>
           {hasProgress && (
-            <Link
+            <button
               className="episode-play-action episode-play-restart"
-              to={routes.playerFromStart(episode.id)}
-              state={playbackState}
               data-tv-focusable="true"
               aria-label={`Play ${episode.title} from start`}
-              draggable={false}
+              onClick={() => onPlayEpisode(playbackEpisode, queue, queueIndex, true)}
+              type="button"
             >
               <RestartIcon />
-            </Link>
+            </button>
           )}
         </div>
       </div>
@@ -93,7 +90,7 @@ function EpisodeCard({ api, episode, progress, playbackEpisode, queue, queueInde
   );
 }
 
-export function EpisodeRail({ api, episodes, progress, series, season }: Props) {
+export function EpisodeRail({ api, episodes, progress, series, season, onPlayEpisode }: Props) {
   const playbackQueue: Episode[] = episodes.map((episode) => ({
     ...episode,
     playbackContext: {
@@ -102,7 +99,7 @@ export function EpisodeRail({ api, episodes, progress, series, season }: Props) 
     },
   }));
   const railRef = useRef<HTMLDivElement | null>(null);
-  const drag = useRef<DragState>();
+  const drag = useRef<DragState | undefined>(undefined);
   const suppressClick = useRef(false);
 
   const onPointerDown = (event: PointerEvent<HTMLDivElement>) => {
@@ -182,6 +179,7 @@ export function EpisodeRail({ api, episodes, progress, series, season }: Props) 
             playbackEpisode={playbackQueue[index]}
             queue={playbackQueue}
             queueIndex={index}
+            onPlayEpisode={onPlayEpisode}
           />
         </div>
       ))}

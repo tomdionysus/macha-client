@@ -1,11 +1,13 @@
 {
   "name": "macha-client",
-  "version": "0.4.0",
+  "version": "0.4.5",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "build-samsung": "tsc -b && vite build --mode samsung",
+    "install-samsung": "bash install-samsung.sh",
     "typecheck": "tsc -b --pretty false",
     "test": "vitest run",
     "test:watch": "vitest"
@@ -23,7 +25,9 @@
     "@vitejs/plugin-react": "^5.0.0",
     "typescript": "^5.9.2",
     "vite": "^7.1.2",
-    "vitest": "^3.2.4"
+    "vitest": "^3.2.4",
+    "@vitejs/plugin-legacy": "^7.2.1",
+    "terser": "^5.16.0"
   },
   "license": "GPL-3.0-or-later",
   "description": "Small React/TypeScript web and TV client for Macha.",

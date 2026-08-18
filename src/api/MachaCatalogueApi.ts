@@ -1,3 +1,4 @@
+import { parseErrorEnvelope } from './errorEnvelope';
 import type {
   CatalogueApi,
   CatalogueItem,
@@ -7,11 +8,6 @@ import type {
 
 interface ItemEnvelope {
   items: CatalogueItem[];
-}
-
-interface ErrorEnvelope {
-  error?: string;
-  message?: string;
 }
 
 export class MachaApiError extends Error {
@@ -88,13 +84,13 @@ export class MachaCatalogueApi implements CatalogueApi {
   }
 
   private async throwResponseError(response: Response): Promise<never> {
-    let body: ErrorEnvelope | undefined;
+    let body: unknown;
     try {
-      body = await response.json() as ErrorEnvelope;
+      body = await response.json() as unknown;
     } catch {
       // The server normally returns JSON errors, but preserve the HTTP status if it does not.
     }
-    const message = body?.message || body?.error || `${response.status} ${response.statusText}`;
-    throw new MachaApiError(`Macha catalogue request failed: ${message}`, response.status, body?.error);
+    const parsed = parseErrorEnvelope(body, `${response.status} ${response.statusText}`);
+    throw new MachaApiError(`Macha catalogue request failed: ${parsed.message}`, response.status, parsed.code);
   }
 }

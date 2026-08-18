@@ -50,7 +50,7 @@ function ContinueWatchingMenu({ item, onRemove }: { item: MediaSummary; onRemove
       if (event.key !== 'Escape') return;
       event.preventDefault();
       setOpen(false);
-      queueMicrotask(() => triggerRef.current?.focus());
+      void Promise.resolve().then(() => triggerRef.current?.focus());
     };
 
     document.addEventListener('pointerdown', onPointerDown);

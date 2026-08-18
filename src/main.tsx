@@ -1,5 +1,5 @@
 import ReactDOM from 'react-dom/client';
-import { BrowserRouter } from 'react-router-dom';
+import { BrowserRouter, HashRouter } from 'react-router-dom';
 import '@fontsource-variable/roboto/wght.css';
 import App from './App';
 import { runBootSplash } from './bootSplash';
@@ -19,6 +19,34 @@ configureClientDiagnostics({
 });
 installClientDiagnosticsConsole();
 const log = createClientLogger('app.boot');
+const samsung = import.meta.env.MODE === 'samsung';
+const Router = samsung ? HashRouter : BrowserRouter;
+
+function describeError(error: unknown): string {
+  if (error instanceof Error) return error.stack || error.message;
+  return String(error);
+}
+
+function showSamsungFatal(error: unknown): void {
+  if (!samsung) return;
+  const root = document.getElementById('root') ?? document.body;
+  const message = document.createElement('pre');
+  message.style.background = '#180000';
+  message.style.color = '#ffffff';
+  message.style.fontFamily = 'monospace';
+  message.style.fontSize = '24px';
+  message.style.margin = '0';
+  message.style.padding = '32px';
+  message.style.whiteSpace = 'pre-wrap';
+  message.textContent = `Macha Samsung runtime failure\n\n${describeError(error)}\n\n${navigator.userAgent}`;
+  while (root.firstChild) root.removeChild(root.firstChild);
+  root.appendChild(message);
+}
+
+if (samsung) {
+  window.addEventListener('error', (event) => showSamsungFatal(event.error ?? event.message));
+  window.addEventListener('unhandledrejection', (event) => showSamsungFatal(event.reason));
+}
 
 async function boot(): Promise<void> {
   const rootElement = document.getElementById('root');
@@ -31,11 +59,14 @@ async function boot(): Promise<void> {
   const platform = detectPlatform();
   log.info('platform-detected', { platform: platform.name });
   ReactDOM.createRoot(rootElement).render(
-    <BrowserRouter>
+    <Router>
       <App platform={platform} />
-    </BrowserRouter>,
+    </Router>,
   );
   log.info('react-mounted');
 }
 
-void boot().catch((error) => log.error('boot-failed', error));
+void boot().catch((error) => {
+  log.error('boot-failed', error);
+  showSamsungFatal(error);
+});
