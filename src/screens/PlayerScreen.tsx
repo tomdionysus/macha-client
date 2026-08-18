@@ -1,10 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type MouseEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent } from 'react';
 import type { MediaApi } from '../api/MediaApi';
 import { PlayIcon, RestartIcon } from '../components/PlaybackIcons';
 import { ErrorMessage, Loading } from '../components/Status';
 import { createClientLogger } from '../diagnostics/ClientLog';
 import { useArtworkUrl } from '../hooks/useArtworkUrl';
-import { useAsync } from '../hooks/useAsync';
 import type { Platform } from '../platform/Platform';
 import type {
   PlaybackPreferencesUpdate,
@@ -17,15 +16,29 @@ import { uiSettings } from '../settings';
 import { describePlaybackSession } from '../playback/PlaybackStatus';
 import type { MediaSummary, PlaybackEvent, PlaybackMode, PlaybackProgress } from '../types';
 
+export interface PlayerHostRequest {
+  media: MediaSummary;
+  startPositionMs: number;
+  requestId: number;
+}
+
 interface Props {
   api: MediaApi;
-  itemId: string;
-  media?: MediaSummary;
+  request: PlayerHostRequest;
   platform: Platform;
   playbackResolver: PlaybackResolver;
-  startPositionMs: number;
+  presentation: 'full' | 'mini';
   onProgress: (progress: PlaybackProgress) => void;
-  onBack: () => void;
+  onPosition: (media: MediaSummary, positionMs: number, durationMs: number) => void;
+  onMinimize: () => void;
+  onExpand: () => void;
+  onStop: () => void;
+  onPrevious: () => void;
+  onNext: () => void;
+  onEnded: () => void;
+  canPrevious: boolean;
+  canNext: boolean;
+  queuePosition?: { index: number; total: number };
 }
 
 function formatTime(ms: number): string {
@@ -38,7 +51,7 @@ function formatTime(ms: number): string {
     : `${minutes}:${String(seconds).padStart(2, '0')}`;
 }
 
-type PlayerIconName = 'back' | 'rewind' | 'pause' | 'forward' | 'options' | 'fullscreen' | 'fullscreen-exit';
+type PlayerIconName = 'back' | 'previous' | 'rewind' | 'pause' | 'forward' | 'next' | 'options' | 'expand' | 'close' | 'fullscreen' | 'fullscreen-exit';
 
 function PlayerIcon({ name }: { name: PlayerIconName }) {
   const common = {
@@ -53,14 +66,22 @@ function PlayerIcon({ name }: { name: PlayerIconName }) {
   switch (name) {
     case 'back':
       return <svg {...common}><path d="M14.5 5 7.5 12l7 7M8 12h9" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>;
+    case 'previous':
+      return <svg {...common}><path d="M6 5h2v14H6V5Zm12 1-8 6 8 6V6Z" fill="currentColor" /></svg>;
     case 'rewind':
       return <svg {...common}><path d="M10.5 6 4.5 12l6 6V6Zm8 0-6 6 6 6V6Z" fill="currentColor" /></svg>;
     case 'pause':
       return <svg {...common}><path d="M7.5 6h3v12h-3V6Zm6 0h3v12h-3V6Z" fill="currentColor" /></svg>;
     case 'forward':
       return <svg {...common}><path d="m13.5 6 6 6-6 6V6Zm-8 0 6 6-6 6V6Z" fill="currentColor" /></svg>;
+    case 'next':
+      return <svg {...common}><path d="M16 5h2v14h-2V5ZM6 6l8 6-8 6V6Z" fill="currentColor" /></svg>;
     case 'options':
       return <svg {...common}><circle cx="6" cy="12" r="1.5" fill="currentColor" /><circle cx="12" cy="12" r="1.5" fill="currentColor" /><circle cx="18" cy="12" r="1.5" fill="currentColor" /></svg>;
+    case 'expand':
+      return <svg {...common}><path d="M8.5 4.5h-4v4M15.5 4.5h4v4M8.5 19.5h-4v-4M15.5 19.5h4v-4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>;
+    case 'close':
+      return <svg {...common}><path d="m6 6 12 12M18 6 6 18" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>;
     case 'fullscreen':
       return <svg {...common}><path d="M8.5 4.5h-4v4M15.5 4.5h4v4M8.5 19.5h-4v-4M15.5 19.5h4v-4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>;
     case 'fullscreen-exit':
@@ -234,7 +255,7 @@ function PlayerOptions({
   );
 }
 
-function PlayerSession({ api, media, platform, playbackResolver, startPositionMs, onProgress, onBack }: Omit<Props, 'itemId' | 'media'> & { media: MediaSummary }) {
+function PlayerSession({ api, media, platform, playbackResolver, startPositionMs, presentation, onProgress, onPosition, onMinimize, onExpand, onStop, onPrevious, onNext, onEnded, canPrevious, canNext, queuePosition }: Omit<Props, 'request'> & { media: MediaSummary; startPositionMs: number }) {
   const pageRef = useRef<HTMLElement | null>(null);
   const hostRef = useRef<HTMLDivElement | null>(null);
   const player = useMemo(() => platform.createPlayer(), [platform]);
@@ -251,10 +272,12 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
   const streamOffsetRef = useRef(0);
   const reloadingRef = useRef(false);
   const lastReportRef = useRef(0);
+  const lastPositionPersistRef = useRef(0);
   const hideTimerRef = useRef<number>();
   const scrubValueRef = useRef<number>();
   const committedSeekRef = useRef<number>();
   const mountedRef = useRef(true);
+  const endedHandledRef = useRef(false);
   const [event, setEvent] = useState(initialEvent);
   const [session, setSession] = useState<PlaybackSession>();
   const [starting, setStarting] = useState(true);
@@ -276,8 +299,12 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
       log.debug('playback-state', { previous, next, streamOffsetMs: streamOffsetRef.current });
     }
     setEvent(next);
-    if (!shouldTrackProgress(media)) return;
     const now = Date.now();
+    if (next.paused || next.ended || now - lastPositionPersistRef.current >= 5_000) {
+      lastPositionPersistRef.current = now;
+      onPosition(media, next.positionMs, next.durationMs);
+    }
+    if (!shouldTrackProgress(media)) return;
     if (next.ended || now - lastReportRef.current >= 10_000) {
       lastReportRef.current = now;
       onProgress({
@@ -288,7 +315,17 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
         media,
       });
     }
-  }, [log, media, onProgress]);
+  }, [log, media, onPosition, onProgress]);
+
+  useEffect(() => {
+    if (!event.ended) {
+      endedHandledRef.current = false;
+      return;
+    }
+    if (endedHandledRef.current) return;
+    endedHandledRef.current = true;
+    onEnded();
+  }, [event.ended, onEnded]);
 
   const showControls = useCallback(() => {
     setControlsVisible(true);
@@ -638,11 +675,17 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
   useEffect(() => {
     const onFullscreenChange = () => {
       setFullscreen(document.fullscreenElement === pageRef.current);
-      showControls();
+      if (presentation === 'full') showControls();
     };
     document.addEventListener('fullscreenchange', onFullscreenChange);
     return () => document.removeEventListener('fullscreenchange', onFullscreenChange);
-  }, [showControls]);
+  }, [presentation, showControls]);
+
+  useEffect(() => {
+    if (presentation === 'mini' && document.fullscreenElement === pageRef.current) {
+      void document.exitFullscreen().catch(() => undefined);
+    }
+  }, [presentation]);
 
   const toggleFullscreen = useCallback(async () => {
     if (platform.name !== 'web' || !document.fullscreenEnabled || !pageRef.current) return;
@@ -656,15 +699,15 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
 
   useEffect(() => {
     const onKeyDown = (keyEvent: KeyboardEvent) => {
-      if (keyEvent.key === 'Escape' && document.fullscreenElement) return;
-      if (keyEvent.key === 'Escape' || keyEvent.key === 'Backspace') {
+      if (presentation === 'full' && keyEvent.key === 'Escape' && document.fullscreenElement) return;
+      if (presentation === 'full' && (keyEvent.key === 'Escape' || keyEvent.key === 'Backspace')) {
         keyEvent.preventDefault();
         keyEvent.stopPropagation();
         if (optionsVisible) setOptionsVisible(false);
-        else onBack();
+        else onMinimize();
         return;
       }
-      if (keyEvent.key === 'MediaPlayPause' || keyEvent.key === ' ') {
+      if (keyEvent.key === 'MediaPlayPause' || (presentation === 'full' && keyEvent.key === ' ')) {
         keyEvent.preventDefault();
         keyEvent.stopPropagation();
         setPaused(!latestRef.current.paused);
@@ -694,11 +737,11 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
         void seek(latestRef.current.positionMs + 10_000);
         return;
       }
-      showControls();
+      if (presentation === 'full') showControls();
     };
     window.addEventListener('keydown', onKeyDown, true);
     return () => window.removeEventListener('keydown', onKeyDown, true);
-  }, [onBack, optionsVisible, seek, setPaused, showControls]);
+  }, [onMinimize, optionsVisible, presentation, seek, setPaused, showControls]);
 
   const duration = session?.durationMs || event.durationMs || 1;
   const displayedProgress = scrubValue ?? Math.min(duration, event.positionMs);
@@ -707,19 +750,26 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
   const mediaSubtitle = media.kind === 'episode'
     ? `${media.playbackContext!.series.title} ${media.subtitle ?? ''}`.trim()
     : media.subtitle;
+  const queueLabel = queuePosition && queuePosition.total > 1 ? `${queuePosition.index + 1} of ${queuePosition.total}` : undefined;
+  const playerSubtitle = [mediaSubtitle, queueLabel].filter(Boolean).join(' · ');
 
   if (fatalError) {
-    return <section className="player-page"><ErrorMessage error={fatalError} /></section>;
+    return <section className={`player-page player-presentation-${presentation}`}><ErrorMessage error={fatalError} /></section>;
   }
 
   return (
     <section
       ref={pageRef}
-      className={`player-page ${audio ? 'audio-player' : ''} ${fullscreen && !controlsVisible ? 'cursor-hidden' : ''}`}
-      onPointerMove={showControls}
-      onPointerDown={showControls}
+      className={`player-page player-presentation-${presentation} ${audio ? 'audio-player' : ''} ${fullscreen && !controlsVisible ? 'cursor-hidden' : ''}`}
+      onPointerMove={() => { if (presentation === 'full') showControls(); }}
+      onPointerDown={() => { if (presentation === 'full') showControls(); }}
       onClick={(clickEvent: MouseEvent<HTMLElement>) => {
-        if (clickEvent.target === clickEvent.currentTarget) showControls();
+        if (presentation === 'full') {
+          if (clickEvent.target === clickEvent.currentTarget) showControls();
+          return;
+        }
+        const target = clickEvent.target as HTMLElement;
+        if (!target.closest('button, input')) onExpand();
       }}
     >
       {backdrop && <div className="player-backdrop" style={{ backgroundImage: `url(${JSON.stringify(backdrop)})` }} />}
@@ -736,7 +786,7 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
         <div className="player-titlebar">
           <div className="player-title-copy">
             <strong>{media.title}</strong>
-            {mediaSubtitle && <span>{mediaSubtitle}</span>}
+            {playerSubtitle && <span>{playerSubtitle}</span>}
           </div>
           <div className="player-stream-status" aria-live="polite">
             {playbackNotice ? (
@@ -778,7 +828,7 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
               const position = scrubValueRef.current;
               if (!controlBusy && position !== undefined) void seek(position);
             }}
-            onKeyUp={(keyEvent) => {
+            onKeyUp={(keyEvent: ReactKeyboardEvent<HTMLInputElement>) => {
               const position = scrubValueRef.current;
               if (!controlBusy && position !== undefined && ['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(keyEvent.key)) void seek(position);
             }}
@@ -791,7 +841,10 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
         </div>
 
         <div className="player-button-row">
-          <button type="button" data-tv-focusable="true" onClick={onBack} aria-label="Back"><PlayerIcon name="back" /></button>
+          <button type="button" data-tv-focusable="true" onClick={onMinimize} aria-label="Minimise player"><PlayerIcon name="back" /></button>
+          {queuePosition && queuePosition.total > 1 && (
+            <button type="button" data-tv-focusable="true" disabled={!canPrevious || controlBusy} onClick={onPrevious} aria-label="Previous item"><PlayerIcon name="previous" /></button>
+          )}
           <button
             type="button"
             data-tv-focusable="true"
@@ -807,6 +860,9 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
             {event.paused ? <PlayIcon /> : <PlayerIcon name="pause" />}
           </button>
           <button type="button" data-tv-focusable="true" disabled={!session?.options.canSeek || controlBusy} onClick={() => void seek(displayedProgress + 10_000)} aria-label="Seek forward"><PlayerIcon name="forward" /></button>
+          {queuePosition && queuePosition.total > 1 && (
+            <button type="button" data-tv-focusable="true" disabled={!canNext || controlBusy} onClick={onNext} aria-label="Next item"><PlayerIcon name="next" /></button>
+          )}
           <button
             type="button"
             data-tv-focusable="true"
@@ -830,28 +886,48 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
           )}
         </div>
       </div>
+
+      <div className="player-mini-chrome" aria-label="Now playing">
+        <button className="player-mini-copy" type="button" data-tv-focusable="true" onClick={onExpand} aria-label={`Open player for ${media.title}`}>
+          <span className="player-mini-title">{media.title}</span>
+          <span className="player-mini-subtitle">
+            {playerSubtitle || 'Now playing'}
+          </span>
+          <span className="player-mini-time">{formatTime(displayedProgress)} / {formatTime(duration)}</span>
+          <span className="player-mini-progress" aria-hidden="true"><span style={{ width: `${Math.min(100, displayedProgress / Math.max(1, duration) * 100)}%` }} /></span>
+        </button>
+        <div className="player-mini-controls">
+          {queuePosition && queuePosition.total > 1 && (
+            <button type="button" data-tv-focusable="true" disabled={!canPrevious || controlBusy} onClick={onPrevious} aria-label="Previous item"><PlayerIcon name="previous" /></button>
+          )}
+          <button type="button" data-tv-focusable="true" disabled={!session || controlBusy} onClick={() => setPaused(!event.paused)} aria-label={event.paused ? 'Play' : 'Pause'}>
+            {event.paused ? <PlayIcon /> : <PlayerIcon name="pause" />}
+          </button>
+          {queuePosition && queuePosition.total > 1 && (
+            <button type="button" data-tv-focusable="true" disabled={!canNext || controlBusy} onClick={onNext} aria-label="Next item"><PlayerIcon name="next" /></button>
+          )}
+          <button type="button" data-tv-focusable="true" onClick={onExpand} aria-label="Open full player"><PlayerIcon name="expand" /></button>
+          <button type="button" data-tv-focusable="true" onClick={onStop} aria-label="Stop playback"><PlayerIcon name="close" /></button>
+        </div>
+      </div>
     </section>
   );
 }
 
-export function PlayerScreen(props: Props) {
-  const details = useAsync(
-    () => props.media?.id === props.itemId ? Promise.resolve(props.media) : props.api.details(props.itemId),
-    [props.api, props.itemId, props.media],
-  );
-  if (details.loading) return <Loading />;
-  if (details.error) return <ErrorMessage error={details.error} />;
-  if (!details.value) return null;
-  if (!canPlay(details.value)) return <ErrorMessage error={new Error('This catalogue item is not directly playable.')} />;
-  if (details.value.kind === 'episode' && !details.value.playbackContext) {
+export function PlayerHost(props: Props) {
+  const { request, ...sessionProps } = props;
+  const media = request.media;
+  if (!canPlay(media)) return <ErrorMessage error={new Error('This catalogue item is not directly playable.')} />;
+  if (media.kind === 'episode' && !media.playbackContext) {
     return <ErrorMessage error={new Error('Episode playback hierarchy context is missing.')} />;
   }
 
   return (
     <PlayerSession
-      key={details.value.id}
-      {...props}
-      media={details.value}
+      key={request.requestId}
+      {...sessionProps}
+      media={media}
+      startPositionMs={request.startPositionMs}
     />
   );
 }

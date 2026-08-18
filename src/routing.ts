@@ -1,5 +1,12 @@
 import type { MediaSummary } from './types';
 
+export interface PlaybackRouteState {
+  media?: MediaSummary;
+  queue?: MediaSummary[];
+  queueIndex?: number;
+  returnTo?: string;
+}
+
 const segment = (value: string) => encodeURIComponent(value);
 
 export const routes = {

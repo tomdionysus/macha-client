@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.0 - 2026-08-18
+
+- move playback ownership out of the `/play/:id` route into one persistent application-level player host; changing between full-player and bottom Now Playing presentations does not detach, reload or recreate the active media element/session;
+- add an unobtrusive bottom Now Playing overlay while browsing, with live video thumbnail or music artwork, title/progress, play/pause, Previous/Next where a queue exists, expand and stop controls;
+- make `/play/:id` a presentation route for the persistent host. Leaving the full player returns to the browsing route while playback continues, and reopening it expands the same live player;
+- add a client-local persisted playback queue with current item/index and position checkpoint. Reloading can reconstruct a fresh playback session without persisting server capability/session URLs;
+- initialise music queues from album track order and TV queues from season episode order, with Previous/Next controls and automatic advance on end;
+- keep movie playback as the same queue model with a single item, preserving one Now Playing implementation across Movies, TV and Music.
+
 ## 0.3.21 - 2026-08-18
 
 - move the Continue Watching overflow control onto the lower-right of the poster/artwork itself, keeping it visually subordinate to the media card;

@@ -27,13 +27,14 @@ Developed with substantial use of AI-assisted implementation
 - Mouse, trackpad and touch episode scrolling.
 - Shared React UI with Web, Android and Tizen platform/player interfaces.
 - Subtle centred Macha watermark behind normal application screens, excluded from playback.
-- Routable player page with auto-hiding translucent-black lower chrome, uniform circular transport controls, Play from start and transactional progress scrubbing.
+- Persistent application-level player with full-screen and bottom Now Playing presentations, auto-hiding full-player chrome, uniform transport controls, Play from start and transactional progress scrubbing.
+- Client-local persisted playback queue. Albums queue their ordered tracks, seasons queue their ordered episodes, and playback advances automatically to the next queued item.
 - Macha 0.9.1 playback-session negotiation with Direct Play, remux and transcode modes.
 - In-session quality, audio, subtitle and media-representation switching.
 - Browser HLS playback through native HLS where available or hls.js otherwise.
 - Android Media3 and Samsung AVPlay host stubs.
 
-Continue Watching is local browser/application state. It is never sent to Macha.
+Continue Watching and the playback queue are local browser/application state. They are never sent to Macha.
 
 ## Requirements
 
@@ -131,13 +132,15 @@ See [`docs/server-api.md`](docs/server-api.md).
 
 ## Playback
 
-Macha 0.9.1 playback is implemented through `MachaPlaybackResolver`. Opening `/play/:id` creates a server playback session with the platform capability profile. The server selects Direct Play, remux or transcode and returns a capability URL for the media.
+Macha 0.9.1 playback is implemented through `MachaPlaybackResolver`. Playback is owned by one persistent `PlayerHost` mounted outside React Router. `/play/:id` now means that the host should use its full-screen presentation; navigating back into the catalogue collapses the same host into the bottom Now Playing overlay. That presentation change does not detach the platform player, reload the media URL, recreate the media element, seek or renegotiate the server session.
 
-The player can update the same logical session to seek, change playback mode or quality, select audio/subtitles, or switch media representation. Transformed seeks and option changes may return a new HLS generation; the client reloads it while preserving the absolute media position. Leaving the player explicitly deletes the session.
+Starting a different item creates the normal Macha playback session with the platform capability profile. The server selects Direct Play, remux or transcode and returns a capability URL for the media. The player can update the same logical session to seek, change playback mode or quality, select audio/subtitles, or switch media representation. Transformed seeks and option changes may return a new HLS generation; the client reloads it while preserving the absolute media position. Explicitly stopping Now Playing deletes the active session.
+
+The playback queue is client-local and persisted per client ID. Album track clicks initialise the queue from the album order; season episode clicks initialise it from season order. Previous/Next operate on that queue and reaching the end of an item advances automatically where another item exists. A hard browser reload cannot preserve a live server capability/session URL, so the client reconstructs a fresh session from the persisted queue/current item and position checkpoint instead.
 
 Direct streams use the platform player directly. On Web, transformed fragmented-MP4 HLS uses native HLS where the browser provides it and hls.js otherwise. Permanent API Bearer authentication is used only for playback-session control; the returned stream/subtitle capability URLs are loaded directly by the player.
 
-The React screen depends only on `PlaybackResolver` and `Platform.Player`, so Android Media3 and Tizen AVPlay can implement the same session/control model without changing the UI.
+The persistent React player depends only on `PlaybackResolver` and `Platform.Player`, so Android Media3 and Tizen AVPlay can implement the same session/control model without changing the UI.
 
 
 ### Playback diagnostics

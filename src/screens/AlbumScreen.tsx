@@ -8,7 +8,7 @@ interface Props {
   api: MediaApi;
   albumId: string;
   onBack: () => void;
-  onPlayTrack: (track: MediaSummary) => void;
+  onPlayTrack: (track: MediaSummary, queue: MediaSummary[], queueIndex: number) => void;
 }
 
 export function AlbumScreen({ api, albumId, onBack, onPlayTrack }: Props) {
@@ -36,13 +36,13 @@ export function AlbumScreen({ api, albumId, onBack, onPlayTrack }: Props) {
         </div>
       </div>
       <div className="track-list" aria-label="Tracks">
-        {album.tracks.map((track) => (
+        {album.tracks.map((track, index) => (
           <button
             key={track.id}
             className="track-row"
             data-tv-focusable="true"
             type="button"
-            onClick={() => onPlayTrack(track)}
+            onClick={() => onPlayTrack(track, album.tracks, index)}
           >
             <span className="track-number">{track.trackNumber ?? '–'}</span>
             <span className="track-title">{track.title}</span>
