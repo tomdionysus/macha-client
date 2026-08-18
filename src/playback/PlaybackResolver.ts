@@ -16,6 +16,43 @@ export interface PlaybackStreamInfo {
   channels?: number;
   sampleRate?: number;
   bitDepth?: number;
+  bitrate?: number;
+}
+
+export interface PlaybackSourceInfo {
+  path: string;
+  format: string;
+  size: number;
+  bitrate: number;
+  streams: PlaybackStreamInfo[];
+}
+
+export interface PlaybackOutputVideoInfo {
+  sourceStream: number;
+  transform: PlaybackTransform;
+  codec?: string;
+  profile?: string;
+  width?: number;
+  height?: number;
+  bitrate?: number;
+}
+
+export interface PlaybackOutputAudioInfo {
+  sourceStream: number;
+  transform: PlaybackTransform;
+  codec?: string;
+  profile?: string;
+  channels?: number;
+  sampleRate?: number;
+  bitDepth?: number;
+  bitrate?: number;
+}
+
+export interface PlaybackOutputInfo {
+  format?: string;
+  bitrate?: number;
+  video?: PlaybackOutputVideoInfo;
+  audio?: PlaybackOutputAudioInfo;
 }
 
 export interface PlaybackSelection {
@@ -26,12 +63,23 @@ export interface PlaybackSelection {
 
 export interface PlaybackOptions {
   modes: PlaybackMode[];
+  qualityHeights: number[];
   mediaIds: string[];
   audioStreams: PlaybackStreamInfo[];
   subtitleStreams: PlaybackStreamInfo[];
   canSeek: boolean;
   canChangeQuality: boolean;
   canSwitchMedia: boolean;
+}
+
+export interface PlaybackPreferences {
+  mode: PlaybackMode | 'auto';
+  maxHeight: number | null;
+  maxBitrate: number | null;
+  audioStream: number | null;
+  subtitleStream: number | null;
+  audioLanguage: string;
+  subtitleLanguage: string;
 }
 
 export interface PlaybackSession {
@@ -43,15 +91,15 @@ export interface PlaybackSession {
   source: PlaybackSource;
   durationMs: number;
   seekMs: number;
-  sourceFormat: string;
-  sourceBitrate: number;
+  preferences: PlaybackPreferences;
+  sourceInfo: PlaybackSourceInfo;
+  output: PlaybackOutputInfo;
   selected: PlaybackSelection;
   transform: {
     video: PlaybackTransform;
     audio: PlaybackTransform;
   };
   options: PlaybackOptions;
-  streams: PlaybackStreamInfo[];
 }
 
 export interface PlaybackPreferencesUpdate {

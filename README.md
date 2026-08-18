@@ -3,7 +3,7 @@
 Macha Client is a small React/TypeScript television and web client for Macha.
 It browses the catalogue exposed by a Macha node and keeps platform-specific playback behind a narrow adapter.
 
-The web client is implemented against the Macha 0.7 catalogue and playback APIs, including Direct Play, remux/transcode HLS, seeking and stream selection. Android/Google TV and Samsung Tizen remain wired as later platform-player targets behind the same playback boundary.
+The web client is implemented against the Macha 0.9.1 catalogue and playback APIs, including Direct Play, remux/transcode HLS, seeking and stream selection. Android/Google TV and Samsung Tizen remain wired as later platform-player targets behind the same playback boundary.
 
 The product is intentionally narrow. It exists to browse and play your own media. There are no accounts, cloud dependencies, adverts, recommendations, social features, other-viewer activity or global watchlists.
 
@@ -28,7 +28,7 @@ Developed with substantial use of AI-assisted implementation
 - Shared React UI with Web, Android and Tizen platform/player interfaces.
 - Subtle centred Macha watermark behind normal application screens, excluded from playback.
 - Routable player page with auto-hiding translucent-black lower chrome, uniform circular transport controls, Play from start and transactional progress scrubbing.
-- Macha 0.7 playback-session negotiation with Direct Play, remux and transcode modes.
+- Macha 0.9.1 playback-session negotiation with Direct Play, remux and transcode modes.
 - In-session quality, audio, subtitle and media-representation switching.
 - Browser HLS playback through native HLS where available or hls.js otherwise.
 - Android Media3 and Samsung AVPlay host stubs.
@@ -39,7 +39,7 @@ Continue Watching is local browser/application state. It is never sent to Macha.
 
 - Node.js 20 or later.
 - npm.
-- Macha 0.7 with the catalogue and streaming HTTP APIs enabled, or demo mode.
+- Macha 0.9.1 with the catalogue and streaming HTTP APIs enabled, or demo mode.
 
 ## Build
 
@@ -63,7 +63,7 @@ npm install
 npm run dev
 ```
 
-`.env.example` configures Vite to proxy same-origin `/api` requests to the Macha node. Macha 0.7 also emits CORS headers, so a separately hosted client may talk to the API directly.
+`.env.example` configures Vite to proxy same-origin `/api` requests to the Macha node. Macha 0.9.1 also emits CORS headers, so a separately hosted client may talk to the API directly.
 
 For the self-contained UI/playback demo:
 
@@ -131,7 +131,7 @@ See [`docs/server-api.md`](docs/server-api.md).
 
 ## Playback
 
-Macha 0.7 playback is implemented through `MachaPlaybackResolver`. Opening `/play/:id` creates a server playback session with the platform capability profile. The server selects Direct Play, remux or transcode and returns a capability URL for the media.
+Macha 0.9.1 playback is implemented through `MachaPlaybackResolver`. Opening `/play/:id` creates a server playback session with the platform capability profile. The server selects Direct Play, remux or transcode and returns a capability URL for the media.
 
 The player can update the same logical session to seek, change playback mode or quality, select audio/subtitles, or switch media representation. Transformed seeks and option changes may return a new HLS generation; the client reloads it while preserving the absolute media position. Leaving the player explicitly deletes the session.
 

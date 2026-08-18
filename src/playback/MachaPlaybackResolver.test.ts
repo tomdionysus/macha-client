@@ -20,18 +20,46 @@ const capabilities: PlaybackCapabilities = {
 };
 
 function sessionResponse(overrides: Record<string, unknown> = {}) {
-  return {
+  const base = {
     session_id: 'session-1',
     item_id: 'movie:test',
     media_id: 'file:abc',
     mode: 'remux',
-    mime_type: 'application/vnd.apple.mpegurl',
-    stream_url: '/api/v1/playback/stream/session-1/cap/1/master.m3u8',
-    subtitle_url: null,
-    selected: { video_stream: 0, audio_stream: 1, subtitle_stream: -1 },
-    transform: { video: 'copy', audio: 'copy' },
+    duration_ms: 5_400_000,
+    seek_ms: 0,
+    preferences: {
+      mode: 'auto',
+      max_height: null,
+      max_bitrate: null,
+      audio_stream: null,
+      subtitle_stream: null,
+      audio_language: '',
+      subtitle_language: '',
+    },
+    selection: { video_stream: 0, audio_stream: 1, subtitle_stream: -1 },
+    source: {
+      path: '/Movies/Test.mkv',
+      format: 'matroska,webm',
+      size: 10_000_000,
+      bitrate: 8_000_000,
+      streams: [
+        { index: 0, type: 'video', codec: 'h264', profile: 'High', language: '', default: true, forced: false, width: 1920, height: 1080, bitrate: 3_700_000 },
+        { index: 1, type: 'audio', codec: 'aac', profile: 'LC', language: 'eng', default: true, forced: false, channels: 2, bitrate: 192_000 },
+      ],
+    },
+    output: {
+      format: 'mp4',
+      video: { source_stream: 0, transform: 'copy', codec: 'h264', profile: 'High', width: 1920, height: 1080 },
+      audio: { source_stream: 1, transform: 'copy', codec: 'aac', profile: 'LC', channels: 2 },
+    },
+    stream: {
+      mime_type: 'application/vnd.apple.mpegurl',
+      url: '/api/v1/playback/stream/session-1/cap/1/master.m3u8',
+      subtitle_url: null,
+    },
     options: {
       modes: ['remux', 'transcode'],
+      quality_heights: [720, 480, 360],
       media_ids: ['file:abc'],
       audio_streams: [{ index: 1, type: 'audio', codec: 'aac', profile: 'LC', language: 'eng', default: true, forced: false, channels: 2 }],
       subtitle_streams: [],
@@ -39,16 +67,8 @@ function sessionResponse(overrides: Record<string, unknown> = {}) {
       can_change_quality: true,
       can_switch_media: false,
     },
-    streams: [
-      { index: 0, type: 'video', codec: 'h264', profile: 'High', language: '', default: true, forced: false, width: 1920, height: 1080 },
-      { index: 1, type: 'audio', codec: 'aac', profile: 'LC', language: 'eng', default: true, forced: false, channels: 2 },
-    ],
-    source_format: 'matroska,webm',
-    duration_ms: 5_400_000,
-    source_bitrate: 8_000_000,
-    seek_ms: 0,
-    ...overrides,
   };
+  return { ...base, ...overrides };
 }
 
 function jsonResponse(value: unknown, status = 200): Response {
@@ -58,7 +78,7 @@ function jsonResponse(value: unknown, status = 200): Response {
 describe('MachaPlaybackResolver', () => {
   afterEach(() => vi.unstubAllGlobals());
 
-  it('creates a 0.7.0 playback session with browser capabilities and bearer auth', async () => {
+  it('creates a playback session with browser capabilities and bearer auth', async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse(sessionResponse(), 201));
     vi.stubGlobal('fetch', fetchMock);
     const resolver = new MachaPlaybackResolver('http://node.test/', 'secret');
@@ -82,8 +102,13 @@ describe('MachaPlaybackResolver', () => {
     expect(requestBody.capabilities).not.toHaveProperty('max_height');
     expect(session.mode).toBe('remux');
     expect(session.seekMs).toBe(0);
+    expect(session.preferences.mode).toBe('auto');
     expect(session.source.url).toBe('http://node.test/api/v1/playback/stream/session-1/cap/1/master.m3u8');
-    expect(session.options.audioStreams[0]).toEqual(expect.objectContaining({ index: 1, language: 'eng', channels: 2 }));
+    expect(session.sourceInfo).toEqual(expect.objectContaining({ path: '/Movies/Test.mkv', format: 'matroska,webm', bitrate: 8_000_000 }));
+    expect(session.sourceInfo.streams[0]).toEqual(expect.objectContaining({ index: 0, codec: 'h264', width: 1920, height: 1080, bitrate: 3_700_000 }));
+    expect(session.output.video).toEqual(expect.objectContaining({ sourceStream: 0, transform: 'copy', codec: 'h264' }));
+    expect(session.options.qualityHeights).toEqual([720, 480, 360]);
+    expect(session.options.audioStreams[0]).toEqual(expect.objectContaining({ index: 1, language: 'eng', channels: 2, bitrate: 192_000 }));
   });
 
 
@@ -132,8 +157,16 @@ describe('MachaPlaybackResolver', () => {
   it('maps PATCH controls to the server field names', async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse(sessionResponse({
       mode: 'transcode',
-      subtitle_url: '/api/v1/playback/stream/session-1/cap/2/subtitle.vtt',
-      selected: { video_stream: 0, audio_stream: 2, subtitle_stream: 5 },
+      stream: {
+        mime_type: 'application/vnd.apple.mpegurl',
+        url: '/api/v1/playback/stream/session-1/cap/2/master.m3u8',
+        subtitle_url: '/api/v1/playback/stream/session-1/cap/2/subtitle.vtt',
+      },
+      selection: { video_stream: 0, audio_stream: 2, subtitle_stream: 5 },
+      preferences: {
+        mode: 'transcode', max_height: 720, max_bitrate: 4_000_000,
+        audio_stream: 2, subtitle_stream: 5, audio_language: '', subtitle_language: '',
+      },
     })));
     vi.stubGlobal('fetch', fetchMock);
     const resolver = new MachaPlaybackResolver('http://node.test', 'secret');

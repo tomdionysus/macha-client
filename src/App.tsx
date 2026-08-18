@@ -234,6 +234,10 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
     setContinueWatching(progressStore.update(progress));
   }, [progressStore]);
 
+  const removeFromContinueWatching = useCallback((item: MediaSummary) => {
+    setContinueWatching(progressStore.clear(item.id));
+  }, [progressStore]);
+
   const saveServer = useCallback((url: string, token: string) => {
     persistServerUrl(url);
     persistApiToken(token);
@@ -269,7 +273,7 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
       </header>
       <main>
         <Routes>
-          <Route path={routes.home} element={<HomeScreen api={api} continueWatching={continueWatching} onOpen={open} onResume={openPlayer} />} />
+          <Route path={routes.home} element={<HomeScreen api={api} continueWatching={continueWatching} onOpen={open} onResume={openPlayer} onRemoveFromContinueWatching={removeFromContinueWatching} />} />
           <Route path={routes.movies} element={<LibraryScreen api={api} kind="movies" onOpen={open} />} />
           <Route path="/movies/:movieId" element={<DetailRoute api={api} onPlay={openPlayer} onPlayFromStart={openPlayerFromStart} progressById={progressById} parameter="movieId" />} />
           <Route path={routes.series} element={<LibraryScreen api={api} kind="shows" onOpen={open} />} />

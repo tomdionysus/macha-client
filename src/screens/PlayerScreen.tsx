@@ -14,6 +14,7 @@ import type {
   PlaybackUpdate,
 } from '../playback/PlaybackResolver';
 import { uiSettings } from '../settings';
+import { describePlaybackSession } from '../playback/PlaybackStatus';
 import type { MediaSummary, PlaybackEvent, PlaybackMode, PlaybackProgress } from '../types';
 
 interface Props {
@@ -35,25 +36,6 @@ function formatTime(ms: number): string {
   return hours > 0
     ? `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
     : `${minutes}:${String(seconds).padStart(2, '0')}`;
-}
-
-function formatBitrate(bitrate: number): string {
-  if (!bitrate) return '';
-  return bitrate >= 1_000_000 ? `${(bitrate / 1_000_000).toFixed(1)} Mb/s` : `${Math.round(bitrate / 1000)} kb/s`;
-}
-
-function formatChannels(channels?: number): string {
-  if (!channels) return '';
-  if (channels === 1) return 'mono';
-  if (channels === 2) return 'stereo';
-  if (channels === 6) return '5.1';
-  if (channels === 8) return '7.1';
-  return `${channels}ch`;
-}
-
-function formatSampleRate(sampleRate?: number): string {
-  if (!sampleRate) return '';
-  return sampleRate >= 1_000 ? `${Number((sampleRate / 1_000).toFixed(1))} kHz` : `${sampleRate} Hz`;
 }
 
 type PlayerIconName = 'back' | 'rewind' | 'pause' | 'forward' | 'options' | 'fullscreen' | 'fullscreen-exit';
@@ -101,60 +83,17 @@ function streamLabel(stream: PlaybackStreamInfo, fallback: string): string {
   return parts.join(' · ');
 }
 
-function sourceVideoHeight(session: PlaybackSession): number | undefined {
-  const selected = session.streams.find((stream) => stream.type === 'video' && stream.index === session.selected.videoStream);
-  return selected?.height;
-}
-
 function qualityChoices(session: PlaybackSession): number[] {
-  const sourceHeight = sourceVideoHeight(session);
-  const standard = [2160, 1440, 1080, 720, 480, 360];
-  if (!sourceHeight) return standard;
-  const choices = standard.filter((height) => height < sourceHeight);
-  if (!standard.includes(sourceHeight)) choices.unshift(sourceHeight);
-  return [...new Set(choices)].sort((a, b) => b - a);
-}
-
-function sessionDescription(session?: PlaybackSession): string | undefined {
-  if (!session) return undefined;
-  const video = session.streams.find((stream) => stream.type === 'video' && stream.index === session.selected.videoStream);
-  const audio = session.streams.find((stream) => stream.type === 'audio' && stream.index === session.selected.audioStream);
-  const parts = [session.mode.toUpperCase()];
-
-  if (video) {
-    parts.push(video.codec.toUpperCase());
-    if (video.width && video.height) parts.push(`${video.width}×${video.height}`);
-  }
-
-  const bitrate = formatBitrate(session.sourceBitrate);
-  if (bitrate) parts.push(bitrate);
-
-  if (audio) {
-    const audioParts = ['AUDIO'];
-    if (audio.language) audioParts.push(audio.language.toUpperCase());
-    audioParts.push(audio.codec.toUpperCase());
-    const channels = formatChannels(audio.channels);
-    const sampleRate = formatSampleRate(audio.sampleRate);
-    if (channels) audioParts.push(channels);
-    if (sampleRate) audioParts.push(sampleRate);
-    if (audio.bitDepth) audioParts.push(`${audio.bitDepth}-bit`);
-    parts.push(audioParts.join(' '));
-  }
-
-  return parts.join(' · ');
+  return session.options.qualityHeights;
 }
 
 function PlayerOptions({
   session,
   busy,
-  qualityLimit,
-  onQualityLimit,
   onApply,
 }: {
   session: PlaybackSession;
   busy: boolean;
-  qualityLimit: number | null;
-  onQualityLimit: (height: number | null) => void;
   onApply: (update: PlaybackUpdate) => void;
 }) {
   const selectedAudio = session.selected.audioStream;
@@ -169,32 +108,40 @@ function PlayerOptions({
       <div className="player-option-group">
         <span>Mode</span>
         <div>
-          <button type="button" data-tv-focusable="true" disabled={busy} onClick={() => mode('auto')}>Auto</button>
+          <button
+            type="button"
+            data-tv-focusable="true"
+            className={session.preferences.mode === 'auto' ? 'selected' : undefined}
+            disabled={busy}
+            onClick={() => mode('auto')}
+          >
+            Auto
+          </button>
           {session.options.modes.map((candidate) => (
             <button
               type="button"
               key={candidate}
               data-tv-focusable="true"
-              className={session.mode === candidate ? 'selected' : undefined}
+              className={session.preferences.mode === candidate ? 'selected' : undefined}
               disabled={busy}
               onClick={() => mode(candidate)}
             >
-              {candidate}
+              {candidate === 'direct' ? 'Direct' : candidate === 'remux' ? 'Remux' : 'Transcode'}
             </button>
           ))}
         </div>
       </div>
 
-      {session.options.canChangeQuality && qualities.length > 0 && (
+      {session.options.canChangeQuality && (
         <div className="player-option-group">
           <span>Quality</span>
           <div>
             <button
               type="button"
               data-tv-focusable="true"
-              className={qualityLimit === null ? 'selected' : undefined}
+              className={session.preferences.maxHeight === null && session.preferences.maxBitrate === null ? 'selected' : undefined}
               disabled={busy}
-              onClick={() => { onQualityLimit(null); preferences({ maxHeight: null, maxBitrate: null }); }}
+              onClick={() => preferences({ maxHeight: null, maxBitrate: null })}
             >
               Original
             </button>
@@ -203,9 +150,9 @@ function PlayerOptions({
                 type="button"
                 key={height}
                 data-tv-focusable="true"
-                className={qualityLimit === height ? 'selected' : undefined}
+                className={session.preferences.maxHeight === height ? 'selected' : undefined}
                 disabled={busy}
-                onClick={() => { onQualityLimit(height); preferences({ maxHeight: height }); }}
+                onClick={() => preferences({ maxHeight: height })}
               >
                 {height}p
               </button>
@@ -318,7 +265,6 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
   const [optionsVisible, setOptionsVisible] = useState(false);
   const [controlBusy, setControlBusy] = useState(false);
   const [seekInFlight, setSeekInFlight] = useState(false);
-  const [qualityLimit, setQualityLimit] = useState<number | null>(null);
   const [scrubValue, setScrubValue] = useState<number>();
   const backdrop = useArtworkUrl(api, media.artwork?.backdrop ?? media.artwork?.thumbnail ?? media.artwork?.poster);
   const cover = useArtworkUrl(api, media.kind === 'track' ? media.artwork?.poster ?? media.artwork?.thumbnail : undefined);
@@ -757,6 +703,7 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
   const duration = session?.durationMs || event.durationMs || 1;
   const displayedProgress = scrubValue ?? Math.min(duration, event.positionMs);
   const audio = media.kind === 'track';
+  const streamStatus = describePlaybackSession(session);
   const mediaSubtitle = media.kind === 'episode'
     ? `${media.playbackContext!.series.title} ${media.subtitle ?? ''}`.trim()
     : media.subtitle;
@@ -791,15 +738,22 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
             <strong>{media.title}</strong>
             {mediaSubtitle && <span>{mediaSubtitle}</span>}
           </div>
-          <small>{playbackNotice ?? sessionDescription(session)}</small>
+          <div className="player-stream-status" aria-live="polite">
+            {playbackNotice ? (
+              <small>{playbackNotice}</small>
+            ) : (
+              <>
+                {streamStatus?.video && <small>{streamStatus.video}</small>}
+                {streamStatus?.audio && <small>{streamStatus.audio}</small>}
+              </>
+            )}
+          </div>
         </div>
 
         {optionsVisible && session && (
           <PlayerOptions
             session={session}
             busy={controlBusy}
-            qualityLimit={qualityLimit}
-            onQualityLimit={setQualityLimit}
             onApply={(update) => void reconfigure(update)}
           />
         )}

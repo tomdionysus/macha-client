@@ -20,12 +20,22 @@ export class DemoPlaybackResolver implements PlaybackResolver {
       },
       durationMs: media.durationMs ?? 0,
       seekMs: 0,
-      sourceFormat: 'mp4',
-      sourceBitrate: 0,
+      preferences: {
+        mode: 'auto',
+        maxHeight: null,
+        maxBitrate: null,
+        audioStream: null,
+        subtitleStream: null,
+        audioLanguage: '',
+        subtitleLanguage: '',
+      },
+      sourceInfo: { path: '/demo/sample.mp4', format: 'mp4', size: 0, bitrate: 0, streams: [] },
+      output: { format: 'mp4' },
       selected: { videoStream: 0, audioStream: 1, subtitleStream: -1 },
       transform: { video: 'copy', audio: 'copy' },
       options: {
         modes: ['direct'],
+        qualityHeights: [],
         mediaIds: [media.mediaIds[0] ?? media.id],
         audioStreams: [],
         subtitleStreams: [],
@@ -33,7 +43,6 @@ export class DemoPlaybackResolver implements PlaybackResolver {
         canChangeQuality: false,
         canSwitchMedia: false,
       },
-      streams: [],
     };
     return this.current;
   }

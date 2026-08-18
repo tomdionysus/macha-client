@@ -38,6 +38,14 @@ describe('ContinueWatchingStore', () => {
     expect(store.list()).toEqual([]);
   });
 
+  it('explicitly removes only the requested item', () => {
+    const store = new ContinueWatchingStore('client', new MemoryStorage());
+    store.update(progress('one', 50_000, 100_000, 1));
+    store.update(progress('two', 50_000, 100_000, 2));
+    expect(store.clear('two').map((entry) => entry.mediaId)).toEqual(['one']);
+    expect(store.list().map((entry) => entry.mediaId)).toEqual(['one']);
+  });
+
   it('removes media once it is effectively finished', () => {
     const store = new ContinueWatchingStore('client', new MemoryStorage());
     store.update(progress('one', 50_000));

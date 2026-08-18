@@ -103,7 +103,7 @@ Continue Watching is intentionally not a server API. It is local client state:
 - item is removed at 92% completion;
 - no account or user identity;
 - no progress upload.
-## Playback (Macha 0.7)
+## Playback (Macha 0.9.1)
 
 The player uses the server playback-session API rather than constructing media URLs itself:
 
@@ -115,7 +115,9 @@ PATCH  /api/v1/playback/sessions/{id}
 DELETE /api/v1/playback/sessions/{id}
 ```
 
-Session creation sends the catalogue `item_id` and the platform capability profile: direct containers/codecs and fragmented-MP4 HLS support, plus optional decoder resolution limits when a platform can report real limits. The Web client deliberately does not use screen dimensions as decoder limits. The server response supplies the selected media representation, actual mode, stream URL, selected streams, available controls, probe data and duration.
+Session creation sends the catalogue `item_id` and the platform capability profile: direct containers/codecs and fragmented-MP4 HLS support, plus optional decoder resolution limits when a platform can report real limits. The Web client deliberately does not use screen dimensions as decoder limits. The server response is authoritative and separates `preferences` (what the user selected), top-level `mode` (what negotiation resolved), `source` (original container and elementary-stream metadata), `output` (copy/transcode result for selected video/audio), `selection`, `stream`, and server-generated `options`.
+
+The client does not derive quality/mode availability locally. `options.modes`, `quality_heights`, `audio_streams`, `subtitle_streams` and `media_ids` drive the controls. Source and copied elementary-stream bitrates are displayed when supplied; transcoded output is displayed from the actual output description, and an unknown CRF video bitrate is left unknown rather than inferred.
 
 `PATCH` is used for server-side seeks of transformed streams and for changing mode, quality limits, audio stream, subtitle stream or media representation. A transformed seek/change may replace the HLS generation while retaining the same logical session. The client therefore treats every PATCH response as authoritative and reloads the returned stream URL.
 

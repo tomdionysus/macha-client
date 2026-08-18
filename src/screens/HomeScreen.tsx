@@ -9,9 +9,10 @@ interface Props {
   continueWatching: PlaybackProgress[];
   onOpen: (item: MediaSummary) => void;
   onResume: (item: MediaSummary) => void;
+  onRemoveFromContinueWatching: (item: MediaSummary) => void;
 }
 
-export function HomeScreen({ api, continueWatching, onOpen, onResume }: Props) {
+export function HomeScreen({ api, continueWatching, onOpen, onResume, onRemoveFromContinueWatching }: Props) {
   const home = useAsync(() => api.home(), [api]);
   if (home.loading) return <Loading />;
   if (home.error) return <ErrorMessage error={home.error} />;
@@ -22,7 +23,7 @@ export function HomeScreen({ api, continueWatching, onOpen, onResume }: Props) {
 
   return (
     <>
-      <MediaRow api={api} title="Continue Watching" items={progressItems} onOpen={onResume} progress={progressMap} variant="continue-watching" />
+      <MediaRow api={api} title="Continue Watching" items={progressItems} onOpen={onResume} onRemoveFromContinueWatching={onRemoveFromContinueWatching} progress={progressMap} variant="continue-watching" />
       <MediaRow api={api} title="Movies" items={home.value.movies.slice(0, 14)} onOpen={onOpen} />
       <MediaRow api={api} title="TV Shows" items={home.value.shows.slice(0, 14)} onOpen={onOpen} />
       <MediaRow api={api} title="Music" items={home.value.albums.slice(0, 14)} onOpen={onOpen} />

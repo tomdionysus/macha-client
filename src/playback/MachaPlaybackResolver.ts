@@ -27,6 +27,28 @@ interface WireStream {
   channels?: number;
   sample_rate?: number;
   bit_depth?: number;
+  bitrate?: number;
+}
+
+interface WireOutputVideo {
+  source_stream: number;
+  transform: 'copy' | 'transcode' | 'omit';
+  codec?: string;
+  profile?: string;
+  width?: number;
+  height?: number;
+  bitrate?: number;
+}
+
+interface WireOutputAudio {
+  source_stream: number;
+  transform: 'copy' | 'transcode' | 'omit';
+  codec?: string;
+  profile?: string;
+  channels?: number;
+  sample_rate?: number;
+  bit_depth?: number;
+  bitrate?: number;
 }
 
 interface WireSession {
@@ -34,20 +56,43 @@ interface WireSession {
   item_id?: string;
   media_id: string;
   mode: PlaybackMode;
-  mime_type: string;
-  stream_url: string;
-  subtitle_url: string | null;
-  selected: {
+  duration_ms: number;
+  seek_ms: number;
+  preferences: {
+    mode: PlaybackMode | 'auto';
+    max_height: number | null;
+    max_bitrate: number | null;
+    audio_stream: number | null;
+    subtitle_stream: number | null;
+    audio_language: string;
+    subtitle_language: string;
+  };
+  selection: {
     video_stream: number;
     audio_stream: number;
     subtitle_stream: number;
   };
-  transform: {
-    video: 'copy' | 'transcode' | 'omit';
-    audio: 'copy' | 'transcode' | 'omit';
+  source: {
+    path: string;
+    format: string;
+    size: number;
+    bitrate: number;
+    streams: WireStream[];
+  };
+  output: {
+    format?: string;
+    bitrate?: number;
+    video?: WireOutputVideo;
+    audio?: WireOutputAudio;
+  };
+  stream: {
+    url: string;
+    mime_type: string;
+    subtitle_url: string | null;
   };
   options: {
     modes: PlaybackMode[];
+    quality_heights: number[];
     media_ids: string[];
     audio_streams: WireStream[];
     subtitle_streams: WireStream[];
@@ -55,11 +100,6 @@ interface WireSession {
     can_change_quality: boolean;
     can_switch_media: boolean;
   };
-  streams: WireStream[];
-  source_format: string;
-  duration_ms: number;
-  source_bitrate: number;
-  seek_ms: number;
 }
 
 export class MachaPlaybackError extends Error {
@@ -92,6 +132,7 @@ function mapStream(stream: WireStream): PlaybackStreamInfo {
     channels: stream.channels,
     sampleRate: stream.sample_rate,
     bitDepth: stream.bit_depth,
+    bitrate: stream.bitrate,
   };
 }
 
@@ -192,6 +233,7 @@ export class MachaPlaybackResolver implements PlaybackResolver {
   private mapSession(wire: WireSession): PlaybackSession {
     const options: PlaybackOptions = {
       modes: wire.options.modes,
+      qualityHeights: wire.options.quality_heights,
       mediaIds: wire.options.media_ids,
       audioStreams: wire.options.audio_streams.map(mapStream),
       subtitleStreams: wire.options.subtitle_streams.map(mapStream),
@@ -201,9 +243,9 @@ export class MachaPlaybackResolver implements PlaybackResolver {
     };
     const source: PlaybackSource = {
       mediaId: wire.media_id,
-      url: this.streamUrl(wire.stream_url),
-      subtitleUrl: wire.subtitle_url ? this.streamUrl(wire.subtitle_url) : undefined,
-      mimeType: wire.mime_type,
+      url: this.streamUrl(wire.stream.url),
+      subtitleUrl: wire.stream.subtitle_url ? this.streamUrl(wire.stream.subtitle_url) : undefined,
+      mimeType: wire.stream.mime_type,
       mode: wire.mode,
       durationMs: wire.duration_ms,
     };
@@ -212,20 +254,59 @@ export class MachaPlaybackResolver implements PlaybackResolver {
       itemId: wire.item_id,
       mediaId: wire.media_id,
       mode: wire.mode,
-      mimeType: wire.mime_type,
+      mimeType: wire.stream.mime_type,
       source,
       durationMs: wire.duration_ms,
       seekMs: wire.seek_ms,
-      sourceFormat: wire.source_format,
-      sourceBitrate: wire.source_bitrate,
-      selected: {
-        videoStream: wire.selected.video_stream,
-        audioStream: wire.selected.audio_stream,
-        subtitleStream: wire.selected.subtitle_stream,
+      preferences: {
+        mode: wire.preferences.mode,
+        maxHeight: wire.preferences.max_height,
+        maxBitrate: wire.preferences.max_bitrate,
+        audioStream: wire.preferences.audio_stream,
+        subtitleStream: wire.preferences.subtitle_stream,
+        audioLanguage: wire.preferences.audio_language,
+        subtitleLanguage: wire.preferences.subtitle_language,
       },
-      transform: wire.transform,
+      sourceInfo: {
+        path: wire.source.path,
+        format: wire.source.format,
+        size: wire.source.size,
+        bitrate: wire.source.bitrate,
+        streams: wire.source.streams.map(mapStream),
+      },
+      output: {
+        format: wire.output.format,
+        bitrate: wire.output.bitrate,
+        video: wire.output.video ? {
+          sourceStream: wire.output.video.source_stream,
+          transform: wire.output.video.transform,
+          codec: wire.output.video.codec,
+          profile: wire.output.video.profile,
+          width: wire.output.video.width,
+          height: wire.output.video.height,
+          bitrate: wire.output.video.bitrate,
+        } : undefined,
+        audio: wire.output.audio ? {
+          sourceStream: wire.output.audio.source_stream,
+          transform: wire.output.audio.transform,
+          codec: wire.output.audio.codec,
+          profile: wire.output.audio.profile,
+          channels: wire.output.audio.channels,
+          sampleRate: wire.output.audio.sample_rate,
+          bitDepth: wire.output.audio.bit_depth,
+          bitrate: wire.output.audio.bitrate,
+        } : undefined,
+      },
+      selected: {
+        videoStream: wire.selection.video_stream,
+        audioStream: wire.selection.audio_stream,
+        subtitleStream: wire.selection.subtitle_stream,
+      },
+      transform: {
+        video: wire.output.video?.transform ?? 'omit',
+        audio: wire.output.audio?.transform ?? 'omit',
+      },
       options,
-      streams: wire.streams.map(mapStream),
     };
   }
 
@@ -238,8 +319,9 @@ export class MachaPlaybackResolver implements PlaybackResolver {
       mimeType: session.mimeType,
       durationMs: session.durationMs,
       seekMs: session.seekMs,
-      sourceFormat: session.sourceFormat,
-      sourceBitrate: session.sourceBitrate,
+      preferenceMode: session.preferences.mode,
+      sourceFormat: session.sourceInfo.format,
+      sourceBitrate: session.sourceInfo.bitrate,
       sourceUrl: session.source.url,
       subtitleUrl: session.source.subtitleUrl,
       selected: session.selected,

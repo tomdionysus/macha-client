@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.3.21 - 2026-08-18
+
+- move the Continue Watching overflow control onto the lower-right of the poster/artwork itself, keeping it visually subordinate to the media card;
+- keep the existing removal behaviour, keyboard handling and TV focus model unchanged.
+
+## 0.3.20 - 2026-08-18
+
+- add a small lower-right overflow menu to Continue Watching cards, with a single `Remove` action;
+- remove dismissed items immediately from the client-local Continue Watching store without changing or deleting catalogue media;
+- support the menu with mouse, keyboard and TV focus navigation, including Escape-to-close behaviour.
+
+## 0.3.19 - 2026-08-18
+
+- add a fixed alphabetical index rail to Movies, TV Shows and Music, with unavailable letters visibly disabled and `#` for numeric/symbol titles;
+- sort and index catalogue entries through the same title normalisation, ignoring leading `The`, `A` and `An` while leaving displayed titles unchanged;
+- jump directly to the first visible catalogue item for the selected letter, including horizontal Artists/Albums rows on the existing Music screen;
+- fold accented Latin initials into their base A-Z letter for indexing. Search behaviour is unchanged.
+
+## 0.3.18 - 2026-08-16
+
+- consume the revised `/api/v1/playback/sessions` contract directly: persisted preferences, resolved mode, original source/container/stream metadata and actual output stream metadata are now separate, with no legacy compatibility mapping;
+- fix the player status display to use the server-resolved mode and per-stream transforms. Copy/copy sessions now report `DIRECT` or `REMUX`; mixed pipelines report video/audio copy/transcode independently; transcodes show original metadata followed by server-reported output codec, resolution/audio format and bitrate where known;
+- make mode, quality, audio, subtitle and source controls mutate the live server session. Mode highlighting follows the persisted preference (so `Auto` remains visibly selected while the resolved mode may be Direct/Remux/Transcode), and the refreshed PATCH response replaces all session/control state at the current absolute playback position;
+- stop inventing quality choices in the browser. The options panel renders only server-advertised mode/quality/track choices, while retaining `Original` as the reset for active quality constraints.
+
 ## 0.3.17 - 2026-08-16
 
 - stop deriving playback decoder limits from the browser display resolution; Web now leaves `max_width`/`max_height` unset, while platforms with real decoder limits may still report them explicitly;

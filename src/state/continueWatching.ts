@@ -33,8 +33,9 @@ export class ContinueWatchingStore {
     return limited;
   }
 
-  clear(mediaId: string): void {
+  clear(mediaId: string): PlaybackProgress[] {
     this.write(this.read().filter((entry) => entry.mediaId !== mediaId));
+    return this.list();
   }
 
   private key(): string {
