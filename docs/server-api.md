@@ -119,7 +119,7 @@ Session creation sends the catalogue `item_id` and the platform capability profi
 
 The client does not derive quality/mode availability locally. `options.modes`, `quality_heights`, `audio_streams`, `subtitle_streams` and `media_ids` drive the controls. Source and copied elementary-stream bitrates are displayed when supplied; transcoded output is displayed from the actual output description, and an unknown CRF video bitrate is left unknown rather than inferred.
 
-`PATCH` is used for server-side seeks of transformed streams and for changing mode, quality limits, audio stream, subtitle stream or media representation. A transformed seek/change may replace the HLS generation while retaining the same logical session. The client therefore treats every PATCH response as authoritative and reloads the returned stream URL.
+`PATCH` is used for server-side seeks of transformed streams and for changing mode, quality limits, audio stream, subtitle stream or media representation. A transformed seek or A/V representation change may replace the HLS generation while retaining the same logical session. Macha server 0.12 adds an in-place subtitle-only PATCH: the returned session is still authoritative, but its A/V stream URL/generation is unchanged and the client replaces only `stream.subtitle_url`. Current servers expose that URL as a Macha segmented-WebVTT manifest; the Web player fetches only subtitle segments around its current playback position.
 
 Direct mode is handed straight to the platform player. Remux/transcode mode returns fragmented-MP4 HLS. The Web platform uses native HLS where available and hls.js otherwise.
 

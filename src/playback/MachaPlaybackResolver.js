@@ -1,3 +1,4 @@
+import { mergeRequestHeaders } from '../api/httpCompat';
 import { createClientLogger } from '../diagnostics/ClientLog';
 import { parseErrorEnvelope } from '../api/errorEnvelope';
 export class MachaPlaybackError extends Error {
@@ -248,12 +249,12 @@ export class MachaPlaybackResolver {
         const requestId = ++this.requestSequence;
         const method = init.method ?? 'GET';
         const started = performance.now();
-        const headers = new Headers(init.headers);
-        headers.set('Accept', 'application/json');
-        if (init.body !== undefined)
-            headers.set('Content-Type', 'application/json');
-        if (this.bearerToken?.trim())
-            headers.set('Authorization', `Bearer ${this.bearerToken.trim()}`);
+        const token = this.bearerToken?.trim();
+        const headers = mergeRequestHeaders(init.headers, {
+            Accept: 'application/json',
+            'Content-Type': init.body !== undefined ? 'application/json' : undefined,
+            Authorization: token ? `Bearer ${token}` : undefined,
+        });
         this.log.debug('http-request', { requestId, method, path, body: this.parseRequestBody(init.body) });
         try {
             const response = await fetch(`${this.baseUrl}${path}`, { ...init, headers });

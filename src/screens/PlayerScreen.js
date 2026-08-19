@@ -66,6 +66,14 @@ function streamLabel(stream, fallback) {
 function qualityChoices(session) {
     return session.options.qualityHeights;
 }
+export function isSubtitleOnlyUpdate(update) {
+    if (update.seekMs !== undefined || update.mediaId !== undefined || !update.preferences)
+        return false;
+    const keys = Object.entries(update.preferences)
+        .filter(([, value]) => value !== undefined)
+        .map(([key]) => key);
+    return keys.length > 0 && keys.every((key) => key === 'subtitleStream' || key === 'subtitleLanguage');
+}
 function PlayerOptions({ session, busy, onApply, }) {
     const selectedAudio = session.selected.audioStream;
     const selectedSubtitle = session.selected.subtitleStream;
@@ -294,6 +302,20 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
                 log.error('player-startup-failed', error);
                 if (!mountedRef.current)
                     return;
+                const failedSessionId = sessionRef.current?.sessionId ?? resolved?.sessionId;
+                sessionRef.current = undefined;
+                setSession(undefined);
+                try {
+                    player.stop();
+                }
+                catch (stopError) {
+                    log.warn('failed-native-player-stop-failed', { error: stopError });
+                }
+                if (failedSessionId) {
+                    await playbackResolver.stop(failedSessionId).catch((stopError) => {
+                        log.warn('failed-session-stop-failed', { sessionId: failedSessionId, error: stopError });
+                    });
+                }
                 setFatalError(error instanceof Error ? error : new Error(String(error)));
             }
             finally {
@@ -408,7 +430,18 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
         setPlaybackNotice('Seeking…');
         const seekStartedAt = performance.now();
         try {
-            const next = await playbackResolver.update(activeSession.sessionId, { seekMs: bounded });
+            const selectedSubtitle = activeSession.selected.subtitleStream;
+            const next = await playbackResolver.update(activeSession.sessionId, {
+                seekMs: bounded,
+                // A seek creates a new transformed stream generation. Preserve the
+                // currently selected subtitle explicitly so the server issues the
+                // matching subtitle capability/manifest for that generation instead
+                // of falling back to the session default (usually Off).
+                preferences: {
+                    subtitleStream: selectedSubtitle >= 0 ? selectedSubtitle : null,
+                    subtitleLanguage: activeSession.preferences.subtitleLanguage,
+                },
+            });
             log.info('seek-server-updated', {
                 sessionId: next.sessionId,
                 mode: next.mode,
@@ -475,30 +508,47 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
         if (!activeSession || controlBusy)
             return;
         const position = latestRef.current.positionMs;
+        const subtitleOnly = isSubtitleOnlyUpdate(update);
+        if (subtitleOnly && !player.setSubtitle) {
+            setPlaybackNotice('This platform cannot change subtitles without restarting playback.');
+            return;
+        }
         const updateStartedAt = performance.now();
-        log.info('stream-update-ui-request', { sessionId: activeSession.sessionId, positionMs: position, update });
+        log.info('stream-update-ui-request', { sessionId: activeSession.sessionId, positionMs: position, subtitleOnly, update });
         setControlBusy(true);
-        setPlaybackNotice('Updating stream…');
+        setPlaybackNotice(subtitleOnly ? 'Loading subtitles…' : 'Updating stream…');
         try {
-            const next = await playbackResolver.update(activeSession.sessionId, {
-                ...update,
-                seekMs: activeSession.options.canSeek ? position : update.seekMs,
-            });
+            const request = subtitleOnly
+                ? update
+                : {
+                    ...update,
+                    seekMs: activeSession.options.canSeek ? position : update.seekMs,
+                };
+            const next = await playbackResolver.update(activeSession.sessionId, request);
             log.info('stream-update-server-complete', {
                 sessionId: next.sessionId,
                 mode: next.mode,
                 positionMs: position,
+                subtitleOnly,
                 elapsedMs: Math.round((performance.now() - updateStartedAt) * 10) / 10,
             });
             if (!mountedRef.current) {
                 await playbackResolver.stop(next.sessionId).catch(() => undefined);
                 return;
             }
-            await loadSession(next, position);
+            if (subtitleOnly) {
+                await player.setSubtitle(next.source.subtitleUrl);
+                sessionRef.current = next;
+                setSession(next);
+            }
+            else {
+                await loadSession(next, position);
+            }
             log.info('stream-update-complete', {
                 sessionId: next.sessionId,
                 mode: next.mode,
                 positionMs: position,
+                subtitleOnly,
                 elapsedMs: Math.round((performance.now() - updateStartedAt) * 10) / 10,
             });
             setPlaybackNotice(undefined);
@@ -507,6 +557,7 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
             log.error('stream-update-failed', {
                 sessionId: activeSession.sessionId,
                 positionMs: position,
+                subtitleOnly,
                 elapsedMs: Math.round((performance.now() - updateStartedAt) * 10) / 10,
                 update,
                 error,
@@ -518,7 +569,7 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
             if (mountedRef.current)
                 setControlBusy(false);
         }
-    }, [controlBusy, loadSession, log, playbackResolver]);
+    }, [controlBusy, loadSession, log, playbackResolver, player]);
     useEffect(() => {
         const onFullscreenChange = () => {
             setFullscreen(document.fullscreenElement === pageRef.current);

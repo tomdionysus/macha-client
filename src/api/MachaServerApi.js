@@ -1,3 +1,4 @@
+import { mergeRequestHeaders } from './httpCompat';
 function normalizeBaseUrl(value) {
     const trimmed = value.trim();
     if (!trimmed || trimmed === '/')
@@ -39,9 +40,11 @@ export class MachaServerApi {
         this.baseUrl = normalizeBaseUrl(baseUrl);
     }
     async status() {
-        const headers = new Headers({ Accept: 'application/json' });
-        if (this.bearerToken?.trim())
-            headers.set('Authorization', `Bearer ${this.bearerToken.trim()}`);
+        const token = this.bearerToken?.trim();
+        const headers = mergeRequestHeaders(undefined, {
+            Accept: 'application/json',
+            Authorization: token ? `Bearer ${token}` : undefined,
+        });
         const response = await fetch(`${this.baseUrl}/api/v1/playback/status`, { method: 'GET', headers });
         let playback = {};
         try {

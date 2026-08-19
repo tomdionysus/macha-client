@@ -1,3 +1,4 @@
+import { mergeRequestHeaders, queryString } from './httpCompat';
 import { parseErrorEnvelope } from './errorEnvelope';
 import type {
   CatalogueApi,
@@ -41,10 +42,8 @@ export class MachaCatalogueApi implements CatalogueApi {
   }
 
   async list(kind?: CatalogueKind, parent?: string): Promise<CatalogueItem[]> {
-    const query = new URLSearchParams();
-    if (kind) query.set('type', kind);
-    if (parent !== undefined) query.set('parent', parent);
-    const suffix = query.size > 0 ? `?${query.toString()}` : '';
+    const query = queryString([['type', kind], ['parent', parent]]);
+    const suffix = query ? `?${query}` : '';
     const response = await this.getJson<ItemEnvelope>(`/api/v1/catalogue/items${suffix}`);
     return response.items;
   }
@@ -54,8 +53,8 @@ export class MachaCatalogueApi implements CatalogueApi {
   }
 
   async search(query: string, limit = 50): Promise<CatalogueItem[]> {
-    const params = new URLSearchParams({ q: query, limit: String(limit) });
-    const response = await this.getJson<ItemEnvelope>(`/api/v1/catalogue/search?${params.toString()}`);
+    const params = queryString([['q', query], ['limit', String(limit)]]);
+    const response = await this.getJson<ItemEnvelope>(`/api/v1/catalogue/search?${params}`);
     return response.items;
   }
 
@@ -77,9 +76,11 @@ export class MachaCatalogueApi implements CatalogueApi {
   }
 
   private fetch(path: string, accept: string, init: RequestInit = { method: 'GET' }): Promise<Response> {
-    const headers = new Headers(init.headers);
-    headers.set('Accept', accept);
-    if (this.bearerToken?.trim()) headers.set('Authorization', `Bearer ${this.bearerToken.trim()}`);
+    const token = this.bearerToken?.trim();
+    const headers = mergeRequestHeaders(init.headers, {
+      Accept: accept,
+      Authorization: token ? `Bearer ${token}` : undefined,
+    });
     return fetch(`${this.baseUrl}${path}`, { ...init, headers });
   }
 

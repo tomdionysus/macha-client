@@ -133,6 +133,25 @@ describe('MachaPlaybackResolver', () => {
         expect(JSON.parse(String(init.body))).toEqual({ seek_ms: 42_000 });
         expect(session.seekMs).toBe(42_000);
     });
+    it('sends subtitle-only PATCHes without an implicit seek', async () => {
+        const fetchMock = vi.fn().mockResolvedValue(jsonResponse(sessionResponse({
+            stream: {
+                mime_type: 'application/vnd.apple.mpegurl',
+                url: '/api/v1/playback/stream/session-1/cap/1/master.m3u8',
+                subtitle_url: '/api/v1/playback/stream/session-1/cap/1/subtitle-5.vtt',
+            },
+            selection: { video_stream: 0, audio_stream: 1, subtitle_stream: 5 },
+        })));
+        vi.stubGlobal('fetch', fetchMock);
+        const resolver = new MachaPlaybackResolver('http://node.test', 'secret');
+        await resolver.update('session-1', {
+            preferences: { subtitleStream: 5, subtitleLanguage: '' },
+        });
+        const [, init] = fetchMock.mock.calls[0];
+        expect(JSON.parse(String(init.body))).toEqual({
+            preferences: { subtitle_stream: 5, subtitle_language: '' },
+        });
+    });
     it('maps PATCH controls to the server field names', async () => {
         const fetchMock = vi.fn().mockResolvedValue(jsonResponse(sessionResponse({
             mode: 'transcode',

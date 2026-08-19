@@ -154,13 +154,35 @@ describe('MachaPlaybackResolver', () => {
     expect(session.seekMs).toBe(42_000);
   });
 
+  it('sends subtitle-only PATCHes without an implicit seek', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(sessionResponse({
+      stream: {
+        mime_type: 'application/vnd.apple.mpegurl',
+        url: '/api/v1/playback/stream/session-1/cap/1/master.m3u8',
+        subtitle_url: '/api/v1/playback/stream/session-1/cap/1/subtitle-5/manifest.json',
+      },
+      selection: { video_stream: 0, audio_stream: 1, subtitle_stream: 5 },
+    })));
+    vi.stubGlobal('fetch', fetchMock);
+    const resolver = new MachaPlaybackResolver('http://node.test', 'secret');
+
+    await resolver.update('session-1', {
+      preferences: { subtitleStream: 5, subtitleLanguage: '' },
+    });
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(String(init.body))).toEqual({
+      preferences: { subtitle_stream: 5, subtitle_language: '' },
+    });
+  });
+
   it('maps PATCH controls to the server field names', async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse(sessionResponse({
       mode: 'transcode',
       stream: {
         mime_type: 'application/vnd.apple.mpegurl',
         url: '/api/v1/playback/stream/session-1/cap/2/master.m3u8',
-        subtitle_url: '/api/v1/playback/stream/session-1/cap/2/subtitle.vtt',
+        subtitle_url: '/api/v1/playback/stream/session-1/cap/2/subtitle-5/manifest.json',
       },
       selection: { video_stream: 0, audio_stream: 2, subtitle_stream: 5 },
       preferences: {
@@ -197,7 +219,7 @@ describe('MachaPlaybackResolver', () => {
       seek_ms: 5_040_000,
       media_id: 'file:def',
     });
-    expect(session.source.subtitleUrl).toBe('http://node.test/api/v1/playback/stream/session-1/cap/2/subtitle.vtt');
+    expect(session.source.subtitleUrl).toBe('http://node.test/api/v1/playback/stream/session-1/cap/2/subtitle-5/manifest.json');
   });
 
   it('deletes the playback session explicitly', async () => {

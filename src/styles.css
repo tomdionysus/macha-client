@@ -560,10 +560,13 @@ h2 { font-size: clamp(1.2rem, 2vw, 1.75rem); letter-spacing: -.01em; margin: 1.1
 .player-failed .player-chrome { transition: none; }
 .player-mini-chrome { display: none; }
 .player-presentation-mini {
+  --player-mini-height: 76px;
   left: max(.75rem, 1.5vw);
   right: max(.75rem, 1.5vw);
   bottom: max(.65rem, 1.2vw);
-  height: 76px;
+  height: var(--player-mini-height);
+  min-height: var(--player-mini-height);
+  max-height: var(--player-mini-height);
   z-index: 80;
   border: 1px solid #ffffff14;
   border-radius: .75rem;
@@ -582,12 +585,12 @@ h2 { font-size: clamp(1.2rem, 2vw, 1.75rem); letter-spacing: -.01em; margin: 1.1
   background: #050506;
 }
 .player-presentation-mini .native-video { object-fit: cover; }
-.player-presentation-mini.audio-player .player-host { width: 76px; opacity: 0; }
+.player-presentation-mini.audio-player .player-host { width: var(--player-mini-height); opacity: 0; }
 .player-presentation-mini .audio-player-art {
   left: 0;
   top: 0;
-  width: 76px;
-  height: 76px;
+  width: var(--player-mini-height);
+  height: var(--player-mini-height);
   transform: none;
   border-radius: .7rem 0 0 .7rem;
   box-shadow: none;
@@ -595,7 +598,7 @@ h2 { font-size: clamp(1.2rem, 2vw, 1.75rem); letter-spacing: -.01em; margin: 1.1
 }
 .player-presentation-mini .audio-player-placeholder { font-size: 2.2rem; }
 .player-presentation-mini .loading-overlay { position: absolute; inset: 0 auto 0 0; width: 132px; }
-.player-presentation-mini.audio-player .loading-overlay { width: 76px; }
+.player-presentation-mini.audio-player .loading-overlay { width: var(--player-mini-height); }
 .player-presentation-mini .loading-spinner { width: 28px; height: 28px; border-width: 2px; }
 .player-presentation-mini .player-mini-chrome {
   position: absolute;
@@ -604,7 +607,7 @@ h2 { font-size: clamp(1.2rem, 2vw, 1.75rem); letter-spacing: -.01em; margin: 1.1
   align-items: stretch;
   min-width: 0;
 }
-.player-presentation-mini.audio-player .player-mini-chrome { left: 76px; }
+.player-presentation-mini.audio-player .player-mini-chrome { left: var(--player-mini-height); }
 .player-mini-copy {
   position: relative;
   flex: 1 1 auto;
@@ -677,14 +680,10 @@ h2 { font-size: clamp(1.2rem, 2vw, 1.75rem); letter-spacing: -.01em; margin: 1.1
   .player-button-row { gap: .35rem; }
   .player-option-group { grid-template-columns: 1fr; gap: .25rem; }
   .player-option-group > span { padding-top: 0; }
-  .player-presentation-mini { left: .5rem; right: .5rem; bottom: .5rem; height: 68px; }
+  .player-presentation-mini { left: .5rem; right: .5rem; bottom: .5rem; }
   .player-presentation-mini .player-host { width: 104px; }
   .player-presentation-mini .player-mini-chrome { left: 104px; }
-  .player-presentation-mini.audio-player .player-host { width: 68px; }
-  .player-presentation-mini .audio-player-art { width: 68px; height: 68px; }
-  .player-presentation-mini.audio-player .player-mini-chrome { left: 68px; }
   .player-presentation-mini .loading-overlay { width: 104px; }
-  .player-presentation-mini.audio-player .loading-overlay { width: 68px; }
   .player-mini-copy { padding-inline: .7rem; }
   .player-mini-time { display: none; }
   .player-mini-controls { padding-inline: .35rem; gap: .1rem; }

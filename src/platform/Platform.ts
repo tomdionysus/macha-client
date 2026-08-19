@@ -10,6 +10,8 @@ export interface Player {
   pause(): void;
   resume(): void;
   seek(positionMs: number): void;
+  /** Replace the subtitle resource without touching active A/V playback. */
+  setSubtitle?(subtitleUrl?: string): Promise<void> | void;
   stop(): void;
   subscribe(listener: PlaybackListener): () => void;
 }

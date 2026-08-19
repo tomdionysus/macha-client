@@ -1,3 +1,4 @@
+import { mergeRequestHeaders, queryString } from './httpCompat';
 import { parseErrorEnvelope } from './errorEnvelope';
 export class MachaApiError extends Error {
     status;
@@ -25,12 +26,8 @@ export class MachaCatalogueApi {
         return this.getJson('/api/v1/catalogue/status');
     }
     async list(kind, parent) {
-        const query = new URLSearchParams();
-        if (kind)
-            query.set('type', kind);
-        if (parent !== undefined)
-            query.set('parent', parent);
-        const suffix = query.size > 0 ? `?${query.toString()}` : '';
+        const query = queryString([['type', kind], ['parent', parent]]);
+        const suffix = query ? `?${query}` : '';
         const response = await this.getJson(`/api/v1/catalogue/items${suffix}`);
         return response.items;
     }
@@ -38,8 +35,8 @@ export class MachaCatalogueApi {
         return this.getJson(`/api/v1/catalogue/items/${encodeURIComponent(id)}`);
     }
     async search(query, limit = 50) {
-        const params = new URLSearchParams({ q: query, limit: String(limit) });
-        const response = await this.getJson(`/api/v1/catalogue/search?${params.toString()}`);
+        const params = queryString([['q', query], ['limit', String(limit)]]);
+        const response = await this.getJson(`/api/v1/catalogue/search?${params}`);
         return response.items;
     }
     async artwork(id) {
@@ -60,10 +57,11 @@ export class MachaCatalogueApi {
         return await response.json();
     }
     fetch(path, accept, init = { method: 'GET' }) {
-        const headers = new Headers(init.headers);
-        headers.set('Accept', accept);
-        if (this.bearerToken?.trim())
-            headers.set('Authorization', `Bearer ${this.bearerToken.trim()}`);
+        const token = this.bearerToken?.trim();
+        const headers = mergeRequestHeaders(init.headers, {
+            Accept: accept,
+            Authorization: token ? `Bearer ${token}` : undefined,
+        });
         return fetch(`${this.baseUrl}${path}`, { ...init, headers });
     }
     async throwResponseError(response) {

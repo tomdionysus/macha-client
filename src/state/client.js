@@ -10,10 +10,16 @@ export function getClientId(storage = localStorage) {
     return id;
 }
 export function getServerUrl(storage = localStorage) {
+    const env = import.meta.env.VITE_MACHA_SERVER;
+    // The Samsung package is intentionally pinned to the build-time endpoint.
+    // Do not allow stale localStorage from an earlier development install to
+    // override it. Normal web builds retain the user-configurable behaviour.
+    if (import.meta.env.MODE === 'samsung') {
+        return env?.replace(/\/+$/, '') ?? '';
+    }
     const configured = storage.getItem(SERVER_URL_KEY);
     if (configured !== null)
         return configured;
-    const env = import.meta.env.VITE_MACHA_SERVER;
     return env?.replace(/\/+$/, '') ?? '';
 }
 export function setServerUrl(url, storage = localStorage) {

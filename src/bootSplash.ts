@@ -49,12 +49,22 @@ export async function runBootSplash(root: HTMLElement, clock: SplashClock = brow
   splash.className = 'splash';
   splash.setAttribute('aria-label', 'Macha');
 
-  const mask = document.createElement('div');
-  mask.className = 'splash-logo-mask';
-  mask.style.setProperty('--macha-logo', `url("${logoUrl}")`);
-  mask.style.setProperty('--macha-flash-duration', `${flash.durationMs}ms`);
-  mask.style.setProperty('--macha-flash-delay', `${flash.delayMs}ms`);
-  splash.appendChild(mask);
+  if (import.meta.env.MODE === 'samsung') {
+    const image = document.createElement('img');
+    image.src = logoUrl;
+    image.alt = '';
+    image.style.width = '320px';
+    image.style.height = '320px';
+    image.style.objectFit = 'contain';
+    splash.appendChild(image);
+  } else {
+    const mask = document.createElement('div');
+    mask.className = 'splash-logo-mask';
+    mask.style.setProperty('--macha-logo', `url("${logoUrl}")`);
+    mask.style.setProperty('--macha-flash-duration', `${flash.durationMs}ms`);
+    mask.style.setProperty('--macha-flash-delay', `${flash.delayMs}ms`);
+    splash.appendChild(mask);
+  }
 
   while (root.firstChild) root.removeChild(root.firstChild);
   root.appendChild(splash);

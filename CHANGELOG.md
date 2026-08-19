@@ -1,5 +1,54 @@
 # Changelog
 
+## 0.5.2
+
+- preserve the active subtitle stream explicitly across server-backed seek generations so a seek cannot silently reset subtitle selection to Off;
+- prevent the `/play/...` route restoration effect from resurrecting a playback session that the user explicitly closed, so the close button tears the player down instead of leaving it running as the mini-player.
+
+## 0.5.1
+
+- finish the Web segmented-WebVTT runtime path so subtitle manifest URLs are fetched as manifests rather than handed directly to `<track>` as if they were VTT files;
+- fetch and browser-parse only the previous/current/next subtitle segments, merging their cues into one stable display track so prefetch tracks cannot render duplicate or competing cues;
+- explicitly activate temporary text tracks in hidden mode before waiting for browser parsing, and clean subtitle cues/listeners deterministically on selection changes and player stop.
+
+## 0.5.0
+
+- consume Macha segmented-WebVTT subtitle manifests on Web, loading only a small temporal window around current playback instead of one whole-file subtitle sidecar;
+- keep the minimized Now Playing bar at a fixed 76 px height across Web and Samsung layouts;
+- switch WebVTT subtitle tracks in place without seeking, reloading, or replacing the active video/audio source;
+- send subtitle-only playback PATCHes without the current playback position so the server can keep the active A/V generation intact;
+- report subtitle loading separately from representation changes and leave platforms that cannot replace subtitles in place playing uninterrupted rather than silently restarting media.
+
+## 0.4.9
+
+- Release an already-created Macha playback session immediately when native player startup fails, so a failed AVPlay prepare cannot strand a transcode reservation.
+- Advertise Samsung AVPlay Matroska support so compatible MKV sources can negotiate Direct Play instead of unnecessarily entering remux/transcode.
+- Constrain the Samsung legacy player chrome to its content height while retaining bottom anchoring, fixing the playback bar expanding over the full screen.
+
+## 0.4.8
+
+- Samsung builds now use the native AVPlay pipeline instead of Chromium 47 HTML5/HLS.js playback.
+- Advertise native Tizen decoder capabilities to the playback resolver.
+- Reduce AVPlay initial/resume buffering to four seconds for LAN VOD startup.
+- Pin Samsung full-player chrome to the bottom with Tizen 3-compatible CSS.
+
+## 0.4.7
+
+- Harden the Samsung/Tizen 3 build: force its build-time server endpoint over stale local storage, add deterministic five-button remote selection, and ship a dedicated Chromium 47 layout stylesheet.
+- Show `SAMSUNG TV` in the top-right platform badge for Samsung builds only.
+- Scope the generated Tizen network access policy to the configured Macha HTTP endpoint.
+
+## 0.4.6
+
+- Add Tizen 3.0 / Chromium 47 CSS fallbacks to the Samsung-only build.
+- Make TV directional/Enter navigation work with legacy Samsung key reporting and visible `:focus` styling.
+- Avoid legacy `Headers(init)` and `URLSearchParams` constructor signatures in Macha HTTP requests.
+
+## 0.4.5 - 2026-08-18
+
+- make the Samsung build safe for Chromium 47 DOM APIs used during boot, artwork loading, TV focus scheduling, and HTML5 playback host management;
+- show Samsung-only fatal runtime failures on screen instead of leaving a silent black application window.
+
 ## 0.4.4 - 2026-08-18
 
 - add an isolated `build-samsung` Vite mode targeting the Chromium 47 engine used by 2017 Samsung Tizen televisions, emitting legacy-only JavaScript without changing the normal modern web build;

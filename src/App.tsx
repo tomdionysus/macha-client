@@ -173,6 +173,7 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
   const queueStore = useMemo(() => new PlaybackQueueStore(clientId), [clientId]);
   const requestSequence = useRef(0);
   const restoredPersistedPlayback = useRef(false);
+  const stoppingPlayback = useRef(false);
   const [queueState, setQueueState] = useState<PlaybackQueueState | undefined>(() => queueStore.load());
   const [activePlayback, setActivePlayback] = useState<ActivePlayback>();
   const [continueWatching, setContinueWatching] = useState<PlaybackProgress[]>(() => (
@@ -237,6 +238,7 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
   }, [progressStore]);
 
   const startPlayback = useCallback((item: MediaSummary, options: StartPlaybackOptions = {}) => {
+    stoppingPlayback.current = false;
     const queue = options.queue?.length ? options.queue : [item];
     const requestedIndex = options.queueIndex ?? queue.findIndex((candidate) => candidate.id === item.id);
     const index = requestedIndex >= 0 ? requestedIndex : 0;
@@ -278,10 +280,11 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
   // reloaded on that URL, reconstruct the playback request from route state,
   // the persisted queue, Continue Watching metadata, or finally the catalogue.
   useEffect(() => {
+    if (stoppingPlayback.current) return undefined;
     if (!playerItemId || activePlayback?.media.id === playerItemId) return undefined;
     let cancelled = false;
     const routeState = (location.state as PlaybackRouteState | null) ?? undefined;
-    const fromStart = new URLSearchParams(location.search).get('start') === '0';
+    const fromStart = /(?:^|[?&])start=0(?:&|$)/.test(location.search);
 
     void (async () => {
       const persistedBeforeRoute = queueStore.load();
@@ -402,11 +405,19 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
 
   const stopPlayback = useCallback(() => {
     const returnTo = activePlayback?.returnTo ?? routes.home;
+    // Clearing activePlayback while /play/... is still current would otherwise
+    // trigger the route restoration effect, which can resurrect the just-closed
+    // session from route state and leave it running as the mini-player.
+    stoppingPlayback.current = true;
+    if (playerRouteActive) navigate(returnTo, { replace: true });
     setActivePlayback(undefined);
     setQueueState(undefined);
     queueStore.clear();
-    if (playerRouteActive) navigate(returnTo, { replace: true });
   }, [activePlayback?.returnTo, navigate, playerRouteActive, queueStore]);
+
+  useEffect(() => {
+    if (!playerRouteActive) stoppingPlayback.current = false;
+  }, [playerRouteActive]);
 
   const saveServer = useCallback((url: string, token: string) => {
     persistServerUrl(url);
@@ -439,7 +450,7 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
             </NavLink>
           ))}
         </nav>
-        <div className="platform-badge">{platform.name.toUpperCase()}</div>
+        <div className="platform-badge">{import.meta.env.MODE === 'samsung' ? 'SAMSUNG TV' : platform.name.toUpperCase()}</div>
       </header>
       <main>
         <Routes>

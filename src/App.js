@@ -89,6 +89,7 @@ export default function App({ platform, apiOverride, playbackOverride }) {
     const queueStore = useMemo(() => new PlaybackQueueStore(clientId), [clientId]);
     const requestSequence = useRef(0);
     const restoredPersistedPlayback = useRef(false);
+    const stoppingPlayback = useRef(false);
     const [queueState, setQueueState] = useState(() => queueStore.load());
     const [activePlayback, setActivePlayback] = useState();
     const [continueWatching, setContinueWatching] = useState(() => (progressStore.list().filter((entry) => !needsEpisodeContextMigration(entry))));
@@ -143,6 +144,7 @@ export default function App({ platform, apiOverride, playbackOverride }) {
         setContinueWatching(progressStore.clear(item.id));
     }, [progressStore]);
     const startPlayback = useCallback((item, options = {}) => {
+        stoppingPlayback.current = false;
         const queue = options.queue?.length ? options.queue : [item];
         const requestedIndex = options.queueIndex ?? queue.findIndex((candidate) => candidate.id === item.id);
         const index = requestedIndex >= 0 ? requestedIndex : 0;
@@ -180,11 +182,13 @@ export default function App({ platform, apiOverride, playbackOverride }) {
     // reloaded on that URL, reconstruct the playback request from route state,
     // the persisted queue, Continue Watching metadata, or finally the catalogue.
     useEffect(() => {
+        if (stoppingPlayback.current)
+            return undefined;
         if (!playerItemId || activePlayback?.media.id === playerItemId)
             return undefined;
         let cancelled = false;
         const routeState = location.state ?? undefined;
-        const fromStart = new URLSearchParams(location.search).get('start') === '0';
+        const fromStart = /(?:^|[?&])start=0(?:&|$)/.test(location.search);
         void (async () => {
             const persistedBeforeRoute = queueStore.load();
             const persistedRoutePosition = persistedBeforeRoute?.items[persistedBeforeRoute.currentIndex]?.id === playerItemId
@@ -308,12 +312,20 @@ export default function App({ platform, apiOverride, playbackOverride }) {
     }, [activePlayback, location.pathname, location.search, navigate, playerRouteActive, queueState]);
     const stopPlayback = useCallback(() => {
         const returnTo = activePlayback?.returnTo ?? routes.home;
+        // Clearing activePlayback while /play/... is still current would otherwise
+        // trigger the route restoration effect, which can resurrect the just-closed
+        // session from route state and leave it running as the mini-player.
+        stoppingPlayback.current = true;
+        if (playerRouteActive)
+            navigate(returnTo, { replace: true });
         setActivePlayback(undefined);
         setQueueState(undefined);
         queueStore.clear();
-        if (playerRouteActive)
-            navigate(returnTo, { replace: true });
     }, [activePlayback?.returnTo, navigate, playerRouteActive, queueStore]);
+    useEffect(() => {
+        if (!playerRouteActive)
+            stoppingPlayback.current = false;
+    }, [playerRouteActive]);
     const saveServer = useCallback((url, token) => {
         persistServerUrl(url);
         persistApiToken(token);
@@ -322,5 +334,5 @@ export default function App({ platform, apiOverride, playbackOverride }) {
         navigate(routes.home, { replace: true });
     }, [navigate]);
     const miniPlayerActive = Boolean(activePlayback && !playerRouteActive);
-    return (_jsxs("div", { className: `app-shell${miniPlayerActive ? ' has-mini-player' : ''}`, children: [!playerRouteActive && _jsx("img", { className: "app-watermark", src: logoUrl, alt: "", "aria-hidden": "true" }), _jsxs("header", { className: "topbar", children: [_jsxs(NavLink, { to: routes.home, className: "brand-link", "aria-label": "Macha home", children: [_jsx(AppLogo, {}), _jsx("span", { className: "brand-name", children: "Macha" })] }), _jsx("nav", { "aria-label": "Main navigation", children: navItems.map((item) => (_jsx(NavLink, { to: item.to, end: item.end, "data-tv-focusable": "true", className: ({ isActive }) => isActive ? 'active' : undefined, children: item.label }, item.to))) }), _jsx("div", { className: "platform-badge", children: platform.name.toUpperCase() })] }), _jsx("main", { children: _jsxs(Routes, { children: [_jsx(Route, { path: routes.home, element: _jsx(HomeScreen, { api: api, continueWatching: continueWatching, onOpen: open, onResume: openPlayer, onRemoveFromContinueWatching: removeFromContinueWatching }) }), _jsx(Route, { path: routes.movies, element: _jsx(LibraryScreen, { api: api, kind: "movies", onOpen: open }) }), _jsx(Route, { path: "/movies/:movieId", element: _jsx(DetailRoute, { api: api, onPlay: openPlayer, onPlayFromStart: openPlayerFromStart, progressById: progressById, parameter: "movieId" }) }), _jsx(Route, { path: routes.series, element: _jsx(LibraryScreen, { api: api, kind: "shows", onOpen: open }) }), _jsx(Route, { path: "/series/:seriesId", element: _jsx(SeriesRoute, { api: api, onOpenSeason: open }) }), _jsx(Route, { path: "/series/:seriesId/seasons/:seasonId", element: _jsx(SeasonRoute, { api: api, progress: progressById, onPlayEpisode: openSeasonEpisode }) }), _jsx(Route, { path: "/episodes/:episodeId", element: _jsx(DetailRoute, { api: api, onPlay: openPlayer, onPlayFromStart: openPlayerFromStart, progressById: progressById, parameter: "episodeId" }) }), _jsx(Route, { path: routes.music, element: _jsx(MusicScreen, { api: api, onOpen: open }) }), _jsx(Route, { path: "/music/artists/:artistId", element: _jsx(ArtistRoute, { api: api, onOpenAlbum: open }) }), _jsx(Route, { path: "/music/albums/:albumId", element: _jsx(AlbumRoute, { api: api, onPlay: openAlbumTrack }) }), _jsx(Route, { path: "/music/tracks/:trackId", element: _jsx(DetailRoute, { api: api, onPlay: openPlayer, onPlayFromStart: openPlayerFromStart, progressById: progressById, parameter: "trackId" }) }), _jsx(Route, { path: "/play/:itemId", element: _jsx("div", { className: "player-route-placeholder", "aria-hidden": "true" }) }), _jsx(Route, { path: "/items/:itemId", element: _jsx(DetailRoute, { api: api, onPlay: openPlayer, onPlayFromStart: openPlayerFromStart, progressById: progressById, parameter: "itemId" }) }), _jsx(Route, { path: routes.search, element: _jsx(SearchScreen, { api: api, onOpen: open }) }), _jsx(Route, { path: routes.settings, element: _jsx(SettingsScreen, { api: api, serverApi: serverApi, serverUrl: serverUrl, apiToken: apiToken, onSave: saveServer }) }), _jsx(Route, { path: routes.sponsor, element: _jsx(SponsorScreen, {}) }), _jsx(Route, { path: "*", element: _jsx(Navigate, { to: routes.home, replace: true }) })] }) }), activePlayback && (_jsx(PlayerHost, { api: api, request: activePlayback, platform: platform, playbackResolver: playbackResolver, presentation: playerRouteActive ? 'full' : 'mini', onProgress: updateProgress, onPosition: persistPlaybackPosition, onMinimize: minimizePlayer, onExpand: expandPlayer, onStop: stopPlayback, onPrevious: previous, onNext: next, onEnded: handleEnded, canPrevious: canPrevious, canNext: canNext, queuePosition: queueState ? { index: queueState.currentIndex, total: queueState.items.length } : undefined }))] }));
+    return (_jsxs("div", { className: `app-shell${miniPlayerActive ? ' has-mini-player' : ''}`, children: [!playerRouteActive && _jsx("img", { className: "app-watermark", src: logoUrl, alt: "", "aria-hidden": "true" }), _jsxs("header", { className: "topbar", children: [_jsxs(NavLink, { to: routes.home, className: "brand-link", "aria-label": "Macha home", children: [_jsx(AppLogo, {}), _jsx("span", { className: "brand-name", children: "Macha" })] }), _jsx("nav", { "aria-label": "Main navigation", children: navItems.map((item) => (_jsx(NavLink, { to: item.to, end: item.end, "data-tv-focusable": "true", className: ({ isActive }) => isActive ? 'active' : undefined, children: item.label }, item.to))) }), _jsx("div", { className: "platform-badge", children: import.meta.env.MODE === 'samsung' ? 'SAMSUNG TV' : platform.name.toUpperCase() })] }), _jsx("main", { children: _jsxs(Routes, { children: [_jsx(Route, { path: routes.home, element: _jsx(HomeScreen, { api: api, continueWatching: continueWatching, onOpen: open, onResume: openPlayer, onRemoveFromContinueWatching: removeFromContinueWatching }) }), _jsx(Route, { path: routes.movies, element: _jsx(LibraryScreen, { api: api, kind: "movies", onOpen: open }) }), _jsx(Route, { path: "/movies/:movieId", element: _jsx(DetailRoute, { api: api, onPlay: openPlayer, onPlayFromStart: openPlayerFromStart, progressById: progressById, parameter: "movieId" }) }), _jsx(Route, { path: routes.series, element: _jsx(LibraryScreen, { api: api, kind: "shows", onOpen: open }) }), _jsx(Route, { path: "/series/:seriesId", element: _jsx(SeriesRoute, { api: api, onOpenSeason: open }) }), _jsx(Route, { path: "/series/:seriesId/seasons/:seasonId", element: _jsx(SeasonRoute, { api: api, progress: progressById, onPlayEpisode: openSeasonEpisode }) }), _jsx(Route, { path: "/episodes/:episodeId", element: _jsx(DetailRoute, { api: api, onPlay: openPlayer, onPlayFromStart: openPlayerFromStart, progressById: progressById, parameter: "episodeId" }) }), _jsx(Route, { path: routes.music, element: _jsx(MusicScreen, { api: api, onOpen: open }) }), _jsx(Route, { path: "/music/artists/:artistId", element: _jsx(ArtistRoute, { api: api, onOpenAlbum: open }) }), _jsx(Route, { path: "/music/albums/:albumId", element: _jsx(AlbumRoute, { api: api, onPlay: openAlbumTrack }) }), _jsx(Route, { path: "/music/tracks/:trackId", element: _jsx(DetailRoute, { api: api, onPlay: openPlayer, onPlayFromStart: openPlayerFromStart, progressById: progressById, parameter: "trackId" }) }), _jsx(Route, { path: "/play/:itemId", element: _jsx("div", { className: "player-route-placeholder", "aria-hidden": "true" }) }), _jsx(Route, { path: "/items/:itemId", element: _jsx(DetailRoute, { api: api, onPlay: openPlayer, onPlayFromStart: openPlayerFromStart, progressById: progressById, parameter: "itemId" }) }), _jsx(Route, { path: routes.search, element: _jsx(SearchScreen, { api: api, onOpen: open }) }), _jsx(Route, { path: routes.settings, element: _jsx(SettingsScreen, { api: api, serverApi: serverApi, serverUrl: serverUrl, apiToken: apiToken, onSave: saveServer }) }), _jsx(Route, { path: routes.sponsor, element: _jsx(SponsorScreen, {}) }), _jsx(Route, { path: "*", element: _jsx(Navigate, { to: routes.home, replace: true }) })] }) }), activePlayback && (_jsx(PlayerHost, { api: api, request: activePlayback, platform: platform, playbackResolver: playbackResolver, presentation: playerRouteActive ? 'full' : 'mini', onProgress: updateProgress, onPosition: persistPlaybackPosition, onMinimize: minimizePlayer, onExpand: expandPlayer, onStop: stopPlayback, onPrevious: previous, onNext: next, onEnded: handleEnded, canPrevious: canPrevious, canNext: canNext, queuePosition: queueState ? { index: queueState.currentIndex, total: queueState.items.length } : undefined }))] }));
 }
