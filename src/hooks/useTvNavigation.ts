@@ -24,6 +24,11 @@ function scoreCandidate(current: DOMRect, candidate: DOMRect, direction: Directi
 }
 
 function samsungElements(): HTMLElement[] {
+  const fullPlayer = document.querySelector<HTMLElement>('.player-presentation-full');
+  if (fullPlayer) {
+    const chrome = fullPlayer.querySelector<HTMLElement>('.player-chrome.visible');
+    return chrome ? Array.from(chrome.querySelectorAll<HTMLElement>(SELECTOR)) : [];
+  }
   return Array.from(document.querySelectorAll<HTMLElement>(SELECTOR));
 }
 

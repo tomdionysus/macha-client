@@ -71,4 +71,22 @@ describe('describePlaybackSession', () => {
       },
     }))?.video).toBe('VIDEO TRANSCODE · SOURCE · HEVC · 1920×1080 · 7.5 Mb/s → H264 · 1280×720 · 4.0 Mb/s');
   });
+
+  it('reports the selected subtitle stream only when subtitles are enabled', () => {
+    const withSubtitles = session({
+      sourceInfo: {
+        path: '/Movies/test.mkv', format: 'matroska,webm', size: 10_000_000, bitrate: 8_000_000,
+        streams: [
+          { index: 0, type: 'video', codec: 'hevc', profile: 'Main', language: '', default: true, forced: false, width: 1920, height: 1080, bitrate: 7_500_000 },
+          { index: 1, type: 'audio', codec: 'eac3', profile: '', language: 'eng', default: true, forced: false, channels: 6, sampleRate: 48000, bitrate: 640_000 },
+          { index: 5, type: 'subtitle', codec: 'ass', profile: '', language: 'eng', default: false, forced: true },
+        ],
+      },
+      selected: { videoStream: 0, audioStream: 1, subtitleStream: 5 },
+    });
+
+    expect(describePlaybackSession(withSubtitles)?.subtitle).toBe('SUBTITLES · ENG · ASS · FORCED');
+    expect(describePlaybackSession(session())?.subtitle).toBeUndefined();
+  });
+
 });

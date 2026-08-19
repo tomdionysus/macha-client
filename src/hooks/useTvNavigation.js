@@ -21,6 +21,11 @@ function scoreCandidate(current, candidate, direction) {
     return primary + secondary * 2.5;
 }
 function samsungElements() {
+    const fullPlayer = document.querySelector('.player-presentation-full');
+    if (fullPlayer) {
+        const chrome = fullPlayer.querySelector('.player-chrome.visible');
+        return chrome ? Array.from(chrome.querySelectorAll(SELECTOR)) : [];
+    }
     return Array.from(document.querySelectorAll(SELECTOR));
 }
 function markSamsungSelected(element, elements) {

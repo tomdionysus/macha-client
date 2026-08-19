@@ -65,6 +65,12 @@ function audioParts(stream) {
         parts.push(bitrate);
     return parts;
 }
+function subtitleParts(stream) {
+    const parts = [stream.language ? stream.language.toUpperCase() : 'UND', stream.codec.toUpperCase()];
+    if (stream.forced)
+        parts.push('FORCED');
+    return parts;
+}
 function outputAudioParts(session) {
     const output = session.output.audio;
     if (!output)
@@ -100,6 +106,9 @@ export function describePlaybackSession(session) {
         return undefined;
     const video = selectedStream(session, 'video', session.selected.videoStream);
     const audio = selectedStream(session, 'audio', session.selected.audioStream);
+    const subtitle = session.selected.subtitleStream >= 0
+        ? selectedStream(session, 'subtitle', session.selected.subtitleStream)
+        : undefined;
     const result = {};
     if (video && session.transform.video !== 'omit') {
         const source = sourceVideoParts(session, video);
@@ -125,6 +134,9 @@ export function describePlaybackSession(session) {
         else {
             result.audio = ['AUDIO COPY', ...source].join(' · ');
         }
+    }
+    if (subtitle) {
+        result.subtitle = ['SUBTITLES', ...subtitleParts(subtitle)].join(' · ');
     }
     // Audio-only playback still needs a meaningful overall mode when everything is copied.
     if (!result.video && result.audio && session.transform.audio === 'copy') {

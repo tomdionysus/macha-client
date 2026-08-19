@@ -19,7 +19,7 @@ function formatSampleRate(sampleRate?: number): string {
   return sampleRate >= 1_000 ? `${Number((sampleRate / 1_000).toFixed(1))} kHz` : `${sampleRate} Hz`;
 }
 
-function selectedStream(session: PlaybackSession, type: 'video' | 'audio', index: number): PlaybackStreamInfo | undefined {
+function selectedStream(session: PlaybackSession, type: 'video' | 'audio' | 'subtitle', index: number): PlaybackStreamInfo | undefined {
   return session.sourceInfo.streams.find((stream) => stream.type === type && stream.index === index);
 }
 
@@ -56,6 +56,12 @@ function audioParts(stream: PlaybackStreamInfo): string[] {
   return parts;
 }
 
+function subtitleParts(stream: PlaybackStreamInfo): string[] {
+  const parts = [stream.language ? stream.language.toUpperCase() : 'UND', stream.codec.toUpperCase()];
+  if (stream.forced) parts.push('FORCED');
+  return parts;
+}
+
 function outputAudioParts(session: PlaybackSession): string[] {
   const output = session.output.audio;
   if (!output) return [];
@@ -78,6 +84,7 @@ function copyModeLabel(session: PlaybackSession): string {
 export interface PlaybackStatusDescription {
   video?: string;
   audio?: string;
+  subtitle?: string;
 }
 
 /**
@@ -92,6 +99,9 @@ export function describePlaybackSession(session?: PlaybackSession): PlaybackStat
 
   const video = selectedStream(session, 'video', session.selected.videoStream);
   const audio = selectedStream(session, 'audio', session.selected.audioStream);
+  const subtitle = session.selected.subtitleStream >= 0
+    ? selectedStream(session, 'subtitle', session.selected.subtitleStream)
+    : undefined;
   const result: PlaybackStatusDescription = {};
 
   if (video && session.transform.video !== 'omit') {
@@ -116,6 +126,10 @@ export function describePlaybackSession(session?: PlaybackSession): PlaybackStat
     } else {
       result.audio = ['AUDIO COPY', ...source].join(' · ');
     }
+  }
+
+  if (subtitle) {
+    result.subtitle = ['SUBTITLES', ...subtitleParts(subtitle)].join(' · ');
   }
 
   // Audio-only playback still needs a meaningful overall mode when everything is copied.

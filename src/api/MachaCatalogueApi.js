@@ -1,5 +1,6 @@
 import { mergeRequestHeaders, queryString } from './httpCompat';
 import { parseErrorEnvelope } from './errorEnvelope';
+import { isGatewayConnectionFailure, serverUnreachable } from './serverConnection';
 export class MachaApiError extends Error {
     status;
     code;
@@ -56,22 +57,32 @@ export class MachaCatalogueApi {
             return undefined;
         return await response.json();
     }
-    fetch(path, accept, init = { method: 'GET' }) {
+    async fetch(path, accept, init = { method: 'GET' }) {
         const token = this.bearerToken?.trim();
         const headers = mergeRequestHeaders(init.headers, {
             Accept: accept,
             Authorization: token ? `Bearer ${token}` : undefined,
         });
-        return fetch(`${this.baseUrl}${path}`, { ...init, headers });
+        try {
+            return await fetch(`${this.baseUrl}${path}`, { ...init, headers });
+        }
+        catch {
+            throw serverUnreachable();
+        }
     }
     async throwResponseError(response) {
         let body;
+        let bodyWasJson = false;
         try {
             body = await response.json();
+            bodyWasJson = true;
         }
         catch {
-            // The server normally returns JSON errors, but preserve the HTTP status if it does not.
+            // A proxy-generated 5xx with no Macha JSON envelope usually means its
+            // upstream server could not be reached.
         }
+        if (isGatewayConnectionFailure(response, bodyWasJson))
+            throw serverUnreachable();
         const parsed = parseErrorEnvelope(body, `${response.status} ${response.statusText}`);
         throw new MachaApiError(`Macha catalogue request failed: ${parsed.message}`, response.status, parsed.code);
     }

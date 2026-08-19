@@ -41,4 +41,13 @@ describe('MachaServerApi', () => {
         vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ enabled: true }), { status: 200 })));
         await expect(new MachaServerApi('').status()).resolves.toEqual(expect.objectContaining({ version: null }));
     });
+    it('reports a network failure as an unreachable Macha server', async () => {
+        vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')));
+        await expect(new MachaServerApi('').status()).rejects.toThrow('The Macha server cannot be reached.');
+    });
+    it('treats a proxy-generated non-JSON 500 as an unreachable Macha server', async () => {
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('connect ECONNREFUSED', { status: 500 })));
+        await expect(new MachaServerApi('').status()).rejects.toThrow('The Macha server cannot be reached.');
+    });
+
 });

@@ -266,6 +266,7 @@ function PlayerOptions({
 function PlayerSession({ api, media, platform, playbackResolver, startPositionMs, presentation, onProgress, onPosition, onMinimize, onExpand, onStop, onPrevious, onNext, onEnded, canPrevious, canNext, queuePosition, initialFatalError }: Omit<Props, 'request'> & { media: MediaSummary; startPositionMs: number; initialFatalError?: Error }) {
   const pageRef = useRef<HTMLElement | null>(null);
   const hostRef = useRef<HTMLDivElement | null>(null);
+  const chromeRef = useRef<HTMLDivElement | null>(null);
   const player = useMemo(() => platform.createPlayer(), [platform]);
   const log = useMemo(() => createClientLogger('playback.screen', { mediaId: media.id }), [media.id]);
   const initialStartPositionMs = useRef(Math.max(0, startPositionMs)).current;
@@ -291,7 +292,10 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
   const [starting, setStarting] = useState(!initialFatalError);
   const [fatalError, setFatalError] = useState<Error | undefined>(initialFatalError);
   const [playbackNotice, setPlaybackNotice] = useState<string>();
-  const [controlsVisible, setControlsVisible] = useState(true);
+  const webControls = platform.name === 'web';
+  const samsungControls = import.meta.env.MODE === 'samsung';
+  const interactionControlled = webControls || samsungControls;
+  const [controlsVisible, setControlsVisible] = useState(!interactionControlled);
   const [fullscreen, setFullscreen] = useState(false);
   const [optionsVisible, setOptionsVisible] = useState(false);
   const [controlBusy, setControlBusy] = useState(false);
@@ -335,13 +339,59 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
     onEnded();
   }, [event.ended, onEnded]);
 
+  const hideControls = useCallback(() => {
+    if (hideTimerRef.current !== undefined) {
+      window.clearTimeout(hideTimerRef.current);
+      hideTimerRef.current = undefined;
+    }
+    if (fatalError) return;
+    setControlsVisible(false);
+    setOptionsVisible(false);
+
+    // Do not leave Samsung focus parked on invisible player controls.
+    const chrome = chromeRef.current;
+    if (!chrome) return;
+    for (const selected of chrome.querySelectorAll<HTMLElement>('[data-tv-selected]')) {
+      selected.removeAttribute('data-tv-selected');
+    }
+    const active = document.activeElement;
+    if (active instanceof HTMLElement && chrome.contains(active)) active.blur();
+  }, [fatalError]);
+
+  const armControlsHide = useCallback(() => {
+    if (hideTimerRef.current !== undefined) window.clearTimeout(hideTimerRef.current);
+    hideTimerRef.current = undefined;
+    if (fatalError) return;
+
+    // Web and Samsung always auto-hide. Preserve the older pause/options
+    // behaviour for any other platform adapter.
+    if (!interactionControlled && (latestRef.current.paused || optionsVisible || controlBusy)) return;
+    hideTimerRef.current = window.setTimeout(hideControls, uiSettings.playerControlsHideDelayMs);
+  }, [controlBusy, fatalError, hideControls, interactionControlled, optionsVisible]);
+
   const showControls = useCallback(() => {
     setControlsVisible(true);
-    if (hideTimerRef.current !== undefined) window.clearTimeout(hideTimerRef.current);
-    if (!fatalError && !latestRef.current.paused && !optionsVisible && !controlBusy) {
-      hideTimerRef.current = window.setTimeout(() => setControlsVisible(false), uiSettings.playerControlsHideDelayMs);
-    }
-  }, [controlBusy, fatalError, optionsVisible]);
+    armControlsHide();
+  }, [armControlsHide]);
+
+  const focusSamsungControls = useCallback(() => {
+    const chrome = chromeRef.current;
+    if (!chrome) return;
+    const elements = Array.from(chrome.querySelectorAll<HTMLElement>('[data-tv-focusable="true"]:not([disabled])'));
+    if (elements.length === 0) return;
+    for (const element of elements) element.removeAttribute('data-tv-selected');
+    elements[0].setAttribute('data-tv-selected', 'true');
+    elements[0].focus();
+  }, []);
+
+  const noteWebPointerMovement = useCallback((clientY: number) => {
+    if (presentation !== 'full' || !webControls) return;
+    const chrome = chromeRef.current;
+    if (!chrome) return;
+    const bounds = chrome.getBoundingClientRect();
+    if (clientY < bounds.top || clientY > bounds.bottom) return;
+    showControls();
+  }, [presentation, showControls, webControls]);
 
   const setScrubPosition = useCallback((positionMs: number | undefined) => {
     scrubValueRef.current = positionMs;
@@ -510,11 +560,16 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
   }, [clearCommittedSeek, initialFatalError, initialStartPositionMs, loadSession, log, media, platform, playbackResolver, player, publish]);
 
   useEffect(() => {
-    showControls();
+    if (presentation === 'full') {
+      if (hideTimerRef.current !== undefined) window.clearTimeout(hideTimerRef.current);
+      hideTimerRef.current = undefined;
+      setOptionsVisible(false);
+      setControlsVisible(!interactionControlled);
+    }
     return () => {
       if (hideTimerRef.current !== undefined) window.clearTimeout(hideTimerRef.current);
     };
-  }, [showControls]);
+  }, [interactionControlled, presentation]);
 
   useEffect(() => {
     if (!fatalError) return;
@@ -545,13 +600,15 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
     if (paused) player.pause();
     else player.resume();
     publish({ ...latestRef.current, paused });
-    if (paused) {
-      setControlsVisible(true);
-      if (hideTimerRef.current !== undefined) window.clearTimeout(hideTimerRef.current);
-    } else {
-      showControls();
+    if (!interactionControlled) {
+      if (paused) {
+        setControlsVisible(true);
+        if (hideTimerRef.current !== undefined) window.clearTimeout(hideTimerRef.current);
+      } else {
+        showControls();
+      }
     }
-  }, [log, player, publish, showControls]);
+  }, [interactionControlled, log, player, publish, showControls]);
 
   const seek = useCallback(async (positionMs: number) => {
     const activeSession = sessionRef.current;
@@ -570,8 +627,10 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
 
     committedSeekRef.current = bounded;
     setScrubPosition(bounded);
-    setControlsVisible(true);
-    if (hideTimerRef.current !== undefined) window.clearTimeout(hideTimerRef.current);
+    if (!interactionControlled) {
+      setControlsVisible(true);
+      if (hideTimerRef.current !== undefined) window.clearTimeout(hideTimerRef.current);
+    }
 
     if (activeSession.mode === 'direct') {
       // Freeze the current picture immediately, move the media element, then
@@ -655,7 +714,7 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
         setControlBusy(false);
       }
     }
-  }, [clearCommittedSeek, controlBusy, loadSession, log, playbackResolver, player, publish, setScrubPosition]);
+  }, [clearCommittedSeek, controlBusy, interactionControlled, loadSession, log, playbackResolver, player, publish, setScrubPosition]);
 
   const playFromStart = useCallback(async () => {
     const activeSession = sessionRef.current;
@@ -735,11 +794,11 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
   useEffect(() => {
     const onFullscreenChange = () => {
       setFullscreen(document.fullscreenElement === pageRef.current);
-      if (presentation === 'full') showControls();
+      if (presentation === 'full' && !interactionControlled) showControls();
     };
     document.addEventListener('fullscreenchange', onFullscreenChange);
     return () => document.removeEventListener('fullscreenchange', onFullscreenChange);
-  }, [presentation, showControls]);
+  }, [interactionControlled, presentation, showControls]);
 
   useEffect(() => {
     if (presentation === 'mini' && document.fullscreenElement === pageRef.current) {
@@ -759,8 +818,48 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
 
   useEffect(() => {
     const onKeyDown = (keyEvent: KeyboardEvent) => {
-      if (presentation === 'full' && keyEvent.key === 'Escape' && document.fullscreenElement) return;
-      if (presentation === 'full' && (keyEvent.key === 'Escape' || keyEvent.key === 'Backspace')) {
+      const samsungBack = samsungControls && (
+        keyEvent.keyCode === 10009
+        || keyEvent.key === 'Escape'
+        || keyEvent.key === 'Backspace'
+        || keyEvent.key === 'BrowserBack'
+        || keyEvent.key === 'XF86Back'
+      );
+      const samsungOk = samsungControls && (keyEvent.key === 'Enter' || keyEvent.keyCode === 13);
+      const samsungDirection = samsungControls && (
+        ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Left', 'Right', 'Up', 'Down'].includes(keyEvent.key)
+        || [37, 38, 39, 40].includes(keyEvent.keyCode)
+      );
+
+      if (presentation === 'full' && samsungBack) {
+        keyEvent.preventDefault();
+        keyEvent.stopPropagation();
+        if (controlsVisible || optionsVisible) hideControls();
+        else onMinimize();
+        return;
+      }
+
+      if (presentation === 'full' && samsungOk && !controlsVisible) {
+        keyEvent.preventDefault();
+        keyEvent.stopPropagation();
+        showControls();
+        window.setTimeout(focusSamsungControls, 0);
+        return;
+      }
+
+      if (presentation === 'full' && samsungDirection) {
+        if (!controlsVisible) {
+          // Hidden player controls are the only Samsung navigation target on
+          // the full player. Do not let D-pad input move focus behind it.
+          keyEvent.preventDefault();
+          keyEvent.stopPropagation();
+          return;
+        }
+        armControlsHide();
+      }
+
+      if (presentation === 'full' && !samsungControls && keyEvent.key === 'Escape' && document.fullscreenElement) return;
+      if (presentation === 'full' && !samsungControls && (keyEvent.key === 'Escape' || keyEvent.key === 'Backspace')) {
         keyEvent.preventDefault();
         keyEvent.stopPropagation();
         if (optionsVisible) setOptionsVisible(false);
@@ -797,11 +896,11 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
         void seek(latestRef.current.positionMs + 10_000);
         return;
       }
-      if (presentation === 'full') showControls();
+      if (presentation === 'full' && !interactionControlled) showControls();
     };
     window.addEventListener('keydown', onKeyDown, true);
     return () => window.removeEventListener('keydown', onKeyDown, true);
-  }, [onMinimize, optionsVisible, presentation, seek, setPaused, showControls]);
+  }, [armControlsHide, controlsVisible, focusSamsungControls, hideControls, interactionControlled, onMinimize, optionsVisible, presentation, samsungControls, seek, setPaused, showControls]);
 
   const duration = session?.durationMs || event.durationMs || 1;
   const displayedProgress = scrubValue ?? Math.min(duration, event.positionMs);
@@ -818,11 +917,23 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
     <section
       ref={pageRef}
       className={`player-page player-presentation-${presentation} ${audio ? 'audio-player' : ''} ${fullscreen && !controlsVisible && !fatalError ? 'cursor-hidden' : ''} ${fatalError ? 'player-failed' : ''}`}
-      onPointerMove={() => { if (presentation === 'full') showControls(); }}
-      onPointerDown={() => { if (presentation === 'full') showControls(); }}
+      onPointerMove={(pointerEvent) => {
+        if (presentation !== 'full') return;
+        if (webControls) {
+          if (!pointerEvent.pointerType || pointerEvent.pointerType === 'mouse') noteWebPointerMovement(pointerEvent.clientY);
+        } else if (!samsungControls) {
+          showControls();
+        }
+      }}
+      onPointerDown={() => {
+        if (presentation === 'full' && !interactionControlled) showControls();
+      }}
       onClick={(clickEvent: MouseEvent<HTMLElement>) => {
         if (presentation === 'full') {
-          if (clickEvent.target === clickEvent.currentTarget) showControls();
+          if (webControls) {
+            const target = clickEvent.target as HTMLElement;
+            if (!target.closest('.player-chrome')) hideControls();
+          }
           return;
         }
         const target = clickEvent.target as HTMLElement;
@@ -846,7 +957,11 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
         </div>
       )}
 
-      <div className={`player-chrome ${controlsVisible || fatalError ? 'visible' : ''}`}>
+      <div
+        ref={chromeRef}
+        className={`player-chrome ${controlsVisible || fatalError ? 'visible' : ''}`}
+        onPointerDown={() => { if (webControls) showControls(); }}
+      >
         <div className="player-titlebar">
           <div className="player-title-copy">
             <strong>{media.title}</strong>
@@ -859,6 +974,7 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
               <>
                 {streamStatus?.video && <small>{streamStatus.video}</small>}
                 {streamStatus?.audio && <small>{streamStatus.audio}</small>}
+                {streamStatus?.subtitle && <small>{streamStatus.subtitle}</small>}
               </>
             )}
           </div>
@@ -932,7 +1048,10 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
             data-tv-focusable="true"
             disabled={!playbackAvailable || controlBusy}
             className={optionsVisible ? 'selected' : undefined}
-            onClick={() => { setOptionsVisible((visible) => !visible); setControlsVisible(true); }}
+            onClick={() => {
+              setOptionsVisible((visible) => !visible);
+              if (!interactionControlled) showControls();
+            }}
             aria-label="Playback options"
           >
             <PlayerIcon name="options" />

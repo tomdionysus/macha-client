@@ -12,6 +12,7 @@ interface Props {
   serverApi: ServerApi;
   serverUrl: string;
   apiToken: string;
+  connectionNotice?: string;
   onSave: (url: string, token: string) => void;
 }
 
@@ -33,7 +34,7 @@ function formatLastSync(unixMs: number): string {
   return new Date(unixMs).toLocaleString();
 }
 
-export function SettingsScreen({ api, serverApi, serverUrl, apiToken, onSave }: Props) {
+export function SettingsScreen({ api, serverApi, serverUrl, apiToken, connectionNotice, onSave }: Props) {
   const [url, setUrl] = useState(serverUrl);
   const [token, setToken] = useState(apiToken);
   const server = useAsync(() => serverApi.status(), [serverApi]);
@@ -50,7 +51,9 @@ export function SettingsScreen({ api, serverApi, serverUrl, apiToken, onSave }: 
           ? 'Synchronising'
           : 'Disabled';
 
-  const overallState = server.error
+  const overallState = connectionNotice
+    ? 'Server unavailable'
+    : server.error
     ? 'Server unavailable'
     : catalogue.error
       ? 'Server online; catalogue unavailable'
@@ -113,6 +116,9 @@ export function SettingsScreen({ api, serverApi, serverUrl, apiToken, onSave }: 
 
       <div className="settings-connection">
         <h2>Connection</h2>
+        {connectionNotice && (server.error || !server.value?.playbackAvailable) && (
+          <p className="settings-status-error" role="alert">{connectionNotice}</p>
+        )}
         <label htmlFor="server-url">Macha API</label>
         <div className="settings-line">
           <input

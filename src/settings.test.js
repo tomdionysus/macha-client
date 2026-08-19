@@ -10,6 +10,9 @@ describe('UI timing settings', () => {
     it('gives seek restarts a short grace period before showing a spinner', () => {
         expect(uiSettings.playerSeekSpinnerDelayMs).toBe(750);
     });
+    it('hides player controls after three seconds of inactivity', () => {
+        expect(uiSettings.playerControlsHideDelayMs).toBe(3_000);
+    });
     it('keeps the visible masked sweep centred across almost all of the configured splash lifetime', () => {
         const timing = splashFlashTiming(1_000);
         expect(timing.durationMs).toBe(900);

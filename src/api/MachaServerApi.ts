@@ -1,4 +1,5 @@
 import { mergeRequestHeaders } from './httpCompat';
+import { isGatewayConnectionFailure, serverUnreachable } from './serverConnection';
 export interface ServerStatus {
   version: string | null;
   playback: Record<string, unknown>;
@@ -64,13 +65,23 @@ export class MachaServerApi implements ServerApi {
       Authorization: token ? `Bearer ${token}` : undefined,
     });
 
-    const response = await fetch(`${this.baseUrl}/api/v1/playback/status`, { method: 'GET', headers });
+    let response: Response;
+    try {
+      response = await fetch(`${this.baseUrl}/api/v1/playback/status`, { method: 'GET', headers });
+    } catch {
+      throw serverUnreachable();
+    }
+
     let playback: Record<string, unknown> = {};
+    let bodyWasJson = false;
     try {
       playback = objectValue(await response.json() as unknown) ?? {};
+      bodyWasJson = true;
     } catch {
-      // An HTTP response still proves that the configured server is reachable.
+      // A proxy-generated 5xx with no Macha JSON body can indicate that its
+      // configured upstream server could not be contacted.
     }
+    if (isGatewayConnectionFailure(response, bodyWasJson)) throw serverUnreachable();
 
     const message = stringValue(playback.message)
       ?? stringValue(playback.error)

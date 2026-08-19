@@ -85,6 +85,7 @@ function PlayerOptions({ session, busy, onApply, }) {
 function PlayerSession({ api, media, platform, playbackResolver, startPositionMs, presentation, onProgress, onPosition, onMinimize, onExpand, onStop, onPrevious, onNext, onEnded, canPrevious, canNext, queuePosition, initialFatalError }) {
     const pageRef = useRef(null);
     const hostRef = useRef(null);
+    const chromeRef = useRef(null);
     const player = useMemo(() => platform.createPlayer(), [platform]);
     const log = useMemo(() => createClientLogger('playback.screen', { mediaId: media.id }), [media.id]);
     const initialStartPositionMs = useRef(Math.max(0, startPositionMs)).current;
@@ -110,7 +111,10 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
     const [starting, setStarting] = useState(!initialFatalError);
     const [fatalError, setFatalError] = useState(initialFatalError);
     const [playbackNotice, setPlaybackNotice] = useState();
-    const [controlsVisible, setControlsVisible] = useState(true);
+    const webControls = platform.name === 'web';
+    const samsungControls = import.meta.env.MODE === 'samsung';
+    const interactionControlled = webControls || samsungControls;
+    const [controlsVisible, setControlsVisible] = useState(!interactionControlled);
     const [fullscreen, setFullscreen] = useState(false);
     const [optionsVisible, setOptionsVisible] = useState(false);
     const [controlBusy, setControlBusy] = useState(false);
@@ -153,14 +157,65 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
         endedHandledRef.current = true;
         onEnded();
     }, [event.ended, onEnded]);
-    const showControls = useCallback(() => {
-        setControlsVisible(true);
+    const hideControls = useCallback(() => {
+        if (hideTimerRef.current !== undefined) {
+            window.clearTimeout(hideTimerRef.current);
+            hideTimerRef.current = undefined;
+        }
+        if (fatalError)
+            return;
+        setControlsVisible(false);
+        setOptionsVisible(false);
+        // Do not leave Samsung focus parked on invisible player controls.
+        const chrome = chromeRef.current;
+        if (!chrome)
+            return;
+        for (const selected of chrome.querySelectorAll('[data-tv-selected]')) {
+            selected.removeAttribute('data-tv-selected');
+        }
+        const active = document.activeElement;
+        if (active instanceof HTMLElement && chrome.contains(active))
+            active.blur();
+    }, [fatalError]);
+    const armControlsHide = useCallback(() => {
         if (hideTimerRef.current !== undefined)
             window.clearTimeout(hideTimerRef.current);
-        if (!fatalError && !latestRef.current.paused && !optionsVisible && !controlBusy) {
-            hideTimerRef.current = window.setTimeout(() => setControlsVisible(false), uiSettings.playerControlsHideDelayMs);
-        }
-    }, [controlBusy, fatalError, optionsVisible]);
+        hideTimerRef.current = undefined;
+        if (fatalError)
+            return;
+        // Web and Samsung always auto-hide. Preserve the older pause/options
+        // behaviour for any other platform adapter.
+        if (!interactionControlled && (latestRef.current.paused || optionsVisible || controlBusy))
+            return;
+        hideTimerRef.current = window.setTimeout(hideControls, uiSettings.playerControlsHideDelayMs);
+    }, [controlBusy, fatalError, hideControls, interactionControlled, optionsVisible]);
+    const showControls = useCallback(() => {
+        setControlsVisible(true);
+        armControlsHide();
+    }, [armControlsHide]);
+    const focusSamsungControls = useCallback(() => {
+        const chrome = chromeRef.current;
+        if (!chrome)
+            return;
+        const elements = Array.from(chrome.querySelectorAll('[data-tv-focusable="true"]:not([disabled])'));
+        if (elements.length === 0)
+            return;
+        for (const element of elements)
+            element.removeAttribute('data-tv-selected');
+        elements[0].setAttribute('data-tv-selected', 'true');
+        elements[0].focus();
+    }, []);
+    const noteWebPointerMovement = useCallback((clientY) => {
+        if (presentation !== 'full' || !webControls)
+            return;
+        const chrome = chromeRef.current;
+        if (!chrome)
+            return;
+        const bounds = chrome.getBoundingClientRect();
+        if (clientY < bounds.top || clientY > bounds.bottom)
+            return;
+        showControls();
+    }, [presentation, showControls, webControls]);
     const setScrubPosition = useCallback((positionMs) => {
         scrubValueRef.current = positionMs;
         setScrubValue(positionMs);
@@ -334,12 +389,18 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
         };
     }, [clearCommittedSeek, initialFatalError, initialStartPositionMs, loadSession, log, media, platform, playbackResolver, player, publish]);
     useEffect(() => {
-        showControls();
+        if (presentation === 'full') {
+            if (hideTimerRef.current !== undefined)
+                window.clearTimeout(hideTimerRef.current);
+            hideTimerRef.current = undefined;
+            setOptionsVisible(false);
+            setControlsVisible(!interactionControlled);
+        }
         return () => {
             if (hideTimerRef.current !== undefined)
                 window.clearTimeout(hideTimerRef.current);
         };
-    }, [showControls]);
+    }, [interactionControlled, presentation]);
     useEffect(() => {
         if (!fatalError)
             return;
@@ -373,15 +434,17 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
         else
             player.resume();
         publish({ ...latestRef.current, paused });
-        if (paused) {
-            setControlsVisible(true);
-            if (hideTimerRef.current !== undefined)
-                window.clearTimeout(hideTimerRef.current);
+        if (!interactionControlled) {
+            if (paused) {
+                setControlsVisible(true);
+                if (hideTimerRef.current !== undefined)
+                    window.clearTimeout(hideTimerRef.current);
+            }
+            else {
+                showControls();
+            }
         }
-        else {
-            showControls();
-        }
-    }, [log, player, publish, showControls]);
+    }, [interactionControlled, log, player, publish, showControls]);
     const seek = useCallback(async (positionMs) => {
         const activeSession = sessionRef.current;
         if (!activeSession || controlBusy || !activeSession.options.canSeek)
@@ -399,9 +462,11 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
         });
         committedSeekRef.current = bounded;
         setScrubPosition(bounded);
-        setControlsVisible(true);
-        if (hideTimerRef.current !== undefined)
-            window.clearTimeout(hideTimerRef.current);
+        if (!interactionControlled) {
+            setControlsVisible(true);
+            if (hideTimerRef.current !== undefined)
+                window.clearTimeout(hideTimerRef.current);
+        }
         if (activeSession.mode === 'direct') {
             // Freeze the current picture immediately, move the media element, then
             // resume only if playback was running before the seek. The committed
@@ -488,7 +553,7 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
                 setControlBusy(false);
             }
         }
-    }, [clearCommittedSeek, controlBusy, loadSession, log, playbackResolver, player, publish, setScrubPosition]);
+    }, [clearCommittedSeek, controlBusy, interactionControlled, loadSession, log, playbackResolver, player, publish, setScrubPosition]);
     const playFromStart = useCallback(async () => {
         const activeSession = sessionRef.current;
         if (!activeSession || controlBusy || !activeSession.options.canSeek)
@@ -573,12 +638,12 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
     useEffect(() => {
         const onFullscreenChange = () => {
             setFullscreen(document.fullscreenElement === pageRef.current);
-            if (presentation === 'full')
+            if (presentation === 'full' && !interactionControlled)
                 showControls();
         };
         document.addEventListener('fullscreenchange', onFullscreenChange);
         return () => document.removeEventListener('fullscreenchange', onFullscreenChange);
-    }, [presentation, showControls]);
+    }, [interactionControlled, presentation, showControls]);
     useEffect(() => {
         if (presentation === 'mini' && document.fullscreenElement === pageRef.current) {
             void document.exitFullscreen().catch(() => undefined);
@@ -599,9 +664,43 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
     }, [log, platform.name]);
     useEffect(() => {
         const onKeyDown = (keyEvent) => {
-            if (presentation === 'full' && keyEvent.key === 'Escape' && document.fullscreenElement)
+            const samsungBack = samsungControls && (keyEvent.keyCode === 10009
+                || keyEvent.key === 'Escape'
+                || keyEvent.key === 'Backspace'
+                || keyEvent.key === 'BrowserBack'
+                || keyEvent.key === 'XF86Back');
+            const samsungOk = samsungControls && (keyEvent.key === 'Enter' || keyEvent.keyCode === 13);
+            const samsungDirection = samsungControls && (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Left', 'Right', 'Up', 'Down'].includes(keyEvent.key)
+                || [37, 38, 39, 40].includes(keyEvent.keyCode));
+            if (presentation === 'full' && samsungBack) {
+                keyEvent.preventDefault();
+                keyEvent.stopPropagation();
+                if (controlsVisible || optionsVisible)
+                    hideControls();
+                else
+                    onMinimize();
                 return;
-            if (presentation === 'full' && (keyEvent.key === 'Escape' || keyEvent.key === 'Backspace')) {
+            }
+            if (presentation === 'full' && samsungOk && !controlsVisible) {
+                keyEvent.preventDefault();
+                keyEvent.stopPropagation();
+                showControls();
+                window.setTimeout(focusSamsungControls, 0);
+                return;
+            }
+            if (presentation === 'full' && samsungDirection) {
+                if (!controlsVisible) {
+                    // Hidden player controls are the only Samsung navigation target on
+                    // the full player. Do not let D-pad input move focus behind it.
+                    keyEvent.preventDefault();
+                    keyEvent.stopPropagation();
+                    return;
+                }
+                armControlsHide();
+            }
+            if (presentation === 'full' && !samsungControls && keyEvent.key === 'Escape' && document.fullscreenElement)
+                return;
+            if (presentation === 'full' && !samsungControls && (keyEvent.key === 'Escape' || keyEvent.key === 'Backspace')) {
                 keyEvent.preventDefault();
                 keyEvent.stopPropagation();
                 if (optionsVisible)
@@ -640,12 +739,12 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
                 void seek(latestRef.current.positionMs + 10_000);
                 return;
             }
-            if (presentation === 'full')
+            if (presentation === 'full' && !interactionControlled)
                 showControls();
         };
         window.addEventListener('keydown', onKeyDown, true);
         return () => window.removeEventListener('keydown', onKeyDown, true);
-    }, [onMinimize, optionsVisible, presentation, seek, setPaused, showControls]);
+    }, [armControlsHide, controlsVisible, focusSamsungControls, hideControls, interactionControlled, onMinimize, optionsVisible, presentation, samsungControls, seek, setPaused, showControls]);
     const duration = session?.durationMs || event.durationMs || 1;
     const displayedProgress = scrubValue ?? Math.min(duration, event.positionMs);
     const audio = media.kind === 'track';
@@ -656,18 +755,33 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
     const playbackAvailable = Boolean(session) && !fatalError;
     const queueLabel = queuePosition && queuePosition.total > 1 ? `${queuePosition.index + 1} of ${queuePosition.total}` : undefined;
     const playerSubtitle = [mediaSubtitle, queueLabel].filter(Boolean).join(' · ');
-    return (_jsxs("section", { ref: pageRef, className: `player-page player-presentation-${presentation} ${audio ? 'audio-player' : ''} ${fullscreen && !controlsVisible && !fatalError ? 'cursor-hidden' : ''} ${fatalError ? 'player-failed' : ''}`, onPointerMove: () => { if (presentation === 'full')
-            showControls(); }, onPointerDown: () => { if (presentation === 'full')
-            showControls(); }, onClick: (clickEvent) => {
+    return (_jsxs("section", { ref: pageRef, className: `player-page player-presentation-${presentation} ${audio ? 'audio-player' : ''} ${fullscreen && !controlsVisible && !fatalError ? 'cursor-hidden' : ''} ${fatalError ? 'player-failed' : ''}`, onPointerMove: (pointerEvent) => {
+            if (presentation !== 'full')
+                return;
+            if (webControls) {
+                if (!pointerEvent.pointerType || pointerEvent.pointerType === 'mouse')
+                    noteWebPointerMovement(pointerEvent.clientY);
+            }
+            else if (!samsungControls) {
+                showControls();
+            }
+        }, onPointerDown: () => {
+            if (presentation === 'full' && !interactionControlled)
+                showControls();
+        }, onClick: (clickEvent) => {
             if (presentation === 'full') {
-                if (clickEvent.target === clickEvent.currentTarget)
-                    showControls();
+                if (webControls) {
+                    const target = clickEvent.target;
+                    if (!target.closest('.player-chrome'))
+                        hideControls();
+                }
                 return;
             }
             const target = clickEvent.target;
             if (!target.closest('button, input'))
                 onExpand();
-        }, children: [backdrop && _jsx("div", { className: "player-backdrop", style: { backgroundImage: `url(${JSON.stringify(backdrop)})` } }), _jsx("div", { ref: hostRef, className: "player-host" }), audio && (_jsx("div", { className: "audio-player-art", children: cover ? _jsx("img", { src: cover, alt: "" }) : _jsx("div", { className: "audio-player-placeholder", children: "\u266A" }) })), starting && _jsx(Loading, {}), seekInFlight && _jsx(Loading, { delayMs: uiSettings.playerSeekSpinnerDelayMs }), fatalError && (_jsxs("div", { className: "player-fatal-error", role: "alert", children: [_jsx("strong", { children: "Playback failed" }), _jsx("span", { children: fatalError.message })] })), _jsxs("div", { className: `player-chrome ${controlsVisible || fatalError ? 'visible' : ''}`, children: [_jsxs("div", { className: "player-titlebar", children: [_jsxs("div", { className: "player-title-copy", children: [_jsx("strong", { children: media.title }), playerSubtitle && _jsx("span", { children: playerSubtitle })] }), _jsx("div", { className: "player-stream-status", "aria-live": "polite", children: playbackNotice ? (_jsx("small", { children: playbackNotice })) : (_jsxs(_Fragment, { children: [streamStatus?.video && _jsx("small", { children: streamStatus.video }), streamStatus?.audio && _jsx("small", { children: streamStatus.audio })] })) })] }), optionsVisible && session && (_jsx(PlayerOptions, { session: session, busy: controlBusy, onApply: (update) => void reconfigure(update) })), _jsxs("div", { className: "player-scrubber-row", children: [_jsx("span", { children: formatTime(displayedProgress) }), _jsx("input", { className: "player-scrubber", type: "range", min: 0, max: Math.max(1, duration), step: 1_000, value: displayedProgress, "aria-label": "Playback position", "data-tv-focusable": "true", disabled: !session?.options.canSeek, "aria-busy": controlBusy || undefined, onChange: (changeEvent) => {
+        }, children: [backdrop && _jsx("div", { className: "player-backdrop", style: { backgroundImage: `url(${JSON.stringify(backdrop)})` } }), _jsx("div", { ref: hostRef, className: "player-host" }), audio && (_jsx("div", { className: "audio-player-art", children: cover ? _jsx("img", { src: cover, alt: "" }) : _jsx("div", { className: "audio-player-placeholder", children: "\u266A" }) })), starting && _jsx(Loading, {}), seekInFlight && _jsx(Loading, { delayMs: uiSettings.playerSeekSpinnerDelayMs }), fatalError && (_jsxs("div", { className: "player-fatal-error", role: "alert", children: [_jsx("strong", { children: "Playback failed" }), _jsx("span", { children: fatalError.message })] })), _jsxs("div", { ref: chromeRef, className: `player-chrome ${controlsVisible || fatalError ? 'visible' : ''}`, onPointerDown: () => { if (webControls)
+                    showControls(); }, children: [_jsxs("div", { className: "player-titlebar", children: [_jsxs("div", { className: "player-title-copy", children: [_jsx("strong", { children: media.title }), playerSubtitle && _jsx("span", { children: playerSubtitle })] }), _jsx("div", { className: "player-stream-status", "aria-live": "polite", children: playbackNotice ? (_jsx("small", { children: playbackNotice })) : (_jsxs(_Fragment, { children: [streamStatus?.video && _jsx("small", { children: streamStatus.video }), streamStatus?.audio && _jsx("small", { children: streamStatus.audio }), streamStatus?.subtitle && _jsx("small", { children: streamStatus.subtitle })] })) })] }), optionsVisible && session && (_jsx(PlayerOptions, { session: session, busy: controlBusy, onApply: (update) => void reconfigure(update) })), _jsxs("div", { className: "player-scrubber-row", children: [_jsx("span", { children: formatTime(displayedProgress) }), _jsx("input", { className: "player-scrubber", type: "range", min: 0, max: Math.max(1, duration), step: 1_000, value: displayedProgress, "aria-label": "Playback position", "data-tv-focusable": "true", disabled: !session?.options.canSeek, "aria-busy": controlBusy || undefined, onChange: (changeEvent) => {
                                     if (!controlBusy)
                                         setScrubPosition(Number(changeEvent.target.value));
                                 }, onPointerUp: () => {
@@ -682,7 +796,11 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
                                     const position = scrubValueRef.current;
                                     if (!controlBusy && position !== undefined)
                                         void seek(position);
-                                } }), _jsx("span", { children: formatTime(duration) })] }), _jsxs("div", { className: "player-button-row", children: [_jsx("button", { type: "button", "data-tv-focusable": "true", onClick: onMinimize, "aria-label": "Minimise player", children: _jsx(PlayerIcon, { name: "back" }) }), queuePosition && queuePosition.total > 1 && (_jsx("button", { type: "button", "data-tv-focusable": "true", disabled: !canPrevious || controlBusy, onClick: onPrevious, "aria-label": "Previous item", children: _jsx(PlayerIcon, { name: "previous" }) })), _jsx("button", { type: "button", "data-tv-focusable": "true", disabled: !playbackAvailable || !session?.options.canSeek || controlBusy, onClick: () => void playFromStart(), "aria-label": "Play from start", title: "Play from start", children: _jsx(RestartIcon, {}) }), _jsx("button", { type: "button", "data-tv-focusable": "true", disabled: !playbackAvailable || !session?.options.canSeek || controlBusy, onClick: () => void seek(displayedProgress - 10_000), "aria-label": "Seek backward", children: _jsx(PlayerIcon, { name: "rewind" }) }), _jsx("button", { type: "button", "data-tv-focusable": "true", disabled: !playbackAvailable || controlBusy, onClick: () => setPaused(!event.paused), "aria-label": event.paused ? 'Play' : 'Pause', children: event.paused ? _jsx(PlayIcon, {}) : _jsx(PlayerIcon, { name: "pause" }) }), _jsx("button", { type: "button", "data-tv-focusable": "true", disabled: !playbackAvailable || !session?.options.canSeek || controlBusy, onClick: () => void seek(displayedProgress + 10_000), "aria-label": "Seek forward", children: _jsx(PlayerIcon, { name: "forward" }) }), queuePosition && queuePosition.total > 1 && (_jsx("button", { type: "button", "data-tv-focusable": "true", disabled: !canNext || controlBusy, onClick: onNext, "aria-label": "Next item", children: _jsx(PlayerIcon, { name: "next" }) })), _jsx("button", { type: "button", "data-tv-focusable": "true", disabled: !playbackAvailable || controlBusy, className: optionsVisible ? 'selected' : undefined, onClick: () => { setOptionsVisible((visible) => !visible); setControlsVisible(true); }, "aria-label": "Playback options", children: _jsx(PlayerIcon, { name: "options" }) }), platform.name === 'web' && document.fullscreenEnabled && (_jsx("button", { type: "button", "data-tv-focusable": "true", onClick: () => void toggleFullscreen(), "aria-label": fullscreen ? 'Exit fullscreen' : 'Fullscreen', title: fullscreen ? 'Exit fullscreen' : 'Fullscreen', children: _jsx(PlayerIcon, { name: fullscreen ? 'fullscreen-exit' : 'fullscreen' }) })), _jsx("button", { type: "button", "data-tv-focusable": "true", onClick: onStop, "aria-label": "Stop playback and close player", title: "Close player", children: _jsx(PlayerIcon, { name: "close" }) })] })] }), _jsxs("div", { className: "player-mini-chrome", "aria-label": "Now playing", children: [_jsxs("button", { className: "player-mini-copy", type: "button", "data-tv-focusable": "true", onClick: onExpand, "aria-label": `Open player for ${media.title}`, children: [_jsx("span", { className: "player-mini-title", children: media.title }), _jsx("span", { className: "player-mini-subtitle", children: fatalError ? `Playback failed · ${fatalError.message}` : playerSubtitle || 'Now playing' }), _jsxs("span", { className: "player-mini-time", children: [formatTime(displayedProgress), " / ", formatTime(duration)] }), _jsx("span", { className: "player-mini-progress", "aria-hidden": "true", children: _jsx("span", { style: { width: `${Math.min(100, displayedProgress / Math.max(1, duration) * 100)}%` } }) })] }), _jsxs("div", { className: "player-mini-controls", children: [queuePosition && queuePosition.total > 1 && (_jsx("button", { type: "button", "data-tv-focusable": "true", disabled: !canPrevious || controlBusy, onClick: onPrevious, "aria-label": "Previous item", children: _jsx(PlayerIcon, { name: "previous" }) })), _jsx("button", { type: "button", "data-tv-focusable": "true", disabled: !playbackAvailable || controlBusy, onClick: () => setPaused(!event.paused), "aria-label": event.paused ? 'Play' : 'Pause', children: event.paused ? _jsx(PlayIcon, {}) : _jsx(PlayerIcon, { name: "pause" }) }), queuePosition && queuePosition.total > 1 && (_jsx("button", { type: "button", "data-tv-focusable": "true", disabled: !canNext || controlBusy, onClick: onNext, "aria-label": "Next item", children: _jsx(PlayerIcon, { name: "next" }) })), _jsx("button", { type: "button", "data-tv-focusable": "true", onClick: onExpand, "aria-label": "Open full player", children: _jsx(PlayerIcon, { name: "expand" }) }), _jsx("button", { type: "button", "data-tv-focusable": "true", onClick: onStop, "aria-label": "Stop playback", children: _jsx(PlayerIcon, { name: "close" }) })] })] })] }));
+                                } }), _jsx("span", { children: formatTime(duration) })] }), _jsxs("div", { className: "player-button-row", children: [_jsx("button", { type: "button", "data-tv-focusable": "true", onClick: onMinimize, "aria-label": "Minimise player", children: _jsx(PlayerIcon, { name: "back" }) }), queuePosition && queuePosition.total > 1 && (_jsx("button", { type: "button", "data-tv-focusable": "true", disabled: !canPrevious || controlBusy, onClick: onPrevious, "aria-label": "Previous item", children: _jsx(PlayerIcon, { name: "previous" }) })), _jsx("button", { type: "button", "data-tv-focusable": "true", disabled: !playbackAvailable || !session?.options.canSeek || controlBusy, onClick: () => void playFromStart(), "aria-label": "Play from start", title: "Play from start", children: _jsx(RestartIcon, {}) }), _jsx("button", { type: "button", "data-tv-focusable": "true", disabled: !playbackAvailable || !session?.options.canSeek || controlBusy, onClick: () => void seek(displayedProgress - 10_000), "aria-label": "Seek backward", children: _jsx(PlayerIcon, { name: "rewind" }) }), _jsx("button", { type: "button", "data-tv-focusable": "true", disabled: !playbackAvailable || controlBusy, onClick: () => setPaused(!event.paused), "aria-label": event.paused ? 'Play' : 'Pause', children: event.paused ? _jsx(PlayIcon, {}) : _jsx(PlayerIcon, { name: "pause" }) }), _jsx("button", { type: "button", "data-tv-focusable": "true", disabled: !playbackAvailable || !session?.options.canSeek || controlBusy, onClick: () => void seek(displayedProgress + 10_000), "aria-label": "Seek forward", children: _jsx(PlayerIcon, { name: "forward" }) }), queuePosition && queuePosition.total > 1 && (_jsx("button", { type: "button", "data-tv-focusable": "true", disabled: !canNext || controlBusy, onClick: onNext, "aria-label": "Next item", children: _jsx(PlayerIcon, { name: "next" }) })), _jsx("button", { type: "button", "data-tv-focusable": "true", disabled: !playbackAvailable || controlBusy, className: optionsVisible ? 'selected' : undefined, onClick: () => {
+                                    setOptionsVisible((visible) => !visible);
+                                    if (!interactionControlled)
+                                        showControls();
+                                }, "aria-label": "Playback options", children: _jsx(PlayerIcon, { name: "options" }) }), platform.name === 'web' && document.fullscreenEnabled && (_jsx("button", { type: "button", "data-tv-focusable": "true", onClick: () => void toggleFullscreen(), "aria-label": fullscreen ? 'Exit fullscreen' : 'Fullscreen', title: fullscreen ? 'Exit fullscreen' : 'Fullscreen', children: _jsx(PlayerIcon, { name: fullscreen ? 'fullscreen-exit' : 'fullscreen' }) })), _jsx("button", { type: "button", "data-tv-focusable": "true", onClick: onStop, "aria-label": "Stop playback and close player", title: "Close player", children: _jsx(PlayerIcon, { name: "close" }) })] })] }), _jsxs("div", { className: "player-mini-chrome", "aria-label": "Now playing", children: [_jsxs("button", { className: "player-mini-copy", type: "button", "data-tv-focusable": "true", onClick: onExpand, "aria-label": `Open player for ${media.title}`, children: [_jsx("span", { className: "player-mini-title", children: media.title }), _jsx("span", { className: "player-mini-subtitle", children: fatalError ? `Playback failed · ${fatalError.message}` : playerSubtitle || 'Now playing' }), _jsxs("span", { className: "player-mini-time", children: [formatTime(displayedProgress), " / ", formatTime(duration)] }), _jsx("span", { className: "player-mini-progress", "aria-hidden": "true", children: _jsx("span", { style: { width: `${Math.min(100, displayedProgress / Math.max(1, duration) * 100)}%` } }) })] }), _jsxs("div", { className: "player-mini-controls", children: [queuePosition && queuePosition.total > 1 && (_jsx("button", { type: "button", "data-tv-focusable": "true", disabled: !canPrevious || controlBusy, onClick: onPrevious, "aria-label": "Previous item", children: _jsx(PlayerIcon, { name: "previous" }) })), _jsx("button", { type: "button", "data-tv-focusable": "true", disabled: !playbackAvailable || controlBusy, onClick: () => setPaused(!event.paused), "aria-label": event.paused ? 'Play' : 'Pause', children: event.paused ? _jsx(PlayIcon, {}) : _jsx(PlayerIcon, { name: "pause" }) }), queuePosition && queuePosition.total > 1 && (_jsx("button", { type: "button", "data-tv-focusable": "true", disabled: !canNext || controlBusy, onClick: onNext, "aria-label": "Next item", children: _jsx(PlayerIcon, { name: "next" }) })), _jsx("button", { type: "button", "data-tv-focusable": "true", onClick: onExpand, "aria-label": "Open full player", children: _jsx(PlayerIcon, { name: "expand" }) }), _jsx("button", { type: "button", "data-tv-focusable": "true", onClick: onStop, "aria-label": "Stop playback", children: _jsx(PlayerIcon, { name: "close" }) })] })] })] }));
 }
 export function PlayerHost(props) {
     const { request, ...sessionProps } = props;

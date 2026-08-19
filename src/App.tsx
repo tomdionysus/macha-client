@@ -12,6 +12,7 @@ import type { PlaybackResolver } from './playback/PlaybackResolver';
 import { DemoPlaybackResolver } from './playback/DemoPlaybackResolver';
 import { MachaPlaybackResolver } from './playback/MachaPlaybackResolver';
 import { DemoServerApi, MachaServerApi, type ServerApi } from './api/MachaServerApi';
+import { SERVER_UNREACHABLE_EVENT, SERVER_UNREACHABLE_MESSAGE } from './api/serverConnection';
 import type { Episode, MediaSummary, PlaybackProgress, SeasonSummary } from './types';
 import { ContinueWatchingStore } from './state/continueWatching';
 import { migrateEpisodeContext, needsEpisodeContextMigration } from './state/continueWatchingMigration';
@@ -168,6 +169,7 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
 
   const [serverUrl, setServerUrl] = useState(() => getServerUrl());
   const [apiToken, setApiToken] = useState(() => getApiToken());
+  const [connectionNotice, setConnectionNotice] = useState<string>();
   const clientId = useMemo(() => getClientId(), []);
   const progressStore = useMemo(() => new ContinueWatchingStore(clientId), [clientId]);
   const queueStore = useMemo(() => new PlaybackQueueStore(clientId), [clientId]);
@@ -195,6 +197,16 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
   const serverApi = useMemo<ServerApi>(() => (
     demo ? new DemoServerApi() : new MachaServerApi(serverUrl, apiToken)
   ), [apiToken, demo, serverUrl]);
+
+  useEffect(() => {
+    const onServerUnreachable = (event: Event) => {
+      const detail = (event as CustomEvent<{ message?: string }>).detail;
+      setConnectionNotice(detail?.message ?? SERVER_UNREACHABLE_MESSAGE);
+      if (location.pathname !== routes.settings) navigate(routes.settings, { replace: true });
+    };
+    window.addEventListener(SERVER_UNREACHABLE_EVENT, onServerUnreachable);
+    return () => window.removeEventListener(SERVER_UNREACHABLE_EVENT, onServerUnreachable);
+  }, [location.pathname, navigate]);
 
   useEffect(() => {
     let cancelled = false;
@@ -420,6 +432,7 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
   }, [playerRouteActive]);
 
   const saveServer = useCallback((url: string, token: string) => {
+    setConnectionNotice(undefined);
     persistServerUrl(url);
     persistApiToken(token);
     setServerUrl(url.trim().replace(/\/+$/, ''));
@@ -468,7 +481,7 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
           <Route path="/play/:itemId" element={<div className="player-route-placeholder" aria-hidden="true" />} />
           <Route path="/items/:itemId" element={<DetailRoute api={api} onPlay={openPlayer} onPlayFromStart={openPlayerFromStart} progressById={progressById} parameter="itemId" />} />
           <Route path={routes.search} element={<SearchScreen api={api} onOpen={open} />} />
-          <Route path={routes.settings} element={<SettingsScreen api={api} serverApi={serverApi} serverUrl={serverUrl} apiToken={apiToken} onSave={saveServer} />} />
+          <Route path={routes.settings} element={<SettingsScreen api={api} serverApi={serverApi} serverUrl={serverUrl} apiToken={apiToken} connectionNotice={connectionNotice} onSave={saveServer} />} />
           <Route path={routes.sponsor} element={<SponsorScreen />} />
           <Route path="*" element={<Navigate to={routes.home} replace />} />
         </Routes>

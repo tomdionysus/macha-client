@@ -1,4 +1,5 @@
 import { mergeRequestHeaders } from './httpCompat';
+import { isGatewayConnectionFailure, serverUnreachable } from './serverConnection';
 function normalizeBaseUrl(value) {
     const trimmed = value.trim();
     if (!trimmed || trimmed === '/')
@@ -45,14 +46,25 @@ export class MachaServerApi {
             Accept: 'application/json',
             Authorization: token ? `Bearer ${token}` : undefined,
         });
-        const response = await fetch(`${this.baseUrl}/api/v1/playback/status`, { method: 'GET', headers });
-        let playback = {};
+        let response;
         try {
-            playback = objectValue(await response.json()) ?? {};
+            response = await fetch(`${this.baseUrl}/api/v1/playback/status`, { method: 'GET', headers });
         }
         catch {
-            // An HTTP response still proves that the configured server is reachable.
+            throw serverUnreachable();
         }
+        let playback = {};
+        let bodyWasJson = false;
+        try {
+            playback = objectValue(await response.json()) ?? {};
+            bodyWasJson = true;
+        }
+        catch {
+            // A proxy-generated 5xx with no Macha JSON body can indicate that its
+            // configured upstream server could not be contacted.
+        }
+        if (isGatewayConnectionFailure(response, bodyWasJson))
+            throw serverUnreachable();
         const message = stringValue(playback.message)
             ?? stringValue(playback.error)
             ?? (response.ok ? null : `${response.status} ${response.statusText}`);

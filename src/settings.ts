@@ -6,7 +6,7 @@
 export const uiSettings = {
   splashDurationMs: 1_000,
   loadingIndicatorDelayMs: 1_000,
-  playerControlsHideDelayMs: 3_500,
+  playerControlsHideDelayMs: 3_000,
   playerSeekSpinnerDelayMs: 750,
 } as const;
 
