@@ -26,6 +26,9 @@ export class MachaMediaApi {
     async albums() {
         return (await this.catalogue.list('album')).map((item) => this.media(item));
     }
+    async tracks() {
+        return (await this.catalogue.list('track')).map((item) => this.media(item));
+    }
     async details(id) {
         const item = await this.catalogue.get(id);
         if (item.kind === 'show') {

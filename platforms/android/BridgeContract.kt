@@ -10,5 +10,6 @@ interface MachaBridge {
     fun pause()
     fun resume()
     fun seek(positionMs: Long)
+    fun setVolume(volume: Float)
     fun stop()
 }

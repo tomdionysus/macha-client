@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.5.6
+
+- make album selection consistently open the album track listing from Music and Artist album grids instead of starting playback, matching the existing Search result behaviour;
+- add an album-detail Play all action that replaces the client-local saved playlist with the album tracks in album order and starts playback from track one;
+- keep Add to playlist as an append operation, distinct from Play all.
+
+## 0.5.5
+
+- rename the user-facing Ingest UI to Import while preserving the existing ingest route, API, job types and internal identifiers unchanged.
+
+## 0.5.4
+
+- add an Ingest page for server-side file/folder imports and BitTorrent magnet acquisition;
+- show live ingest and torrent state, progress, transfer/copy rate, ETA, peer counts where applicable, and staging-area usage;
+- add pause/resume controls and a destructive Delete action mapped to the server cancel operation;
+- represent torrent-backed catalogue import as the same torrent row, switching from BitTorrent transfer metrics to generic ingest/copy metrics once the server hands the payload to ingest;
+- preserve the 0.5.3 Music/Playlist and volume-control architecture while adding acquisition as an independent API and route.
+
+## 0.5.3
+
+- refactor Music into Artists, Albums, Tracks and Playlist sub-navigation, with grid browsing consistent with the Movies and TV catalogue pages;
+- add a client-local persistent music playlist with album/track insertion, shuffle/play controls, drag-handle and keyboard reordering, duplicate entries, and per-entry removal;
+- add shared music overflow actions for Add to playlist, Play next, Play later, Shuffle and detail navigation while keeping Play now as the default album/track action;
+- extend the persistent playback queue with insert-next and append operations so music queue actions do not replace the item currently playing;
+- add global track catalogue browsing through the existing catalogue list API;
+- add a persisted volume control to the full and mini player bars for all media, backed by the common Player contract and the Web/Samsung platform players.
+
 ## 0.5.2
 
 - add unobtrusive per-entity metadata editing for movies, series, seasons, episodes, artists, albums and tracks, including editable descriptive fields and preferred artwork selection when multiple stored images exist for a role;

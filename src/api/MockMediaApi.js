@@ -133,6 +133,9 @@ export class MockMediaApi {
     async albums() {
         return albums;
     }
+    async tracks() {
+        return album.tracks;
+    }
     async details(id) {
         if (id === show.id)
             return show;

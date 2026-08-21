@@ -71,6 +71,37 @@ export class PlaybackQueueStore {
         this.storage.setItem(this.key, JSON.stringify(next));
         return next;
     }
+    insertNext(items) {
+        const additions = items.filter(playable);
+        if (additions.length === 0)
+            return this.load();
+        const current = this.load();
+        if (!current)
+            return this.replace(additions, 0);
+        const insertAt = current.currentIndex + 1;
+        const next = {
+            ...current,
+            items: [...current.items.slice(0, insertAt), ...additions, ...current.items.slice(insertAt)],
+            updatedAt: Date.now(),
+        };
+        this.storage.setItem(this.key, JSON.stringify(next));
+        return next;
+    }
+    append(items) {
+        const additions = items.filter(playable);
+        if (additions.length === 0)
+            return this.load();
+        const current = this.load();
+        if (!current)
+            return this.replace(additions, 0);
+        const next = {
+            ...current,
+            items: [...current.items, ...additions],
+            updatedAt: Date.now(),
+        };
+        this.storage.setItem(this.key, JSON.stringify(next));
+        return next;
+    }
     clear() {
         this.storage.removeItem(this.key);
     }

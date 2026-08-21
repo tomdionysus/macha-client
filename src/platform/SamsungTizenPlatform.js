@@ -100,7 +100,11 @@ class SamsungAvPlayer {
         catch (error) {
             this.log.warn('buffer-tuning-unsupported', { error: errorText(error) });
         }
-        if (source.subtitleUrl && api.setExternalSubtitlePath) {
+        // Samsung AVPlay accepts a concrete external subtitle file while IDLE,
+        // not Macha's segmented subtitle manifest. Dynamic segmented subtitle
+        // switching is therefore left unsupported here rather than restarting the
+        // active A/V session behind the user.
+        if (source.subtitleUrl && /\.vtt(?:$|[?#])/i.test(source.subtitleUrl) && api.setExternalSubtitlePath) {
             try {
                 api.setExternalSubtitlePath(source.subtitleUrl);
             }
@@ -172,6 +176,18 @@ class SamsungAvPlayer {
             this.resumeAfterSeek = false;
             this.log.error('seek-failed', { positionMs: bounded, error: errorText(error) });
         });
+    }
+    setVolume(volume) {
+        const control = window.tizen?.tvaudiocontrol;
+        if (!control)
+            return;
+        const bounded = Math.max(0, Math.min(1, Number.isFinite(volume) ? volume : 1));
+        try {
+            control.setVolume(Math.round(bounded * 100));
+        }
+        catch (error) {
+            this.log.warn('volume-set-failed', { volume: bounded, error: errorText(error) });
+        }
     }
     stop() {
         const api = window.webapis?.avplay;
@@ -269,6 +285,15 @@ class SamsungAvPlayer {
 }
 export class SamsungTizenPlatform {
     name = 'tizen';
+    initialVolume() {
+        try {
+            const volume = window.tizen?.tvaudiocontrol?.getVolume();
+            return typeof volume === 'number' ? Math.max(0, Math.min(1, volume / 100)) : undefined;
+        }
+        catch {
+            return undefined;
+        }
+    }
     async capabilities() {
         // Conservative 2017/Tizen 3 baseline. These are native TV decoder
         // capabilities rather than Chromium M47 HTMLMediaElement capabilities.

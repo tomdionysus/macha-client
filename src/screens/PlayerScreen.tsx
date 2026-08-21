@@ -39,6 +39,8 @@ interface Props {
   canPrevious: boolean;
   canNext: boolean;
   queuePosition?: { index: number; total: number };
+  volume: number;
+  onVolumeChange: (volume: number) => void;
 }
 
 function formatTime(ms: number): string {
@@ -51,7 +53,7 @@ function formatTime(ms: number): string {
     : `${minutes}:${String(seconds).padStart(2, '0')}`;
 }
 
-type PlayerIconName = 'back' | 'previous' | 'rewind' | 'pause' | 'forward' | 'next' | 'options' | 'expand' | 'close' | 'fullscreen' | 'fullscreen-exit';
+type PlayerIconName = 'back' | 'previous' | 'rewind' | 'pause' | 'forward' | 'next' | 'options' | 'expand' | 'close' | 'fullscreen' | 'fullscreen-exit' | 'volume' | 'mute';
 
 function PlayerIcon({ name }: { name: PlayerIconName }) {
   const common = {
@@ -86,7 +88,43 @@ function PlayerIcon({ name }: { name: PlayerIconName }) {
       return <svg {...common}><path d="M8.5 4.5h-4v4M15.5 4.5h4v4M8.5 19.5h-4v-4M15.5 19.5h4v-4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>;
     case 'fullscreen-exit':
       return <svg {...common}><path d="M9 4.5v4.5H4.5M15 4.5V9h4.5M9 19.5V15H4.5M15 19.5V15h4.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>;
+    case 'volume':
+      return <svg {...common}><path d="M4 10v4h3l4 3V7l-4 3H4Z" fill="currentColor" /><path d="M14 9.2a4 4 0 0 1 0 5.6M16.6 6.8a7.3 7.3 0 0 1 0 10.4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /></svg>;
+    case 'mute':
+      return <svg {...common}><path d="M4 10v4h3l4 3V7l-4 3H4Z" fill="currentColor" /><path d="m15 9 5 6M20 9l-5 6" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" /></svg>;
   }
+}
+
+function VolumeControl({ volume, onChange, compact = false }: { volume: number; onChange: (volume: number) => void; compact?: boolean }) {
+  const lastAudibleRef = useRef(volume > 0 ? volume : 1);
+  useEffect(() => {
+    if (volume > 0) lastAudibleRef.current = volume;
+  }, [volume]);
+
+  return (
+    <div className={`player-volume-control${compact ? ' compact' : ''}`}>
+      <button
+        type="button"
+        data-tv-focusable="true"
+        aria-label={volume > 0 ? 'Mute' : 'Unmute'}
+        title={volume > 0 ? 'Mute' : 'Unmute'}
+        onClick={() => onChange(volume > 0 ? 0 : lastAudibleRef.current)}
+      >
+        <PlayerIcon name={volume > 0 ? 'volume' : 'mute'} />
+      </button>
+      <input
+        className="player-volume-slider"
+        type="range"
+        min={0}
+        max={1}
+        step={0.05}
+        value={volume}
+        data-tv-focusable="true"
+        aria-label="Volume"
+        onChange={(event: ChangeEvent<HTMLInputElement>) => onChange(Number(event.target.value))}
+      />
+    </div>
+  );
 }
 
 function canPlay(media: MediaSummary): boolean {
@@ -263,7 +301,7 @@ function PlayerOptions({
   );
 }
 
-function PlayerSession({ api, media, platform, playbackResolver, startPositionMs, presentation, onProgress, onPosition, onMinimize, onExpand, onStop, onPrevious, onNext, onEnded, canPrevious, canNext, queuePosition, initialFatalError }: Omit<Props, 'request'> & { media: MediaSummary; startPositionMs: number; initialFatalError?: Error }) {
+function PlayerSession({ api, media, platform, playbackResolver, startPositionMs, presentation, onProgress, onPosition, onMinimize, onExpand, onStop, onPrevious, onNext, onEnded, canPrevious, canNext, queuePosition, volume, onVolumeChange, initialFatalError }: Omit<Props, 'request'> & { media: MediaSummary; startPositionMs: number; initialFatalError?: Error }) {
   const pageRef = useRef<HTMLElement | null>(null);
   const hostRef = useRef<HTMLDivElement | null>(null);
   const chromeRef = useRef<HTMLDivElement | null>(null);
@@ -303,6 +341,10 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
   const [scrubValue, setScrubValue] = useState<number>();
   const backdrop = useArtworkUrl(api, media.artwork?.backdrop ?? media.artwork?.thumbnail ?? media.artwork?.poster);
   const cover = useArtworkUrl(api, media.kind === 'track' ? media.artwork?.poster ?? media.artwork?.thumbnail : undefined);
+
+  useEffect(() => {
+    player.setVolume(volume);
+  }, [player, volume]);
 
   const publish = useCallback((next: PlaybackEvent) => {
     const previous = latestRef.current;
@@ -1056,6 +1098,7 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
           >
             <PlayerIcon name="options" />
           </button>
+          <VolumeControl volume={volume} onChange={onVolumeChange} />
           {platform.name === 'web' && document.fullscreenEnabled && (
             <button
               type="button"
@@ -1090,6 +1133,7 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
           {queuePosition && queuePosition.total > 1 && (
             <button type="button" data-tv-focusable="true" disabled={!canNext || controlBusy} onClick={onNext} aria-label="Next item"><PlayerIcon name="next" /></button>
           )}
+          <VolumeControl volume={volume} onChange={onVolumeChange} compact />
           <button type="button" data-tv-focusable="true" onClick={onExpand} aria-label="Open full player"><PlayerIcon name="expand" /></button>
           <button type="button" data-tv-focusable="true" onClick={onStop} aria-label="Stop playback"><PlayerIcon name="close" /></button>
         </div>

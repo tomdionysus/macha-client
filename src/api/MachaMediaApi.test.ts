@@ -71,6 +71,11 @@ class FakeCatalogue implements CatalogueApi {
         catalogueItem('track-1', 'track', { parent_id: 'album-1', disc_number: 1, track_number: 1, title: 'First', media_ids: ['file:1'] }),
       ]);
     }
+    if (kind === 'track' && parent === undefined) {
+      return Promise.resolve([
+        catalogueItem('track-global', 'track', { parent_id: 'album-1', track_number: 3, title: 'Global Track', media_ids: ['file:3'] }),
+      ]);
+    }
     return Promise.resolve([]);
   }
 }
@@ -116,6 +121,17 @@ describe('MachaMediaApi', () => {
     if (album.kind !== 'album' || !('tracks' in album)) throw new Error('expected album details');
     expect(album.tracks.map((item) => item.id)).toEqual(['track-1', 'track-2']);
     expect(album.tracks[0].subtitle).toBe('Track 1');
+  });
+
+  it('lists tracks directly for the top-level Music tracks grid', async () => {
+    const api = new MachaMediaApi(new FakeCatalogue());
+    const tracks = await api.tracks();
+    expect(tracks).toEqual([expect.objectContaining({
+      id: 'track-global',
+      kind: 'track',
+      parentId: 'album-1',
+      subtitle: 'Track 3',
+    })]);
   });
 
 });

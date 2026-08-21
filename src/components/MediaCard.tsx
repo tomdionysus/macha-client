@@ -1,15 +1,23 @@
-import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { MediaApi } from '../api/MediaApi';
 import { useArtworkUrl } from '../hooks/useArtworkUrl';
 import { routes } from '../routing';
 import type { MediaSummary } from '../types';
+import { OverflowMenu, type OverflowMenuAction } from './OverflowMenu';
+
+export interface MediaCardAction {
+  label: string;
+  onSelect: (item: MediaSummary) => void;
+  disabled?: boolean;
+  destructive?: boolean;
+}
 
 interface Props {
   api: MediaApi;
   item: MediaSummary;
   onOpen: (item: MediaSummary) => void;
   onRemoveFromContinueWatching?: (item: MediaSummary) => void;
+  actions?: readonly MediaCardAction[];
   progress?: number;
   variant?: 'default' | 'continue-watching';
   elementRef?: (element: HTMLButtonElement | null) => void;
@@ -31,69 +39,13 @@ function Poster({ api, item, progress }: Pick<Props, 'api' | 'item' | 'progress'
   );
 }
 
-function ContinueWatchingMenu({ item, onRemove }: { item: MediaSummary; onRemove: (item: MediaSummary) => void }) {
-  const [open, setOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement>(null);
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const removeRef = useRef<HTMLButtonElement>(null);
-
-  useEffect(() => {
-    if (!open) return undefined;
-
-    removeRef.current?.focus();
-
-    const onPointerDown = (event: PointerEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
-    };
-
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
-      event.preventDefault();
-      setOpen(false);
-      void Promise.resolve().then(() => triggerRef.current?.focus());
-    };
-
-    document.addEventListener('pointerdown', onPointerDown);
-    document.addEventListener('keydown', onKeyDown);
-    return () => {
-      document.removeEventListener('pointerdown', onPointerDown);
-      document.removeEventListener('keydown', onKeyDown);
-    };
-  }, [open]);
-
-  return (
-    <div ref={rootRef} className="continue-card-menu">
-      <button
-        ref={triggerRef}
-        type="button"
-        className="continue-card-menu-trigger"
-        data-tv-focusable="true"
-        aria-label={`More options for ${item.title}`}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        onClick={() => setOpen((value) => !value)}
-      >
-        <span aria-hidden="true">⋯</span>
-      </button>
-      {open && (
-        <div className="continue-card-menu-popover" role="menu">
-          <button
-            ref={removeRef}
-            type="button"
-            role="menuitem"
-            data-tv-focusable="true"
-            onClick={() => {
-              setOpen(false);
-              onRemove(item);
-            }}
-            aria-label={`Remove ${item.title} from Continue Watching`}
-          >
-            Remove
-          </button>
-        </div>
-      )}
-    </div>
-  );
+function actionItems(item: MediaSummary, actions: readonly MediaCardAction[]): OverflowMenuAction[] {
+  return actions.map((action) => ({
+    label: action.label,
+    disabled: action.disabled,
+    destructive: action.destructive,
+    onSelect: () => action.onSelect(item),
+  }));
 }
 
 function ContinueWatchingEpisodeCard({ api, item, onOpen, onRemoveFromContinueWatching, progress, elementRef }: Props) {
@@ -103,6 +55,9 @@ function ContinueWatchingEpisodeCard({ api, item, onOpen, onRemoveFromContinueWa
   const seasonLabel = item.subtitle
     ? `${context.season.title} · ${item.subtitle}`
     : context.season.title;
+  const actions: MediaCardAction[] = onRemoveFromContinueWatching
+    ? [{ label: 'Remove', onSelect: onRemoveFromContinueWatching, destructive: true }]
+    : [];
 
   return (
     <article className="media-card media-card-episode continue-card">
@@ -133,12 +88,22 @@ function ContinueWatchingEpisodeCard({ api, item, onOpen, onRemoveFromContinueWa
           {seasonLabel}
         </Link>
       </div>
-      {onRemoveFromContinueWatching && <ContinueWatchingMenu item={item} onRemove={onRemoveFromContinueWatching} />}
+      {actions.length > 0 && (
+        <OverflowMenu
+          className="card-overflow-menu"
+          label={`More options for ${item.title}`}
+          actions={actionItems(item, actions)}
+        />
+      )}
     </article>
   );
 }
 
 function ContinueWatchingCard({ api, item, onOpen, onRemoveFromContinueWatching, progress, elementRef }: Props) {
+  const actions: MediaCardAction[] = onRemoveFromContinueWatching
+    ? [{ label: 'Remove', onSelect: onRemoveFromContinueWatching, destructive: true }]
+    : [];
+
   return (
     <article className={`media-card media-card-${item.kind} continue-card`}>
       <button
@@ -153,12 +118,42 @@ function ContinueWatchingCard({ api, item, onOpen, onRemoveFromContinueWatching,
         <span className="card-title">{item.title}</span>
         {(item.subtitle || item.year) && <span className="card-subtitle">{item.subtitle ?? item.year}</span>}
       </button>
-      {onRemoveFromContinueWatching && <ContinueWatchingMenu item={item} onRemove={onRemoveFromContinueWatching} />}
+      {actions.length > 0 && (
+        <OverflowMenu
+          className="card-overflow-menu"
+          label={`More options for ${item.title}`}
+          actions={actionItems(item, actions)}
+        />
+      )}
     </article>
   );
 }
 
-export function MediaCard({ api, item, onOpen, onRemoveFromContinueWatching, progress, variant = 'default', elementRef }: Props) {
+function ActionableMediaCard({ api, item, onOpen, actions = [], progress, elementRef }: Props) {
+  return (
+    <article className={`media-card media-card-${item.kind} continue-card media-card-actionable`}>
+      <button
+        type="button"
+        ref={elementRef}
+        className="continue-card-open"
+        data-tv-focusable="true"
+        onClick={() => onOpen(item)}
+        aria-label={`Play ${item.title} now`}
+      >
+        <Poster api={api} item={item} progress={progress} />
+        <span className="card-title">{item.title}</span>
+        {(item.subtitle || item.year) && <span className="card-subtitle">{item.subtitle ?? item.year}</span>}
+      </button>
+      <OverflowMenu
+        className="card-overflow-menu"
+        label={`More options for ${item.title}`}
+        actions={actionItems(item, actions)}
+      />
+    </article>
+  );
+}
+
+export function MediaCard({ api, item, onOpen, onRemoveFromContinueWatching, actions, progress, variant = 'default', elementRef }: Props) {
   if (variant === 'continue-watching') {
     if (item.kind === 'episode') {
       return (
@@ -182,6 +177,19 @@ export function MediaCard({ api, item, onOpen, onRemoveFromContinueWatching, pro
         onRemoveFromContinueWatching={onRemoveFromContinueWatching}
         progress={progress}
         variant={variant}
+        elementRef={elementRef}
+      />
+    );
+  }
+
+  if (actions?.length) {
+    return (
+      <ActionableMediaCard
+        api={api}
+        item={item}
+        onOpen={onOpen}
+        actions={actions}
+        progress={progress}
         elementRef={elementRef}
       />
     );

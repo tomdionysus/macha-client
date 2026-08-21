@@ -48,6 +48,10 @@ export class MachaMediaApi implements MediaApi {
     return (await this.catalogue.list('album')).map((item) => this.media(item));
   }
 
+  async tracks(): Promise<MediaSummary[]> {
+    return (await this.catalogue.list('track')).map((item) => this.media(item));
+  }
+
   async details(id: string): Promise<MediaDetails> {
     const item = await this.catalogue.get(id);
 

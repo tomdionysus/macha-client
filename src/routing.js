@@ -8,6 +8,10 @@ export const routes = {
     season: (showId, seasonId) => `/series/${segment(showId)}/seasons/${segment(seasonId)}`,
     episode: (id) => `/episodes/${segment(id)}`,
     music: '/music',
+    musicArtists: '/music/artists',
+    musicAlbums: '/music/albums',
+    musicTracks: '/music/tracks',
+    musicPlaylist: '/music/playlist',
     artist: (id) => `/music/artists/${segment(id)}`,
     album: (id) => `/music/albums/${segment(id)}`,
     track: (id) => `/music/tracks/${segment(id)}`,
@@ -16,6 +20,7 @@ export const routes = {
     item: (id) => `/items/${segment(id)}`,
     edit: (id) => `/items/${segment(id)}/edit`,
     search: '/search',
+    ingest: '/ingest',
     settings: '/settings',
     sponsor: '/sponsor',
 };

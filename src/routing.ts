@@ -18,6 +18,10 @@ export const routes = {
   season: (showId: string, seasonId: string) => `/series/${segment(showId)}/seasons/${segment(seasonId)}`,
   episode: (id: string) => `/episodes/${segment(id)}`,
   music: '/music',
+  musicArtists: '/music/artists',
+  musicAlbums: '/music/albums',
+  musicTracks: '/music/tracks',
+  musicPlaylist: '/music/playlist',
   artist: (id: string) => `/music/artists/${segment(id)}`,
   album: (id: string) => `/music/albums/${segment(id)}`,
   track: (id: string) => `/music/tracks/${segment(id)}`,
@@ -26,6 +30,7 @@ export const routes = {
   item: (id: string) => `/items/${segment(id)}`,
   edit: (id: string) => `/items/${segment(id)}/edit`,
   search: '/search',
+  ingest: '/ingest',
   settings: '/settings',
   sponsor: '/sponsor',
 } as const;

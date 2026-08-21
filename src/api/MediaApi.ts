@@ -9,6 +9,7 @@ export interface MediaApi {
   shows(): Promise<MediaSummary[]>;
   artists(): Promise<MediaSummary[]>;
   albums(): Promise<MediaSummary[]>;
+  tracks(): Promise<MediaSummary[]>;
   details(id: string): Promise<MediaDetails>;
   search(query: string): Promise<MediaSummary[]>;
   artwork(ref: ArtworkRef): Promise<Blob>;

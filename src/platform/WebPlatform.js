@@ -126,6 +126,7 @@ class WebPlayer {
     subtitleGeneration = 0;
     subtitleCleanup;
     subtitleTextTrack;
+    volume = 1;
     attach(host) {
         this.host = host;
         this.log.debug('attach');
@@ -168,6 +169,7 @@ class WebPlayer {
             video.playsInline = true;
             video.preload = 'auto';
             video.crossOrigin = 'anonymous';
+            video.volume = this.volume;
             this.attachMediaDiagnostics(video);
             const publish = () => this.publish(video);
             video.addEventListener('timeupdate', publish);
@@ -518,6 +520,11 @@ class WebPlayer {
         }
         this.log.info('local-seek-request', { positionMs, state: videoState(this.video) });
         this.video.currentTime = Math.max(0, positionMs / 1000);
+    }
+    setVolume(volume) {
+        this.volume = Math.max(0, Math.min(1, Number.isFinite(volume) ? volume : 1));
+        if (this.video)
+            this.video.volume = this.volume;
     }
     stop() {
         this.log.debug('stop', this.video ? videoState(this.video) : undefined);

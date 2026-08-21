@@ -12,6 +12,11 @@ describe('routes', () => {
         expect(routes.movie('movie:one')).toBe('/movies/movie%3Aone');
         expect(routes.show('show:one')).toBe('/series/show%3Aone');
         expect(routes.season('show:one', 'season:1')).toBe('/series/show%3Aone/seasons/season%3A1');
+        expect(routes.musicArtists).toBe('/music/artists');
+        expect(routes.musicAlbums).toBe('/music/albums');
+        expect(routes.musicTracks).toBe('/music/tracks');
+        expect(routes.musicPlaylist).toBe('/music/playlist');
+        expect(routes.ingest).toBe('/ingest');
         expect(routes.artist('artist:one')).toBe('/music/artists/artist%3Aone');
         expect(routes.album('album:one')).toBe('/music/albums/album%3Aone');
         expect(routes.track('track:one')).toBe('/music/tracks/track%3Aone');

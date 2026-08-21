@@ -40,6 +40,24 @@ describe('PlaybackQueueStore', () => {
         expect(next?.currentIndex).toBe(1);
         expect(next?.items.map((item) => item.id)).toEqual(['one', 'two']);
     });
+    it('inserts items after the current item without disturbing playback position', () => {
+        const storage = new MemoryStorage();
+        const store = new PlaybackQueueStore('client', storage);
+        store.replace([track('one'), track('two')], 0);
+        store.updatePosition(12_000);
+        const next = store.insertNext([track('next-a'), track('next-b')]);
+        expect(next?.items.map((item) => item.id)).toEqual(['one', 'next-a', 'next-b', 'two']);
+        expect(next?.currentIndex).toBe(0);
+        expect(next?.positionMs).toBe(12_000);
+    });
+    it('appends items to the active queue without changing the current item', () => {
+        const storage = new MemoryStorage();
+        const store = new PlaybackQueueStore('client', storage);
+        store.replace([track('one'), track('two')], 1);
+        const next = store.append([track('later')]);
+        expect(next?.items.map((item) => item.id)).toEqual(['one', 'two', 'later']);
+        expect(next?.currentIndex).toBe(1);
+    });
     it('discards malformed persisted state', () => {
         const storage = new MemoryStorage();
         storage.setItem('macha.playbackQueue.v1.client', '{"items":[],"currentIndex":99}');

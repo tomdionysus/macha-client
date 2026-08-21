@@ -24,6 +24,11 @@ interface SamsungAvPlayListener {
   onresourceconflicted?(): void;
 }
 
+interface SamsungAudioControlApi {
+  getVolume(): number;
+  setVolume(volume: number): void;
+}
+
 interface SamsungAvPlayApi {
   open(url: string): void;
   close(): void;
@@ -51,6 +56,9 @@ declare global {
   interface Window {
     webapis?: {
       avplay?: SamsungAvPlayApi;
+    };
+    tizen?: {
+      tvaudiocontrol?: SamsungAudioControlApi;
     };
   }
 }
@@ -245,6 +253,17 @@ class SamsungAvPlayer implements Player {
     );
   }
 
+  setVolume(volume: number): void {
+    const control = window.tizen?.tvaudiocontrol;
+    if (!control) return;
+    const bounded = Math.max(0, Math.min(1, Number.isFinite(volume) ? volume : 1));
+    try {
+      control.setVolume(Math.round(bounded * 100));
+    } catch (error) {
+      this.log.warn('volume-set-failed', { volume: bounded, error: errorText(error) });
+    }
+  }
+
   stop(): void {
     const api = window.webapis?.avplay;
     if (api) this.resetNativePlayer(api);
@@ -345,6 +364,15 @@ class SamsungAvPlayer implements Player {
 
 export class SamsungTizenPlatform implements Platform {
   readonly name = 'tizen' as const;
+
+  initialVolume(): number | undefined {
+    try {
+      const volume = window.tizen?.tvaudiocontrol?.getVolume();
+      return typeof volume === 'number' ? Math.max(0, Math.min(1, volume / 100)) : undefined;
+    } catch {
+      return undefined;
+    }
+  }
 
   async capabilities(): Promise<PlaybackCapabilities> {
     // Conservative 2017/Tizen 3 baseline. These are native TV decoder

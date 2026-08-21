@@ -1,38 +1,70 @@
 import { useMemo } from 'react';
 import type { MediaApi } from '../api/MediaApi';
 import { AlphabetIndex } from '../components/AlphabetIndex';
+import { MediaCard, type MediaCardAction } from '../components/MediaCard';
+import { MusicNav } from '../components/MusicNav';
 import { ErrorMessage, Loading } from '../components/Status';
-import { MediaRow } from '../components/MediaRow';
 import { useAlphabetIndex } from '../hooks/useAlphabetIndex';
 import { useAsync } from '../hooks/useAsync';
 import { sortMediaByIndexedTitle } from '../titleIndex';
 import type { MediaSummary } from '../types';
 
+export type MusicSection = 'artists' | 'albums' | 'tracks';
+
 interface Props {
   api: MediaApi;
+  section: MusicSection;
   onOpen: (item: MediaSummary) => void;
+  onPlayNow: (item: MediaSummary) => void;
+  onAddToPlaylist: (item: MediaSummary) => void;
+  onPlayNext: (item: MediaSummary) => void;
+  onPlayLater: (item: MediaSummary) => void;
+  onShuffle: (item: MediaSummary) => void;
 }
 
-export function MusicScreen({ api, onOpen }: Props) {
-  const music = useAsync(async () => {
-    const [artists, albums] = await Promise.all([api.artists(), api.albums()]);
-    return { artists, albums };
-  }, [api]);
+function titleFor(section: MusicSection): string {
+  if (section === 'artists') return 'Artists';
+  if (section === 'albums') return 'Albums';
+  return 'Tracks';
+}
 
-  const artists = useMemo(() => sortMediaByIndexedTitle(music.value?.artists ?? []), [music.value?.artists]);
-  const albums = useMemo(() => sortMediaByIndexedTitle(music.value?.albums ?? []), [music.value?.albums]);
-  const indexedItems = useMemo(() => [...artists, ...albums], [artists, albums]);
-  const alphabet = useAlphabetIndex(indexedItems);
+export function MusicScreen({ api, section, onOpen, onPlayNow, onAddToPlaylist, onPlayNext, onPlayLater, onShuffle }: Props) {
+  const result = useAsync(() => {
+    if (section === 'artists') return api.artists();
+    if (section === 'albums') return api.albums();
+    return api.tracks();
+  }, [api, section]);
+  const items = useMemo(() => sortMediaByIndexedTitle(result.value ?? []), [result.value]);
+  const alphabet = useAlphabetIndex(items);
 
-  if (music.loading) return <Loading />;
-  if (music.error) return <ErrorMessage error={music.error} />;
-  if (!music.value) return null;
+  if (result.loading) return <Loading />;
+  if (result.error) return <ErrorMessage error={result.error} />;
+
+  const actions: MediaCardAction[] = section === 'artists' ? [] : [
+    { label: section === 'albums' ? 'Add album to playlist' : 'Add track to playlist', onSelect: onAddToPlaylist },
+    ...(section === 'albums' ? [{ label: 'Shuffle', onSelect: onShuffle }] : []),
+    { label: 'Play next', onSelect: onPlayNext },
+    { label: 'Play later', onSelect: onPlayLater },
+    { label: section === 'albums' ? 'View album' : 'View track', onSelect: onOpen },
+  ];
 
   return (
-    <section className="catalogue-indexed">
+    <section className="catalogue-indexed music-browser">
       <h1>Music</h1>
-      <MediaRow api={api} title="Artists" items={artists} onOpen={onOpen} itemRef={alphabet.registerItem} />
-      <MediaRow api={api} title="Albums" items={albums} onOpen={onOpen} itemRef={alphabet.registerItem} />
+      <MusicNav />
+      <h2 className="music-browser-heading">{titleFor(section)}</h2>
+      <div className="media-grid">
+        {items.map((item) => (
+          <MediaCard
+            key={item.id}
+            api={api}
+            item={item}
+            onOpen={section === 'tracks' ? onPlayNow : onOpen}
+            actions={actions}
+            elementRef={(element) => alphabet.registerItem(item.id, element)}
+          />
+        ))}
+      </div>
       <AlphabetIndex availableKeys={alphabet.availableKeys} onSelect={alphabet.jumpTo} />
     </section>
   );

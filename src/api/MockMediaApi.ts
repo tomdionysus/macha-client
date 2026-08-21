@@ -163,6 +163,10 @@ export class MockMediaApi implements MediaApi {
     return albums;
   }
 
+  async tracks(): Promise<MediaSummary[]> {
+    return album.tracks;
+  }
+
   async details(id: string): Promise<MediaDetails> {
     if (id === show.id) return show;
     if (id === season.id) return season;

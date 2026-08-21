@@ -10,6 +10,7 @@ export interface Player {
   pause(): void;
   resume(): void;
   seek(positionMs: number): void;
+  setVolume(volume: number): void;
   /** Replace the subtitle resource without touching active A/V playback. */
   setSubtitle?(subtitleUrl?: string): Promise<void> | void;
   stop(): void;
@@ -18,6 +19,8 @@ export interface Player {
 
 export interface Platform {
   readonly name: 'web' | 'android' | 'tizen';
+  /** Native/system volume when the platform owns audio volume, otherwise undefined. */
+  initialVolume?(): number | undefined;
   capabilities(): Promise<PlaybackCapabilities>;
   createPlayer(): Player;
   exitApplication?(): void;

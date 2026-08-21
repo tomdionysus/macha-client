@@ -1,5 +1,5 @@
 import type { MediaApi } from '../api/MediaApi';
-import { MediaRow } from '../components/MediaRow';
+import { MediaCard, type MediaCardAction } from '../components/MediaCard';
 import { ErrorMessage, Loading } from '../components/Status';
 import { useArtworkUrl } from '../hooks/useArtworkUrl';
 import { useAsync } from '../hooks/useAsync';
@@ -11,10 +11,14 @@ interface Props {
   artistId: string;
   onBack: () => void;
   onOpenAlbum: (album: MediaSummary) => void;
+  onAddToPlaylist: (album: MediaSummary) => void;
+  onPlayNext: (album: MediaSummary) => void;
+  onPlayLater: (album: MediaSummary) => void;
+  onShuffle: (album: MediaSummary) => void;
   onEdit?: () => void;
 }
 
-export function ArtistScreen({ api, artistId, onBack, onOpenAlbum, onEdit }: Props) {
+export function ArtistScreen({ api, artistId, onBack, onOpenAlbum, onAddToPlaylist, onPlayNext, onPlayLater, onShuffle, onEdit }: Props) {
   const details = useAsync(() => api.details(artistId), [api, artistId]);
   const artist = details.value?.kind === 'artist' && 'albums' in details.value
     ? details.value as ArtistDetails
@@ -25,6 +29,14 @@ export function ArtistScreen({ api, artistId, onBack, onOpenAlbum, onEdit }: Pro
   if (details.error) return <ErrorMessage error={details.error} />;
   if (!artist) return <ErrorMessage error={new Error('Catalogue item is not an artist.')} />;
 
+  const albumActions: MediaCardAction[] = [
+    { label: 'Add album to playlist', onSelect: onAddToPlaylist },
+    { label: 'Shuffle', onSelect: onShuffle },
+    { label: 'Play next', onSelect: onPlayNext },
+    { label: 'Play later', onSelect: onPlayLater },
+    { label: 'View album', onSelect: onOpenAlbum },
+  ];
+
   return (
     <section className="detail music-detail">
       {backdrop && <div className="detail-backdrop" style={{ backgroundImage: `url(${JSON.stringify(backdrop)})` }} />}
@@ -34,7 +46,18 @@ export function ArtistScreen({ api, artistId, onBack, onOpenAlbum, onEdit }: Pro
         <p className="eyebrow">Artist</p>
         <h1>{artist.title}</h1>
         {artist.synopsis && <p className="synopsis">{artist.synopsis}</p>}
-        <MediaRow api={api} title="Albums" items={artist.albums} onOpen={onOpenAlbum} />
+        <h2>Albums</h2>
+        <div className="media-grid">
+          {artist.albums.map((album) => (
+            <MediaCard
+              key={album.id}
+              api={api}
+              item={album}
+              onOpen={onOpenAlbum}
+              actions={albumActions}
+            />
+          ))}
+        </div>
       </div>
     </section>
   );

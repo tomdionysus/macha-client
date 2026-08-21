@@ -53,8 +53,8 @@ h2 { font-size: 24px; }
 .media-card { width: 190px; flex: 0 0 190px; }
 .poster { width: 100%; height: 285px; }
 .music-artwork, .media-card-album .poster, .media-card-artist .poster, .media-card-track .poster { height: 190px; }
-.continue-card-menu { height: 285px; }
-.media-card-album .continue-card-menu, .media-card-artist .continue-card-menu, .media-card-track .continue-card-menu { height: 190px; }
+.card-overflow-menu { height: 285px; }
+.media-card-album .card-overflow-menu, .media-card-artist .card-overflow-menu, .media-card-track .card-overflow-menu { height: 190px; }
 .continue-card-context { display: block; }
 .continue-card-context-link { width: auto; }
 
@@ -62,7 +62,7 @@ h2 { font-size: 24px; }
 .alphabet-index-button { font-size: 11px; }
 
 .poster-placeholder, .movie-detail-poster-placeholder, .episode-still-placeholder,
-.loading-overlay, .audio-player-placeholder, .player-fatal-error, .continue-card-menu-trigger,
+.loading-overlay, .audio-player-placeholder, .player-fatal-error, .overflow-menu-trigger,
 .episode-play-action, .player-button-row button, .media-control-button, .player-mini-controls button,
 .status-screen { display: flex; align-items: center; justify-content: center; }
 
@@ -78,9 +78,16 @@ h2 { font-size: 24px; }
 .album-header { display: flex; align-items: flex-end; }
 .album-cover { width: 280px; height: 280px; flex: 0 0 280px; margin-right: 42px; }
 .track-list { display: block; }
-.track-row { display: flex; align-items: center; }
+.music-subnav, .playlist-heading-row, .playlist-actions { display: flex; }
+.track-row, .track-row-open { display: flex; align-items: center; }
+.track-row-open { flex: 1 1 auto; }
 .track-number, .track-action { width: 48px; flex: 0 0 48px; }
 .track-title, .track-copy { flex: 1 1 auto; }
+.playlist-track-row { display: flex; align-items: center; }
+.playlist-drag-handle, .playlist-remove, .playlist-track-number { flex: 0 0 auto; }
+.playlist-artwork { width: 50px; height: 50px; flex: 0 0 50px; margin: 0 10px; }
+.playlist-track-copy { flex: 1 1 auto; min-width: 0; }
+.player-volume-control { display: flex; align-items: center; }
 
 .settings { width: 900px; max-width: 100%; }
 .settings-line { display: flex; }
@@ -92,6 +99,22 @@ h2 { font-size: 24px; }
 .settings-status-card { flex: 1 1 0; margin-right: 16px; }
 .settings-status-card dl { display: block; }
 .settings-status-card dl > div { display: flex; justify-content: space-between; }
+
+.ingest-header { display: flex; align-items: flex-end; justify-content: space-between; }
+.ingest-header > div:first-child { flex: 1 1 auto; }
+.ingest-staging-summary { width: 360px; flex: 0 0 360px; margin-left: 24px; }
+.ingest-submit-grid { display: flex; }
+.ingest-submit-card { flex: 1 1 0; margin-right: 16px; }
+.ingest-submit-card:last-child { margin-right: 0; }
+.ingest-submit-line { display: flex; }
+.ingest-submit-line input { flex: 1 1 auto; margin-right: 10px; }
+.ingest-submit-line button { flex: 0 0 auto; }
+.ingest-job-heading { display: flex; justify-content: space-between; }
+.ingest-job-stats { display: flex; flex-wrap: wrap; }
+.ingest-job-stats > div { width: 16.66%; flex: 0 0 16.66%; padding-right: 12px; }
+.ingest-job-stats-import > div { width: 33.33%; flex-basis: 33.33%; }
+.ingest-job-actions { display: flex; justify-content: flex-end; }
+.ingest-job-actions button { margin-left: 8px; }
 .sponsor-heading { display: flex; align-items: center; }
 .sponsor-logo { width: 180px; height: 180px; flex: 0 0 180px; margin-right: 42px; }
 .sponsor-options { display: flex; }
@@ -215,6 +238,8 @@ function samsungManifest(version: string): Plugin {
 
     <tizen:privilege
         name="http://tizen.org/privilege/internet"/>
+    <tizen:privilege
+        name="http://tizen.org/privilege/tv.audio"/>
 
     <access origin="http://10.44.1.50:7438" subdomains="false"/>
 </widget>

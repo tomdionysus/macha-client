@@ -84,6 +84,35 @@ export class PlaybackQueueStore {
     return next;
   }
 
+  insertNext(items: MediaSummary[]): PlaybackQueueState | undefined {
+    const additions = items.filter(playable);
+    if (additions.length === 0) return this.load();
+    const current = this.load();
+    if (!current) return this.replace(additions, 0);
+    const insertAt = current.currentIndex + 1;
+    const next: PlaybackQueueState = {
+      ...current,
+      items: [...current.items.slice(0, insertAt), ...additions, ...current.items.slice(insertAt)],
+      updatedAt: Date.now(),
+    };
+    this.storage.setItem(this.key, JSON.stringify(next));
+    return next;
+  }
+
+  append(items: MediaSummary[]): PlaybackQueueState | undefined {
+    const additions = items.filter(playable);
+    if (additions.length === 0) return this.load();
+    const current = this.load();
+    if (!current) return this.replace(additions, 0);
+    const next: PlaybackQueueState = {
+      ...current,
+      items: [...current.items, ...additions],
+      updatedAt: Date.now(),
+    };
+    this.storage.setItem(this.key, JSON.stringify(next));
+    return next;
+  }
+
   clear(): void {
     this.storage.removeItem(this.key);
   }

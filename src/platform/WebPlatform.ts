@@ -146,6 +146,7 @@ class WebPlayer implements Player {
   private subtitleGeneration = 0;
   private subtitleCleanup?: () => void;
   private subtitleTextTrack?: TextTrack;
+  private volume = 1;
 
   attach(host: HTMLElement): void {
     this.host = host;
@@ -190,6 +191,7 @@ class WebPlayer implements Player {
       video.playsInline = true;
       video.preload = 'auto';
       video.crossOrigin = 'anonymous';
+      video.volume = this.volume;
       this.attachMediaDiagnostics(video);
 
       const publish = () => this.publish(video!);
@@ -541,6 +543,11 @@ class WebPlayer implements Player {
     }
     this.log.info('local-seek-request', { positionMs, state: videoState(this.video) });
     this.video.currentTime = Math.max(0, positionMs / 1000);
+  }
+
+  setVolume(volume: number): void {
+    this.volume = Math.max(0, Math.min(1, Number.isFinite(volume) ? volume : 1));
+    if (this.video) this.video.volume = this.volume;
   }
 
   stop(): void {
