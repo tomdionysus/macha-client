@@ -4,6 +4,7 @@ import { ErrorMessage, Loading } from '../components/Status';
 import { useArtworkUrl } from '../hooks/useArtworkUrl';
 import { useAsync } from '../hooks/useAsync';
 import type { Episode, PlaybackProgress, SeasonDetails, ShowDetails } from '../types';
+import { EditButton } from '../components/EditButton';
 
 interface Props {
   api: MediaApi;
@@ -12,9 +13,10 @@ interface Props {
   onBack: () => void;
   progress: Map<string, PlaybackProgress>;
   onPlayEpisode: (episode: Episode, queue: Episode[], queueIndex: number, fromStart: boolean) => void;
+  onEdit?: () => void;
 }
 
-export function SeasonScreen({ api, seriesId, seasonId, onBack, progress, onPlayEpisode }: Props) {
+export function SeasonScreen({ api, seriesId, seasonId, onBack, progress, onPlayEpisode, onEdit }: Props) {
   const result = useAsync(async () => {
     const [seriesResult, seasonResult] = await Promise.all([api.details(seriesId), api.details(seasonId)]);
     if (seriesResult.kind !== 'show' || !('seasons' in seriesResult)) throw new Error('Parent catalogue item is not a series.');
@@ -42,6 +44,7 @@ export function SeasonScreen({ api, seriesId, seasonId, onBack, progress, onPlay
       {backdrop && <div className="detail-backdrop season-backdrop" style={{ backgroundImage: `url(${JSON.stringify(backdrop)})` }} />}
       <div className="detail-content season-content">
         <button className="back-button" data-tv-focusable="true" onClick={onBack} type="button">← Back</button>
+        {onEdit && <EditButton onClick={onEdit} />}
         <h1>{series.title}</h1>
         <p className="eyebrow">{season.title || `Season ${season.seasonNumber}`}</p>
         {season.synopsis && <p className="synopsis">{season.synopsis}</p>}

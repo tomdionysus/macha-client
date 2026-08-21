@@ -4,15 +4,17 @@ import { ErrorMessage, Loading } from '../components/Status';
 import { useArtworkUrl } from '../hooks/useArtworkUrl';
 import { useAsync } from '../hooks/useAsync';
 import type { ArtistDetails, MediaSummary } from '../types';
+import { EditButton } from '../components/EditButton';
 
 interface Props {
   api: MediaApi;
   artistId: string;
   onBack: () => void;
   onOpenAlbum: (album: MediaSummary) => void;
+  onEdit?: () => void;
 }
 
-export function ArtistScreen({ api, artistId, onBack, onOpenAlbum }: Props) {
+export function ArtistScreen({ api, artistId, onBack, onOpenAlbum, onEdit }: Props) {
   const details = useAsync(() => api.details(artistId), [api, artistId]);
   const artist = details.value?.kind === 'artist' && 'albums' in details.value
     ? details.value as ArtistDetails
@@ -28,6 +30,7 @@ export function ArtistScreen({ api, artistId, onBack, onOpenAlbum }: Props) {
       {backdrop && <div className="detail-backdrop" style={{ backgroundImage: `url(${JSON.stringify(backdrop)})` }} />}
       <div className="detail-content series-content">
         <button className="back-button" data-tv-focusable="true" onClick={onBack} type="button">← Music</button>
+        {onEdit && <EditButton onClick={onEdit} />}
         <p className="eyebrow">Artist</p>
         <h1>{artist.title}</h1>
         {artist.synopsis && <p className="synopsis">{artist.synopsis}</p>}

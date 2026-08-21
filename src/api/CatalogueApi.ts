@@ -50,6 +50,8 @@ export interface CatalogueApi {
   status(): Promise<CatalogueStatus>;
   list(kind?: CatalogueKind, parent?: string): Promise<CatalogueItem[]>;
   get(id: string): Promise<CatalogueItem>;
+  update(item: CatalogueItem, expectedRevision?: number): Promise<CatalogueItem>;
+  clearMetadata(id: string, expectedRevision?: number): Promise<void>;
   search(query: string, limit?: number): Promise<CatalogueItem[]>;
   artwork(id: string): Promise<Blob>;
 }

@@ -54,6 +54,17 @@ describe('MachaCatalogueApi', () => {
         expect(url).toBe('http://node.test/api/v1/catalogue/artwork/abcd');
         expect(new Headers(init.headers).get('Authorization')).toBe('Bearer secret');
     });
+    it('clears catalogue metadata with optimistic revision protection', async () => {
+        const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+        vi.stubGlobal('fetch', fetchMock);
+        const api = new MachaCatalogueApi('http://node.test', 'secret');
+        await api.clearMetadata('show:black-books', 7);
+        const [url, init] = fetchMock.mock.calls[0];
+        expect(url).toBe('http://node.test/api/v1/catalogue/items/show%3Ablack-books/metadata');
+        expect(init.method).toBe('DELETE');
+        expect(new Headers(init.headers).get('If-Match')).toBe('"rev-7"');
+        expect(new Headers(init.headers).get('Authorization')).toBe('Bearer secret');
+    });
     it('surfaces Macha JSON errors', async () => {
         vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ error: 'catalogue_unavailable', message: 'catalogue root object unavailable' }, { status: 503 })));
         const api = new MachaCatalogueApi('');
@@ -74,5 +85,4 @@ describe('MachaCatalogueApi', () => {
         const api = new MachaCatalogueApi('');
         await expect(api.status()).rejects.toThrow('Macha catalogue request failed: catalogue exploded');
     });
-
 });

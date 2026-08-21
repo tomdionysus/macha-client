@@ -35,6 +35,24 @@ export class MachaCatalogueApi {
     get(id) {
         return this.getJson(`/api/v1/catalogue/items/${encodeURIComponent(id)}`);
     }
+    update(item, expectedRevision = item.revision) {
+        return this.request(`/api/v1/catalogue/items/${encodeURIComponent(item.id)}`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                'If-Match': `"rev-${expectedRevision}"`,
+            },
+            body: JSON.stringify(item),
+        });
+    }
+    clearMetadata(id, expectedRevision) {
+        return this.request(`/api/v1/catalogue/items/${encodeURIComponent(id)}/metadata`, {
+            method: 'DELETE',
+            headers: expectedRevision === undefined ? undefined : {
+                'If-Match': `"rev-${expectedRevision}"`,
+            },
+        });
+    }
     async search(query, limit = 50) {
         const params = queryString([['q', query], ['limit', String(limit)]]);
         const response = await this.getJson(`/api/v1/catalogue/search?${params}`);

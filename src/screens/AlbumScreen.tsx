@@ -3,15 +3,17 @@ import { ErrorMessage, Loading } from '../components/Status';
 import { useArtworkUrl } from '../hooks/useArtworkUrl';
 import { useAsync } from '../hooks/useAsync';
 import type { AlbumDetails, MediaSummary } from '../types';
+import { EditButton } from '../components/EditButton';
 
 interface Props {
   api: MediaApi;
   albumId: string;
   onBack: () => void;
   onPlayTrack: (track: MediaSummary, queue: MediaSummary[], queueIndex: number) => void;
+  onEdit?: () => void;
 }
 
-export function AlbumScreen({ api, albumId, onBack, onPlayTrack }: Props) {
+export function AlbumScreen({ api, albumId, onBack, onPlayTrack, onEdit }: Props) {
   const details = useAsync(() => api.details(albumId), [api, albumId]);
   const album = details.value?.kind === 'album' && 'tracks' in details.value
     ? details.value as AlbumDetails
@@ -25,6 +27,7 @@ export function AlbumScreen({ api, albumId, onBack, onPlayTrack }: Props) {
   return (
     <section className="album-page">
       <button className="back-button" data-tv-focusable="true" onClick={onBack} type="button">← Music</button>
+      {onEdit && <EditButton onClick={onEdit} />}
       <div className="album-header">
         <div className="album-cover">
           {cover ? <img src={cover} alt="" /> : <div className="poster-placeholder">{album.title.slice(0, 1)}</div>}

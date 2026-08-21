@@ -3,7 +3,8 @@ import { EpisodeRail } from '../components/EpisodeRail';
 import { ErrorMessage, Loading } from '../components/Status';
 import { useArtworkUrl } from '../hooks/useArtworkUrl';
 import { useAsync } from '../hooks/useAsync';
-export function SeasonScreen({ api, seriesId, seasonId, onBack, progress, onPlayEpisode }) {
+import { EditButton } from '../components/EditButton';
+export function SeasonScreen({ api, seriesId, seasonId, onBack, progress, onPlayEpisode, onEdit }) {
     const result = useAsync(async () => {
         const [seriesResult, seasonResult] = await Promise.all([api.details(seriesId), api.details(seasonId)]);
         if (seriesResult.kind !== 'show' || !('seasons' in seriesResult))
@@ -29,5 +30,5 @@ export function SeasonScreen({ api, seriesId, seasonId, onBack, progress, onPlay
         return _jsx(ErrorMessage, { error: result.error });
     if (!season || !series)
         return null;
-    return (_jsxs("section", { className: "detail season-detail", children: [backdrop && _jsx("div", { className: "detail-backdrop season-backdrop", style: { backgroundImage: `url(${JSON.stringify(backdrop)})` } }), _jsxs("div", { className: "detail-content season-content", children: [_jsx("button", { className: "back-button", "data-tv-focusable": "true", onClick: onBack, type: "button", children: "\u2190 Back" }), _jsx("h1", { children: series.title }), _jsx("p", { className: "eyebrow", children: season.title || `Season ${season.seasonNumber}` }), season.synopsis && _jsx("p", { className: "synopsis", children: season.synopsis }), _jsxs("section", { className: "episode-section", children: [_jsx("h2", { children: "Episodes" }), _jsx(EpisodeRail, { api: api, episodes: season.episodes, progress: progress, series: series, season: season, onPlayEpisode: onPlayEpisode })] })] })] }));
+    return (_jsxs("section", { className: "detail season-detail", children: [backdrop && _jsx("div", { className: "detail-backdrop season-backdrop", style: { backgroundImage: `url(${JSON.stringify(backdrop)})` } }), _jsxs("div", { className: "detail-content season-content", children: [_jsx("button", { className: "back-button", "data-tv-focusable": "true", onClick: onBack, type: "button", children: "\u2190 Back" }), onEdit && _jsx(EditButton, { onClick: onEdit }), _jsx("h1", { children: series.title }), _jsx("p", { className: "eyebrow", children: season.title || `Season ${season.seasonNumber}` }), season.synopsis && _jsx("p", { className: "synopsis", children: season.synopsis }), _jsxs("section", { className: "episode-section", children: [_jsx("h2", { children: "Episodes" }), _jsx(EpisodeRail, { api: api, episodes: season.episodes, progress: progress, series: series, season: season, onPlayEpisode: onPlayEpisode })] })] })] }));
 }

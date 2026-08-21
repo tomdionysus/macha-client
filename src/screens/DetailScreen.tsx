@@ -4,6 +4,7 @@ import type { MediaDetails, MediaSummary, PlaybackProgress } from '../types';
 import { useAsync } from '../hooks/useAsync';
 import { ErrorMessage, Loading } from '../components/Status';
 import { useArtworkUrl } from '../hooks/useArtworkUrl';
+import { EditButton } from '../components/EditButton';
 
 interface Props {
   api: MediaApi;
@@ -12,6 +13,7 @@ interface Props {
   onPlay: (item: MediaSummary) => void;
   onPlayFromStart: (item: MediaSummary) => void;
   progress?: PlaybackProgress;
+  onEdit?: () => void;
 }
 
 function canPlayDirectly(details: MediaDetails): boolean {
@@ -23,7 +25,7 @@ function canResume(media: MediaSummary, progress?: PlaybackProgress): boolean {
     && Boolean(progress && progress.positionMs > 0 && progress.durationMs > 0);
 }
 
-export function DetailScreen({ api, itemId, onBack, onPlay, onPlayFromStart, progress }: Props) {
+export function DetailScreen({ api, itemId, onBack, onPlay, onPlayFromStart, progress, onEdit }: Props) {
   const details = useAsync(() => api.details(itemId), [api, itemId]);
   const backdrop = useArtworkUrl(api, details.value?.artwork?.backdrop ?? details.value?.artwork?.poster ?? details.value?.artwork?.thumbnail);
   const poster = useArtworkUrl(api, details.value?.kind === 'movie' ? details.value.artwork?.poster : undefined);
@@ -75,6 +77,7 @@ export function DetailScreen({ api, itemId, onBack, onPlay, onPlayFromStart, pro
       {backdrop && <div className="detail-backdrop" style={{ backgroundImage: `url(${JSON.stringify(backdrop)})` }} />}
       <div className="detail-content">
         <button className="back-button" data-tv-focusable="true" onClick={onBack} type="button">← Back</button>
+        {onEdit && <EditButton onClick={onEdit} />}
         {media.kind === 'movie' ? (
           <div className={`movie-detail-layout ${poster ? 'has-poster' : ''}`}>
             <div className="movie-detail-poster" aria-hidden="true">

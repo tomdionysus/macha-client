@@ -24,6 +24,8 @@ function catalogueItem(id, kind, partial = {}) {
 }
 class FakeCatalogue {
     status() { throw new Error('not used'); }
+    update(item) { return Promise.resolve(item); }
+    clearMetadata() { return Promise.resolve(); }
     artwork(id) { return Promise.resolve(new Blob([id])); }
     search() { return Promise.resolve([]); }
     get(id) {

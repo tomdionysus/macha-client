@@ -14,6 +14,7 @@ export const routes = {
     player: (id) => `/play/${segment(id)}`,
     playerFromStart: (id) => `/play/${segment(id)}?start=0`,
     item: (id) => `/items/${segment(id)}`,
+    edit: (id) => `/items/${segment(id)}/edit`,
     search: '/search',
     settings: '/settings',
     sponsor: '/sponsor',

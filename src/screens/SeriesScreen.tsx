@@ -4,15 +4,17 @@ import { ErrorMessage, Loading } from '../components/Status';
 import { useArtworkUrl } from '../hooks/useArtworkUrl';
 import { useAsync } from '../hooks/useAsync';
 import type { SeasonSummary, ShowDetails } from '../types';
+import { EditButton } from '../components/EditButton';
 
 interface Props {
   api: MediaApi;
   seriesId: string;
   onBack: () => void;
   onOpenSeason: (season: SeasonSummary) => void;
+  onEdit?: () => void;
 }
 
-export function SeriesScreen({ api, seriesId, onBack, onOpenSeason }: Props) {
+export function SeriesScreen({ api, seriesId, onBack, onOpenSeason, onEdit }: Props) {
   const details = useAsync(() => api.details(seriesId), [api, seriesId]);
   const show = details.value?.kind === 'show' && 'seasons' in details.value ? details.value as ShowDetails : undefined;
   const backdrop = useArtworkUrl(api, show?.artwork?.backdrop ?? show?.artwork?.poster);
@@ -26,6 +28,7 @@ export function SeriesScreen({ api, seriesId, onBack, onOpenSeason }: Props) {
       {backdrop && <div className="detail-backdrop" style={{ backgroundImage: `url(${JSON.stringify(backdrop)})` }} />}
       <div className="detail-content series-content">
         <button className="back-button" data-tv-focusable="true" onClick={onBack} type="button">← Back</button>
+        {onEdit && <EditButton onClick={onEdit} />}
         <p className="eyebrow">TV Series{show.year ? ` · ${show.year}` : ''}</p>
         <h1>{show.title}</h1>
         {show.synopsis && <p className="synopsis">{show.synopsis}</p>}

@@ -2,6 +2,8 @@
 
 ## 0.5.2
 
+- add unobtrusive per-entity metadata editing for movies, series, seasons, episodes, artists, albums and tracks, including editable descriptive fields and preferred artwork selection when multiple stored images exist for a role;
+- add Clear Metadata as a destructive reset that removes the catalogue match so the underlying media can be catalogued again;
 - preserve the active subtitle stream explicitly across server-backed seek generations so a seek cannot silently reset subtitle selection to Off;
 - prevent the `/play/...` route restoration effect from resurrecting a playback session that the user explicitly closed, so the close button tears the player down instead of leaving it running as the mini-player.
 

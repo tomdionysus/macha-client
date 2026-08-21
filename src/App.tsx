@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Navigate, NavLink, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { MachaCatalogueApi } from './api/MachaCatalogueApi';
+import type { CatalogueApi } from './api/CatalogueApi';
 import { MachaMediaApi } from './api/MachaMediaApi';
 import { MockMediaApi } from './api/MockMediaApi';
 import type { MediaApi } from './api/MediaApi';
@@ -36,6 +37,7 @@ import { AlbumScreen } from './screens/AlbumScreen';
 import { PlayerHost, type PlayerHostRequest } from './screens/PlayerScreen';
 import { SettingsScreen } from './screens/SettingsScreen';
 import { SponsorScreen } from './screens/SponsorScreen';
+import { MetadataEditorScreen } from './screens/MetadataEditorScreen';
 import { pathForMedia, routes, type PlaybackRouteState } from './routing';
 
 interface Props {
@@ -78,12 +80,13 @@ function playerRouteItemId(pathname: string): string | undefined {
   }
 }
 
-function DetailRoute({ api, onPlay, onPlayFromStart, progressById, parameter }: {
+function DetailRoute({ api, onPlay, onPlayFromStart, progressById, parameter, onEdit }: {
   api: MediaApi;
   onPlay: (item: MediaSummary) => void;
   onPlayFromStart: (item: MediaSummary) => void;
   progressById: Map<string, PlaybackProgress>;
   parameter: 'movieId' | 'episodeId' | 'trackId' | 'itemId';
+  onEdit?: (id: string) => void;
 }) {
   const params = useParams();
   const navigate = useNavigate();
@@ -96,68 +99,100 @@ function DetailRoute({ api, onPlay, onPlayFromStart, progressById, parameter }: 
       onPlay={onPlay}
       onPlayFromStart={onPlayFromStart}
       progress={progressById.get(itemId)}
+      onEdit={onEdit ? () => onEdit(itemId) : undefined}
     />
   );
 }
 
-function SeriesRoute({ api, onOpenSeason }: { api: MediaApi; onOpenSeason: (season: SeasonSummary) => void }) {
+function SeriesRoute({ api, onOpenSeason, onEdit }: { api: MediaApi; onOpenSeason: (season: SeasonSummary) => void; onEdit?: (id: string) => void }) {
   const { seriesId } = useParams();
   const navigate = useNavigate();
+  const resolvedSeriesId = required(seriesId, 'seriesId');
   return (
     <SeriesScreen
       api={api}
-      seriesId={required(seriesId, 'seriesId')}
+      seriesId={resolvedSeriesId}
       onBack={() => navigate(-1)}
       onOpenSeason={onOpenSeason}
+      onEdit={onEdit ? () => onEdit(resolvedSeriesId) : undefined}
     />
   );
 }
 
-function SeasonRoute({ api, progress, onPlayEpisode }: {
+function SeasonRoute({ api, progress, onPlayEpisode, onEdit }: {
   api: MediaApi;
   progress: Map<string, PlaybackProgress>;
   onPlayEpisode: (episode: Episode, queue: Episode[], queueIndex: number, fromStart: boolean) => void;
+  onEdit?: (id: string) => void;
 }) {
   const { seriesId, seasonId } = useParams();
   const navigate = useNavigate();
   const resolvedSeriesId = required(seriesId, 'seriesId');
+  const resolvedSeasonId = required(seasonId, 'seasonId');
   return (
     <SeasonScreen
       api={api}
       seriesId={resolvedSeriesId}
-      seasonId={required(seasonId, 'seasonId')}
+      seasonId={resolvedSeasonId}
       onBack={() => navigate(-1)}
       progress={progress}
       onPlayEpisode={onPlayEpisode}
+      onEdit={onEdit ? () => onEdit(resolvedSeasonId) : undefined}
     />
   );
 }
 
-function ArtistRoute({ api, onOpenAlbum }: { api: MediaApi; onOpenAlbum: (album: MediaSummary) => void }) {
+function ArtistRoute({ api, onOpenAlbum, onEdit }: { api: MediaApi; onOpenAlbum: (album: MediaSummary) => void; onEdit?: (id: string) => void }) {
   const { artistId } = useParams();
   const navigate = useNavigate();
+  const resolvedArtistId = required(artistId, 'artistId');
   return (
     <ArtistScreen
       api={api}
-      artistId={required(artistId, 'artistId')}
+      artistId={resolvedArtistId}
       onBack={() => navigate(routes.music)}
       onOpenAlbum={onOpenAlbum}
+      onEdit={onEdit ? () => onEdit(resolvedArtistId) : undefined}
     />
   );
 }
 
-function AlbumRoute({ api, onPlay }: {
+function AlbumRoute({ api, onPlay, onEdit }: {
   api: MediaApi;
   onPlay: (track: MediaSummary, queue: MediaSummary[], queueIndex: number) => void;
+  onEdit?: (id: string) => void;
 }) {
   const { albumId } = useParams();
   const navigate = useNavigate();
+  const resolvedAlbumId = required(albumId, 'albumId');
   return (
     <AlbumScreen
       api={api}
-      albumId={required(albumId, 'albumId')}
+      albumId={resolvedAlbumId}
       onBack={() => navigate(-1)}
       onPlayTrack={onPlay}
+      onEdit={onEdit ? () => onEdit(resolvedAlbumId) : undefined}
+    />
+  );
+}
+
+function MetadataEditorRoute({ api }: { api: CatalogueApi }) {
+  const { itemId } = useParams();
+  const navigate = useNavigate();
+  return (
+    <MetadataEditorScreen
+      api={api}
+      itemId={required(itemId, 'itemId')}
+      onBack={() => navigate(-1)}
+      onSaved={() => navigate(-1)}
+      onCleared={(item) => {
+        const destination = item.kind === 'movie'
+          ? routes.movies
+          : (item.kind === 'show' || item.kind === 'season' || item.kind === 'episode')
+            ? routes.series
+            : routes.music;
+        navigate(destination, { replace: true });
+      }}
     />
   );
 }
@@ -182,12 +217,14 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
     progressStore.list().filter((entry) => !needsEpisodeContextMigration(entry))
   ));
   const demo = import.meta.env.VITE_DEMO === 'true';
+  const catalogueApi = useMemo(() => new MachaCatalogueApi(serverUrl, apiToken), [apiToken, serverUrl]);
+  const metadataEditingAvailable = !demo && !apiOverride;
 
   const api = useMemo<MediaApi>(() => {
     if (apiOverride) return apiOverride;
     if (demo) return new MockMediaApi();
-    return new MachaMediaApi(new MachaCatalogueApi(serverUrl, apiToken));
-  }, [apiOverride, apiToken, demo, serverUrl]);
+    return new MachaMediaApi(catalogueApi);
+  }, [apiOverride, catalogueApi, demo]);
 
   const playbackResolver = useMemo<PlaybackResolver>(() => {
     if (playbackOverride) return playbackOverride;
@@ -440,6 +477,10 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
     navigate(routes.home, { replace: true });
   }, [navigate]);
 
+  const openMetadataEditor = useCallback((id: string) => {
+    navigate(routes.edit(id));
+  }, [navigate]);
+
   const miniPlayerActive = Boolean(activePlayback && !playerRouteActive);
 
   return (
@@ -469,17 +510,18 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
         <Routes>
           <Route path={routes.home} element={<HomeScreen api={api} continueWatching={continueWatching} onOpen={open} onResume={openPlayer} onRemoveFromContinueWatching={removeFromContinueWatching} />} />
           <Route path={routes.movies} element={<LibraryScreen api={api} kind="movies" onOpen={open} />} />
-          <Route path="/movies/:movieId" element={<DetailRoute api={api} onPlay={openPlayer} onPlayFromStart={openPlayerFromStart} progressById={progressById} parameter="movieId" />} />
+          <Route path="/movies/:movieId" element={<DetailRoute api={api} onPlay={openPlayer} onPlayFromStart={openPlayerFromStart} progressById={progressById} parameter="movieId" onEdit={metadataEditingAvailable ? openMetadataEditor : undefined} />} />
           <Route path={routes.series} element={<LibraryScreen api={api} kind="shows" onOpen={open} />} />
-          <Route path="/series/:seriesId" element={<SeriesRoute api={api} onOpenSeason={open} />} />
-          <Route path="/series/:seriesId/seasons/:seasonId" element={<SeasonRoute api={api} progress={progressById} onPlayEpisode={openSeasonEpisode} />} />
-          <Route path="/episodes/:episodeId" element={<DetailRoute api={api} onPlay={openPlayer} onPlayFromStart={openPlayerFromStart} progressById={progressById} parameter="episodeId" />} />
+          <Route path="/series/:seriesId" element={<SeriesRoute api={api} onOpenSeason={open} onEdit={metadataEditingAvailable ? openMetadataEditor : undefined} />} />
+          <Route path="/series/:seriesId/seasons/:seasonId" element={<SeasonRoute api={api} progress={progressById} onPlayEpisode={openSeasonEpisode} onEdit={metadataEditingAvailable ? openMetadataEditor : undefined} />} />
+          <Route path="/episodes/:episodeId" element={<DetailRoute api={api} onPlay={openPlayer} onPlayFromStart={openPlayerFromStart} progressById={progressById} parameter="episodeId" onEdit={metadataEditingAvailable ? openMetadataEditor : undefined} />} />
           <Route path={routes.music} element={<MusicScreen api={api} onOpen={open} />} />
-          <Route path="/music/artists/:artistId" element={<ArtistRoute api={api} onOpenAlbum={open} />} />
-          <Route path="/music/albums/:albumId" element={<AlbumRoute api={api} onPlay={openAlbumTrack} />} />
-          <Route path="/music/tracks/:trackId" element={<DetailRoute api={api} onPlay={openPlayer} onPlayFromStart={openPlayerFromStart} progressById={progressById} parameter="trackId" />} />
+          <Route path="/music/artists/:artistId" element={<ArtistRoute api={api} onOpenAlbum={open} onEdit={metadataEditingAvailable ? openMetadataEditor : undefined} />} />
+          <Route path="/music/albums/:albumId" element={<AlbumRoute api={api} onPlay={openAlbumTrack} onEdit={metadataEditingAvailable ? openMetadataEditor : undefined} />} />
+          <Route path="/music/tracks/:trackId" element={<DetailRoute api={api} onPlay={openPlayer} onPlayFromStart={openPlayerFromStart} progressById={progressById} parameter="trackId" onEdit={metadataEditingAvailable ? openMetadataEditor : undefined} />} />
           <Route path="/play/:itemId" element={<div className="player-route-placeholder" aria-hidden="true" />} />
-          <Route path="/items/:itemId" element={<DetailRoute api={api} onPlay={openPlayer} onPlayFromStart={openPlayerFromStart} progressById={progressById} parameter="itemId" />} />
+          <Route path="/items/:itemId" element={<DetailRoute api={api} onPlay={openPlayer} onPlayFromStart={openPlayerFromStart} progressById={progressById} parameter="itemId" onEdit={metadataEditingAvailable ? openMetadataEditor : undefined} />} />
+          <Route path="/items/:itemId/edit" element={metadataEditingAvailable ? <MetadataEditorRoute api={catalogueApi} /> : <Navigate to={routes.home} replace />} />
           <Route path={routes.search} element={<SearchScreen api={api} onOpen={open} />} />
           <Route path={routes.settings} element={<SettingsScreen api={api} serverApi={serverApi} serverUrl={serverUrl} apiToken={apiToken} connectionNotice={connectionNotice} onSave={saveServer} />} />
           <Route path={routes.sponsor} element={<SponsorScreen />} />

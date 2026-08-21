@@ -53,6 +53,26 @@ export class MachaCatalogueApi implements CatalogueApi {
     return this.getJson(`/api/v1/catalogue/items/${encodeURIComponent(id)}`);
   }
 
+  update(item: CatalogueItem, expectedRevision = item.revision): Promise<CatalogueItem> {
+    return this.request(`/api/v1/catalogue/items/${encodeURIComponent(item.id)}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'If-Match': `"rev-${expectedRevision}"`,
+      },
+      body: JSON.stringify(item),
+    });
+  }
+
+  clearMetadata(id: string, expectedRevision?: number): Promise<void> {
+    return this.request(`/api/v1/catalogue/items/${encodeURIComponent(id)}/metadata`, {
+      method: 'DELETE',
+      headers: expectedRevision === undefined ? undefined : {
+        'If-Match': `"rev-${expectedRevision}"`,
+      },
+    });
+  }
+
   async search(query: string, limit = 50): Promise<CatalogueItem[]> {
     const params = queryString([['q', query], ['limit', String(limit)]]);
     const response = await this.getJson<ItemEnvelope>(`/api/v1/catalogue/search?${params}`);
