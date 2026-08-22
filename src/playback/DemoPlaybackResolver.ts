@@ -5,7 +5,7 @@ export class DemoPlaybackResolver implements PlaybackResolver {
   readonly available = true;
   private current?: PlaybackSession;
 
-  async resolve(media: MediaSummary, _capabilities: PlaybackCapabilities): Promise<PlaybackSession> {
+  async resolve(media: MediaSummary, capabilities: PlaybackCapabilities): Promise<PlaybackSession> {
     this.current = {
       sessionId: `demo-${media.id}`,
       itemId: media.id,
@@ -21,7 +21,7 @@ export class DemoPlaybackResolver implements PlaybackResolver {
       durationMs: media.durationMs ?? 0,
       seekMs: 0,
       preferences: {
-        mode: 'auto',
+        mode: capabilities.platform === 'tizen' ? 'direct' : 'auto',
         maxHeight: null,
         maxBitrate: null,
         audioStream: null,

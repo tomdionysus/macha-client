@@ -4,6 +4,8 @@ import type { MediaDetails, MediaSummary, PlaybackProgress } from '../types';
 import { useAsync } from '../hooks/useAsync';
 import { ErrorMessage, Loading } from '../components/Status';
 import { useArtworkUrl } from '../hooks/useArtworkUrl';
+import { requestTvDefaultFocus } from '../hooks/useTvNavigation';
+import { useEffect } from 'react';
 import { EditButton } from '../components/EditButton';
 
 interface Props {
@@ -29,6 +31,9 @@ export function DetailScreen({ api, itemId, onBack, onPlay, onPlayFromStart, pro
   const details = useAsync(() => api.details(itemId), [api, itemId]);
   const backdrop = useArtworkUrl(api, details.value?.artwork?.backdrop ?? details.value?.artwork?.poster ?? details.value?.artwork?.thumbnail);
   const poster = useArtworkUrl(api, details.value?.kind === 'movie' ? details.value.artwork?.poster : undefined);
+  useEffect(() => {
+    if (details.value && (details.value.kind === 'movie' || details.value.kind === 'episode' || details.value.kind === 'track')) requestTvDefaultFocus();
+  }, [details.value]);
   if (details.loading) return <Loading />;
   if (details.error) return <ErrorMessage error={details.error} />;
   if (!details.value) return null;
@@ -48,6 +53,7 @@ export function DetailScreen({ api, itemId, onBack, onPlay, onPlayFromStart, pro
           <button
             className="media-control-button"
             data-tv-focusable="true"
+            data-tv-default-focus={import.meta.env.MODE === 'samsung' ? 'true' : undefined}
             onClick={() => onPlay(media)}
             type="button"
             aria-label={resumable ? 'Resume playback' : 'Play'}

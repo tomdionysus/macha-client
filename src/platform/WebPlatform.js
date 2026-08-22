@@ -115,6 +115,7 @@ function hlsEventSummary(value) {
 }
 let webPlayerSequence = 0;
 class WebPlayer {
+    options;
     host;
     video;
     hls;
@@ -129,6 +130,10 @@ class WebPlayer {
     subtitleTextTrack;
     volume = 1;
     directReadAheadSourceUrl;
+    wantsPlayback = false;
+    constructor(options = {}) {
+        this.options = options;
+    }
     attach(host) {
         this.host = host;
         this.log.debug('attach');
@@ -174,12 +179,34 @@ class WebPlayer {
             video.preload = 'auto';
             video.crossOrigin = 'anonymous';
             video.volume = this.volume;
+            if (this.options.legacyMediaElement) {
+                video.muted = false;
+                video.defaultMuted = false;
+                video.removeAttribute('muted');
+                video.setAttribute('autoplay', 'autoplay');
+                video.setAttribute('preload', 'auto');
+            }
             this.attachMediaDiagnostics(video);
             const publish = () => this.publish(video);
             video.addEventListener('timeupdate', publish);
             video.addEventListener('pause', publish);
             video.addEventListener('play', publish);
+            video.addEventListener('playing', publish);
+            video.addEventListener('waiting', publish);
+            video.addEventListener('seeking', publish);
+            video.addEventListener('seeked', publish);
+            video.addEventListener('canplay', publish);
             video.addEventListener('ended', publish);
+            if (this.options.legacyMediaElement) {
+                const resumeWhenReady = () => {
+                    if (!this.wantsPlayback || !video.paused)
+                        return;
+                    this.requestLegacyPlay(video, 'media-ready');
+                };
+                video.addEventListener('loadedmetadata', resumeWhenReady);
+                video.addEventListener('loadeddata', resumeWhenReady);
+                video.addEventListener('canplay', resumeWhenReady);
+            }
             video.addEventListener('loadedmetadata', () => {
                 const requestedPositionMs = this.pendingInitialPositionMs;
                 if (requestedPositionMs > 0) {
@@ -198,7 +225,7 @@ class WebPlayer {
             this.log.warn('subtitle-initial-load-failed', { url: source.subtitleUrl, error: error instanceof Error ? error.message : String(error) });
         });
         if (isHls(source)) {
-            if (nativeHlsSupported(video)) {
+            if (this.options.forceNativeHls || nativeHlsSupported(video)) {
                 this.log.info('hls-native-selected', { url: source.url });
                 video.src = source.url;
             }
@@ -212,7 +239,9 @@ class WebPlayer {
             }
         }
         else {
-            const directUrl = source.mode === 'direct' ? await directPlayReadAheadUrl(source) : source.url;
+            const directUrl = source.mode === 'direct' && this.options.directPlayReadAhead !== false
+                ? await directPlayReadAheadUrl(source)
+                : source.url;
             if (directUrl !== source.url)
                 this.directReadAheadSourceUrl = source.url;
             this.log.info('direct-source-selected', {
@@ -223,6 +252,21 @@ class WebPlayer {
             video.src = directUrl;
         }
         const playStarted = performance.now();
+        this.wantsPlayback = true;
+        if (this.options.legacyMediaElement) {
+            // Chrome 47 predates the standardized Promise-returning play(). Setting
+            // autoplay before the source and issuing play explicitly gives the TV
+            // both mechanisms; readiness events retry the request if it was early.
+            video.muted = false;
+            video.defaultMuted = false;
+            video.removeAttribute('muted');
+            this.requestLegacyPlay(video, 'source-ready');
+            this.log.info('autoplay-requested-legacy', {
+                elapsedMs: Math.round((performance.now() - playStarted) * 10) / 10,
+                state: videoState(video),
+            });
+            return true;
+        }
         try {
             await video.play();
             this.log.info('autoplay-started', {
@@ -511,6 +555,7 @@ class WebPlayer {
     }
     pause() {
         this.log.info('pause-request', this.video ? videoState(this.video) : undefined);
+        this.wantsPlayback = false;
         this.video?.pause();
     }
     resume() {
@@ -520,9 +565,30 @@ class WebPlayer {
             return;
         }
         this.log.info('resume-request', videoState(video));
+        this.wantsPlayback = true;
+        if (this.options.legacyMediaElement) {
+            this.requestLegacyPlay(video, 'resume');
+            return;
+        }
         void video.play()
             .then(() => this.log.info('resume-started', videoState(video)))
             .catch((error) => this.log.error('resume-failed', { error, state: videoState(video) }));
+    }
+    requestLegacyPlay(video, reason) {
+        try {
+            const result = video.play();
+            if (result && typeof result.then === 'function') {
+                void result
+                    .then(() => this.log.info('legacy-play-started', { reason, state: videoState(video) }))
+                    .catch((error) => this.log.warn('legacy-play-deferred', { reason, error, state: videoState(video) }));
+            }
+            else {
+                this.log.debug('legacy-play-requested', { reason, state: videoState(video) });
+            }
+        }
+        catch (error) {
+            this.log.warn('legacy-play-request-failed', { reason, error, state: videoState(video) });
+        }
     }
     seek(positionMs) {
         if (!this.video) {
@@ -534,10 +600,17 @@ class WebPlayer {
     }
     setVolume(volume) {
         this.volume = Math.max(0, Math.min(1, Number.isFinite(volume) ? volume : 1));
-        if (this.video)
+        if (this.video) {
             this.video.volume = this.volume;
+            if (this.options.legacyMediaElement && this.volume > 0) {
+                this.video.muted = false;
+                this.video.defaultMuted = false;
+                this.video.removeAttribute('muted');
+            }
+        }
     }
     stop() {
+        this.wantsPlayback = false;
         this.log.debug('stop', this.video ? videoState(this.video) : undefined);
         this.hls?.destroy();
         this.hls = undefined;
@@ -660,6 +733,10 @@ class WebPlayer {
             durationMs: duration,
             paused: video.paused,
             ended: video.ended,
+            seeking: video.seeking,
+            buffering: !video.paused
+                && !video.ended
+                && (video.seeking || video.readyState < HTMLMediaElement.HAVE_FUTURE_DATA),
         };
         this.listeners.forEach((listener) => listener(event));
     }
@@ -672,8 +749,12 @@ function supportedMime(media, mime) {
         && MediaSource.isTypeSupported(mime);
 }
 export class WebPlatform {
+    playerOptions;
     name = 'web';
     log = createClientLogger('playback.capabilities');
+    constructor(playerOptions = {}) {
+        this.playerOptions = playerOptions;
+    }
     async capabilities() {
         const video = document.createElement('video');
         const probe = (mime) => supportedMime(video, mime);
@@ -701,6 +782,6 @@ export class WebPlatform {
         return capabilities;
     }
     createPlayer() {
-        return new WebPlayer();
+        return new WebPlayer(this.playerOptions);
     }
 }

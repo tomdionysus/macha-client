@@ -108,11 +108,31 @@ describe('MachaPlaybackResolver', () => {
     expect(session.sourceInfo).toEqual(expect.objectContaining({ path: '/Movies/Test.mkv', format: 'matroska,webm', bitrate: 8_000_000 }));
     expect(session.sourceInfo.streams[0]).toEqual(expect.objectContaining({ index: 0, codec: 'h264', width: 1920, height: 1080, bitrate: 3_700_000 }));
     expect(session.output.video).toEqual(expect.objectContaining({ sourceStream: 0, transform: 'copy', codec: 'h264' }));
+    expect(session.options.modes).toEqual(['direct', 'remux', 'transcode']);
     expect(session.options.qualityHeights).toEqual([720, 480, 360]);
     expect(session.options.audioStreams[0]).toEqual(expect.objectContaining({ index: 1, language: 'eng', channels: 2, bitrate: 192_000 }));
   });
 
 
+
+  it('prefers Direct on Samsung while Web remains Auto', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(sessionResponse(), 201));
+    vi.stubGlobal('fetch', fetchMock);
+    const resolver = new MachaPlaybackResolver('http://node.test', 'secret');
+
+    await resolver.resolve(media, { ...capabilities, platform: 'tizen' });
+    const [, samsungInit] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(String(samsungInit.body))).toEqual(expect.objectContaining({
+      preferences: { mode: 'direct' },
+    }));
+
+    fetchMock.mockClear();
+    await resolver.resolve(media, capabilities);
+    const [, webInit] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(String(webInit.body))).toEqual(expect.objectContaining({
+      preferences: { mode: 'auto' },
+    }));
+  });
 
   it('only sends decoder resolution limits when the platform explicitly reports them', async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse(sessionResponse(), 201));
@@ -175,6 +195,34 @@ describe('MachaPlaybackResolver', () => {
     expect(JSON.parse(String(init.body))).toEqual({
       preferences: { subtitle_stream: 5, subtitle_language: '' },
     });
+  });
+
+  it('sends an explicit Direct preference even when the server options omitted Direct', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(sessionResponse({
+      mode: 'direct',
+      preferences: {
+        mode: 'direct', max_height: null, max_bitrate: null,
+        audio_stream: null, subtitle_stream: null, audio_language: '', subtitle_language: '',
+      },
+      stream: {
+        mime_type: 'video/x-matroska',
+        url: '/api/v1/playback/stream/session-1/direct',
+        subtitle_url: null,
+      },
+      options: {
+        ...sessionResponse().options,
+        modes: ['remux', 'transcode'],
+      },
+    })));
+    vi.stubGlobal('fetch', fetchMock);
+    const resolver = new MachaPlaybackResolver('http://node.test', 'secret');
+
+    const session = await resolver.update('session-1', { preferences: { mode: 'direct' } });
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(String(init.body))).toEqual({ preferences: { mode: 'direct' } });
+    expect(session.preferences.mode).toBe('direct');
+    expect(session.mode).toBe('direct');
   });
 
   it('maps PATCH controls to the server field names', async () => {

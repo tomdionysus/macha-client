@@ -1,5 +1,51 @@
 # Changelog
 
+## 0.6.7
+
+- always expose Direct next to Auto in playback mode controls on Web and Samsung, regardless of capability-derived server mode options;
+- treat an explicit Direct selection as a user override and send `preferences.mode = direct` even when Direct was omitted from `options.modes`;
+- continue deriving Remux and Transcode availability from the server.
+
+## 0.6.6
+
+- remove the in-app volume control from Samsung builds and keep the HTML media element at unity volume, leaving TV volume/mute to the remote and platform;
+- make the full-player progress bar display-only on Samsung so D-pad navigation cannot select or scrub it;
+- force Samsung HTML5 HLS playback through the TV's native HLS path instead of hls.js/MSE on Chromium 47, reducing client-side playback work and restoring the platform AAC audio path;
+- exclude the real hls.js implementation from Samsung bundles while keeping normal Web HLS probing and hls.js fallback unchanged.
+
+## 0.6.5
+
+- remove Samsung AVPlay from the active Tizen build and restore the shared HTML5/Web playback path;
+- constrain Samsung playback negotiation to H.264 + AAC in MP4/fMP4/HLS at up to 1920x1080, with no DASH/HDR/native-only codec claims;
+- preserve automatic playback intent on Chromium 47, including legacy `HTMLMediaElement.play()` runtimes where `play()` does not return a Promise;
+- add an explicit Samsung D-pad input adapter with old key-name/keyCode handling, repeat suppression, visibility-aware focus targets and row/column-biased spatial navigation;
+- keep the Samsung mini-player at the existing 76 px height, including its video preview, instead of allowing the legacy full-player rules to expand it over the screen;
+- reduce Samsung-only UI cost by disabling animation/transitions, expensive blur/shadow effects and verbose playback diagnostics;
+- keep the normal Web build, capability probing, navigation and diagnostics behaviour unchanged.
+
+## 0.6.4
+
+- fix the Samsung/Tizen 3 compatibility stylesheet overriding the 76 px minimised player into a full-screen fixed layer;
+- preserve the minimised player geometry explicitly on Samsung: 76 px total height, 132 px video preview, and the mini controls occupying the remainder of the same bar.
+
+## 0.6.3
+
+- introduce an explicit Web Direct Play desired seek position so repeated/held skip input accumulates from the latest user target instead of stale media-element time;
+- coalesce Direct Play media-element seek mutations to a bounded cadence while keeping the progress UI on the latest desired target and preserving the three-second delayed spinner semantics;
+- make seek-only session updates preserve active subtitle selection/language and subtitle resource continuity so Direct Play and transformed seeks cannot implicitly clear subtitles.
+
+## 0.6.2
+
+- make Web full-player Left/Right arrow keys seek backward/forward by 10 seconds, without stealing arrow-key input from sliders, text controls, or modified browser shortcuts;
+- delay seek spinner feedback until a seek has remained unresolved for three seconds, avoiding loading flashes for fast seeks and Direct Play read-ahead cache hits;
+- track Web Direct Play seeking/buffering state so a slow optimistic seek shows the spinner after the grace period and clears it only once the media element has actually resumed (or resolved a paused seek).
+
+## 0.6.1
+
+- make Web Direct Play seeking optimistic: move the browser immediately without waiting for playback-session mutation or forcing a pause/resume cycle;
+- asynchronously synchronize Web Direct Play seek position back to the server with a short latest-wins debounce and serialized PATCHes, preventing rapid scrubbing from racing older session updates;
+- keep remux/transcode and native Android/Tizen seek behaviour unchanged, and discard queued Web Direct Play seek mutations when another representation/session update supersedes them.
+
 ## 0.6.0
 
 - add a Web-only Direct Play rolling read-ahead cache implemented as a transparent Service Worker byte-range proxy, preserving native browser demux/decoder behaviour for containers such as Matroska;

@@ -49,5 +49,4 @@ describe('MachaServerApi', () => {
         vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('connect ECONNREFUSED', { status: 500 })));
         await expect(new MachaServerApi('').status()).rejects.toThrow('The Macha server cannot be reached.');
     });
-
 });

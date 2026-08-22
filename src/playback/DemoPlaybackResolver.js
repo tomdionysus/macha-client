@@ -1,7 +1,7 @@
 export class DemoPlaybackResolver {
     available = true;
     current;
-    async resolve(media, _capabilities) {
+    async resolve(media, capabilities) {
         this.current = {
             sessionId: `demo-${media.id}`,
             itemId: media.id,
@@ -17,7 +17,7 @@ export class DemoPlaybackResolver {
             durationMs: media.durationMs ?? 0,
             seekMs: 0,
             preferences: {
-                mode: 'auto',
+                mode: capabilities.platform === 'tizen' ? 'direct' : 'auto',
                 maxHeight: null,
                 maxBitrate: null,
                 audioStream: null,

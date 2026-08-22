@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-TV_SERIAL="${TV_SERIAL:-10.44.1.177:26101}"
+TV_SERIAL="${TV_SERIAL:-10.44.1.183:26101}"
 CERT_PROFILE="${CERT_PROFILE:-macha-tv-samsung}"
 APP_ID="macha00001.Macha"
 

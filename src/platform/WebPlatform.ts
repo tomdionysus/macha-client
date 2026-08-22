@@ -138,6 +138,15 @@ function hlsEventSummary(value: unknown): Record<string, unknown> {
 
 let webPlayerSequence = 0;
 
+export interface WebPlayerOptions {
+  /** Disable the Web-only Service Worker read-ahead path for constrained runtimes. */
+  directPlayReadAhead?: boolean;
+  /** Chromium 47 compatibility: play() may not return a Promise. */
+  legacyMediaElement?: boolean;
+  /** Samsung TV: bypass Chromium's MIME probe and use the platform HLS path. */
+  forceNativeHls?: boolean;
+}
+
 class WebPlayer implements Player {
   private host?: HTMLElement;
   private video?: HTMLVideoElement;
@@ -153,6 +162,9 @@ class WebPlayer implements Player {
   private subtitleTextTrack?: TextTrack;
   private volume = 1;
   private directReadAheadSourceUrl?: string;
+  private wantsPlayback = false;
+
+  constructor(private readonly options: WebPlayerOptions = {}) {}
 
   attach(host: HTMLElement): void {
     this.host = host;
@@ -200,13 +212,34 @@ class WebPlayer implements Player {
       video.preload = 'auto';
       video.crossOrigin = 'anonymous';
       video.volume = this.volume;
+      if (this.options.legacyMediaElement) {
+        video.muted = false;
+        video.defaultMuted = false;
+        video.removeAttribute('muted');
+        video.setAttribute('autoplay', 'autoplay');
+        video.setAttribute('preload', 'auto');
+      }
       this.attachMediaDiagnostics(video);
 
       const publish = () => this.publish(video!);
       video.addEventListener('timeupdate', publish);
       video.addEventListener('pause', publish);
       video.addEventListener('play', publish);
+      video.addEventListener('playing', publish);
+      video.addEventListener('waiting', publish);
+      video.addEventListener('seeking', publish);
+      video.addEventListener('seeked', publish);
+      video.addEventListener('canplay', publish);
       video.addEventListener('ended', publish);
+      if (this.options.legacyMediaElement) {
+        const resumeWhenReady = () => {
+          if (!this.wantsPlayback || !video!.paused) return;
+          this.requestLegacyPlay(video!, 'media-ready');
+        };
+        video.addEventListener('loadedmetadata', resumeWhenReady);
+        video.addEventListener('loadeddata', resumeWhenReady);
+        video.addEventListener('canplay', resumeWhenReady);
+      }
       video.addEventListener('loadedmetadata', () => {
         const requestedPositionMs = this.pendingInitialPositionMs;
         if (requestedPositionMs > 0) {
@@ -227,7 +260,7 @@ class WebPlayer implements Player {
     });
 
     if (isHls(source)) {
-      if (nativeHlsSupported(video)) {
+      if (this.options.forceNativeHls || nativeHlsSupported(video)) {
         this.log.info('hls-native-selected', { url: source.url });
         video.src = source.url;
       } else if (Hls.isSupported()) {
@@ -238,7 +271,9 @@ class WebPlayer implements Player {
         throw new Error('This browser cannot play fragmented-MP4 HLS.');
       }
     } else {
-      const directUrl = source.mode === 'direct' ? await directPlayReadAheadUrl(source) : source.url;
+      const directUrl = source.mode === 'direct' && this.options.directPlayReadAhead !== false
+        ? await directPlayReadAheadUrl(source)
+        : source.url;
       if (directUrl !== source.url) this.directReadAheadSourceUrl = source.url;
       this.log.info('direct-source-selected', {
         url: source.url,
@@ -249,6 +284,21 @@ class WebPlayer implements Player {
     }
 
     const playStarted = performance.now();
+    this.wantsPlayback = true;
+    if (this.options.legacyMediaElement) {
+      // Chrome 47 predates the standardized Promise-returning play(). Setting
+      // autoplay before the source and issuing play explicitly gives the TV
+      // both mechanisms; readiness events retry the request if it was early.
+      video.muted = false;
+      video.defaultMuted = false;
+      video.removeAttribute('muted');
+      this.requestLegacyPlay(video, 'source-ready');
+      this.log.info('autoplay-requested-legacy', {
+        elapsedMs: Math.round((performance.now() - playStarted) * 10) / 10,
+        state: videoState(video),
+      });
+      return true;
+    }
     try {
       await video.play();
       this.log.info('autoplay-started', {
@@ -535,6 +585,7 @@ class WebPlayer implements Player {
 
   pause(): void {
     this.log.info('pause-request', this.video ? videoState(this.video) : undefined);
+    this.wantsPlayback = false;
     this.video?.pause();
   }
 
@@ -545,9 +596,29 @@ class WebPlayer implements Player {
       return;
     }
     this.log.info('resume-request', videoState(video));
+    this.wantsPlayback = true;
+    if (this.options.legacyMediaElement) {
+      this.requestLegacyPlay(video, 'resume');
+      return;
+    }
     void video.play()
       .then(() => this.log.info('resume-started', videoState(video)))
       .catch((error) => this.log.error('resume-failed', { error, state: videoState(video) }));
+  }
+
+  private requestLegacyPlay(video: HTMLVideoElement, reason: string): void {
+    try {
+      const result = video.play() as Promise<void> | undefined;
+      if (result && typeof result.then === 'function') {
+        void result
+          .then(() => this.log.info('legacy-play-started', { reason, state: videoState(video) }))
+          .catch((error) => this.log.warn('legacy-play-deferred', { reason, error, state: videoState(video) }));
+      } else {
+        this.log.debug('legacy-play-requested', { reason, state: videoState(video) });
+      }
+    } catch (error) {
+      this.log.warn('legacy-play-request-failed', { reason, error, state: videoState(video) });
+    }
   }
 
   seek(positionMs: number): void {
@@ -561,10 +632,18 @@ class WebPlayer implements Player {
 
   setVolume(volume: number): void {
     this.volume = Math.max(0, Math.min(1, Number.isFinite(volume) ? volume : 1));
-    if (this.video) this.video.volume = this.volume;
+    if (this.video) {
+      this.video.volume = this.volume;
+      if (this.options.legacyMediaElement && this.volume > 0) {
+        this.video.muted = false;
+        this.video.defaultMuted = false;
+        this.video.removeAttribute('muted');
+      }
+    }
   }
 
   stop(): void {
+    this.wantsPlayback = false;
     this.log.debug('stop', this.video ? videoState(this.video) : undefined);
     this.hls?.destroy();
     this.hls = undefined;
@@ -683,6 +762,10 @@ class WebPlayer implements Player {
       durationMs: duration,
       paused: video.paused,
       ended: video.ended,
+      seeking: video.seeking,
+      buffering: !video.paused
+        && !video.ended
+        && (video.seeking || video.readyState < HTMLMediaElement.HAVE_FUTURE_DATA),
     };
     this.listeners.forEach((listener) => listener(event));
   }
@@ -698,6 +781,8 @@ function supportedMime(media: HTMLMediaElement, mime: string): boolean {
 export class WebPlatform implements Platform {
   readonly name = 'web' as const;
   private readonly log = createClientLogger('playback.capabilities');
+
+  constructor(private readonly playerOptions: WebPlayerOptions = {}) {}
 
   async capabilities(): Promise<PlaybackCapabilities> {
     const video = document.createElement('video');
@@ -728,6 +813,6 @@ export class WebPlatform implements Platform {
   }
 
   createPlayer(): Player {
-    return new WebPlayer();
+    return new WebPlayer(this.playerOptions);
   }
 }

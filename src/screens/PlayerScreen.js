@@ -4,8 +4,11 @@ import { PlayIcon, RestartIcon } from '../components/PlaybackIcons';
 import { Loading } from '../components/Status';
 import { createClientLogger } from '../diagnostics/ClientLog';
 import { useArtworkUrl } from '../hooks/useArtworkUrl';
+import { requestTvDefaultFocus } from '../hooks/useTvNavigation';
 import { uiSettings } from '../settings';
 import { describePlaybackSession } from '../playback/PlaybackStatus';
+import { DirectSeekSessionSync } from '../playback/DirectSeekSync';
+import { nextDesiredSeekPosition, preserveSeekSubtitleState } from '../playback/SeekState';
 function formatTime(ms) {
     const total = Math.max(0, Math.floor(ms / 1000));
     const hours = Math.floor(total / 3600);
@@ -78,6 +81,22 @@ function streamLabel(stream, fallback) {
 function qualityChoices(session) {
     return session.options.qualityHeights;
 }
+export function webSeekDeltaForKey(key) {
+    if (key === 'ArrowLeft')
+        return -10_000;
+    if (key === 'ArrowRight')
+        return 10_000;
+    return undefined;
+}
+export function webSeekHasResumed(event, targetMs, resumeAfterSeek) {
+    if (Math.abs(event.positionMs - targetMs) > 1_500)
+        return false;
+    if (event.seeking)
+        return false;
+    if (!resumeAfterSeek)
+        return true;
+    return !event.paused && !event.buffering;
+}
 export function isSubtitleOnlyUpdate(update) {
     if (update.seekMs !== undefined || update.mediaId !== undefined || !update.preferences)
         return false;
@@ -116,6 +135,11 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
     const hideTimerRef = useRef(undefined);
     const scrubValueRef = useRef(undefined);
     const committedSeekRef = useRef(undefined);
+    const desiredSeekRef = useRef(undefined);
+    const directSeekDispatchTimerRef = useRef(undefined);
+    const directSeekLastDispatchRef = useRef(0);
+    const directSeekSyncRef = useRef(undefined);
+    const directSeekResumeRef = useRef(undefined);
     const mountedRef = useRef(true);
     const endedHandledRef = useRef(false);
     const [event, setEvent] = useState(initialEvent);
@@ -125,18 +149,54 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
     const [playbackNotice, setPlaybackNotice] = useState();
     const webControls = platform.name === 'web';
     const samsungControls = import.meta.env.MODE === 'samsung';
+    const html5Player = webControls || samsungControls;
     const interactionControlled = webControls || samsungControls;
     const [controlsVisible, setControlsVisible] = useState(!interactionControlled);
     const [fullscreen, setFullscreen] = useState(false);
     const [optionsVisible, setOptionsVisible] = useState(false);
     const [controlBusy, setControlBusy] = useState(false);
     const [seekInFlight, setSeekInFlight] = useState(false);
+    const [seekFeedbackGeneration, setSeekFeedbackGeneration] = useState(0);
     const [scrubValue, setScrubValue] = useState();
     const backdrop = useArtworkUrl(api, media.artwork?.backdrop ?? media.artwork?.thumbnail ?? media.artwork?.poster);
     const cover = useArtworkUrl(api, media.kind === 'track' ? media.artwork?.poster ?? media.artwork?.thumbnail : undefined);
     useEffect(() => {
-        player.setVolume(volume);
-    }, [player, volume]);
+        player.setVolume(samsungControls ? 1 : volume);
+    }, [player, samsungControls, volume]);
+    useEffect(() => {
+        const sync = new DirectSeekSessionSync((sessionId, positionMs) => playbackResolver.update(sessionId, { seekMs: positionMs }), (next, request) => {
+            if (!mountedRef.current)
+                return;
+            const current = sessionRef.current;
+            if (!current || current.sessionId !== request.sessionId || current.mode !== 'direct')
+                return;
+            const preserved = preserveSeekSubtitleState(current, next);
+            sessionRef.current = preserved;
+            setSession(preserved);
+            log.info('seek-direct-session-synced', {
+                sessionId: request.sessionId,
+                positionMs: request.positionMs,
+                sequence: request.sequence,
+            });
+        }, (error, request) => {
+            log.warn('seek-direct-session-sync-failed', {
+                sessionId: request.sessionId,
+                positionMs: request.positionMs,
+                sequence: request.sequence,
+                error,
+            });
+        });
+        directSeekSyncRef.current = sync;
+        return () => {
+            sync.dispose();
+            if (directSeekSyncRef.current === sync)
+                directSeekSyncRef.current = undefined;
+        };
+    }, [log, playbackResolver]);
+    const beginSeekFeedback = useCallback(() => {
+        setSeekFeedbackGeneration((generation) => generation + 1);
+        setSeekInFlight(true);
+    }, []);
     const publish = useCallback((next) => {
         const previous = latestRef.current;
         latestRef.current = next;
@@ -217,8 +277,9 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
             return;
         for (const element of elements)
             element.removeAttribute('data-tv-selected');
-        elements[0].setAttribute('data-tv-selected', 'true');
-        elements[0].focus();
+        const preferred = elements.find((element) => element.getAttribute('data-tv-default-focus') === 'true') ?? elements[0];
+        preferred.setAttribute('data-tv-selected', 'true');
+        preferred.focus();
     }, []);
     const noteWebPointerMovement = useCallback((clientY) => {
         if (presentation !== 'full' || !webControls)
@@ -238,6 +299,19 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
     const clearCommittedSeek = useCallback(() => {
         committedSeekRef.current = undefined;
         setScrubPosition(undefined);
+    }, [setScrubPosition]);
+    const clearDesiredSeek = useCallback(() => {
+        desiredSeekRef.current = undefined;
+        directSeekResumeRef.current = undefined;
+        if (directSeekDispatchTimerRef.current !== undefined) {
+            window.clearTimeout(directSeekDispatchTimerRef.current);
+            directSeekDispatchTimerRef.current = undefined;
+        }
+        setScrubPosition(undefined);
+    }, [setScrubPosition]);
+    const setDesiredSeek = useCallback((positionMs) => {
+        desiredSeekRef.current = positionMs;
+        setScrubPosition(positionMs);
     }, [setScrubPosition]);
     const loadSession = useCallback(async (next, absolutePositionMs, resumeAfterLoad = true) => {
         const bounded = Math.max(0, Math.min(next.durationMs || Number.MAX_SAFE_INTEGER, absolutePositionMs));
@@ -314,18 +388,32 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
             const absolutePositionMs = next.positionMs + streamOffsetRef.current;
             const committedSeek = committedSeekRef.current;
             if (committedSeek !== undefined) {
-                // A browser may emit pause/timeupdate events from the old position after
-                // a range interaction. Keep the user's committed seek authoritative
-                // until the player itself reaches the new position.
+                // Native and transformed seeks still use a committed target because the
+                // old generation may publish stale events while it is being replaced.
                 if (Math.abs(absolutePositionMs - committedSeek) > 1_500)
                     return;
                 clearCommittedSeek();
             }
-            publish({
+            const absoluteEvent = {
                 ...next,
                 positionMs: absolutePositionMs,
                 durationMs,
-            });
+            };
+            const pendingDirectSeek = directSeekResumeRef.current;
+            const desiredSeek = desiredSeekRef.current;
+            if (pendingDirectSeek && desiredSeek !== undefined
+                && webSeekHasResumed(absoluteEvent, desiredSeek, pendingDirectSeek.resumeAfterSeek)) {
+                const targetMs = desiredSeek;
+                clearDesiredSeek();
+                setSeekInFlight(false);
+                log.info('seek-direct-resumed', {
+                    sessionId: sessionRef.current?.sessionId,
+                    positionMs: absolutePositionMs,
+                    targetMs,
+                    buffering: absoluteEvent.buffering,
+                });
+            }
+            publish(absoluteEvent);
         });
         void (async () => {
             if (initialFatalError) {
@@ -396,13 +484,16 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
         return () => {
             log.info('player-unmount', { sessionId: sessionRef.current?.sessionId, latest: latestRef.current });
             mountedRef.current = false;
+            if (directSeekDispatchTimerRef.current !== undefined)
+                window.clearTimeout(directSeekDispatchTimerRef.current);
+            directSeekDispatchTimerRef.current = undefined;
             unsubscribe();
             player.detach();
             const activeSession = sessionRef.current;
             if (activeSession)
                 void playbackResolver.stop(activeSession.sessionId).catch(() => undefined);
         };
-    }, [clearCommittedSeek, initialFatalError, initialStartPositionMs, loadSession, log, media, platform, playbackResolver, player, publish]);
+    }, [clearCommittedSeek, clearDesiredSeek, initialFatalError, initialStartPositionMs, loadSession, log, media, platform, playbackResolver, player, publish]);
     useEffect(() => {
         if (presentation === 'full') {
             if (hideTimerRef.current !== undefined)
@@ -475,30 +566,72 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
             currentPositionMs: previous.positionMs,
             resumeAfterSeek,
         });
-        committedSeekRef.current = bounded;
-        setScrubPosition(bounded);
+        if (!(activeSession.mode === 'direct' && html5Player)) {
+            committedSeekRef.current = bounded;
+            setScrubPosition(bounded);
+        }
         if (!interactionControlled) {
             setControlsVisible(true);
             if (hideTimerRef.current !== undefined)
                 window.clearTimeout(hideTimerRef.current);
         }
         if (activeSession.mode === 'direct') {
-            // Freeze the current picture immediately, move the media element, then
-            // resume only if playback was running before the seek. The committed
-            // scrub value prevents stale media events snapping the bar backwards.
-            player.pause();
-            publish({ ...previous, positionMs: bounded, paused: true, ended: false });
             const directSeekStartedAt = performance.now();
-            player.seek(bounded);
-            if (resumeAfterSeek)
-                player.resume();
+            let sequence;
+            if (html5Player) {
+                // Keep the user's requested position separate from the media element's
+                // reported time. Repeated arrows/buttons therefore accumulate against
+                // the latest desired target even while the browser is still resolving
+                // an earlier range seek. Actual media seeks are coalesced to avoid
+                // thrashing the demuxer/read-ahead window during a held key.
+                setDesiredSeek(bounded);
+                directSeekResumeRef.current = { targetMs: bounded, resumeAfterSeek };
+                beginSeekFeedback();
+                const dispatch = () => {
+                    directSeekDispatchTimerRef.current = undefined;
+                    const targetMs = desiredSeekRef.current;
+                    if (targetMs === undefined)
+                        return;
+                    directSeekLastDispatchRef.current = performance.now();
+                    directSeekResumeRef.current = {
+                        targetMs,
+                        resumeAfterSeek: directSeekResumeRef.current?.resumeAfterSeek ?? resumeAfterSeek,
+                    };
+                    player.seek(targetMs);
+                };
+                const elapsed = performance.now() - directSeekLastDispatchRef.current;
+                const delayMs = Math.max(0, 120 - elapsed);
+                if (delayMs === 0) {
+                    if (directSeekDispatchTimerRef.current !== undefined) {
+                        window.clearTimeout(directSeekDispatchTimerRef.current);
+                        directSeekDispatchTimerRef.current = undefined;
+                    }
+                    dispatch();
+                }
+                else if (directSeekDispatchTimerRef.current === undefined) {
+                    directSeekDispatchTimerRef.current = window.setTimeout(dispatch, delayMs);
+                }
+                sequence = directSeekSyncRef.current?.schedule(activeSession.sessionId, bounded);
+            }
+            else {
+                // Preserve the established native-player behaviour on Android/Tizen.
+                player.pause();
+                publish({ ...previous, positionMs: bounded, paused: true, ended: false });
+                player.seek(bounded);
+                if (resumeAfterSeek)
+                    player.resume();
+            }
             log.info('seek-direct-dispatched', {
                 elapsedMs: Math.round((performance.now() - directSeekStartedAt) * 10) / 10,
                 positionMs: bounded,
                 resumeAfterSeek,
+                optimistic: html5Player,
+                sessionSyncSequence: sequence,
             });
             return true;
         }
+        directSeekSyncRef.current?.clearPending();
+        clearDesiredSeek();
         // Server-backed seek generations can take long enough to be perceptible.
         // Pause the old stream immediately but delay the spinner so a fast restart
         // looks like one continuous interaction rather than a flash of loading UI.
@@ -506,12 +639,12 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
         player.pause();
         publish({ ...previous, positionMs: bounded, paused: true, ended: false });
         setControlBusy(true);
-        setSeekInFlight(true);
+        beginSeekFeedback();
         setPlaybackNotice('Seeking…');
         const seekStartedAt = performance.now();
         try {
             const selectedSubtitle = activeSession.selected.subtitleStream;
-            const next = await playbackResolver.update(activeSession.sessionId, {
+            const updated = await playbackResolver.update(activeSession.sessionId, {
                 seekMs: bounded,
                 // A seek creates a new transformed stream generation. Preserve the
                 // currently selected subtitle explicitly so the server issues the
@@ -522,6 +655,7 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
                     subtitleLanguage: activeSession.preferences.subtitleLanguage,
                 },
             });
+            const next = preserveSeekSubtitleState(activeSession, updated);
             log.info('seek-server-updated', {
                 sessionId: next.sessionId,
                 mode: next.mode,
@@ -568,7 +702,14 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
                 setControlBusy(false);
             }
         }
-    }, [clearCommittedSeek, controlBusy, interactionControlled, loadSession, log, playbackResolver, player, publish, setScrubPosition]);
+    }, [beginSeekFeedback, clearCommittedSeek, clearDesiredSeek, controlBusy, interactionControlled, loadSession, log, playbackResolver, player, publish, setDesiredSeek, setScrubPosition, html5Player]);
+    const seekBy = useCallback((deltaMs) => {
+        const activeSession = sessionRef.current;
+        if (!activeSession || !activeSession.options.canSeek)
+            return;
+        const target = nextDesiredSeekPosition(desiredSeekRef.current, latestRef.current.positionMs, deltaMs, activeSession.durationMs);
+        void seek(target);
+    }, [seek]);
     const playFromStart = useCallback(async () => {
         const activeSession = sessionRef.current;
         if (!activeSession || controlBusy || !activeSession.options.canSeek)
@@ -595,6 +736,9 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
         }
         const updateStartedAt = performance.now();
         log.info('stream-update-ui-request', { sessionId: activeSession.sessionId, positionMs: position, subtitleOnly, update });
+        directSeekSyncRef.current?.clearPending();
+        clearDesiredSeek();
+        setSeekInFlight(false);
         setControlBusy(true);
         setPlaybackNotice(subtitleOnly ? 'Loading subtitles…' : 'Updating stream…');
         try {
@@ -649,7 +793,7 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
             if (mountedRef.current)
                 setControlBusy(false);
         }
-    }, [controlBusy, loadSession, log, playbackResolver, player]);
+    }, [clearDesiredSeek, controlBusy, loadSession, log, playbackResolver, player]);
     useEffect(() => {
         const onFullscreenChange = () => {
             setFullscreen(document.fullscreenElement === pageRef.current);
@@ -664,6 +808,10 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
             void document.exitFullscreen().catch(() => undefined);
         }
     }, [presentation]);
+    useEffect(() => {
+        if (samsungControls)
+            requestTvDefaultFocus();
+    }, [presentation, samsungControls]);
     const toggleFullscreen = useCallback(async () => {
         if (platform.name !== 'web' || !document.fullscreenEnabled || !pageRef.current)
             return;
@@ -690,10 +838,7 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
             if (presentation === 'full' && samsungBack) {
                 keyEvent.preventDefault();
                 keyEvent.stopPropagation();
-                if (controlsVisible || optionsVisible)
-                    hideControls();
-                else
-                    onMinimize();
+                onMinimize();
                 return;
             }
             if (presentation === 'full' && samsungOk && !controlsVisible) {
@@ -742,16 +887,28 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
                 setPaused(true);
                 return;
             }
+            if (presentation === 'full' && webControls && !keyEvent.altKey && !keyEvent.ctrlKey && !keyEvent.metaKey) {
+                const delta = webSeekDeltaForKey(keyEvent.key);
+                const target = keyEvent.target;
+                const targetOwnsArrowKeys = target instanceof Element && Boolean(target.closest('input, select, textarea, [contenteditable="true"]'));
+                if (delta !== undefined && !targetOwnsArrowKeys) {
+                    keyEvent.preventDefault();
+                    keyEvent.stopPropagation();
+                    showControls();
+                    seekBy(delta);
+                    return;
+                }
+            }
             if (keyEvent.key === 'MediaRewind') {
                 keyEvent.preventDefault();
                 keyEvent.stopPropagation();
-                void seek(latestRef.current.positionMs - 10_000);
+                seekBy(-10_000);
                 return;
             }
             if (keyEvent.key === 'MediaFastForward') {
                 keyEvent.preventDefault();
                 keyEvent.stopPropagation();
-                void seek(latestRef.current.positionMs + 10_000);
+                seekBy(10_000);
                 return;
             }
             if (presentation === 'full' && !interactionControlled)
@@ -759,7 +916,7 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
         };
         window.addEventListener('keydown', onKeyDown, true);
         return () => window.removeEventListener('keydown', onKeyDown, true);
-    }, [armControlsHide, controlsVisible, focusSamsungControls, hideControls, interactionControlled, onMinimize, optionsVisible, presentation, samsungControls, seek, setPaused, showControls]);
+    }, [armControlsHide, controlsVisible, focusSamsungControls, hideControls, interactionControlled, onMinimize, optionsVisible, presentation, samsungControls, seekBy, setPaused, showControls, webControls]);
     const duration = session?.durationMs || event.durationMs || 1;
     const displayedProgress = scrubValue ?? Math.min(duration, event.positionMs);
     const audio = media.kind === 'track';
@@ -795,8 +952,8 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
             const target = clickEvent.target;
             if (!target.closest('button, input'))
                 onExpand();
-        }, children: [backdrop && _jsx("div", { className: "player-backdrop", style: { backgroundImage: `url(${JSON.stringify(backdrop)})` } }), _jsx("div", { ref: hostRef, className: "player-host" }), audio && (_jsx("div", { className: "audio-player-art", children: cover ? _jsx("img", { src: cover, alt: "" }) : _jsx("div", { className: "audio-player-placeholder", children: "\u266A" }) })), starting && _jsx(Loading, {}), seekInFlight && _jsx(Loading, { delayMs: uiSettings.playerSeekSpinnerDelayMs }), fatalError && (_jsxs("div", { className: "player-fatal-error", role: "alert", children: [_jsx("strong", { children: "Playback failed" }), _jsx("span", { children: fatalError.message })] })), _jsxs("div", { ref: chromeRef, className: `player-chrome ${controlsVisible || fatalError ? 'visible' : ''}`, onPointerDown: () => { if (webControls)
-                    showControls(); }, children: [_jsxs("div", { className: "player-titlebar", children: [_jsxs("div", { className: "player-title-copy", children: [_jsx("strong", { children: media.title }), playerSubtitle && _jsx("span", { children: playerSubtitle })] }), _jsx("div", { className: "player-stream-status", "aria-live": "polite", children: playbackNotice ? (_jsx("small", { children: playbackNotice })) : (_jsxs(_Fragment, { children: [streamStatus?.video && _jsx("small", { children: streamStatus.video }), streamStatus?.audio && _jsx("small", { children: streamStatus.audio }), streamStatus?.subtitle && _jsx("small", { children: streamStatus.subtitle })] })) })] }), optionsVisible && session && (_jsx(PlayerOptions, { session: session, busy: controlBusy, onApply: (update) => void reconfigure(update) })), _jsxs("div", { className: "player-scrubber-row", children: [_jsx("span", { children: formatTime(displayedProgress) }), _jsx("input", { className: "player-scrubber", type: "range", min: 0, max: Math.max(1, duration), step: 1_000, value: displayedProgress, "aria-label": "Playback position", "data-tv-focusable": "true", disabled: !session?.options.canSeek, "aria-busy": controlBusy || undefined, onChange: (changeEvent) => {
+        }, children: [backdrop && _jsx("div", { className: "player-backdrop", style: { backgroundImage: `url(${JSON.stringify(backdrop)})` } }), _jsx("div", { ref: hostRef, className: "player-host" }), audio && (_jsx("div", { className: "audio-player-art", children: cover ? _jsx("img", { src: cover, alt: "" }) : _jsx("div", { className: "audio-player-placeholder", children: "\u266A" }) })), starting && _jsx(Loading, {}), seekInFlight && _jsx(Loading, { delayMs: uiSettings.playerSeekSpinnerDelayMs }, seekFeedbackGeneration), fatalError && (_jsxs("div", { className: "player-fatal-error", role: "alert", children: [_jsx("strong", { children: "Playback failed" }), _jsx("span", { children: fatalError.message })] })), _jsxs("div", { ref: chromeRef, className: `player-chrome ${controlsVisible || fatalError ? 'visible' : ''}`, onPointerDown: () => { if (webControls)
+                    showControls(); }, children: [_jsxs("div", { className: "player-titlebar", children: [_jsxs("div", { className: "player-title-copy", children: [_jsx("strong", { children: media.title }), playerSubtitle && _jsx("span", { children: playerSubtitle })] }), _jsx("div", { className: "player-stream-status", "aria-live": "polite", children: playbackNotice ? (_jsx("small", { children: playbackNotice })) : (_jsxs(_Fragment, { children: [streamStatus?.video && _jsx("small", { children: streamStatus.video }), streamStatus?.audio && _jsx("small", { children: streamStatus.audio }), streamStatus?.subtitle && _jsx("small", { children: streamStatus.subtitle })] })) })] }), optionsVisible && session && (_jsx(PlayerOptions, { session: session, busy: controlBusy, onApply: (update) => void reconfigure(update) })), _jsxs("div", { className: "player-scrubber-row", children: [_jsx("span", { children: formatTime(displayedProgress) }), samsungControls ? (_jsx("div", { className: "player-scrubber-display", role: "progressbar", "aria-label": "Playback position", "aria-valuemin": 0, "aria-valuemax": Math.max(1, duration), "aria-valuenow": Math.max(0, Math.min(duration, displayedProgress)), children: _jsx("span", { style: { width: `${Math.min(100, displayedProgress / Math.max(1, duration) * 100)}%` } }) })) : (_jsx("input", { className: "player-scrubber", type: "range", min: 0, max: Math.max(1, duration), step: 1_000, value: displayedProgress, "aria-label": "Playback position", "data-tv-focusable": "true", disabled: !session?.options.canSeek, "aria-busy": controlBusy || undefined, onChange: (changeEvent) => {
                                     if (!controlBusy)
                                         setScrubPosition(Number(changeEvent.target.value));
                                 }, onPointerUp: () => {
@@ -811,11 +968,11 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
                                     const position = scrubValueRef.current;
                                     if (!controlBusy && position !== undefined)
                                         void seek(position);
-                                } }), _jsx("span", { children: formatTime(duration) })] }), _jsxs("div", { className: "player-button-row", children: [_jsx("button", { type: "button", "data-tv-focusable": "true", onClick: onMinimize, "aria-label": "Minimise player", children: _jsx(PlayerIcon, { name: "back" }) }), queuePosition && queuePosition.total > 1 && (_jsx("button", { type: "button", "data-tv-focusable": "true", disabled: !canPrevious || controlBusy, onClick: onPrevious, "aria-label": "Previous item", children: _jsx(PlayerIcon, { name: "previous" }) })), _jsx("button", { type: "button", "data-tv-focusable": "true", disabled: !playbackAvailable || !session?.options.canSeek || controlBusy, onClick: () => void playFromStart(), "aria-label": "Play from start", title: "Play from start", children: _jsx(RestartIcon, {}) }), _jsx("button", { type: "button", "data-tv-focusable": "true", disabled: !playbackAvailable || !session?.options.canSeek || controlBusy, onClick: () => void seek(displayedProgress - 10_000), "aria-label": "Seek backward", children: _jsx(PlayerIcon, { name: "rewind" }) }), _jsx("button", { type: "button", "data-tv-focusable": "true", disabled: !playbackAvailable || controlBusy, onClick: () => setPaused(!event.paused), "aria-label": event.paused ? 'Play' : 'Pause', children: event.paused ? _jsx(PlayIcon, {}) : _jsx(PlayerIcon, { name: "pause" }) }), _jsx("button", { type: "button", "data-tv-focusable": "true", disabled: !playbackAvailable || !session?.options.canSeek || controlBusy, onClick: () => void seek(displayedProgress + 10_000), "aria-label": "Seek forward", children: _jsx(PlayerIcon, { name: "forward" }) }), queuePosition && queuePosition.total > 1 && (_jsx("button", { type: "button", "data-tv-focusable": "true", disabled: !canNext || controlBusy, onClick: onNext, "aria-label": "Next item", children: _jsx(PlayerIcon, { name: "next" }) })), _jsx("button", { type: "button", "data-tv-focusable": "true", disabled: !playbackAvailable || controlBusy, className: optionsVisible ? 'selected' : undefined, onClick: () => {
+                                } })), _jsx("span", { children: formatTime(duration) })] }), _jsxs("div", { className: "player-button-row", children: [_jsx("button", { type: "button", "data-tv-focusable": "true", onClick: onMinimize, "aria-label": "Minimise player", children: _jsx(PlayerIcon, { name: "back" }) }), queuePosition && queuePosition.total > 1 && (_jsx("button", { type: "button", "data-tv-focusable": "true", disabled: !canPrevious || controlBusy, onClick: onPrevious, "aria-label": "Previous item", children: _jsx(PlayerIcon, { name: "previous" }) })), _jsx("button", { type: "button", "data-tv-focusable": "true", disabled: !playbackAvailable || !session?.options.canSeek || controlBusy, onClick: () => void playFromStart(), "aria-label": "Play from start", title: "Play from start", children: _jsx(RestartIcon, {}) }), _jsx("button", { type: "button", "data-tv-focusable": "true", disabled: !playbackAvailable || !session?.options.canSeek || controlBusy, onClick: () => seekBy(-10_000), "aria-label": "Seek backward", children: _jsx(PlayerIcon, { name: "rewind" }) }), _jsx("button", { type: "button", "data-tv-focusable": "true", "data-tv-default-focus": samsungControls ? 'true' : undefined, disabled: !playbackAvailable || controlBusy, onClick: () => setPaused(!event.paused), "aria-label": event.paused ? 'Play' : 'Pause', children: event.paused ? _jsx(PlayIcon, {}) : _jsx(PlayerIcon, { name: "pause" }) }), _jsx("button", { type: "button", "data-tv-focusable": "true", disabled: !playbackAvailable || !session?.options.canSeek || controlBusy, onClick: () => seekBy(10_000), "aria-label": "Seek forward", children: _jsx(PlayerIcon, { name: "forward" }) }), queuePosition && queuePosition.total > 1 && (_jsx("button", { type: "button", "data-tv-focusable": "true", disabled: !canNext || controlBusy, onClick: onNext, "aria-label": "Next item", children: _jsx(PlayerIcon, { name: "next" }) })), _jsx("button", { type: "button", "data-tv-focusable": "true", disabled: !playbackAvailable || controlBusy, className: optionsVisible ? 'selected' : undefined, onClick: () => {
                                     setOptionsVisible((visible) => !visible);
                                     if (!interactionControlled)
                                         showControls();
-                                }, "aria-label": "Playback options", children: _jsx(PlayerIcon, { name: "options" }) }), _jsx(VolumeControl, { volume: volume, onChange: onVolumeChange }), platform.name === 'web' && document.fullscreenEnabled && (_jsx("button", { type: "button", "data-tv-focusable": "true", onClick: () => void toggleFullscreen(), "aria-label": fullscreen ? 'Exit fullscreen' : 'Fullscreen', title: fullscreen ? 'Exit fullscreen' : 'Fullscreen', children: _jsx(PlayerIcon, { name: fullscreen ? 'fullscreen-exit' : 'fullscreen' }) })), _jsx("button", { type: "button", "data-tv-focusable": "true", onClick: onStop, "aria-label": "Stop playback and close player", title: "Close player", children: _jsx(PlayerIcon, { name: "close" }) })] })] }), _jsxs("div", { className: "player-mini-chrome", "aria-label": "Now playing", children: [_jsxs("button", { className: "player-mini-copy", type: "button", "data-tv-focusable": "true", onClick: onExpand, "aria-label": `Open player for ${media.title}`, children: [_jsx("span", { className: "player-mini-title", children: media.title }), _jsx("span", { className: "player-mini-subtitle", children: fatalError ? `Playback failed · ${fatalError.message}` : playerSubtitle || 'Now playing' }), _jsxs("span", { className: "player-mini-time", children: [formatTime(displayedProgress), " / ", formatTime(duration)] }), _jsx("span", { className: "player-mini-progress", "aria-hidden": "true", children: _jsx("span", { style: { width: `${Math.min(100, displayedProgress / Math.max(1, duration) * 100)}%` } }) })] }), _jsxs("div", { className: "player-mini-controls", children: [queuePosition && queuePosition.total > 1 && (_jsx("button", { type: "button", "data-tv-focusable": "true", disabled: !canPrevious || controlBusy, onClick: onPrevious, "aria-label": "Previous item", children: _jsx(PlayerIcon, { name: "previous" }) })), _jsx("button", { type: "button", "data-tv-focusable": "true", disabled: !playbackAvailable || controlBusy, onClick: () => setPaused(!event.paused), "aria-label": event.paused ? 'Play' : 'Pause', children: event.paused ? _jsx(PlayIcon, {}) : _jsx(PlayerIcon, { name: "pause" }) }), queuePosition && queuePosition.total > 1 && (_jsx("button", { type: "button", "data-tv-focusable": "true", disabled: !canNext || controlBusy, onClick: onNext, "aria-label": "Next item", children: _jsx(PlayerIcon, { name: "next" }) })), _jsx(VolumeControl, { volume: volume, onChange: onVolumeChange, compact: true }), _jsx("button", { type: "button", "data-tv-focusable": "true", onClick: onExpand, "aria-label": "Open full player", children: _jsx(PlayerIcon, { name: "expand" }) }), _jsx("button", { type: "button", "data-tv-focusable": "true", onClick: onStop, "aria-label": "Stop playback", children: _jsx(PlayerIcon, { name: "close" }) })] })] })] }));
+                                }, "aria-label": "Playback options", children: _jsx(PlayerIcon, { name: "options" }) }), !samsungControls && _jsx(VolumeControl, { volume: volume, onChange: onVolumeChange }), platform.name === 'web' && document.fullscreenEnabled && (_jsx("button", { type: "button", "data-tv-focusable": "true", onClick: () => void toggleFullscreen(), "aria-label": fullscreen ? 'Exit fullscreen' : 'Fullscreen', title: fullscreen ? 'Exit fullscreen' : 'Fullscreen', children: _jsx(PlayerIcon, { name: fullscreen ? 'fullscreen-exit' : 'fullscreen' }) })), _jsx("button", { type: "button", "data-tv-focusable": "true", onClick: onStop, "aria-label": "Stop playback and close player", title: "Close player", children: _jsx(PlayerIcon, { name: "close" }) })] })] }), _jsxs("div", { className: "player-mini-chrome", "aria-label": "Now playing", children: [_jsxs("button", { className: "player-mini-copy", type: "button", "data-tv-focusable": "true", onClick: onExpand, "aria-label": `Open player for ${media.title}`, children: [_jsx("span", { className: "player-mini-title", children: media.title }), _jsx("span", { className: "player-mini-subtitle", children: fatalError ? `Playback failed · ${fatalError.message}` : playerSubtitle || 'Now playing' }), _jsxs("span", { className: "player-mini-time", children: [formatTime(displayedProgress), " / ", formatTime(duration)] }), _jsx("span", { className: "player-mini-progress", "aria-hidden": "true", children: _jsx("span", { style: { width: `${Math.min(100, displayedProgress / Math.max(1, duration) * 100)}%` } }) })] }), _jsxs("div", { className: "player-mini-controls", children: [queuePosition && queuePosition.total > 1 && (_jsx("button", { type: "button", "data-tv-focusable": "true", disabled: !canPrevious || controlBusy, onClick: onPrevious, "aria-label": "Previous item", children: _jsx(PlayerIcon, { name: "previous" }) })), _jsx("button", { type: "button", "data-tv-focusable": "true", "data-tv-default-focus": samsungControls ? 'true' : undefined, disabled: !playbackAvailable || controlBusy, onClick: () => setPaused(!event.paused), "aria-label": event.paused ? 'Play' : 'Pause', children: event.paused ? _jsx(PlayIcon, {}) : _jsx(PlayerIcon, { name: "pause" }) }), queuePosition && queuePosition.total > 1 && (_jsx("button", { type: "button", "data-tv-focusable": "true", disabled: !canNext || controlBusy, onClick: onNext, "aria-label": "Next item", children: _jsx(PlayerIcon, { name: "next" }) })), !samsungControls && _jsx(VolumeControl, { volume: volume, onChange: onVolumeChange, compact: true }), _jsx("button", { type: "button", "data-tv-focusable": "true", onClick: onExpand, "aria-label": "Open full player", children: _jsx(PlayerIcon, { name: "expand" }) }), _jsx("button", { type: "button", "data-tv-focusable": "true", onClick: onStop, "aria-label": "Stop playback", children: _jsx(PlayerIcon, { name: "close" }) })] })] })] }));
 }
 export function PlayerHost(props) {
     const { request, ...sessionProps } = props;

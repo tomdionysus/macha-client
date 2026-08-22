@@ -9,6 +9,7 @@ import { AppLogo } from './components/AppLogo';
 import { MusicNav } from './components/MusicNav';
 import logoUrl from './assets/macha-logo.svg?url';
 import { useTvNavigation } from './hooks/useTvNavigation';
+import { samsungBackTarget } from './platform/samsungBackNavigation';
 import type { Platform } from './platform/Platform';
 import type { PlaybackResolver } from './playback/PlaybackResolver';
 import { DemoPlaybackResolver } from './playback/DemoPlaybackResolver';
@@ -106,12 +107,16 @@ function DetailRoute({ api, onPlay, onPlayFromStart, progressById, parameter, on
 }) {
   const params = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const itemId = required(params[parameter], parameter);
   return (
     <DetailScreen
       api={api}
       itemId={itemId}
-      onBack={() => navigate(-1)}
+      onBack={() => {
+        if (import.meta.env.MODE !== 'samsung') { navigate(-1); return; }
+        void samsungBackTarget(location.pathname, api).then((target) => { if (target) navigate(target); });
+      }}
       onPlay={onPlay}
       onPlayFromStart={onPlayFromStart}
       progress={progressById.get(itemId)}
@@ -123,12 +128,16 @@ function DetailRoute({ api, onPlay, onPlayFromStart, progressById, parameter, on
 function SeriesRoute({ api, onOpenSeason, onEdit }: { api: MediaApi; onOpenSeason: (season: SeasonSummary) => void; onEdit?: (id: string) => void }) {
   const { seriesId } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const resolvedSeriesId = required(seriesId, 'seriesId');
   return (
     <SeriesScreen
       api={api}
       seriesId={resolvedSeriesId}
-      onBack={() => navigate(-1)}
+      onBack={() => {
+        if (import.meta.env.MODE !== 'samsung') { navigate(-1); return; }
+        void samsungBackTarget(location.pathname, api).then((target) => { if (target) navigate(target); });
+      }}
       onOpenSeason={onOpenSeason}
       onEdit={onEdit ? () => onEdit(resolvedSeriesId) : undefined}
     />
@@ -143,6 +152,7 @@ function SeasonRoute({ api, progress, onPlayEpisode, onEdit }: {
 }) {
   const { seriesId, seasonId } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const resolvedSeriesId = required(seriesId, 'seriesId');
   const resolvedSeasonId = required(seasonId, 'seasonId');
   return (
@@ -150,7 +160,10 @@ function SeasonRoute({ api, progress, onPlayEpisode, onEdit }: {
       api={api}
       seriesId={resolvedSeriesId}
       seasonId={resolvedSeasonId}
-      onBack={() => navigate(-1)}
+      onBack={() => {
+        if (import.meta.env.MODE !== 'samsung') { navigate(-1); return; }
+        void samsungBackTarget(location.pathname, api).then((target) => { if (target) navigate(target); });
+      }}
       progress={progress}
       onPlayEpisode={onPlayEpisode}
       onEdit={onEdit ? () => onEdit(resolvedSeasonId) : undefined}
@@ -169,12 +182,16 @@ function ArtistRoute({ api, onOpenAlbum, onAddToPlaylist, onPlayNext, onPlayLate
 }) {
   const { artistId } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const resolvedArtistId = required(artistId, 'artistId');
   return (
     <ArtistScreen
       api={api}
       artistId={resolvedArtistId}
-      onBack={() => navigate(routes.musicArtists)}
+      onBack={() => {
+        if (import.meta.env.MODE !== 'samsung') { navigate(routes.musicArtists); return; }
+        void samsungBackTarget(location.pathname, api).then((target) => { if (target) navigate(target); });
+      }}
       onOpenAlbum={onOpenAlbum}
       onAddToPlaylist={onAddToPlaylist}
       onPlayNext={onPlayNext}
@@ -198,12 +215,16 @@ function AlbumRoute({ api, onPlay, onPlayAll, onOpenTrack, onAddToPlaylist, onPl
 }) {
   const { albumId } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const resolvedAlbumId = required(albumId, 'albumId');
   return (
     <AlbumScreen
       api={api}
       albumId={resolvedAlbumId}
-      onBack={() => navigate(-1)}
+      onBack={() => {
+        if (import.meta.env.MODE !== 'samsung') { navigate(-1); return; }
+        void samsungBackTarget(location.pathname, api).then((target) => { if (target) navigate(target); });
+      }}
       onPlayTrack={onPlay}
       onPlayAll={onPlayAll}
       onOpenTrack={onOpenTrack}
@@ -238,7 +259,6 @@ function MetadataEditorRoute({ api }: { api: CatalogueApi }) {
 }
 
 export default function App({ platform, apiOverride, playbackOverride }: Props) {
-  useTvNavigation();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -282,6 +302,21 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
   const acquisitionApi = useMemo(() => (
     demo ? new DemoAcquisitionApi() : new MachaAcquisitionApi(serverUrl, apiToken)
   ), [apiToken, demo, serverUrl]);
+
+  const samsungBack = useCallback(() => {
+    if (import.meta.env.MODE !== 'samsung') return false;
+    if (location.pathname === routes.home) {
+      platform.exitApplication?.();
+      return true;
+    }
+    const returnTo = playerRouteItemId(location.pathname) ? activePlayback?.returnTo : undefined;
+    void samsungBackTarget(location.pathname, api, returnTo)
+      .then((target) => { if (target) navigate(target); })
+      .catch(() => navigate(routes.home));
+    return true;
+  }, [activePlayback?.returnTo, api, location.pathname, navigate, platform]);
+
+  useTvNavigation(samsungBack);
 
   useEffect(() => {
     const onServerUnreachable = (event: Event) => {

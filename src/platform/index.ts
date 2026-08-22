@@ -2,7 +2,7 @@ import type { Platform } from './Platform';
 import { AndroidPlatform, type AndroidBridge } from './AndroidPlatform';
 import { TizenPlatform, type TizenBridge } from './TizenPlatform';
 import { WebPlatform } from './WebPlatform';
-import { SamsungTizenPlatform } from './SamsungTizenPlatform';
+import { SamsungWebPlatform } from './SamsungWebPlatform';
 
 declare global {
   interface Window {
@@ -12,7 +12,7 @@ declare global {
 }
 
 export function detectPlatform(): Platform {
-  if (import.meta.env.MODE === 'samsung') return new SamsungTizenPlatform();
+  if (import.meta.env.MODE === 'samsung') return new SamsungWebPlatform();
   if (window.__MACHA_ANDROID__) return new AndroidPlatform(window.__MACHA_ANDROID__);
   if (window.__MACHA_TIZEN__) return new TizenPlatform(window.__MACHA_TIZEN__);
   return new WebPlatform();

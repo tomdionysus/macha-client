@@ -185,7 +185,7 @@ export class MachaPlaybackResolver implements PlaybackResolver {
       item_id: media.id,
       capabilities: wireCapabilities,
       preferences: {
-        mode: 'auto',
+        mode: capabilities.platform === 'tizen' ? 'direct' : 'auto',
       },
     };
     const session = this.mapSession(await this.request<WireSession>('/api/v1/playback/sessions', {
@@ -229,7 +229,9 @@ export class MachaPlaybackResolver implements PlaybackResolver {
 
   private mapSession(wire: WireSession): PlaybackSession {
     const options: PlaybackOptions = {
-      modes: wire.options.modes,
+      // Direct is an explicit user override, not a capability-derived offer.
+      // Always expose it alongside the server-derived Remux/Transcode choices.
+      modes: ['direct', ...wire.options.modes.filter((mode) => mode !== 'direct')],
       qualityHeights: wire.options.quality_heights,
       mediaIds: wire.options.media_ids,
       audioStreams: wire.options.audio_streams.map(mapStream),

@@ -1,6 +1,8 @@
 import { useEffect } from 'react';
+import { SamsungDpadInput } from '../platform/SamsungDpadInput';
 const SELECTOR = '[data-tv-focusable="true"]:not([disabled])';
 const SELECTED_ATTRIBUTE = 'data-tv-selected';
+const DEFAULT_FOCUS_ATTRIBUTE = 'data-tv-default-focus';
 function scoreCandidate(current, candidate, direction) {
     const cx = current.left + current.width / 2;
     const cy = current.top + current.height / 2;
@@ -20,13 +22,20 @@ function scoreCandidate(current, candidate, direction) {
     const secondary = direction === 'left' || direction === 'right' ? Math.abs(dy) : Math.abs(dx);
     return primary + secondary * 2.5;
 }
+function samsungVisible(element) {
+    // Avoid getComputedStyle walks on every remote press: they are expensive on
+    // Chromium 47. Geometry filters display:none/zero-size controls; the player
+    // chrome is the one intentional opacity-hidden focus container.
+    const chrome = element.closest('.player-chrome');
+    if (chrome && !chrome.classList.contains('visible'))
+        return false;
+    const rect = element.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+}
 function samsungElements() {
     const fullPlayer = document.querySelector('.player-presentation-full');
-    if (fullPlayer) {
-        const chrome = fullPlayer.querySelector('.player-chrome.visible');
-        return chrome ? Array.from(chrome.querySelectorAll(SELECTOR)) : [];
-    }
-    return Array.from(document.querySelectorAll(SELECTOR));
+    const scope = fullPlayer?.querySelector('.player-chrome.visible') ?? document;
+    return Array.from(scope.querySelectorAll(SELECTOR)).filter(samsungVisible);
 }
 function markSamsungSelected(element, elements) {
     for (const candidate of elements)
@@ -34,7 +43,43 @@ function markSamsungSelected(element, elements) {
     if (!element)
         return;
     element.setAttribute(SELECTED_ATTRIBUTE, 'true');
-    element.focus();
+    if (document.activeElement !== element)
+        element.focus();
+}
+function rectGap(start, size, otherStart, otherSize) {
+    const end = start + size;
+    const otherEnd = otherStart + otherSize;
+    if (otherEnd < start)
+        return start - otherEnd;
+    if (otherStart > end)
+        return otherStart - end;
+    return 0;
+}
+function scoreSamsungCandidate(current, candidate, direction) {
+    const cx = current.left + current.width / 2;
+    const cy = current.top + current.height / 2;
+    const tx = candidate.left + candidate.width / 2;
+    const ty = candidate.top + candidate.height / 2;
+    const dx = tx - cx;
+    const dy = ty - cy;
+    if (direction === 'left' && dx >= -1)
+        return null;
+    if (direction === 'right' && dx <= 1)
+        return null;
+    if (direction === 'up' && dy >= -1)
+        return null;
+    if (direction === 'down' && dy <= 1)
+        return null;
+    const horizontal = direction === 'left' || direction === 'right';
+    const primary = horizontal ? Math.abs(dx) : Math.abs(dy);
+    const secondary = horizontal ? Math.abs(dy) : Math.abs(dx);
+    const laneGap = horizontal
+        ? rectGap(current.top, current.height, candidate.top, candidate.height)
+        : rectGap(current.left, current.width, candidate.left, candidate.width);
+    // Prefer staying in the current visual row/column. Crossing a lane is
+    // deliberately expensive so a remote press does not jump diagonally across
+    // unrelated controls merely because their centres are slightly closer.
+    return primary + secondary * 0.2 + laneGap * 6;
 }
 function samsungSequentialCandidate(elements, current, direction) {
     const index = elements.indexOf(current);
@@ -44,7 +89,7 @@ function samsungSequentialCandidate(elements, current, direction) {
     const next = index + delta;
     return next >= 0 && next < elements.length ? elements[next] : undefined;
 }
-function useSamsungNavigation() {
+function useSamsungNavigation(onBack) {
     const focusFirst = () => {
         const elements = samsungElements();
         if (elements.length === 0)
@@ -52,72 +97,76 @@ function useSamsungNavigation() {
         const active = document.activeElement instanceof HTMLElement && elements.indexOf(document.activeElement) >= 0
             ? document.activeElement
             : undefined;
-        markSamsungSelected(active ?? elements[0], elements);
+        const selected = elements.find((element) => element.getAttribute(SELECTED_ATTRIBUTE) === 'true');
+        const preferred = elements.find((element) => element.getAttribute(DEFAULT_FOCUS_ATTRIBUTE) === 'true');
+        markSamsungSelected(active ?? selected ?? preferred ?? elements[0], elements);
     };
-    const onFocusIn = (event) => {
-        const target = event.target;
-        if (!(target instanceof HTMLElement) || !target.matches(SELECTOR))
-            return;
-        markSamsungSelected(target, samsungElements());
-    };
-    const onKeyDown = (event) => {
-        const keyToDirection = {
-            ArrowLeft: 'left', Left: 'left',
-            ArrowRight: 'right', Right: 'right',
-            ArrowUp: 'up', Up: 'up',
-            ArrowDown: 'down', Down: 'down',
-        };
-        const keyCodeDirection = {
-            37: 'left', 38: 'up', 39: 'right', 40: 'down',
-        };
+    const focusDefault = () => {
         const elements = samsungElements();
         if (elements.length === 0)
             return;
+        const preferred = elements.find((element) => element.getAttribute(DEFAULT_FOCUS_ATTRIBUTE) === 'true') ?? elements[0];
+        markSamsungSelected(preferred, elements);
+    };
+    const onFocusIn = (event) => {
+        const target = event.target;
+        if (!(target instanceof HTMLElement) || !target.matches(SELECTOR) || !samsungVisible(target))
+            return;
+        markSamsungSelected(target, samsungElements());
+    };
+    const onCommand = (command) => {
+        const elements = samsungElements();
+        if (elements.length === 0)
+            return false;
         const active = document.activeElement instanceof HTMLElement && elements.indexOf(document.activeElement) >= 0
             ? document.activeElement
             : undefined;
         const selected = elements.find((element) => element.getAttribute(SELECTED_ATTRIBUTE) === 'true');
-        const current = active ?? selected ?? elements[0];
-        if (event.key === 'Enter' || event.keyCode === 13) {
-            event.preventDefault();
-            event.stopPropagation();
+        const preferred = elements.find((element) => element.getAttribute(DEFAULT_FOCUS_ATTRIBUTE) === 'true');
+        const current = active ?? selected ?? preferred ?? elements[0];
+        if (command === 'back')
+            return onBack?.() ?? false;
+        if (command === 'activate') {
             markSamsungSelected(current, elements);
             current.click();
-            return;
+            return true;
         }
-        const direction = keyToDirection[event.key] ?? keyCodeDirection[event.keyCode];
-        if (!direction)
-            return;
-        if (current instanceof HTMLInputElement && current.type === 'range' && (direction === 'left' || direction === 'right')) {
-            return;
+        if (current instanceof HTMLInputElement && current.type === 'range' && (command === 'left' || command === 'right')) {
+            return false;
         }
         const currentRect = current.getBoundingClientRect();
-        let next = elements
-            .filter((element) => element !== current)
-            .map((element) => ({ element, score: scoreCandidate(currentRect, element.getBoundingClientRect(), direction) }))
-            .filter((entry) => entry.score !== null)
-            .sort((a, b) => a.score - b.score)[0]?.element;
-        // Chromium 47 can briefly return degenerate geometry while the layout settles.
-        // Keep the five-button remote deterministic rather than silently losing input.
+        const geometryValid = currentRect.width > 0 && currentRect.height > 0;
+        let next;
+        if (geometryValid) {
+            next = elements
+                .filter((element) => element !== current)
+                .map((element) => ({ element, score: scoreSamsungCandidate(currentRect, element.getBoundingClientRect(), command) }))
+                .filter((entry) => entry.score !== null)
+                .sort((a, b) => a.score - b.score)[0]?.element;
+        }
+        else {
+            // Only use DOM order when Chromium has not produced usable geometry yet.
+            next = samsungSequentialCandidate(elements, current, command);
+        }
         if (!next)
-            next = samsungSequentialCandidate(elements, current, direction);
-        if (!next)
-            return;
-        event.preventDefault();
-        event.stopPropagation();
+            return false;
         markSamsungSelected(next, elements);
         next.scrollIntoView(false);
+        return true;
     };
-    // Samsung recommends keydown on body/document. Capture phase ensures the
-    // application sees D-pad input before React/input handlers consume it.
-    document.addEventListener('keydown', onKeyDown, true);
+    const input = new SamsungDpadInput(onCommand);
+    input.attach(document);
     document.addEventListener('focusin', onFocusIn, true);
+    window.addEventListener('hashchange', focusFirst);
+    window.addEventListener('macha:tv-focus-default', focusDefault);
     focusFirst();
     const timer = window.setTimeout(focusFirst, 0);
     return () => {
         window.clearTimeout(timer);
-        document.removeEventListener('keydown', onKeyDown, true);
+        input.detach();
         document.removeEventListener('focusin', onFocusIn, true);
+        window.removeEventListener('hashchange', focusFirst);
+        window.removeEventListener('macha:tv-focus-default', focusDefault);
     };
 }
 function useWebNavigation() {
@@ -163,8 +212,13 @@ function useWebNavigation() {
     void Promise.resolve().then(focusFirst);
     return () => window.removeEventListener('keydown', onKeyDown);
 }
-export function useTvNavigation() {
+export function requestTvDefaultFocus() {
+    if (import.meta.env.MODE !== 'samsung')
+        return;
+    window.setTimeout(() => window.dispatchEvent(new Event('macha:tv-focus-default')), 0);
+}
+export function useTvNavigation(onBack) {
     useEffect(() => (import.meta.env.MODE === 'samsung'
-        ? useSamsungNavigation()
-        : useWebNavigation()), []);
+        ? useSamsungNavigation(onBack)
+        : useWebNavigation()), [onBack]);
 }

@@ -8,6 +8,7 @@ import { AppLogo } from './components/AppLogo';
 import { MusicNav } from './components/MusicNav';
 import logoUrl from './assets/macha-logo.svg?url';
 import { useTvNavigation } from './hooks/useTvNavigation';
+import { samsungBackTarget } from './platform/samsungBackNavigation';
 import { DemoPlaybackResolver } from './playback/DemoPlaybackResolver';
 import { MachaPlaybackResolver } from './playback/MachaPlaybackResolver';
 import { DemoServerApi, MachaServerApi } from './api/MachaServerApi';
@@ -71,33 +72,73 @@ function shuffled(items) {
 function DetailRoute({ api, onPlay, onPlayFromStart, progressById, parameter, onEdit }) {
     const params = useParams();
     const navigate = useNavigate();
+    const location = useLocation();
     const itemId = required(params[parameter], parameter);
-    return (_jsx(DetailScreen, { api: api, itemId: itemId, onBack: () => navigate(-1), onPlay: onPlay, onPlayFromStart: onPlayFromStart, progress: progressById.get(itemId), onEdit: onEdit ? () => onEdit(itemId) : undefined }));
+    return (_jsx(DetailScreen, { api: api, itemId: itemId, onBack: () => {
+            if (import.meta.env.MODE !== 'samsung') {
+                navigate(-1);
+                return;
+            }
+            void samsungBackTarget(location.pathname, api).then((target) => { if (target)
+                navigate(target); });
+        }, onPlay: onPlay, onPlayFromStart: onPlayFromStart, progress: progressById.get(itemId), onEdit: onEdit ? () => onEdit(itemId) : undefined }));
 }
 function SeriesRoute({ api, onOpenSeason, onEdit }) {
     const { seriesId } = useParams();
     const navigate = useNavigate();
+    const location = useLocation();
     const resolvedSeriesId = required(seriesId, 'seriesId');
-    return (_jsx(SeriesScreen, { api: api, seriesId: resolvedSeriesId, onBack: () => navigate(-1), onOpenSeason: onOpenSeason, onEdit: onEdit ? () => onEdit(resolvedSeriesId) : undefined }));
+    return (_jsx(SeriesScreen, { api: api, seriesId: resolvedSeriesId, onBack: () => {
+            if (import.meta.env.MODE !== 'samsung') {
+                navigate(-1);
+                return;
+            }
+            void samsungBackTarget(location.pathname, api).then((target) => { if (target)
+                navigate(target); });
+        }, onOpenSeason: onOpenSeason, onEdit: onEdit ? () => onEdit(resolvedSeriesId) : undefined }));
 }
 function SeasonRoute({ api, progress, onPlayEpisode, onEdit }) {
     const { seriesId, seasonId } = useParams();
     const navigate = useNavigate();
+    const location = useLocation();
     const resolvedSeriesId = required(seriesId, 'seriesId');
     const resolvedSeasonId = required(seasonId, 'seasonId');
-    return (_jsx(SeasonScreen, { api: api, seriesId: resolvedSeriesId, seasonId: resolvedSeasonId, onBack: () => navigate(-1), progress: progress, onPlayEpisode: onPlayEpisode, onEdit: onEdit ? () => onEdit(resolvedSeasonId) : undefined }));
+    return (_jsx(SeasonScreen, { api: api, seriesId: resolvedSeriesId, seasonId: resolvedSeasonId, onBack: () => {
+            if (import.meta.env.MODE !== 'samsung') {
+                navigate(-1);
+                return;
+            }
+            void samsungBackTarget(location.pathname, api).then((target) => { if (target)
+                navigate(target); });
+        }, progress: progress, onPlayEpisode: onPlayEpisode, onEdit: onEdit ? () => onEdit(resolvedSeasonId) : undefined }));
 }
 function ArtistRoute({ api, onOpenAlbum, onAddToPlaylist, onPlayNext, onPlayLater, onShuffle, onEdit }) {
     const { artistId } = useParams();
     const navigate = useNavigate();
+    const location = useLocation();
     const resolvedArtistId = required(artistId, 'artistId');
-    return (_jsx(ArtistScreen, { api: api, artistId: resolvedArtistId, onBack: () => navigate(routes.musicArtists), onOpenAlbum: onOpenAlbum, onAddToPlaylist: onAddToPlaylist, onPlayNext: onPlayNext, onPlayLater: onPlayLater, onShuffle: onShuffle, onEdit: onEdit ? () => onEdit(resolvedArtistId) : undefined }));
+    return (_jsx(ArtistScreen, { api: api, artistId: resolvedArtistId, onBack: () => {
+            if (import.meta.env.MODE !== 'samsung') {
+                navigate(routes.musicArtists);
+                return;
+            }
+            void samsungBackTarget(location.pathname, api).then((target) => { if (target)
+                navigate(target); });
+        }, onOpenAlbum: onOpenAlbum, onAddToPlaylist: onAddToPlaylist, onPlayNext: onPlayNext, onPlayLater: onPlayLater, onShuffle: onShuffle, onEdit: onEdit ? () => onEdit(resolvedArtistId) : undefined }));
 }
 function AlbumRoute({ api, onPlay, onPlayAll, onOpenTrack, onAddToPlaylist, onPlayNext, onPlayLater, onShuffle, onEdit }) {
     const { albumId } = useParams();
     const navigate = useNavigate();
+    const location = useLocation();
     const resolvedAlbumId = required(albumId, 'albumId');
-    return (_jsx(AlbumScreen, { api: api, albumId: resolvedAlbumId, onBack: () => navigate(-1), onPlayTrack: onPlay, onPlayAll: onPlayAll, onOpenTrack: onOpenTrack, onAddToPlaylist: onAddToPlaylist, onPlayNext: onPlayNext, onPlayLater: onPlayLater, onShuffle: onShuffle, onEdit: onEdit ? () => onEdit(resolvedAlbumId) : undefined }));
+    return (_jsx(AlbumScreen, { api: api, albumId: resolvedAlbumId, onBack: () => {
+            if (import.meta.env.MODE !== 'samsung') {
+                navigate(-1);
+                return;
+            }
+            void samsungBackTarget(location.pathname, api).then((target) => { if (target)
+                navigate(target); });
+        }, onPlayTrack: onPlay, onPlayAll: onPlayAll, onOpenTrack: onOpenTrack, onAddToPlaylist: onAddToPlaylist, onPlayNext: onPlayNext, onPlayLater: onPlayLater, onShuffle: onShuffle, onEdit: onEdit ? () => onEdit(resolvedAlbumId) : undefined }));
 }
 function MetadataEditorRoute({ api }) {
     const { itemId } = useParams();
@@ -112,7 +153,6 @@ function MetadataEditorRoute({ api }) {
         } }));
 }
 export default function App({ platform, apiOverride, playbackOverride }) {
-    useTvNavigation();
     const navigate = useNavigate();
     const location = useLocation();
     const [serverUrl, setServerUrl] = useState(() => getServerUrl());
@@ -148,6 +188,21 @@ export default function App({ platform, apiOverride, playbackOverride }) {
     }, [apiToken, demo, playbackOverride, serverUrl]);
     const serverApi = useMemo(() => (demo ? new DemoServerApi() : new MachaServerApi(serverUrl, apiToken)), [apiToken, demo, serverUrl]);
     const acquisitionApi = useMemo(() => (demo ? new DemoAcquisitionApi() : new MachaAcquisitionApi(serverUrl, apiToken)), [apiToken, demo, serverUrl]);
+    const samsungBack = useCallback(() => {
+        if (import.meta.env.MODE !== 'samsung')
+            return false;
+        if (location.pathname === routes.home) {
+            platform.exitApplication?.();
+            return true;
+        }
+        const returnTo = playerRouteItemId(location.pathname) ? activePlayback?.returnTo : undefined;
+        void samsungBackTarget(location.pathname, api, returnTo)
+            .then((target) => { if (target)
+            navigate(target); })
+            .catch(() => navigate(routes.home));
+        return true;
+    }, [activePlayback?.returnTo, api, location.pathname, navigate, platform]);
+    useTvNavigation(samsungBack);
     useEffect(() => {
         const onServerUnreachable = (event) => {
             const detail = event.detail;

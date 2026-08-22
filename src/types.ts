@@ -131,4 +131,8 @@ export interface PlaybackEvent {
   durationMs: number;
   paused: boolean;
   ended: boolean;
+  /** True while the underlying media element is resolving a new seek position. */
+  seeking?: boolean;
+  /** True while playback wants to run but lacks enough media to continue. */
+  buffering?: boolean;
 }

@@ -9,15 +9,16 @@ import { detectPlatform } from './platform';
 import { diagnosticsSettings } from './settings';
 import { installDirectPlayReadAheadDiagnostics, warmDirectPlayReadAhead } from './playback/directPlayReadAhead';
 import './styles.css';
+const samsung = import.meta.env.MODE === 'samsung';
 configureClientDiagnostics({
-    level: diagnosticsSettings.playbackLogLevel,
-    console: diagnosticsSettings.playbackConsole,
-    maxEntries: diagnosticsSettings.playbackLogBufferEntries,
+    level: samsung ? 'warn' : diagnosticsSettings.playbackLogLevel,
+    console: samsung ? false : diagnosticsSettings.playbackConsole,
+    maxEntries: samsung ? 256 : diagnosticsSettings.playbackLogBufferEntries,
 });
 installClientDiagnosticsConsole();
-installDirectPlayReadAheadDiagnostics();
+if (!samsung)
+    installDirectPlayReadAheadDiagnostics();
 const log = createClientLogger('app.boot');
-const samsung = import.meta.env.MODE === 'samsung';
 const Router = samsung ? HashRouter : BrowserRouter;
 function describeError(error) {
     if (error instanceof Error)

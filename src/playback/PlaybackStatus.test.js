@@ -66,7 +66,6 @@ describe('describePlaybackSession', () => {
             },
         }))?.video).toBe('VIDEO TRANSCODE · SOURCE · HEVC · 1920×1080 · 7.5 Mb/s → H264 · 1280×720 · 4.0 Mb/s');
     });
-
     it('reports the selected subtitle stream only when subtitles are enabled', () => {
         const withSubtitles = session({
             sourceInfo: {
@@ -82,5 +81,4 @@ describe('describePlaybackSession', () => {
         expect(describePlaybackSession(withSubtitles)?.subtitle).toBe('SUBTITLES · ENG · ASS · FORCED');
         expect(describePlaybackSession(session())?.subtitle).toBeUndefined();
     });
-
 });

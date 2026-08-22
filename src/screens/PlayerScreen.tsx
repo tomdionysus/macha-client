@@ -4,6 +4,7 @@ import { PlayIcon, RestartIcon } from '../components/PlaybackIcons';
 import { Loading } from '../components/Status';
 import { createClientLogger } from '../diagnostics/ClientLog';
 import { useArtworkUrl } from '../hooks/useArtworkUrl';
+import { requestTvDefaultFocus } from '../hooks/useTvNavigation';
 import type { Platform } from '../platform/Platform';
 import type {
   PlaybackPreferencesUpdate,
@@ -14,6 +15,8 @@ import type {
 } from '../playback/PlaybackResolver';
 import { uiSettings } from '../settings';
 import { describePlaybackSession } from '../playback/PlaybackStatus';
+import { DirectSeekSessionSync } from '../playback/DirectSeekSync';
+import { nextDesiredSeekPosition, preserveSeekSubtitleState } from '../playback/SeekState';
 import type { MediaSummary, PlaybackEvent, PlaybackMode, PlaybackProgress } from '../types';
 
 export interface PlayerHostRequest {
@@ -144,6 +147,19 @@ function streamLabel(stream: PlaybackStreamInfo, fallback: string): string {
 
 function qualityChoices(session: PlaybackSession): number[] {
   return session.options.qualityHeights;
+}
+
+export function webSeekDeltaForKey(key: string): number | undefined {
+  if (key === 'ArrowLeft') return -10_000;
+  if (key === 'ArrowRight') return 10_000;
+  return undefined;
+}
+
+export function webSeekHasResumed(event: PlaybackEvent, targetMs: number, resumeAfterSeek: boolean): boolean {
+  if (Math.abs(event.positionMs - targetMs) > 1_500) return false;
+  if (event.seeking) return false;
+  if (!resumeAfterSeek) return true;
+  return !event.paused && !event.buffering;
 }
 
 export function isSubtitleOnlyUpdate(update: PlaybackUpdate): boolean {
@@ -323,6 +339,11 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
   const hideTimerRef = useRef<number | undefined>(undefined);
   const scrubValueRef = useRef<number | undefined>(undefined);
   const committedSeekRef = useRef<number | undefined>(undefined);
+  const desiredSeekRef = useRef<number | undefined>(undefined);
+  const directSeekDispatchTimerRef = useRef<number | undefined>(undefined);
+  const directSeekLastDispatchRef = useRef(0);
+  const directSeekSyncRef = useRef<DirectSeekSessionSync | undefined>(undefined);
+  const directSeekResumeRef = useRef<{ targetMs: number; resumeAfterSeek: boolean } | undefined>(undefined);
   const mountedRef = useRef(true);
   const endedHandledRef = useRef(false);
   const [event, setEvent] = useState(initialEvent);
@@ -332,19 +353,58 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
   const [playbackNotice, setPlaybackNotice] = useState<string>();
   const webControls = platform.name === 'web';
   const samsungControls = import.meta.env.MODE === 'samsung';
+  const html5Player = webControls || samsungControls;
   const interactionControlled = webControls || samsungControls;
   const [controlsVisible, setControlsVisible] = useState(!interactionControlled);
   const [fullscreen, setFullscreen] = useState(false);
   const [optionsVisible, setOptionsVisible] = useState(false);
   const [controlBusy, setControlBusy] = useState(false);
   const [seekInFlight, setSeekInFlight] = useState(false);
+  const [seekFeedbackGeneration, setSeekFeedbackGeneration] = useState(0);
   const [scrubValue, setScrubValue] = useState<number>();
   const backdrop = useArtworkUrl(api, media.artwork?.backdrop ?? media.artwork?.thumbnail ?? media.artwork?.poster);
   const cover = useArtworkUrl(api, media.kind === 'track' ? media.artwork?.poster ?? media.artwork?.thumbnail : undefined);
 
   useEffect(() => {
-    player.setVolume(volume);
-  }, [player, volume]);
+    player.setVolume(samsungControls ? 1 : volume);
+  }, [player, samsungControls, volume]);
+
+  useEffect(() => {
+    const sync = new DirectSeekSessionSync(
+      (sessionId, positionMs) => playbackResolver.update(sessionId, { seekMs: positionMs }),
+      (next, request) => {
+        if (!mountedRef.current) return;
+        const current = sessionRef.current;
+        if (!current || current.sessionId !== request.sessionId || current.mode !== 'direct') return;
+        const preserved = preserveSeekSubtitleState(current, next);
+        sessionRef.current = preserved;
+        setSession(preserved);
+        log.info('seek-direct-session-synced', {
+          sessionId: request.sessionId,
+          positionMs: request.positionMs,
+          sequence: request.sequence,
+        });
+      },
+      (error, request) => {
+        log.warn('seek-direct-session-sync-failed', {
+          sessionId: request.sessionId,
+          positionMs: request.positionMs,
+          sequence: request.sequence,
+          error,
+        });
+      },
+    );
+    directSeekSyncRef.current = sync;
+    return () => {
+      sync.dispose();
+      if (directSeekSyncRef.current === sync) directSeekSyncRef.current = undefined;
+    };
+  }, [log, playbackResolver]);
+
+  const beginSeekFeedback = useCallback(() => {
+    setSeekFeedbackGeneration((generation) => generation + 1);
+    setSeekInFlight(true);
+  }, []);
 
   const publish = useCallback((next: PlaybackEvent) => {
     const previous = latestRef.current;
@@ -422,8 +482,9 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
     const elements = Array.from(chrome.querySelectorAll<HTMLElement>('[data-tv-focusable="true"]:not([disabled])'));
     if (elements.length === 0) return;
     for (const element of elements) element.removeAttribute('data-tv-selected');
-    elements[0].setAttribute('data-tv-selected', 'true');
-    elements[0].focus();
+    const preferred = elements.find((element) => element.getAttribute('data-tv-default-focus') === 'true') ?? elements[0];
+    preferred.setAttribute('data-tv-selected', 'true');
+    preferred.focus();
   }, []);
 
   const noteWebPointerMovement = useCallback((clientY: number) => {
@@ -443,6 +504,21 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
   const clearCommittedSeek = useCallback(() => {
     committedSeekRef.current = undefined;
     setScrubPosition(undefined);
+  }, [setScrubPosition]);
+
+  const clearDesiredSeek = useCallback(() => {
+    desiredSeekRef.current = undefined;
+    directSeekResumeRef.current = undefined;
+    if (directSeekDispatchTimerRef.current !== undefined) {
+      window.clearTimeout(directSeekDispatchTimerRef.current);
+      directSeekDispatchTimerRef.current = undefined;
+    }
+    setScrubPosition(undefined);
+  }, [setScrubPosition]);
+
+  const setDesiredSeek = useCallback((positionMs: number) => {
+    desiredSeekRef.current = positionMs;
+    setScrubPosition(positionMs);
   }, [setScrubPosition]);
 
   const loadSession = useCallback(async (next: PlaybackSession, absolutePositionMs: number, resumeAfterLoad = true) => {
@@ -516,17 +592,31 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
       const absolutePositionMs = next.positionMs + streamOffsetRef.current;
       const committedSeek = committedSeekRef.current;
       if (committedSeek !== undefined) {
-        // A browser may emit pause/timeupdate events from the old position after
-        // a range interaction. Keep the user's committed seek authoritative
-        // until the player itself reaches the new position.
+        // Native and transformed seeks still use a committed target because the
+        // old generation may publish stale events while it is being replaced.
         if (Math.abs(absolutePositionMs - committedSeek) > 1_500) return;
         clearCommittedSeek();
       }
-      publish({
+      const absoluteEvent = {
         ...next,
         positionMs: absolutePositionMs,
         durationMs,
-      });
+      };
+      const pendingDirectSeek = directSeekResumeRef.current;
+      const desiredSeek = desiredSeekRef.current;
+      if (pendingDirectSeek && desiredSeek !== undefined
+        && webSeekHasResumed(absoluteEvent, desiredSeek, pendingDirectSeek.resumeAfterSeek)) {
+        const targetMs = desiredSeek;
+        clearDesiredSeek();
+        setSeekInFlight(false);
+        log.info('seek-direct-resumed', {
+          sessionId: sessionRef.current?.sessionId,
+          positionMs: absolutePositionMs,
+          targetMs,
+          buffering: absoluteEvent.buffering,
+        });
+      }
+      publish(absoluteEvent);
     });
 
     void (async () => {
@@ -594,12 +684,14 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
     return () => {
       log.info('player-unmount', { sessionId: sessionRef.current?.sessionId, latest: latestRef.current });
       mountedRef.current = false;
+      if (directSeekDispatchTimerRef.current !== undefined) window.clearTimeout(directSeekDispatchTimerRef.current);
+      directSeekDispatchTimerRef.current = undefined;
       unsubscribe();
       player.detach();
       const activeSession = sessionRef.current;
       if (activeSession) void playbackResolver.stop(activeSession.sessionId).catch(() => undefined);
     };
-  }, [clearCommittedSeek, initialFatalError, initialStartPositionMs, loadSession, log, media, platform, playbackResolver, player, publish]);
+  }, [clearCommittedSeek, clearDesiredSeek, initialFatalError, initialStartPositionMs, loadSession, log, media, platform, playbackResolver, player, publish]);
 
   useEffect(() => {
     if (presentation === 'full') {
@@ -667,29 +759,69 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
       resumeAfterSeek,
     });
 
-    committedSeekRef.current = bounded;
-    setScrubPosition(bounded);
+    if (!(activeSession.mode === 'direct' && html5Player)) {
+      committedSeekRef.current = bounded;
+      setScrubPosition(bounded);
+    }
     if (!interactionControlled) {
       setControlsVisible(true);
       if (hideTimerRef.current !== undefined) window.clearTimeout(hideTimerRef.current);
     }
 
     if (activeSession.mode === 'direct') {
-      // Freeze the current picture immediately, move the media element, then
-      // resume only if playback was running before the seek. The committed
-      // scrub value prevents stale media events snapping the bar backwards.
-      player.pause();
-      publish({ ...previous, positionMs: bounded, paused: true, ended: false });
       const directSeekStartedAt = performance.now();
-      player.seek(bounded);
-      if (resumeAfterSeek) player.resume();
+      let sequence: number | undefined;
+      if (html5Player) {
+        // Keep the user's requested position separate from the media element's
+        // reported time. Repeated arrows/buttons therefore accumulate against
+        // the latest desired target even while the browser is still resolving
+        // an earlier range seek. Actual media seeks are coalesced to avoid
+        // thrashing the demuxer/read-ahead window during a held key.
+        setDesiredSeek(bounded);
+        directSeekResumeRef.current = { targetMs: bounded, resumeAfterSeek };
+        beginSeekFeedback();
+        const dispatch = () => {
+          directSeekDispatchTimerRef.current = undefined;
+          const targetMs = desiredSeekRef.current;
+          if (targetMs === undefined) return;
+          directSeekLastDispatchRef.current = performance.now();
+          directSeekResumeRef.current = {
+            targetMs,
+            resumeAfterSeek: directSeekResumeRef.current?.resumeAfterSeek ?? resumeAfterSeek,
+          };
+          player.seek(targetMs);
+        };
+        const elapsed = performance.now() - directSeekLastDispatchRef.current;
+        const delayMs = Math.max(0, 120 - elapsed);
+        if (delayMs === 0) {
+          if (directSeekDispatchTimerRef.current !== undefined) {
+            window.clearTimeout(directSeekDispatchTimerRef.current);
+            directSeekDispatchTimerRef.current = undefined;
+          }
+          dispatch();
+        } else if (directSeekDispatchTimerRef.current === undefined) {
+          directSeekDispatchTimerRef.current = window.setTimeout(dispatch, delayMs);
+        }
+        sequence = directSeekSyncRef.current?.schedule(activeSession.sessionId, bounded);
+      } else {
+        // Preserve the established native-player behaviour on Android/Tizen.
+        player.pause();
+        publish({ ...previous, positionMs: bounded, paused: true, ended: false });
+        player.seek(bounded);
+        if (resumeAfterSeek) player.resume();
+      }
       log.info('seek-direct-dispatched', {
         elapsedMs: Math.round((performance.now() - directSeekStartedAt) * 10) / 10,
         positionMs: bounded,
         resumeAfterSeek,
+        optimistic: html5Player,
+        sessionSyncSequence: sequence,
       });
       return true;
     }
+
+    directSeekSyncRef.current?.clearPending();
+    clearDesiredSeek();
 
     // Server-backed seek generations can take long enough to be perceptible.
     // Pause the old stream immediately but delay the spinner so a fast restart
@@ -698,12 +830,12 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
     player.pause();
     publish({ ...previous, positionMs: bounded, paused: true, ended: false });
     setControlBusy(true);
-    setSeekInFlight(true);
+    beginSeekFeedback();
     setPlaybackNotice('Seeking…');
     const seekStartedAt = performance.now();
     try {
       const selectedSubtitle = activeSession.selected.subtitleStream;
-      const next = await playbackResolver.update(activeSession.sessionId, {
+      const updated = await playbackResolver.update(activeSession.sessionId, {
         seekMs: bounded,
         // A seek creates a new transformed stream generation. Preserve the
         // currently selected subtitle explicitly so the server issues the
@@ -714,6 +846,7 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
           subtitleLanguage: activeSession.preferences.subtitleLanguage,
         },
       });
+      const next = preserveSeekSubtitleState(activeSession, updated);
       log.info('seek-server-updated', {
         sessionId: next.sessionId,
         mode: next.mode,
@@ -756,7 +889,19 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
         setControlBusy(false);
       }
     }
-  }, [clearCommittedSeek, controlBusy, interactionControlled, loadSession, log, playbackResolver, player, publish, setScrubPosition]);
+  }, [beginSeekFeedback, clearCommittedSeek, clearDesiredSeek, controlBusy, interactionControlled, loadSession, log, playbackResolver, player, publish, setDesiredSeek, setScrubPosition, html5Player]);
+
+  const seekBy = useCallback((deltaMs: number) => {
+    const activeSession = sessionRef.current;
+    if (!activeSession || !activeSession.options.canSeek) return;
+    const target = nextDesiredSeekPosition(
+      desiredSeekRef.current,
+      latestRef.current.positionMs,
+      deltaMs,
+      activeSession.durationMs,
+    );
+    void seek(target);
+  }, [seek]);
 
   const playFromStart = useCallback(async () => {
     const activeSession = sessionRef.current;
@@ -782,6 +927,9 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
     }
     const updateStartedAt = performance.now();
     log.info('stream-update-ui-request', { sessionId: activeSession.sessionId, positionMs: position, subtitleOnly, update });
+    directSeekSyncRef.current?.clearPending();
+    clearDesiredSeek();
+    setSeekInFlight(false);
     setControlBusy(true);
     setPlaybackNotice(subtitleOnly ? 'Loading subtitles…' : 'Updating stream…');
     try {
@@ -831,7 +979,7 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
     } finally {
       if (mountedRef.current) setControlBusy(false);
     }
-  }, [controlBusy, loadSession, log, playbackResolver, player]);
+  }, [clearDesiredSeek, controlBusy, loadSession, log, playbackResolver, player]);
 
   useEffect(() => {
     const onFullscreenChange = () => {
@@ -847,6 +995,10 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
       void document.exitFullscreen().catch(() => undefined);
     }
   }, [presentation]);
+
+  useEffect(() => {
+    if (samsungControls) requestTvDefaultFocus();
+  }, [presentation, samsungControls]);
 
   const toggleFullscreen = useCallback(async () => {
     if (platform.name !== 'web' || !document.fullscreenEnabled || !pageRef.current) return;
@@ -876,8 +1028,7 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
       if (presentation === 'full' && samsungBack) {
         keyEvent.preventDefault();
         keyEvent.stopPropagation();
-        if (controlsVisible || optionsVisible) hideControls();
-        else onMinimize();
+        onMinimize();
         return;
       }
 
@@ -926,23 +1077,35 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
         setPaused(true);
         return;
       }
+      if (presentation === 'full' && webControls && !keyEvent.altKey && !keyEvent.ctrlKey && !keyEvent.metaKey) {
+        const delta = webSeekDeltaForKey(keyEvent.key);
+        const target = keyEvent.target;
+        const targetOwnsArrowKeys = target instanceof Element && Boolean(target.closest('input, select, textarea, [contenteditable="true"]'));
+        if (delta !== undefined && !targetOwnsArrowKeys) {
+          keyEvent.preventDefault();
+          keyEvent.stopPropagation();
+          showControls();
+          seekBy(delta);
+          return;
+        }
+      }
       if (keyEvent.key === 'MediaRewind') {
         keyEvent.preventDefault();
         keyEvent.stopPropagation();
-        void seek(latestRef.current.positionMs - 10_000);
+        seekBy(-10_000);
         return;
       }
       if (keyEvent.key === 'MediaFastForward') {
         keyEvent.preventDefault();
         keyEvent.stopPropagation();
-        void seek(latestRef.current.positionMs + 10_000);
+        seekBy(10_000);
         return;
       }
       if (presentation === 'full' && !interactionControlled) showControls();
     };
     window.addEventListener('keydown', onKeyDown, true);
     return () => window.removeEventListener('keydown', onKeyDown, true);
-  }, [armControlsHide, controlsVisible, focusSamsungControls, hideControls, interactionControlled, onMinimize, optionsVisible, presentation, samsungControls, seek, setPaused, showControls]);
+  }, [armControlsHide, controlsVisible, focusSamsungControls, hideControls, interactionControlled, onMinimize, optionsVisible, presentation, samsungControls, seekBy, setPaused, showControls, webControls]);
 
   const duration = session?.durationMs || event.durationMs || 1;
   const displayedProgress = scrubValue ?? Math.min(duration, event.positionMs);
@@ -990,7 +1153,7 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
         </div>
       )}
       {starting && <Loading />}
-      {seekInFlight && <Loading delayMs={uiSettings.playerSeekSpinnerDelayMs} />}
+      {seekInFlight && <Loading key={seekFeedbackGeneration} delayMs={uiSettings.playerSeekSpinnerDelayMs} />}
 
       {fatalError && (
         <div className="player-fatal-error" role="alert">
@@ -1032,33 +1195,46 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
 
         <div className="player-scrubber-row">
           <span>{formatTime(displayedProgress)}</span>
-          <input
-            className="player-scrubber"
-            type="range"
-            min={0}
-            max={Math.max(1, duration)}
-            step={1_000}
-            value={displayedProgress}
-            aria-label="Playback position"
-            data-tv-focusable="true"
-            disabled={!session?.options.canSeek}
-            aria-busy={controlBusy || undefined}
-            onChange={(changeEvent: ChangeEvent<HTMLInputElement>) => {
-              if (!controlBusy) setScrubPosition(Number(changeEvent.target.value));
-            }}
-            onPointerUp={() => {
-              const position = scrubValueRef.current;
-              if (!controlBusy && position !== undefined) void seek(position);
-            }}
-            onKeyUp={(keyEvent: ReactKeyboardEvent<HTMLInputElement>) => {
-              const position = scrubValueRef.current;
-              if (!controlBusy && position !== undefined && ['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(keyEvent.key)) void seek(position);
-            }}
-            onBlur={() => {
-              const position = scrubValueRef.current;
-              if (!controlBusy && position !== undefined) void seek(position);
-            }}
-          />
+          {samsungControls ? (
+            <div
+              className="player-scrubber-display"
+              role="progressbar"
+              aria-label="Playback position"
+              aria-valuemin={0}
+              aria-valuemax={Math.max(1, duration)}
+              aria-valuenow={Math.max(0, Math.min(duration, displayedProgress))}
+            >
+              <span style={{ width: `${Math.min(100, displayedProgress / Math.max(1, duration) * 100)}%` }} />
+            </div>
+          ) : (
+            <input
+              className="player-scrubber"
+              type="range"
+              min={0}
+              max={Math.max(1, duration)}
+              step={1_000}
+              value={displayedProgress}
+              aria-label="Playback position"
+              data-tv-focusable="true"
+              disabled={!session?.options.canSeek}
+              aria-busy={controlBusy || undefined}
+              onChange={(changeEvent: ChangeEvent<HTMLInputElement>) => {
+                if (!controlBusy) setScrubPosition(Number(changeEvent.target.value));
+              }}
+              onPointerUp={() => {
+                const position = scrubValueRef.current;
+                if (!controlBusy && position !== undefined) void seek(position);
+              }}
+              onKeyUp={(keyEvent: ReactKeyboardEvent<HTMLInputElement>) => {
+                const position = scrubValueRef.current;
+                if (!controlBusy && position !== undefined && ['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(keyEvent.key)) void seek(position);
+              }}
+              onBlur={() => {
+                const position = scrubValueRef.current;
+                if (!controlBusy && position !== undefined) void seek(position);
+              }}
+            />
+          )}
           <span>{formatTime(duration)}</span>
         </div>
 
@@ -1077,11 +1253,11 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
           >
             <RestartIcon />
           </button>
-          <button type="button" data-tv-focusable="true" disabled={!playbackAvailable || !session?.options.canSeek || controlBusy} onClick={() => void seek(displayedProgress - 10_000)} aria-label="Seek backward"><PlayerIcon name="rewind" /></button>
-          <button type="button" data-tv-focusable="true" disabled={!playbackAvailable || controlBusy} onClick={() => setPaused(!event.paused)} aria-label={event.paused ? 'Play' : 'Pause'}>
+          <button type="button" data-tv-focusable="true" disabled={!playbackAvailable || !session?.options.canSeek || controlBusy} onClick={() => seekBy(-10_000)} aria-label="Seek backward"><PlayerIcon name="rewind" /></button>
+          <button type="button" data-tv-focusable="true" data-tv-default-focus={samsungControls ? 'true' : undefined} disabled={!playbackAvailable || controlBusy} onClick={() => setPaused(!event.paused)} aria-label={event.paused ? 'Play' : 'Pause'}>
             {event.paused ? <PlayIcon /> : <PlayerIcon name="pause" />}
           </button>
-          <button type="button" data-tv-focusable="true" disabled={!playbackAvailable || !session?.options.canSeek || controlBusy} onClick={() => void seek(displayedProgress + 10_000)} aria-label="Seek forward"><PlayerIcon name="forward" /></button>
+          <button type="button" data-tv-focusable="true" disabled={!playbackAvailable || !session?.options.canSeek || controlBusy} onClick={() => seekBy(10_000)} aria-label="Seek forward"><PlayerIcon name="forward" /></button>
           {queuePosition && queuePosition.total > 1 && (
             <button type="button" data-tv-focusable="true" disabled={!canNext || controlBusy} onClick={onNext} aria-label="Next item"><PlayerIcon name="next" /></button>
           )}
@@ -1098,7 +1274,7 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
           >
             <PlayerIcon name="options" />
           </button>
-          <VolumeControl volume={volume} onChange={onVolumeChange} />
+          {!samsungControls && <VolumeControl volume={volume} onChange={onVolumeChange} />}
           {platform.name === 'web' && document.fullscreenEnabled && (
             <button
               type="button"
@@ -1127,13 +1303,13 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
           {queuePosition && queuePosition.total > 1 && (
             <button type="button" data-tv-focusable="true" disabled={!canPrevious || controlBusy} onClick={onPrevious} aria-label="Previous item"><PlayerIcon name="previous" /></button>
           )}
-          <button type="button" data-tv-focusable="true" disabled={!playbackAvailable || controlBusy} onClick={() => setPaused(!event.paused)} aria-label={event.paused ? 'Play' : 'Pause'}>
+          <button type="button" data-tv-focusable="true" data-tv-default-focus={samsungControls ? 'true' : undefined} disabled={!playbackAvailable || controlBusy} onClick={() => setPaused(!event.paused)} aria-label={event.paused ? 'Play' : 'Pause'}>
             {event.paused ? <PlayIcon /> : <PlayerIcon name="pause" />}
           </button>
           {queuePosition && queuePosition.total > 1 && (
             <button type="button" data-tv-focusable="true" disabled={!canNext || controlBusy} onClick={onNext} aria-label="Next item"><PlayerIcon name="next" /></button>
           )}
-          <VolumeControl volume={volume} onChange={onVolumeChange} compact />
+          {!samsungControls && <VolumeControl volume={volume} onChange={onVolumeChange} compact />}
           <button type="button" data-tv-focusable="true" onClick={onExpand} aria-label="Open full player"><PlayerIcon name="expand" /></button>
           <button type="button" data-tv-focusable="true" onClick={onStop} aria-label="Stop playback"><PlayerIcon name="close" /></button>
         </div>

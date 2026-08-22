@@ -121,10 +121,15 @@ h2 { font-size: 24px; }
 .sponsor-options article { flex: 1 1 0; margin-right: 16px; }
 
 .status-screen { min-height: 700px; flex-direction: column; text-align: center; }
-.player-page, .player-presentation-full, .player-host, .native-video, .player-backdrop { top: 0; right: 0; bottom: 0; left: 0; }
-.player-page { position: fixed !important; width: 100% !important; height: 100% !important; }
-.player-host { position: absolute !important; width: 100% !important; height: 100% !important; }
-.native-video, .samsung-avplay { position: absolute !important; width: 100% !important; height: 100% !important; }
+.player-page { position: fixed !important; }
+.player-page.player-presentation-full { top: 0 !important; right: 0 !important; bottom: 0 !important; left: 0 !important; width: 100% !important; height: 100% !important; }
+.player-presentation-full .player-host, .player-presentation-full .native-video { top: 0 !important; right: 0 !important; bottom: 0 !important; left: 0 !important; width: 100% !important; height: 100% !important; }
+.player-page.player-presentation-mini { top: auto !important; right: 29px !important; bottom: 23px !important; left: 29px !important; width: auto !important; height: 76px !important; min-height: 76px !important; max-height: 76px !important; }
+.player-presentation-mini .player-host { top: 0 !important; right: auto !important; bottom: 0 !important; left: 0 !important; width: 132px !important; height: 76px !important; }
+.player-presentation-mini .native-video { top: 0 !important; right: 0 !important; bottom: 0 !important; left: 0 !important; width: 100% !important; height: 76px !important; }
+.player-presentation-mini.audio-player .player-host { width: 76px !important; height: 76px !important; }
+.player-presentation-mini .player-mini-chrome { top: 0 !important; right: 0 !important; bottom: 0 !important; left: 132px !important; height: 76px !important; min-height: 76px !important; max-height: 76px !important; }
+.player-presentation-mini.audio-player .player-mini-chrome { left: 76px !important; }
 .player-chrome { position: absolute !important; top: auto !important; right: 0 !important; bottom: 0 !important; left: 0 !important; height: auto !important; min-height: 0 !important; z-index: 120 !important; }
 .player-stream-status, .player-options { display: block; }
 .player-option-group { display: flex; align-items: flex-start; }
@@ -132,18 +137,32 @@ h2 { font-size: 24px; }
 .player-scrubber-row { display: flex; align-items: center; }
 .player-scrubber-row > :first-child, .player-scrubber-row > :last-child { width: 72px; flex: 0 0 72px; }
 .player-scrubber { flex: 1 1 auto; margin: 0 16px; }
+.player-scrubber-display { flex: 1 1 auto; height: 6px; margin: 0 16px; background: #28282c; overflow: hidden; }
+.player-scrubber-display > span { display: block; height: 100%; background: #9f1834; }
 .audio-player-art { width: 420px; height: 420px; margin-left: -210px; margin-top: -210px; }
 .player-mini-copy { display: flex; align-items: center; }
 .player-mini-title, .player-mini-subtitle { display: block; }
 .player-mini-time { position: absolute; right: 14px; top: 14px; }
 .toast { max-width: 560px; }
 
+/* Chromium 47: avoid expensive compositor effects and animation on the TV UI. */
+*, *::before, *::after { transition: none !important; animation: none !important; }
+.app-watermark, .player-backdrop { display: none !important; }
+.topbar, .section-subnav, .media-card, .continue-card, .primary-button, .track-row,
+.player-presentation-mini, .settings-status-card, .ingest-submit-card, .overflow-menu-popover {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+  box-shadow: none !important;
+}
+h1, h2, .card-title, .episode-heading strong, .track-title, .player-titlebar strong { text-shadow: none !important; }
+.media-card:focus, .episode-still-link:focus { transform: none !important; }
+
 [data-tv-focusable="true"]:focus,
 [data-tv-focusable="true"][data-tv-selected="true"] {
-  outline: 4px solid #620014 !important;
-  outline-offset: 2px !important;
-  background-color: rgba(57,0,11,0.55) !important;
-  box-shadow: 0 0 26px rgba(98,0,20,0.75) !important;
+  outline: none !important;
+  border-radius: 8px !important;
+  background-color: transparent !important;
+  box-shadow: 0 0 0 2px #620014 !important;
 }
 `
 
@@ -179,11 +198,6 @@ function samsungCssCompatibility(): Plugin {
     name: 'macha-samsung-css-compatibility',
     transformIndexHtml() {
       return [
-        {
-          tag: 'script',
-          attrs: { type: 'text/javascript', src: '$WEBAPIS/webapis/webapis.js' },
-          injectTo: 'head-prepend',
-        },
         {
           tag: 'link',
           attrs: { rel: 'stylesheet', href: './samsung-tizen3.css' },
@@ -232,14 +246,13 @@ function samsungManifest(version: string): Plugin {
         required_version="2.4"/>
 
     <content src="index.html"/>
+    <icon src="macha-icon.png"/>
     <name>Macha</name>
 
     <tizen:profile name="tv-samsung"/>
 
     <tizen:privilege
         name="http://tizen.org/privilege/internet"/>
-    <tizen:privilege
-        name="http://tizen.org/privilege/tv.audio"/>
 
     <access origin="http://10.44.1.50:7438" subdomains="false"/>
 </widget>

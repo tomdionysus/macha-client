@@ -3,7 +3,7 @@
 Macha Client is a small React/TypeScript television and web client for Macha.
 It browses the catalogue exposed by a Macha node and keeps platform-specific playback behind a narrow adapter.
 
-The web client is implemented against the Macha 0.9.1 catalogue and playback APIs, including Direct Play, remux/transcode HLS, seeking and stream selection. Android/Google TV and Samsung Tizen remain wired as later platform-player targets behind the same playback boundary.
+The web client is implemented against the Macha 0.9.1 catalogue and playback APIs, including Direct Play, remux/transcode HLS, seeking and stream selection. Samsung Tizen is packaged as a legacy Web target behind the same playback boundary; Android/Google TV remains a later native-player target.
 
 The product is intentionally narrow. It exists to browse and play your own media. There are no accounts, cloud dependencies, adverts, recommendations, social features, other-viewer activity or global watchlists.
 
@@ -32,7 +32,7 @@ Developed with substantial use of AI-assisted implementation
 - Macha 0.9.1 playback-session negotiation with Direct Play, remux and transcode modes.
 - In-session quality, audio, subtitle and media-representation switching.
 - Browser HLS playback through native HLS where available or hls.js otherwise.
-- Android Media3 and Samsung AVPlay host stubs.
+- Android Media3 host stubs plus a Samsung Tizen legacy-Web target using the shared HTML5 player.
 
 Continue Watching and the playback queue are local browser/application state. They are never sent to Macha.
 
@@ -150,7 +150,7 @@ The playback queue is client-local and persisted per client ID. Album track clic
 
 Direct streams use the platform player directly. On Web, transformed fragmented-MP4 HLS uses native HLS where the browser provides it and hls.js otherwise. Permanent API Bearer authentication is used only for playback-session control; the returned stream/subtitle capability URLs are loaded directly by the player.
 
-The persistent React player depends only on `PlaybackResolver` and `Platform.Player`, so Android Media3 and Tizen AVPlay can implement the same session/control model without changing the UI.
+The persistent React player depends only on `PlaybackResolver` and `Platform.Player`, so future native platform players can implement the same session/control model without changing the UI.
 
 
 ### Playback diagnostics
@@ -181,7 +181,7 @@ Diagnostic verbosity is configured in `src/settings.ts` with `diagnosticsSetting
 
 ### Samsung Tizen
 
-`TizenPlatform` and `platforms/tizen/` define the corresponding AVPlay boundary. The same React assets become the Tizen application UI.
+`SamsungWebPlatform` keeps the Samsung build on the shared HTML5/Web player and advertises only the conservative H.264/AAC, MP4/HLS, 1080p capability profile used by the 2017 Tizen 3 target. The generic `TizenPlatform` boundary remains available for a future native player target, but the Samsung package does not use AVPlay.
 
 ## Deliberate omissions
 

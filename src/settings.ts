@@ -7,7 +7,7 @@ export const uiSettings = {
   splashDurationMs: 1_000,
   loadingIndicatorDelayMs: 1_000,
   playerControlsHideDelayMs: 3_000,
-  playerSeekSpinnerDelayMs: 750,
+  playerSeekSpinnerDelayMs: 3_000,
 } as const;
 
 export function splashFlashTiming(durationMs = uiSettings.splashDurationMs): { delayMs: number; durationMs: number } {

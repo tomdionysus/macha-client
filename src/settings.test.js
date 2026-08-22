@@ -7,8 +7,8 @@ describe('UI timing settings', () => {
     it('keeps the loading indicator hidden for the first second', () => {
         expect(uiSettings.loadingIndicatorDelayMs).toBe(1_000);
     });
-    it('gives seek restarts a short grace period before showing a spinner', () => {
-        expect(uiSettings.playerSeekSpinnerDelayMs).toBe(750);
+    it('shows seek feedback only after three seconds without resuming', () => {
+        expect(uiSettings.playerSeekSpinnerDelayMs).toBe(3_000);
     });
     it('hides player controls after three seconds of inactivity', () => {
         expect(uiSettings.playerControlsHideDelayMs).toBe(3_000);
