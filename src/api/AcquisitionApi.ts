@@ -1,5 +1,5 @@
-export type IngestJobState = 'queued' | 'scanning' | 'importing' | 'paused' | 'blocked' | 'completed' | 'cancelled' | 'failed';
-export type TorrentJobState = 'queued' | 'metadata' | 'downloading' | 'verifying' | 'downloaded' | 'importing' | 'paused' | 'blocked' | 'completed' | 'cancelled' | 'failed';
+export type IngestJobState = 'queued' | 'scanning' | 'importing' | 'cataloguing' | 'paused' | 'blocked' | 'completed' | 'cancelled' | 'failed';
+export type TorrentJobState = 'queued' | 'metadata' | 'downloading' | 'verifying' | 'downloaded' | 'importing' | 'cataloguing' | 'paused' | 'blocked' | 'completed' | 'cancelled' | 'failed';
 
 export interface StagingStatus {
   path: string;
@@ -76,7 +76,9 @@ export interface AcquisitionApi {
   pauseIngest(id: string): Promise<IngestJob>;
   resumeIngest(id: string): Promise<IngestJob>;
   cancelIngest(id: string): Promise<IngestJob>;
+  clearIngest(id: string): Promise<void>;
   pauseTorrent(id: string): Promise<TorrentJob>;
   resumeTorrent(id: string): Promise<TorrentJob>;
   cancelTorrent(id: string): Promise<TorrentJob>;
+  clearTorrent(id: string): Promise<void>;
 }

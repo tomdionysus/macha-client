@@ -150,6 +150,7 @@ export class MachaMediaApi implements MediaApi {
       discNumber: optionalNumber(item.disc_number),
       trackNumber: optionalNumber(item.track_number),
       mediaIds: [...item.media_ids],
+      catalogueUpdatedNs: item.updated_ns,
       // Placeholder until Macha exposes a full date from the metadata provider.
       releaseDate: undefined,
     };

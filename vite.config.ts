@@ -78,7 +78,7 @@ h2 { font-size: 24px; }
 .album-header { display: flex; align-items: flex-end; }
 .album-cover { width: 280px; height: 280px; flex: 0 0 280px; margin-right: 42px; }
 .track-list { display: block; }
-.music-subnav, .playlist-heading-row, .playlist-actions { display: flex; }
+.section-nav-slot, .section-subnav, .playlist-heading-row, .playlist-actions { display: flex; }
 .track-row, .track-row-open { display: flex; align-items: center; }
 .track-row-open { flex: 1 1 auto; }
 .track-number, .track-action { width: 48px; flex: 0 0 48px; }

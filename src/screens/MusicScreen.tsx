@@ -2,7 +2,6 @@ import { useMemo } from 'react';
 import type { MediaApi } from '../api/MediaApi';
 import { AlphabetIndex } from '../components/AlphabetIndex';
 import { MediaCard, type MediaCardAction } from '../components/MediaCard';
-import { MusicNav } from '../components/MusicNav';
 import { ErrorMessage, Loading } from '../components/Status';
 import { useAlphabetIndex } from '../hooks/useAlphabetIndex';
 import { useAsync } from '../hooks/useAsync';
@@ -51,7 +50,6 @@ export function MusicScreen({ api, section, onOpen, onPlayNow, onAddToPlaylist, 
   return (
     <section className="catalogue-indexed music-browser">
       <h1>Music</h1>
-      <MusicNav />
       <h2 className="music-browser-heading">{titleFor(section)}</h2>
       <div className="media-grid">
         {items.map((item) => (

@@ -133,4 +133,13 @@ describe('MachaMediaApi', () => {
                 subtitle: 'Track 3',
             })]);
     });
+    it('preserves catalogue updated_ns for Home recency ordering', async () => {
+        const catalogue = new FakeCatalogue();
+        catalogue.list = (kind) => kind === 'movie'
+            ? Promise.resolve([catalogueItem('recent', 'movie', { updated_ns: 123456789 })])
+            : Promise.resolve([]);
+        const api = new MachaMediaApi(catalogue);
+        const movies = await api.movies();
+        expect(movies[0]?.catalogueUpdatedNs).toBe(123456789);
+    });
 });

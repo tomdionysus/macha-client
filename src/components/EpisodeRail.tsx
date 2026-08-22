@@ -1,6 +1,6 @@
 import { useRef, type MouseEvent, type PointerEvent, type WheelEvent } from 'react';
 import type { MediaApi } from '../api/MediaApi';
-import { useArtworkUrl } from '../hooks/useArtworkUrl';
+import { LazyArtwork } from './LazyArtwork';
 import { PlayIcon, RestartIcon } from './PlaybackIcons';
 import type { Episode, PlaybackProgress, SeasonDetails, ShowDetails } from '../types';
 
@@ -41,7 +41,6 @@ function EpisodeCard({ api, episode, progress, playbackEpisode, queue, queueInde
   queueIndex: number;
   onPlayEpisode: (episode: Episode, queue: Episode[], queueIndex: number, fromStart: boolean) => void;
 }) {
-  const image = useArtworkUrl(api, episode.artwork?.thumbnail ?? episode.artwork?.backdrop);
   const hasProgress = resumable(progress);
   return (
     <article className={`episode-card${hasProgress ? ' has-progress' : ''}`}>
@@ -54,9 +53,12 @@ function EpisodeCard({ api, episode, progress, playbackEpisode, queue, queueInde
           type="button"
         >
           <div className="episode-still">
-            {image
-              ? <img src={image} alt="" loading="lazy" draggable={false} />
-              : <div className="episode-still-placeholder">{episode.episodeNumber}</div>}
+            <LazyArtwork
+              api={api}
+              artwork={episode.artwork?.thumbnail ?? episode.artwork?.backdrop}
+              draggable={false}
+              placeholder={<div className="episode-still-placeholder">{episode.episodeNumber}</div>}
+            />
             {progress && progress.durationMs > 0 && (
               <div className="episode-progress-track" aria-hidden="true">
                 <div className="episode-progress-value" style={{ width: `${Math.min(100, progress.positionMs / progress.durationMs * 100)}%` }} />

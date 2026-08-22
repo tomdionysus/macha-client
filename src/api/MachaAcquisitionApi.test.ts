@@ -48,7 +48,9 @@ describe('MachaAcquisitionApi', () => {
       .mockResolvedValueOnce(jsonResponse({ id: 'torrent-1' }, 202))
       .mockResolvedValueOnce(jsonResponse({ id: 'torrent-1', state: 'paused' }))
       .mockResolvedValueOnce(jsonResponse({ id: 'torrent-1', state: 'queued' }))
-      .mockResolvedValueOnce(jsonResponse({ id: 'torrent-1', state: 'cancelled' }));
+      .mockResolvedValueOnce(jsonResponse({ id: 'torrent-1', state: 'cancelled' }))
+      .mockResolvedValueOnce(jsonResponse({ cleared: true }))
+      .mockResolvedValueOnce(jsonResponse({ cleared: true }));
     vi.stubGlobal('fetch', fetchMock);
 
     const api = new MachaAcquisitionApi('');
@@ -56,12 +58,16 @@ describe('MachaAcquisitionApi', () => {
     await api.pauseTorrent('torrent-1');
     await api.resumeTorrent('torrent-1');
     await api.cancelTorrent('torrent-1');
+    await api.clearTorrent('torrent-1');
+    await api.clearIngest('ingest-1');
 
     expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
       '/api/v1/torrents/jobs',
       '/api/v1/torrents/jobs/torrent-1/pause',
       '/api/v1/torrents/jobs/torrent-1/resume',
       '/api/v1/torrents/jobs/torrent-1/cancel',
+      '/api/v1/torrents/jobs/torrent-1/clear',
+      '/api/v1/ingest/jobs/ingest-1/clear',
     ]);
   });
 });

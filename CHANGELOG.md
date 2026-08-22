@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.7
+
+- lazy-load card and episode artwork near the viewport through two shared intersection observers and a six-request scheduler, prioritising visible artwork, coalescing duplicate IDs, and cancelling queued work that scrolls away;
+- add a reusable top-right card dismiss control and use it for Continue Watching and import/torrent jobs, replacing Continue Watching's overflow-menu Remove action;
+- add a reusable centered contextual lower navbar at the application-shell level, with Music providing Artists, Albums, Tracks and Playlist across all Music routes;
+- order Home Movies, TV Shows and Music newest-first using the catalogue `updated_ns` chronology signal currently exposed by the server;
+- make import/torrent job X removal clear terminal server jobs, and require confirmation before cancelling and clearing active work;
+- follow linked ingest lifecycle state on torrent cards so completed imports show Imported into Macha instead of the stale downloading/importing handoff message, including the cataloguing state where supplied.
+
 ## 0.5.6
 
 - make album selection consistently open the album track listing from Music and Artist album grids instead of starting playback, matching the existing Search result behaviour;

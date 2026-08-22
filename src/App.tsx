@@ -6,6 +6,7 @@ import { MachaMediaApi } from './api/MachaMediaApi';
 import { MockMediaApi } from './api/MockMediaApi';
 import type { MediaApi } from './api/MediaApi';
 import { AppLogo } from './components/AppLogo';
+import { MusicNav } from './components/MusicNav';
 import logoUrl from './assets/macha-logo.svg?url';
 import { useTvNavigation } from './hooks/useTvNavigation';
 import type { Platform } from './platform/Platform';
@@ -613,6 +614,7 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
   }, [navigate]);
 
   const miniPlayerActive = Boolean(activePlayback && !playerRouteActive);
+  const musicSectionActive = location.pathname === routes.music || location.pathname.startsWith(`${routes.music}/`);
 
   return (
     <div className={`app-shell${miniPlayerActive ? ' has-mini-player' : ''}`}>
@@ -637,6 +639,11 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
         </nav>
         <div className="platform-badge">{import.meta.env.MODE === 'samsung' ? 'SAMSUNG TV' : platform.name.toUpperCase()}</div>
       </header>
+      {!playerRouteActive && musicSectionActive && (
+        <div className="section-nav-slot">
+          <MusicNav />
+        </div>
+      )}
       <main>
         <Routes>
           <Route path={routes.home} element={<HomeScreen api={api} continueWatching={continueWatching} onOpen={open} onResume={openPlayer} onRemoveFromContinueWatching={removeFromContinueWatching} />} />

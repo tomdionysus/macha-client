@@ -1,5 +1,5 @@
-import { NavLink } from 'react-router-dom';
 import { routes } from '../routing';
+import { SectionNav } from './SectionNav';
 
 const items = [
   { to: routes.musicArtists, label: 'Artists' },
@@ -9,18 +9,5 @@ const items = [
 ] as const;
 
 export function MusicNav() {
-  return (
-    <nav className="music-subnav" aria-label="Music navigation">
-      {items.map((item) => (
-        <NavLink
-          key={item.to}
-          to={item.to}
-          data-tv-focusable="true"
-          className={({ isActive }: { isActive: boolean }) => isActive ? 'active' : undefined}
-        >
-          {item.label}
-        </NavLink>
-      ))}
-    </nav>
-  );
+  return <SectionNav ariaLabel="Music navigation" items={items} />;
 }

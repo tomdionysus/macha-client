@@ -57,9 +57,15 @@ export class MachaAcquisitionApi {
     pauseIngest(id) { return this.ingestAction(id, 'pause'); }
     resumeIngest(id) { return this.ingestAction(id, 'resume'); }
     cancelIngest(id) { return this.ingestAction(id, 'cancel'); }
+    async clearIngest(id) {
+        await this.request(`/api/v1/ingest/jobs/${encodeURIComponent(id)}/clear`, { method: 'POST' });
+    }
     pauseTorrent(id) { return this.torrentAction(id, 'pause'); }
     resumeTorrent(id) { return this.torrentAction(id, 'resume'); }
     cancelTorrent(id) { return this.torrentAction(id, 'cancel'); }
+    async clearTorrent(id) {
+        await this.request(`/api/v1/torrents/jobs/${encodeURIComponent(id)}/clear`, { method: 'POST' });
+    }
     ingestAction(id, action) {
         return this.request(`/api/v1/ingest/jobs/${encodeURIComponent(id)}/${action}`, { method: 'POST' });
     }
@@ -119,7 +125,9 @@ export class DemoAcquisitionApi {
     pauseIngest() { return Promise.reject(new Error('Import is unavailable in demo mode.')); }
     resumeIngest() { return Promise.reject(new Error('Import is unavailable in demo mode.')); }
     cancelIngest() { return Promise.reject(new Error('Import is unavailable in demo mode.')); }
+    clearIngest() { return Promise.reject(new Error('Import is unavailable in demo mode.')); }
     pauseTorrent() { return Promise.reject(new Error('Torrent acquisition is unavailable in demo mode.')); }
     resumeTorrent() { return Promise.reject(new Error('Torrent acquisition is unavailable in demo mode.')); }
     cancelTorrent() { return Promise.reject(new Error('Torrent acquisition is unavailable in demo mode.')); }
+    clearTorrent() { return Promise.reject(new Error('Torrent acquisition is unavailable in demo mode.')); }
 }

@@ -1,8 +1,9 @@
 import { Link } from 'react-router-dom';
 import type { MediaApi } from '../api/MediaApi';
-import { useArtworkUrl } from '../hooks/useArtworkUrl';
 import { routes } from '../routing';
 import type { MediaSummary } from '../types';
+import { CardCloseButton } from './CardCloseButton';
+import { LazyArtwork } from './LazyArtwork';
 import { OverflowMenu, type OverflowMenuAction } from './OverflowMenu';
 
 export interface MediaCardAction {
@@ -28,10 +29,13 @@ function artworkClass(item: MediaSummary): string {
 }
 
 function Poster({ api, item, progress }: Pick<Props, 'api' | 'item' | 'progress'>) {
-  const image = useArtworkUrl(api, item.artwork?.poster ?? item.artwork?.thumbnail);
   return (
     <div className={artworkClass(item)}>
-      {image ? <img src={image} alt="" loading="lazy" /> : <div className="poster-placeholder">{item.title.slice(0, 1)}</div>}
+      <LazyArtwork
+        api={api}
+        artwork={item.artwork?.poster ?? item.artwork?.thumbnail}
+        placeholder={<div className="poster-placeholder">{item.title.slice(0, 1)}</div>}
+      />
       {progress !== undefined && progress > 0 && (
         <div className="progress-track"><div className="progress-value" style={{ width: `${Math.min(100, progress * 100)}%` }} /></div>
       )}
@@ -55,10 +59,6 @@ function ContinueWatchingEpisodeCard({ api, item, onOpen, onRemoveFromContinueWa
   const seasonLabel = item.subtitle
     ? `${context.season.title} · ${item.subtitle}`
     : context.season.title;
-  const actions: MediaCardAction[] = onRemoveFromContinueWatching
-    ? [{ label: 'Remove', onSelect: onRemoveFromContinueWatching, destructive: true }]
-    : [];
-
   return (
     <article className="media-card media-card-episode continue-card">
       <button
@@ -88,11 +88,11 @@ function ContinueWatchingEpisodeCard({ api, item, onOpen, onRemoveFromContinueWa
           {seasonLabel}
         </Link>
       </div>
-      {actions.length > 0 && (
-        <OverflowMenu
-          className="card-overflow-menu"
-          label={`More options for ${item.title}`}
-          actions={actionItems(item, actions)}
+      {onRemoveFromContinueWatching && (
+        <CardCloseButton
+          className="continue-card-remove"
+          label={`Remove ${item.title} from Continue Watching`}
+          onClick={() => onRemoveFromContinueWatching(item)}
         />
       )}
     </article>
@@ -100,10 +100,6 @@ function ContinueWatchingEpisodeCard({ api, item, onOpen, onRemoveFromContinueWa
 }
 
 function ContinueWatchingCard({ api, item, onOpen, onRemoveFromContinueWatching, progress, elementRef }: Props) {
-  const actions: MediaCardAction[] = onRemoveFromContinueWatching
-    ? [{ label: 'Remove', onSelect: onRemoveFromContinueWatching, destructive: true }]
-    : [];
-
   return (
     <article className={`media-card media-card-${item.kind} continue-card`}>
       <button
@@ -118,11 +114,11 @@ function ContinueWatchingCard({ api, item, onOpen, onRemoveFromContinueWatching,
         <span className="card-title">{item.title}</span>
         {(item.subtitle || item.year) && <span className="card-subtitle">{item.subtitle ?? item.year}</span>}
       </button>
-      {actions.length > 0 && (
-        <OverflowMenu
-          className="card-overflow-menu"
-          label={`More options for ${item.title}`}
-          actions={actionItems(item, actions)}
+      {onRemoveFromContinueWatching && (
+        <CardCloseButton
+          className="continue-card-remove"
+          label={`Remove ${item.title} from Continue Watching`}
+          onClick={() => onRemoveFromContinueWatching(item)}
         />
       )}
     </article>

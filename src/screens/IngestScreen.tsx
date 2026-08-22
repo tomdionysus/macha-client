@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from 'react';
+import { CardCloseButton } from '../components/CardCloseButton';
 import type {
   AcquisitionApi,
   AcquisitionSnapshot,
@@ -11,12 +12,13 @@ interface Props {
 }
 
 type JobKind = 'ingest' | 'torrent';
-type JobAction = 'pause' | 'resume' | 'delete';
+type JobAction = 'pause' | 'resume' | 'remove';
 
 const ingestPauseableStates = new Set(['queued', 'scanning', 'importing']);
 const ingestResumableStates = new Set(['paused', 'blocked', 'failed']);
 const torrentPauseableStates = new Set(['queued', 'metadata', 'downloading', 'verifying', 'downloaded', 'importing']);
 const torrentResumableStates = new Set(['paused', 'blocked']);
+const terminalStates = new Set(['completed', 'cancelled', 'failed']);
 
 function formatBytes(value: number): string {
   if (!Number.isFinite(value) || value <= 0) return '0 B';
@@ -66,8 +68,18 @@ function canResume(kind: JobKind, state: string): boolean {
   return kind === 'ingest' ? ingestResumableStates.has(state) : torrentResumableStates.has(state);
 }
 
-function canDelete(state: string): boolean {
-  return state !== 'completed' && state !== 'cancelled';
+function isTerminal(state: string): boolean {
+  return terminalStates.has(state);
+}
+
+function torrentLifecycleMessage(job: TorrentJob, linkedIngest?: IngestJob): string | undefined {
+  if (!job.ingest_job_id) return undefined;
+  const state = linkedIngest?.state ?? job.state;
+  if (state === 'completed') return 'Imported into Macha.';
+  if (state === 'cataloguing') return 'Imported into the Macha namespace; cataloguing media.';
+  if (state === 'cancelled') return 'Import cancelled.';
+  if (state === 'failed') return undefined;
+  return 'Downloaded; importing into the Macha namespace.';
 }
 
 function Progress({ value }: { value: number | null }) {
@@ -78,40 +90,34 @@ function Progress({ value }: { value: number | null }) {
   );
 }
 
-function JobControls({ kind, id, state, busyAction, confirmDelete, onAction, onConfirmDelete }: {
+function JobControls({ kind, id, state, busyAction, confirmRemove, onAction, onConfirmRemove }: {
   kind: JobKind;
   id: string;
   state: string;
   busyAction: JobAction | undefined;
-  confirmDelete: boolean;
-  onAction: (kind: JobKind, id: string, action: JobAction) => void;
-  onConfirmDelete: (key: string | undefined) => void;
+  confirmRemove: boolean;
+  onAction: (kind: JobKind, id: string, state: string, action: JobAction) => void;
+  onConfirmRemove: (key: string | undefined) => void;
 }) {
   const active = busyAction !== undefined;
-  const key = jobKey(kind, id);
   return (
     <div className="ingest-job-actions">
       {canPause(kind, state) && (
-        <button className="secondary-button" data-tv-focusable="true" disabled={active} onClick={() => onAction(kind, id, 'pause')}>
+        <button className="secondary-button" data-tv-focusable="true" disabled={active} onClick={() => onAction(kind, id, state, 'pause')}>
           {active && busyAction === 'pause' ? 'Pausing…' : 'Pause'}
         </button>
       )}
       {canResume(kind, state) && (
-        <button className="secondary-button" data-tv-focusable="true" disabled={active} onClick={() => onAction(kind, id, 'resume')}>
+        <button className="secondary-button" data-tv-focusable="true" disabled={active} onClick={() => onAction(kind, id, state, 'resume')}>
           {active && busyAction === 'resume' ? 'Resuming…' : 'Resume'}
         </button>
       )}
-      {canDelete(state) && !confirmDelete && (
-        <button className="secondary-button ingest-delete-button" data-tv-focusable="true" disabled={active} onClick={() => onConfirmDelete(key)}>
-          Delete
-        </button>
-      )}
-      {canDelete(state) && confirmDelete && (
+      {confirmRemove && !isTerminal(state) && (
         <>
-          <button className="secondary-button ingest-delete-button confirm" data-tv-focusable="true" disabled={active} onClick={() => onAction(kind, id, 'delete')}>
-            {active && busyAction === 'delete' ? 'Deleting…' : 'Confirm delete'}
+          <button className="secondary-button ingest-delete-button confirm" data-tv-focusable="true" disabled={active} onClick={() => onAction(kind, id, state, 'remove')}>
+            {active && busyAction === 'remove' ? 'Removing…' : 'Confirm remove'}
           </button>
-          <button className="secondary-button" data-tv-focusable="true" disabled={active} onClick={() => onConfirmDelete(undefined)}>
+          <button className="secondary-button" data-tv-focusable="true" disabled={active} onClick={() => onConfirmRemove(undefined)}>
             Keep
           </button>
         </>
@@ -120,16 +126,24 @@ function JobControls({ kind, id, state, busyAction, confirmDelete, onAction, onC
   );
 }
 
-function IngestJobCard({ job, busyAction, confirmDelete, onAction, onConfirmDelete }: {
+function IngestJobCard({ job, busyAction, confirmRemove, onAction, onConfirmRemove }: {
   job: IngestJob;
   busyAction: JobAction | undefined;
-  confirmDelete: boolean;
-  onAction: (kind: JobKind, id: string, action: JobAction) => void;
-  onConfirmDelete: (key: string | undefined) => void;
+  confirmRemove: boolean;
+  onAction: (kind: JobKind, id: string, state: string, action: JobAction) => void;
+  onConfirmRemove: (key: string | undefined) => void;
 }) {
   const progress = percent(job.progress, job.bytes_completed, job.bytes_total);
   return (
     <article className={`ingest-job-card state-${job.state}`}>
+      <CardCloseButton
+        className="ingest-job-remove"
+        label={`Remove ${job.display_name || job.source_path} import job`}
+        disabled={busyAction !== undefined}
+        onClick={() => isTerminal(job.state)
+          ? onAction('ingest', job.id, job.state, 'remove')
+          : onConfirmRemove(jobKey('ingest', job.id))}
+      />
       <div className="ingest-job-heading">
         <div>
           <span className="ingest-state">{stateLabel(job.state)}</span>
@@ -147,24 +161,35 @@ function IngestJobCard({ job, busyAction, confirmDelete, onAction, onConfirmDele
       </dl>
       {job.current_file && <p className="ingest-current">Current: <span>{job.current_file}</span></p>}
       {job.error && <p className="ingest-job-error">{job.error}</p>}
-      <JobControls kind="ingest" id={job.id} state={job.state} busyAction={busyAction} confirmDelete={confirmDelete} onAction={onAction} onConfirmDelete={onConfirmDelete} />
+      <JobControls kind="ingest" id={job.id} state={job.state} busyAction={busyAction} confirmRemove={confirmRemove} onAction={onAction} onConfirmRemove={onConfirmRemove} />
     </article>
   );
 }
 
-function TorrentJobCard({ job, busyAction, confirmDelete, onAction, onConfirmDelete }: {
+function TorrentJobCard({ job, linkedIngest, busyAction, confirmRemove, onAction, onConfirmRemove }: {
   job: TorrentJob;
+  linkedIngest?: IngestJob;
   busyAction: JobAction | undefined;
-  confirmDelete: boolean;
-  onAction: (kind: JobKind, id: string, action: JobAction) => void;
-  onConfirmDelete: (key: string | undefined) => void;
+  confirmRemove: boolean;
+  onAction: (kind: JobKind, id: string, state: string, action: JobAction) => void;
+  onConfirmRemove: (key: string | undefined) => void;
 }) {
   const progress = percent(job.progress, job.bytes_completed, job.bytes_total);
+  const displayState = linkedIngest?.state ?? job.state;
+  const displayError = job.error || linkedIngest?.error;
   return (
-    <article className={`ingest-job-card state-${job.state}`}>
+    <article className={`ingest-job-card state-${displayState}`}>
+      <CardCloseButton
+        className="ingest-job-remove"
+        label={`Remove ${job.name || 'torrent'} job`}
+        disabled={busyAction !== undefined}
+        onClick={() => isTerminal(job.state)
+          ? onAction('torrent', job.id, job.state, 'remove')
+          : onConfirmRemove(jobKey('torrent', job.id))}
+      />
       <div className="ingest-job-heading">
         <div>
-          <span className="ingest-state">{stateLabel(job.state)}</span>
+          <span className="ingest-state">{stateLabel(displayState)}</span>
           <h3>{job.name || 'Torrent'}</h3>
           {job.info_hash && <p className="ingest-source">{job.info_hash}</p>}
         </div>
@@ -178,7 +203,7 @@ function TorrentJobCard({ job, busyAction, confirmDelete, onAction, onConfirmDel
             <div><dt>Rate</dt><dd>{formatRate(job.download_rate)}</dd></div>
             <div><dt>ETA</dt><dd>{formatEta(job.eta_seconds)}</dd></div>
           </dl>
-          <p className="ingest-current">Downloaded; importing into the Macha namespace.</p>
+          {torrentLifecycleMessage(job, linkedIngest) && <p className="ingest-current">{torrentLifecycleMessage(job, linkedIngest)}</p>}
         </>
       ) : (
         <dl className="ingest-job-stats">
@@ -190,8 +215,8 @@ function TorrentJobCard({ job, busyAction, confirmDelete, onAction, onConfirmDel
           <div><dt>Seeds</dt><dd>{job.seeds}</dd></div>
         </dl>
       )}
-      {job.error && <p className="ingest-job-error">{job.error}</p>}
-      <JobControls kind="torrent" id={job.id} state={job.state} busyAction={busyAction} confirmDelete={confirmDelete} onAction={onAction} onConfirmDelete={onConfirmDelete} />
+      {displayError && <p className="ingest-job-error">{displayError}</p>}
+      <JobControls kind="torrent" id={job.id} state={job.state} busyAction={busyAction} confirmRemove={confirmRemove} onAction={onAction} onConfirmRemove={onConfirmRemove} />
     </article>
   );
 }
@@ -205,7 +230,7 @@ export function IngestScreen({ api }: Props) {
   const [submitting, setSubmitting] = useState<'path' | 'magnet'>();
   const [error, setError] = useState<string>();
   const [notice, setNotice] = useState<string>();
-  const [confirmDelete, setConfirmDelete] = useState<string>();
+  const [confirmRemove, setConfirmRemove] = useState<string>();
 
   const refresh = useCallback(async () => {
     const value = await api.snapshot();
@@ -245,11 +270,11 @@ export function IngestScreen({ api }: Props) {
   }, [api]);
 
   const filesystemJobs = useMemo(
-    () => snapshot?.ingestJobs.filter((job) => job.source_type !== 'torrent' && job.state !== 'cancelled') ?? [],
+    () => snapshot?.ingestJobs.filter((job) => job.source_type !== 'torrent') ?? [],
     [snapshot?.ingestJobs],
   );
   const torrentJobs = useMemo(
-    () => snapshot?.torrentJobs.filter((job) => job.state !== 'cancelled') ?? [],
+    () => snapshot?.torrentJobs ?? [],
     [snapshot?.torrentJobs],
   );
 
@@ -295,7 +320,7 @@ export function IngestScreen({ api }: Props) {
     }
   };
 
-  const act = useCallback(async (kind: JobKind, id: string, action: JobAction) => {
+  const act = useCallback(async (kind: JobKind, id: string, state: string, action: JobAction) => {
     const key = jobKey(kind, id);
     setBusyByJob((current) => ({ ...current, [key]: action }));
     setError(undefined);
@@ -304,13 +329,19 @@ export function IngestScreen({ api }: Props) {
       if (kind === 'ingest') {
         if (action === 'pause') await api.pauseIngest(id);
         else if (action === 'resume') await api.resumeIngest(id);
-        else await api.cancelIngest(id);
+        else {
+          if (!isTerminal(state)) await api.cancelIngest(id);
+          await api.clearIngest(id);
+        }
       } else {
         if (action === 'pause') await api.pauseTorrent(id);
         else if (action === 'resume') await api.resumeTorrent(id);
-        else await api.cancelTorrent(id);
+        else {
+          if (!isTerminal(state)) await api.cancelTorrent(id);
+          await api.clearTorrent(id);
+        }
       }
-      if (action === 'delete') setConfirmDelete(undefined);
+      if (action === 'remove') setConfirmRemove(undefined);
       await refresh();
     } catch (reason: unknown) {
       setError(reason instanceof Error ? reason.message : String(reason));
@@ -389,10 +420,11 @@ export function IngestScreen({ api }: Props) {
             <TorrentJobCard
               key={job.id}
               job={job}
+              linkedIngest={job.ingest_job_id ? snapshot?.ingestJobs.find((candidate) => candidate.id === job.ingest_job_id) : undefined}
               busyAction={busyByJob[jobKey('torrent', job.id)]}
-              confirmDelete={confirmDelete === jobKey('torrent', job.id)}
-              onAction={(kind, id, action) => { void act(kind, id, action); }}
-              onConfirmDelete={setConfirmDelete}
+              confirmRemove={confirmRemove === jobKey('torrent', job.id)}
+              onAction={(kind, id, state, action) => { void act(kind, id, state, action); }}
+              onConfirmRemove={setConfirmRemove}
             />
           ))}
           {snapshot && torrentJobs.length === 0 && <p className="ingest-empty">No torrent jobs.</p>}
@@ -410,9 +442,9 @@ export function IngestScreen({ api }: Props) {
               key={job.id}
               job={job}
               busyAction={busyByJob[jobKey('ingest', job.id)]}
-              confirmDelete={confirmDelete === jobKey('ingest', job.id)}
-              onAction={(kind, id, action) => { void act(kind, id, action); }}
-              onConfirmDelete={setConfirmDelete}
+              confirmRemove={confirmRemove === jobKey('ingest', job.id)}
+              onAction={(kind, id, state, action) => { void act(kind, id, state, action); }}
+              onConfirmRemove={setConfirmRemove}
             />
           ))}
           {snapshot && filesystemJobs.length === 0 && <p className="ingest-empty">No filesystem import jobs.</p>}

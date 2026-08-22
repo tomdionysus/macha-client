@@ -13,6 +13,7 @@ import { isGatewayConnectionFailure, serverUnreachable } from './serverConnectio
 interface IngestJobsEnvelope { jobs: IngestJob[]; }
 interface TorrentJobsEnvelope { jobs: TorrentJob[]; }
 interface IdEnvelope { id: string; }
+interface ClearEnvelope { cleared: boolean; }
 
 export class MachaAcquisitionApiError extends Error {
   constructor(
@@ -77,9 +78,15 @@ export class MachaAcquisitionApi implements AcquisitionApi {
   pauseIngest(id: string): Promise<IngestJob> { return this.ingestAction(id, 'pause'); }
   resumeIngest(id: string): Promise<IngestJob> { return this.ingestAction(id, 'resume'); }
   cancelIngest(id: string): Promise<IngestJob> { return this.ingestAction(id, 'cancel'); }
+  async clearIngest(id: string): Promise<void> {
+    await this.request<ClearEnvelope>(`/api/v1/ingest/jobs/${encodeURIComponent(id)}/clear`, { method: 'POST' });
+  }
   pauseTorrent(id: string): Promise<TorrentJob> { return this.torrentAction(id, 'pause'); }
   resumeTorrent(id: string): Promise<TorrentJob> { return this.torrentAction(id, 'resume'); }
   cancelTorrent(id: string): Promise<TorrentJob> { return this.torrentAction(id, 'cancel'); }
+  async clearTorrent(id: string): Promise<void> {
+    await this.request<ClearEnvelope>(`/api/v1/torrents/jobs/${encodeURIComponent(id)}/clear`, { method: 'POST' });
+  }
 
   private ingestAction(id: string, action: 'pause' | 'resume' | 'cancel'): Promise<IngestJob> {
     return this.request(`/api/v1/ingest/jobs/${encodeURIComponent(id)}/${action}`, { method: 'POST' });
@@ -144,7 +151,9 @@ export class DemoAcquisitionApi implements AcquisitionApi {
   pauseIngest(): Promise<IngestJob> { return Promise.reject(new Error('Import is unavailable in demo mode.')); }
   resumeIngest(): Promise<IngestJob> { return Promise.reject(new Error('Import is unavailable in demo mode.')); }
   cancelIngest(): Promise<IngestJob> { return Promise.reject(new Error('Import is unavailable in demo mode.')); }
+  clearIngest(): Promise<void> { return Promise.reject(new Error('Import is unavailable in demo mode.')); }
   pauseTorrent(): Promise<TorrentJob> { return Promise.reject(new Error('Torrent acquisition is unavailable in demo mode.')); }
   resumeTorrent(): Promise<TorrentJob> { return Promise.reject(new Error('Torrent acquisition is unavailable in demo mode.')); }
   cancelTorrent(): Promise<TorrentJob> { return Promise.reject(new Error('Torrent acquisition is unavailable in demo mode.')); }
+  clearTorrent(): Promise<void> { return Promise.reject(new Error('Torrent acquisition is unavailable in demo mode.')); }
 }

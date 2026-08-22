@@ -35,6 +35,9 @@ export interface MediaSummary {
   durationMs?: number;
   playbackContext?: PlaybackHierarchyContext;
 
+  /** Catalogue `updated_ns`, currently the server's only chronology signal for Home recency ordering. */
+  catalogueUpdatedNs?: number;
+
   /**
    * Reserved UI field for a future catalogue release/air date.
    * The current Macha catalogue wire model does not expose this yet.

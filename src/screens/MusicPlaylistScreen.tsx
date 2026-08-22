@@ -1,7 +1,6 @@
 import { useRef, type DragEvent, type KeyboardEvent } from 'react';
 import type { MediaApi } from '../api/MediaApi';
-import { MusicNav } from '../components/MusicNav';
-import { useArtworkUrl } from '../hooks/useArtworkUrl';
+import { LazyArtwork } from '../components/LazyArtwork';
 import type { MusicPlaylistEntry } from '../state/musicPlaylist';
 
 interface Props {
@@ -15,10 +14,13 @@ interface Props {
 }
 
 function PlaylistArtwork({ api, entry }: { api: MediaApi; entry: MusicPlaylistEntry }) {
-  const artwork = useArtworkUrl(api, entry.track.artwork?.poster ?? entry.track.artwork?.thumbnail);
   return (
     <span className="playlist-artwork" aria-hidden="true">
-      {artwork ? <img src={artwork} alt="" /> : <span>{entry.track.title.slice(0, 1)}</span>}
+      <LazyArtwork
+        api={api}
+        artwork={entry.track.artwork?.poster ?? entry.track.artwork?.thumbnail}
+        placeholder={<span>{entry.track.title.slice(0, 1)}</span>}
+      />
     </span>
   );
 }
@@ -48,7 +50,6 @@ export function MusicPlaylistScreen({ api, entries, onPlay, onShuffle, onRemove,
   return (
     <section className="music-playlist-page">
       <h1>Music</h1>
-      <MusicNav />
       <div className="playlist-heading-row">
         <div>
           <h2>Playlist</h2>
