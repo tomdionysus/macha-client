@@ -1,6 +1,7 @@
 import Hls from 'hls.js';
 import { createClientLogger } from '../diagnostics/ClientLog';
 import { detectWebMediaCodecCapabilities } from './WebMediaCapabilities';
+import { directPlayReadAheadMetrics, directPlayReadAheadUrl, releaseDirectPlayReadAhead, } from '../playback/directPlayReadAhead';
 function isLegacyWebVtt(url) {
     return /\.vtt(?:$|[?#])/i.test(url);
 }
@@ -127,6 +128,7 @@ class WebPlayer {
     subtitleCleanup;
     subtitleTextTrack;
     volume = 1;
+    directReadAheadSourceUrl;
     attach(host) {
         this.host = host;
         this.log.debug('attach');
@@ -149,6 +151,8 @@ class WebPlayer {
             hls: isHls(source),
         });
         this.pendingInitialPositionMs = positionMs;
+        releaseDirectPlayReadAhead(this.directReadAheadSourceUrl);
+        this.directReadAheadSourceUrl = undefined;
         this.hls?.destroy();
         this.hls = undefined;
         let video = this.video;
@@ -208,8 +212,15 @@ class WebPlayer {
             }
         }
         else {
-            this.log.info('direct-source-selected', { url: source.url, mimeType: source.mimeType });
-            video.src = source.url;
+            const directUrl = source.mode === 'direct' ? await directPlayReadAheadUrl(source) : source.url;
+            if (directUrl !== source.url)
+                this.directReadAheadSourceUrl = source.url;
+            this.log.info('direct-source-selected', {
+                url: source.url,
+                mimeType: source.mimeType,
+                readAhead: directUrl !== source.url,
+            });
+            video.src = directUrl;
         }
         const playStarted = performance.now();
         try {
@@ -530,6 +541,8 @@ class WebPlayer {
         this.log.debug('stop', this.video ? videoState(this.video) : undefined);
         this.hls?.destroy();
         this.hls = undefined;
+        releaseDirectPlayReadAhead(this.directReadAheadSourceUrl);
+        this.directReadAheadSourceUrl = undefined;
         const video = this.video;
         if (!video)
             return;
@@ -617,10 +630,12 @@ class WebPlayer {
         for (const name of stateEvents) {
             video.addEventListener(name, () => {
                 const state = videoState(video);
+                const readAhead = directPlayReadAheadMetrics(this.directReadAheadSourceUrl);
+                const detail = readAhead ? { ...state, directReadAhead: readAhead } : state;
                 if (name === 'waiting' || name === 'stalled' || name === 'error' || name === 'abort')
-                    this.log.warn(`media-${name}`, state);
+                    this.log.warn(`media-${name}`, detail);
                 else
-                    this.log.debug(`media-${name}`, state);
+                    this.log.debug(`media-${name}`, detail);
             });
         }
         video.addEventListener('progress', () => {

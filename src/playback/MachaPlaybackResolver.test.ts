@@ -104,6 +104,7 @@ describe('MachaPlaybackResolver', () => {
     expect(session.seekMs).toBe(0);
     expect(session.preferences.mode).toBe('auto');
     expect(session.source.url).toBe('http://node.test/api/v1/playback/stream/session-1/cap/1/master.m3u8');
+    expect(session.source.sizeBytes).toBe(10_000_000);
     expect(session.sourceInfo).toEqual(expect.objectContaining({ path: '/Movies/Test.mkv', format: 'matroska,webm', bitrate: 8_000_000 }));
     expect(session.sourceInfo.streams[0]).toEqual(expect.objectContaining({ index: 0, codec: 'h264', width: 1920, height: 1080, bitrate: 3_700_000 }));
     expect(session.output.video).toEqual(expect.objectContaining({ sourceStream: 0, transform: 'copy', codec: 'h264' }));

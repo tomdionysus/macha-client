@@ -95,6 +95,7 @@ describe('MachaPlaybackResolver', () => {
         expect(session.seekMs).toBe(0);
         expect(session.preferences.mode).toBe('auto');
         expect(session.source.url).toBe('http://node.test/api/v1/playback/stream/session-1/cap/1/master.m3u8');
+        expect(session.source.sizeBytes).toBe(10_000_000);
         expect(session.sourceInfo).toEqual(expect.objectContaining({ path: '/Movies/Test.mkv', format: 'matroska,webm', bitrate: 8_000_000 }));
         expect(session.sourceInfo.streams[0]).toEqual(expect.objectContaining({ index: 0, codec: 'h264', width: 1920, height: 1080, bitrate: 3_700_000 }));
         expect(session.output.video).toEqual(expect.objectContaining({ sourceStream: 0, transform: 'copy', codec: 'h264' }));
@@ -138,7 +139,7 @@ describe('MachaPlaybackResolver', () => {
             stream: {
                 mime_type: 'application/vnd.apple.mpegurl',
                 url: '/api/v1/playback/stream/session-1/cap/1/master.m3u8',
-                subtitle_url: '/api/v1/playback/stream/session-1/cap/1/subtitle-5.vtt',
+                subtitle_url: '/api/v1/playback/stream/session-1/cap/1/subtitle-5/manifest.json',
             },
             selection: { video_stream: 0, audio_stream: 1, subtitle_stream: 5 },
         })));
@@ -158,7 +159,7 @@ describe('MachaPlaybackResolver', () => {
             stream: {
                 mime_type: 'application/vnd.apple.mpegurl',
                 url: '/api/v1/playback/stream/session-1/cap/2/master.m3u8',
-                subtitle_url: '/api/v1/playback/stream/session-1/cap/2/subtitle.vtt',
+                subtitle_url: '/api/v1/playback/stream/session-1/cap/2/subtitle-5/manifest.json',
             },
             selection: { video_stream: 0, audio_stream: 2, subtitle_stream: 5 },
             preferences: {
@@ -193,7 +194,7 @@ describe('MachaPlaybackResolver', () => {
             seek_ms: 5_040_000,
             media_id: 'file:def',
         });
-        expect(session.source.subtitleUrl).toBe('http://node.test/api/v1/playback/stream/session-1/cap/2/subtitle.vtt');
+        expect(session.source.subtitleUrl).toBe('http://node.test/api/v1/playback/stream/session-1/cap/2/subtitle-5/manifest.json');
     });
     it('deletes the playback session explicitly', async () => {
         const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));

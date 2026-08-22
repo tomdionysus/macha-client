@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.0
+
+- add a Web-only Direct Play rolling read-ahead cache implemented as a transparent Service Worker byte-range proxy, preserving native browser demux/decoder behaviour for containers such as Matroska;
+- fetch Direct Play media in 8 MiB chunks with a 64 MiB target read-ahead window, 96 MiB resident cap, two-request upstream limit, and demand-over-prefetch scheduling;
+- keep the read-ahead cache memory-only and release it when the active Direct Play source stops or changes, with automatic fallback to the original media URL when Service Workers or upstream range reads are unavailable;
+- expose Direct Play read-ahead diagnostics including resident/ahead bytes, fetched/served/cache-hit bytes, upstream throughput, concurrent fetches, and demand wait time/count so playback stalls can be distinguished from demux/timestamp problems.
+
 ## 0.5.7
 
 - lazy-load card and episode artwork near the viewport through two shared intersection observers and a six-request scheduler, prioritising visible artwork, coalescing duplicate IDs, and cancelling queued work that scrolls away;

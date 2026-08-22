@@ -7,6 +7,7 @@ import { runBootSplash } from './bootSplash';
 import { configureClientDiagnostics, createClientLogger, installClientDiagnosticsConsole, } from './diagnostics/ClientLog';
 import { detectPlatform } from './platform';
 import { diagnosticsSettings } from './settings';
+import { installDirectPlayReadAheadDiagnostics, warmDirectPlayReadAhead } from './playback/directPlayReadAhead';
 import './styles.css';
 configureClientDiagnostics({
     level: diagnosticsSettings.playbackLogLevel,
@@ -14,6 +15,7 @@ configureClientDiagnostics({
     maxEntries: diagnosticsSettings.playbackLogBufferEntries,
 });
 installClientDiagnosticsConsole();
+installDirectPlayReadAheadDiagnostics();
 const log = createClientLogger('app.boot');
 const samsung = import.meta.env.MODE === 'samsung';
 const Router = samsung ? HashRouter : BrowserRouter;
@@ -52,6 +54,8 @@ async function boot() {
     log.debug('splash-complete');
     const platform = detectPlatform();
     log.info('platform-detected', { platform: platform.name });
+    if (platform.name === 'web')
+        warmDirectPlayReadAhead();
     ReactDOM.createRoot(rootElement).render(_jsx(Router, { children: _jsx(App, { platform: platform }) }));
     log.info('react-mounted');
 }

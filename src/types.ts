@@ -121,6 +121,8 @@ export interface PlaybackSource {
   mimeType?: string;
   mode: PlaybackMode;
   durationMs?: number;
+  /** Source byte length when known; enables bounded Direct Play read-ahead. */
+  sizeBytes?: number;
   headers?: Record<string, string>;
 }
 

@@ -3,6 +3,11 @@ import { createClientLogger } from '../diagnostics/ClientLog';
 import type { Platform, PlaybackListener, Player } from './Platform';
 import type { PlaybackCapabilities, PlaybackSource } from '../types';
 import { detectWebMediaCodecCapabilities } from './WebMediaCapabilities';
+import {
+  directPlayReadAheadMetrics,
+  directPlayReadAheadUrl,
+  releaseDirectPlayReadAhead,
+} from '../playback/directPlayReadAhead';
 
 interface SubtitleSegmentManifest {
   format: 'macha-webvtt-segments';
@@ -147,6 +152,7 @@ class WebPlayer implements Player {
   private subtitleCleanup?: () => void;
   private subtitleTextTrack?: TextTrack;
   private volume = 1;
+  private directReadAheadSourceUrl?: string;
 
   attach(host: HTMLElement): void {
     this.host = host;
@@ -171,6 +177,8 @@ class WebPlayer implements Player {
       hls: isHls(source),
     });
     this.pendingInitialPositionMs = positionMs;
+    releaseDirectPlayReadAhead(this.directReadAheadSourceUrl);
+    this.directReadAheadSourceUrl = undefined;
     this.hls?.destroy();
     this.hls = undefined;
 
@@ -230,8 +238,14 @@ class WebPlayer implements Player {
         throw new Error('This browser cannot play fragmented-MP4 HLS.');
       }
     } else {
-      this.log.info('direct-source-selected', { url: source.url, mimeType: source.mimeType });
-      video.src = source.url;
+      const directUrl = source.mode === 'direct' ? await directPlayReadAheadUrl(source) : source.url;
+      if (directUrl !== source.url) this.directReadAheadSourceUrl = source.url;
+      this.log.info('direct-source-selected', {
+        url: source.url,
+        mimeType: source.mimeType,
+        readAhead: directUrl !== source.url,
+      });
+      video.src = directUrl;
     }
 
     const playStarted = performance.now();
@@ -554,6 +568,8 @@ class WebPlayer implements Player {
     this.log.debug('stop', this.video ? videoState(this.video) : undefined);
     this.hls?.destroy();
     this.hls = undefined;
+    releaseDirectPlayReadAhead(this.directReadAheadSourceUrl);
+    this.directReadAheadSourceUrl = undefined;
     const video = this.video;
     if (!video) return;
     this.clearSubtitleTracks(video);
@@ -640,8 +656,10 @@ class WebPlayer implements Player {
     for (const name of stateEvents) {
       video.addEventListener(name, () => {
         const state = videoState(video);
-        if (name === 'waiting' || name === 'stalled' || name === 'error' || name === 'abort') this.log.warn(`media-${name}`, state);
-        else this.log.debug(`media-${name}`, state);
+        const readAhead = directPlayReadAheadMetrics(this.directReadAheadSourceUrl);
+        const detail = readAhead ? { ...state, directReadAhead: readAhead } : state;
+        if (name === 'waiting' || name === 'stalled' || name === 'error' || name === 'abort') this.log.warn(`media-${name}`, detail);
+        else this.log.debug(`media-${name}`, detail);
       });
     }
     video.addEventListener('progress', () => {

@@ -245,6 +245,7 @@ export class MachaPlaybackResolver implements PlaybackResolver {
       mimeType: wire.stream.mime_type,
       mode: wire.mode,
       durationMs: wire.duration_ms,
+      sizeBytes: wire.source.size,
     };
     return {
       sessionId: wire.session_id,

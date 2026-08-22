@@ -10,6 +10,7 @@ import {
 } from './diagnostics/ClientLog';
 import { detectPlatform } from './platform';
 import { diagnosticsSettings } from './settings';
+import { installDirectPlayReadAheadDiagnostics, warmDirectPlayReadAhead } from './playback/directPlayReadAhead';
 import './styles.css';
 
 configureClientDiagnostics({
@@ -18,6 +19,7 @@ configureClientDiagnostics({
   maxEntries: diagnosticsSettings.playbackLogBufferEntries,
 });
 installClientDiagnosticsConsole();
+installDirectPlayReadAheadDiagnostics();
 const log = createClientLogger('app.boot');
 const samsung = import.meta.env.MODE === 'samsung';
 const Router = samsung ? HashRouter : BrowserRouter;
@@ -58,6 +60,7 @@ async function boot(): Promise<void> {
 
   const platform = detectPlatform();
   log.info('platform-detected', { platform: platform.name });
+  if (platform.name === 'web') warmDirectPlayReadAhead();
   ReactDOM.createRoot(rootElement).render(
     <Router>
       <App platform={platform} />
