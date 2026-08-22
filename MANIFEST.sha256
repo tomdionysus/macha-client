@@ -97,8 +97,8 @@ cd73895c5fecd00305e64b821fca9b5d16a7f14e783ef1612939c6a1d6321baa  ./src/api/Acqu
 7b1c68d535c78a0e14d79b429efafcfb9277f05441ec7f4defc9359c4a765e38  ./src/api/MachaAcquisitionApi.test.ts
 95d28d5d664df171b671e6a9442e63bcb8b221cc0769a8abf2ee038caac770a2  ./src/api/MachaAcquisitionApi.ts
 7e6711f7d775caee882f8e0ac9eb9a12063cda8f93dad96be780d7addc369a3e  ./src/api/MachaCatalogueApi.js
-f0e65cad6a6ce4c185e69d17932f65fd64c0372afa93508caafcca38f2f35449  ./src/api/MachaCatalogueApi.test.js
-39846be57265165f501c26ff24440e3e6b56fdfcddd565a2a0bce6173fed547b  ./src/api/MachaCatalogueApi.test.ts
+ad93213a94b3285825a1b62a61e28f6655856eaa1bf7029f138daf24b1e09e6f  ./src/api/MachaCatalogueApi.test.js
+f460ef247d368995894fbe526a4d52d0b6a6ebeb13cd77e42d27d2822e116546  ./src/api/MachaCatalogueApi.test.ts
 87746b429ff0283a4b53f4fba97e11b6600bfc18e42e2ed23e382c06b0316475  ./src/api/MachaCatalogueApi.ts
 492185692de0a153d219d6d3ec1c317479651db4376afd866008631ecd80a637  ./src/api/MachaMediaApi.js
 88f92db4b89b3215b734a4f02d1f53b96292b6c7b0ce512cbba22f5901da746e  ./src/api/MachaMediaApi.test.js
@@ -169,8 +169,8 @@ d59d184f7d60223e367062eb2cf26bc637b8a4315ac9628a17e6bc6fb34ed48f  ./src/hooks/ar
 3ed4782ca7f819bb347968d2d21651750ab718d6e6c1370a7598ee434112660d  ./src/hooks/artworkRetry.test.ts
 e272ff9a50a651a7c5a395cf23452998430aa6dd073a483a9f8865d826f7a05b  ./src/hooks/artworkRetry.ts
 40377ce9ed21aefe0b9877b8430ccc3714014c845b408b9acd80f5877590f1ee  ./src/hooks/artworkScheduler.js
-1f0f731d09ded18799d886912c24eb680fa755c29cd9d9a518f862fe75321f59  ./src/hooks/artworkScheduler.test.js
-ea987ab19ecf252928d27cf6bec0d2b64ef55fee4d12514099370d1090b9764e  ./src/hooks/artworkScheduler.test.ts
+e68d7ba1431064c757eaef99dc96e6ba3845082aa1275997e9f643ef20c31269  ./src/hooks/artworkScheduler.test.js
+4ce3e6b31860cb6dcf2f046e3b300f2a61a7903ce795914b9d16095b72af33be  ./src/hooks/artworkScheduler.test.ts
 6075031e768eeefc9c38652a76f7ca00ef8e78d1fc8244fb6b2baefd10d8806d  ./src/hooks/artworkScheduler.ts
 03f5c6cd27ba878968f2290241012a09f64cc1c372b748dfdceed3cd810f027e  ./src/hooks/artworkVisibility.js
 ab99fb09169c86bd54f9478013b8ed75d50ea57ca73cd10c422789483d9ca98b  ./src/hooks/artworkVisibility.ts
@@ -221,8 +221,8 @@ ee2b84525f51d137383196a12d0efb2b4bbb9371a78473a219ed0f3f8748dea1  ./src/playback
 dcbef81a29a73d8b1dc2f7b219603f7a1e54f987426743fdc2c03fe57bc3537f  ./src/playback/DirectSeekSync.test.ts
 5f5914dfcdb361adf940776a5e603b1b7ee8970e5efea91bbe1b7b99810f80b4  ./src/playback/DirectSeekSync.ts
 4b0382c46049454ae14245aa4a6ba2e59117476e37a886fa6ee4dd087a7b3b21  ./src/playback/MachaPlaybackResolver.js
-bf36f7c720a3eccd8cbfc49f95231ef5631368174b9cc0526c4f10716c74a887  ./src/playback/MachaPlaybackResolver.test.js
-eca674e4cbf25750983f940117d50636059b3030c4c65784386de3a7ad79e9aa  ./src/playback/MachaPlaybackResolver.test.ts
+8a26d51b8165aaa001ea188d188b7cec1628583ed2634ac88b692b88c9757e1b  ./src/playback/MachaPlaybackResolver.test.js
+f1a47292e93a073bf8f0d2393ea07fde4c64c6acc8c5d1a7d2b778a71c65c66f  ./src/playback/MachaPlaybackResolver.test.ts
 a40c146e5a113f8087c684d265377d94855cb44c9b000923e706099ffd5dce39  ./src/playback/MachaPlaybackResolver.ts
 8e609bb71c20b858c77f0e9f90bb1319db8477b13f9f965f1a1e18524bf50881  ./src/playback/PlaybackResolver.js
 97a97549c617f5d607786080a5794dd7f1fac1befd67851f1dc63ff479c777db  ./src/playback/PlaybackResolver.ts
@@ -305,8 +305,8 @@ a120da644e62851be414756503d96ff78f94144779cc632d8dddf55cc916c9d0  ./src/state/vo
 a31ef5ac89dc525a157b503f65706392d289af5c881d4ccbd396ab4e9c1ae431  ./src/state/volume.ts
 8c6f161cbe2fc23909adcbd0c0bd4b77931c3e182c09603ec5cceb674bb9d94c  ./src/styles.css
 7fde6e1887b31cd4733fc91e7eaa857e913385ae35365c3950307d3a708f3b0e  ./src/titleIndex.js
-eafc940a7d25ff36074cbd009674e238e4168fdbb9c5fe78b7748b011af0a8de  ./src/titleIndex.test.js
-068cb9005515278f96b34a32aa5b03901d120d69636f75ac1cca2c6dade4ad59  ./src/titleIndex.test.ts
+f2ad523866a7e72ea543cee0df04f364e90fdf206aef6dd52c359d829256b055  ./src/titleIndex.test.js
+608836600e396f121378b083f437421f9c4508fe634057a014645bd214692dda  ./src/titleIndex.test.ts
 7c49a6e4a3457933bba9e58c922857c4ce8da57cfde99ea8b32760785bad1ef5  ./src/titleIndex.ts
 8e609bb71c20b858c77f0e9f90bb1319db8477b13f9f965f1a1e18524bf50881  ./src/types.js
 79fa00f76e1c9317fbc1dd8f329c0da018cc6efe12bb5f7843d0b8ed874153e6  ./src/types.ts

@@ -1,3 +1,4 @@
+import { describe, expect, it } from 'vitest';
 import { alphabetIndexKey, compareIndexedTitles, indexedTitle, sortMediaByIndexedTitle } from './titleIndex';
 function item(id, title) {
     return { id, title, kind: 'movie', mediaIds: [] };

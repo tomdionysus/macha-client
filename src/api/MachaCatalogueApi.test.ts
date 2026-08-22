@@ -54,7 +54,7 @@ describe('MachaCatalogueApi', () => {
     await api.search('black books', 25);
 
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe('http://node.test/api/v1/catalogue/search?q=black+books&limit=25');
+    expect(url).toBe('http://node.test/api/v1/catalogue/search?q=black%20books&limit=25');
     expect(new Headers(init.headers).get('Authorization')).toBe('Bearer secret');
   });
 

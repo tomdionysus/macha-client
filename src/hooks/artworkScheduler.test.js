@@ -9,21 +9,22 @@ describe('ArtworkRequestScheduler', () => {
     it('never exceeds the configured request concurrency', async () => {
         const scheduler = new ArtworkRequestScheduler(2);
         const gates = [deferred(), deferred(), deferred(), deferred()];
+        const started = [deferred(), deferred(), deferred(), deferred()];
         let active = 0;
         let peak = 0;
         const handles = gates.map((gate, index) => scheduler.request(String(index), async () => {
             active += 1;
             peak = Math.max(peak, active);
+            started[index].resolve();
             const result = await gate.promise;
             active -= 1;
             return result;
         }));
-        await Promise.resolve();
+        await Promise.all([started[0].promise, started[1].promise]);
         expect(active).toBe(2);
         gates[0].resolve(0);
         gates[1].resolve(1);
-        await Promise.resolve();
-        await Promise.resolve();
+        await Promise.all([started[2].promise, started[3].promise]);
         expect(active).toBe(2);
         gates[2].resolve(2);
         gates[3].resolve(3);
@@ -46,8 +47,10 @@ describe('ArtworkRequestScheduler', () => {
         const scheduler = new ArtworkRequestScheduler(2);
         let loads = 0;
         const gate = deferred();
-        const first = scheduler.request('same', async () => { loads += 1; return gate.promise; });
+        const started = deferred();
+        const first = scheduler.request('same', async () => { loads += 1; started.resolve(); return gate.promise; });
         const second = scheduler.request('same', async () => { loads += 1; return 'wrong'; });
+        await started.promise;
         expect(loads).toBe(1);
         gate.resolve('artwork');
         await expect(first.promise).resolves.toBe('artwork');

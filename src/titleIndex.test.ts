@@ -1,3 +1,4 @@
+import { describe, expect, it } from 'vitest';
 import { alphabetIndexKey, compareIndexedTitles, indexedTitle, sortMediaByIndexedTitle } from './titleIndex';
 import type { MediaSummary } from './types';
 

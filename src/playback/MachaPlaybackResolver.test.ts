@@ -61,7 +61,7 @@ function sessionResponse(overrides: Record<string, unknown> = {}) {
       modes: ['remux', 'transcode'],
       quality_heights: [720, 480, 360],
       media_ids: ['file:abc'],
-      audio_streams: [{ index: 1, type: 'audio', codec: 'aac', profile: 'LC', language: 'eng', default: true, forced: false, channels: 2 }],
+      audio_streams: [{ index: 1, type: 'audio', codec: 'aac', profile: 'LC', language: 'eng', default: true, forced: false, channels: 2, bitrate: 192_000 }],
       subtitle_streams: [],
       can_seek: true,
       can_change_quality: true,
@@ -116,7 +116,7 @@ describe('MachaPlaybackResolver', () => {
 
 
   it('prefers Direct on Samsung while Web remains Auto', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(sessionResponse(), 201));
+    const fetchMock = vi.fn().mockImplementation(async () => jsonResponse(sessionResponse(), 201));
     vi.stubGlobal('fetch', fetchMock);
     const resolver = new MachaPlaybackResolver('http://node.test', 'secret');
 
