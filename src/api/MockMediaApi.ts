@@ -177,7 +177,7 @@ export class MockMediaApi implements MediaApi {
     return result;
   }
 
-  async artwork(_ref: ArtworkRef): Promise<Blob> {
+  async artwork(_ref: ArtworkRef, _signal?: AbortSignal): Promise<Blob> {
     throw new Error('Demo catalogue has no artwork objects');
   }
 

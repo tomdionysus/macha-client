@@ -8,27 +8,21 @@ import { requestTvDefaultFocus } from '../hooks/useTvNavigation';
 import type { Platform } from '../platform/Platform';
 import type {
   PlaybackPreferencesUpdate,
-  PlaybackResolver,
   PlaybackSession,
   PlaybackStreamInfo,
   PlaybackUpdate,
 } from '../playback/PlaybackResolver';
-import { PlaybackCoordinator, isSubtitleOnlyPlaybackUpdate, type PlaybackCoordinatorSnapshot } from '../playback/PlaybackCoordinator';
+import { isSubtitleOnlyPlaybackUpdate, type PlaybackCoordinatorSnapshot } from '../playback/PlaybackCoordinator';
+import { PlaybackRuntime, type PlaybackRuntimeRequest, type PlaybackRuntimeSnapshot } from '../playback/PlaybackRuntime';
 import { uiSettings } from '../settings';
 import { describePlaybackSession } from '../playback/PlaybackStatus';
-import type { MediaSummary, PlaybackMode, PlaybackProgress } from '../types';
-
-export interface PlayerHostRequest {
-  media: MediaSummary;
-  startPositionMs: number;
-  requestId: number;
-}
+import type { MediaSummary, PlaybackEvent, PlaybackMode, PlaybackProgress } from '../types';
 
 interface Props {
   api: MediaApi;
-  request: PlayerHostRequest;
+  request: PlaybackRuntimeRequest;
   platform: Platform;
-  playbackResolver: PlaybackResolver;
+  runtime: PlaybackRuntime;
   presentation: 'full' | 'mini';
   onProgress: (progress: PlaybackProgress) => void;
   onPosition: (media: MediaSummary, positionMs: number, durationMs: number) => void;
@@ -127,10 +121,6 @@ function VolumeControl({ volume, onChange, compact = false }: { volume: number; 
       />
     </div>
   );
-}
-
-function canPlay(media: MediaSummary): boolean {
-  return media.kind === 'movie' || media.kind === 'episode' || media.kind === 'track';
 }
 
 function shouldTrackProgress(media: MediaSummary): boolean {
@@ -306,7 +296,7 @@ function PlayerOptions({
   );
 }
 
-function PlayerSession({ api, media, platform, playbackResolver, startPositionMs, presentation, onProgress, onPosition, onMinimize, onExpand, onStop, onPrevious, onNext, onEnded, canPrevious, canNext, queuePosition, volume, onVolumeChange, initialFatalError }: Omit<Props, 'request'> & { media: MediaSummary; startPositionMs: number; initialFatalError?: Error }) {
+function PlayerSession({ api, media, platform, runtime, startPositionMs, presentation, onProgress, onPosition, onMinimize, onExpand, onStop, onPrevious, onNext, onEnded, canPrevious, canNext, queuePosition, volume, onVolumeChange }: Omit<Props, 'request'> & { media: MediaSummary; startPositionMs: number }) {
   const pageRef = useRef<HTMLElement | null>(null);
   const hostRef = useRef<HTMLDivElement | null>(null);
   const chromeRef = useRef<HTMLDivElement | null>(null);
@@ -315,19 +305,25 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
   const lastReportRef = useRef(0);
   const lastPositionPersistRef = useRef(0);
   const endedHandledRef = useRef(false);
-  const player = useMemo(() => platform.createPlayer(), [platform]);
+  const lastEventByMediaRef = useRef(new Map<string, PlaybackEvent>());
   const log = useMemo(() => createClientLogger('playback.screen', { mediaId: media.id }), [media.id]);
   const webControls = platform.name === 'web';
   const samsungControls = import.meta.env.MODE === 'samsung';
   const interactionControlled = webControls || samsungControls;
-  const coordinator = useMemo(() => new PlaybackCoordinator({
-    media,
-    player,
-    resolver: playbackResolver,
-    capabilities: () => platform.capabilities(),
-    initialPositionMs: Math.max(0, startPositionMs),
-  }), [media, platform, playbackResolver, player, startPositionMs, webControls]);
-  const [playback, setPlayback] = useState<PlaybackCoordinatorSnapshot>(() => coordinator.getSnapshot());
+  const [runtimePlayback, setRuntimePlayback] = useState<PlaybackCoordinatorSnapshot | undefined>(() => runtime.getPlaybackSnapshot());
+  const [runtimeState, setRuntimeState] = useState<PlaybackRuntimeSnapshot>(() => runtime.getSnapshot());
+  const playback: PlaybackCoordinatorSnapshot = runtimePlayback ?? {
+    intent: { positionMs: Math.max(0, startPositionMs), paused: true },
+    event: {
+      positionMs: Math.max(0, startPositionMs),
+      durationMs: media.durationMs ?? 0,
+      paused: true,
+      ended: false,
+    },
+    starting: runtimeState.phase === 'starting',
+    preparingSource: false,
+    fatalError: runtimeState.fatalError,
+  };
   const [controlsVisible, setControlsVisible] = useState(!interactionControlled);
   const [fullscreen, setFullscreen] = useState(false);
   const [optionsVisible, setOptionsVisible] = useState(false);
@@ -337,8 +333,18 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
   const cover = useArtworkUrl(api, media.kind === 'track' ? media.artwork?.poster ?? media.artwork?.thumbnail : undefined);
 
   useEffect(() => {
-    player.setVolume(samsungControls ? 1 : volume);
-  }, [player, samsungControls, volume]);
+    lastReportRef.current = 0;
+    lastPositionPersistRef.current = 0;
+    endedHandledRef.current = false;
+    scrubValueRef.current = undefined;
+    setScrubValue(undefined);
+    setLocalNotice(undefined);
+    setOptionsVisible(false);
+  }, [media.id]);
+
+  useEffect(() => {
+    runtime.setVolume(samsungControls ? 1 : volume);
+  }, [runtime, samsungControls, volume]);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -350,18 +356,21 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
       catalogueDurationMs: media.durationMs,
       platform: platform.name,
     });
-    player.attach(host);
-    const unsubscribe = coordinator.subscribe(setPlayback);
-    if (!initialFatalError) void coordinator.start();
+    runtime.attach(host);
+    const unsubscribePlayback = runtime.subscribePlayback(setRuntimePlayback);
+    const unsubscribeLifecycle = runtime.subscribeLifecycle(setRuntimeState);
     return () => {
-      log.info('player-unmount', { sessionId: coordinator.getSnapshot().session?.sessionId, latest: coordinator.getSnapshot().event });
-      unsubscribe();
-      coordinator.dispose();
+      const latest = runtime.getPlaybackSnapshot();
+      log.info('player-unmount', { sessionId: latest?.session?.sessionId, latest: latest?.event });
+      unsubscribePlayback();
+      unsubscribeLifecycle();
+      runtime.detach(host);
     };
-  }, [coordinator, initialFatalError, log, media.durationMs, media.id, media.kind, platform.name, player, startPositionMs]);
+  }, [log, media.durationMs, media.id, media.kind, platform.name, runtime, startPositionMs]);
 
   useEffect(() => {
     const event = playback.event;
+    lastEventByMediaRef.current.set(media.id, event);
     const now = Date.now();
     if (event.paused || event.ended || now - lastPositionPersistRef.current >= 5_000) {
       lastPositionPersistRef.current = now;
@@ -381,8 +390,9 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
 
   useEffect(() => () => {
     if (!shouldTrackProgress(media)) return;
-    const event = coordinator.getSnapshot().event;
-    if (!event.durationMs) return;
+    const event = lastEventByMediaRef.current.get(media.id);
+    lastEventByMediaRef.current.delete(media.id);
+    if (!event?.durationMs) return;
     onProgress({
       mediaId: media.id,
       positionMs: event.positionMs,
@@ -390,7 +400,7 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
       updatedAt: Date.now(),
       media,
     });
-  }, [coordinator, media, onProgress]);
+  }, [media, onProgress]);
 
   useEffect(() => {
     if (!playback.event.ended) {
@@ -402,7 +412,7 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
     onEnded();
   }, [onEnded, playback.event.ended]);
 
-  const fatalError = initialFatalError ?? playback.fatalError;
+  const fatalError = runtimeState.fatalError ?? playback.fatalError;
   const playbackNotice = localNotice ?? playback.notice;
 
   const hideControls = useCallback(() => {
@@ -460,7 +470,7 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
 
   const setPaused = useCallback((paused: boolean) => {
     setLocalNotice(undefined);
-    coordinator.setPaused(paused);
+    runtime.setPaused(paused);
     if (!interactionControlled) {
       if (paused) {
         setControlsVisible(true);
@@ -469,23 +479,23 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
         showControls();
       }
     }
-  }, [coordinator, interactionControlled, showControls]);
+  }, [interactionControlled, runtime, showControls]);
 
   const seek = useCallback((positionMs: number) => {
     setLocalNotice(undefined);
     setScrubPosition(undefined);
-    const accepted = coordinator.seek(positionMs);
-    if (!accepted) setLocalNotice(coordinator.getSnapshot().notice);
+    const accepted = runtime.seek(positionMs);
+    if (!accepted) setLocalNotice(runtime.getPlaybackSnapshot()?.notice);
     if (!interactionControlled) showControls();
     return accepted;
-  }, [coordinator, interactionControlled, setScrubPosition, showControls]);
+  }, [interactionControlled, runtime, setScrubPosition, showControls]);
 
   const seekBy = useCallback((deltaMs: number) => {
     setLocalNotice(undefined);
     setScrubPosition(undefined);
-    coordinator.seekBy(deltaMs);
+    runtime.seekBy(deltaMs);
     if (!interactionControlled) showControls();
-  }, [coordinator, interactionControlled, setScrubPosition, showControls]);
+  }, [interactionControlled, runtime, setScrubPosition, showControls]);
 
   const playFromStart = useCallback(() => {
     log.info('restart-ui-request', {
@@ -493,14 +503,14 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
       mode: playback.session?.mode,
       currentPositionMs: playback.event.positionMs,
     });
-    coordinator.seek(0);
-    coordinator.setPaused(false);
-  }, [coordinator, log, playback.event.positionMs, playback.session?.mode, playback.session?.sessionId]);
+    runtime.seek(0);
+    runtime.setPaused(false);
+  }, [log, playback.event.positionMs, playback.session?.mode, playback.session?.sessionId, runtime]);
 
   const reconfigure = useCallback((update: PlaybackUpdate) => {
     setLocalNotice(undefined);
-    coordinator.update(update);
-  }, [coordinator]);
+    runtime.update(update);
+  }, [runtime]);
 
   useEffect(() => {
     if (presentation === 'full') {
@@ -837,20 +847,11 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
 
 export function PlayerHost(props: Props) {
   const { request, ...sessionProps } = props;
-  const media = request.media;
-  const initialFatalError = !canPlay(media)
-    ? new Error('This catalogue item is not directly playable.')
-    : media.kind === 'episode' && !media.playbackContext
-      ? new Error('Episode playback hierarchy context is missing.')
-      : undefined;
-
   return (
     <PlayerSession
-      key={request.requestId}
       {...sessionProps}
-      media={media}
+      media={request.media}
       startPositionMs={request.startPositionMs}
-      initialFatalError={initialFatalError}
     />
   );
 }

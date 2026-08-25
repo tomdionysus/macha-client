@@ -1,7 +1,8 @@
 import Hls from 'hls.js';
 import { createClientLogger } from '../diagnostics/ClientLog';
-import type { Platform, PlaybackListener, Player } from './Platform';
+import type { Platform, PlaybackFailureListener, PlaybackListener, Player } from './Platform';
 import type { PlaybackCapabilities, PlaybackSource, PlaybackTimeRange } from '../types';
+import { ManagedHlsMediaRecoveryBudget } from './ManagedHlsRecovery';
 import { detectWebMediaCodecCapabilities } from './WebMediaCapabilities';
 import {
   directPlayReadAheadMetrics,
@@ -134,7 +135,21 @@ function objectValue(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' ? value as Record<string, unknown> : {};
 }
 
-function hlsEventSummary(value: unknown): Record<string, unknown> {
+function errorSummary(value: unknown): Record<string, unknown> | string | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (value instanceof Error) return { name: value.name, message: value.message };
+  const object = objectValue(value);
+  if (Object.keys(object).length > 0) {
+    return {
+      name: object.name,
+      message: object.message,
+      code: object.code,
+    };
+  }
+  return String(value);
+}
+
+export function hlsEventSummary(value: unknown): Record<string, unknown> {
   const data = objectValue(value);
   const frag = objectValue(data.frag);
   const response = objectValue(data.response);
@@ -143,6 +158,11 @@ function hlsEventSummary(value: unknown): Record<string, unknown> {
     type: data.type,
     details: data.details,
     fatal: data.fatal,
+    reason: data.reason,
+    sourceBufferName: data.sourceBufferName,
+    mimeType: data.mimeType,
+    parent: data.parent,
+    error: errorSummary(data.error),
     level: data.level ?? frag.level,
     sn: frag.sn,
     start: frag.start,
@@ -180,6 +200,7 @@ class WebPlayer implements Player {
   private video?: HTMLVideoElement;
   private hls?: Hls;
   private listeners = new Set<PlaybackListener>();
+  private failureListeners = new Set<PlaybackFailureListener>();
   private readonly playerId = ++webPlayerSequence;
   private readonly log = createClientLogger('playback.web', { playerId: this.playerId });
   private lastTimeLogMs = 0;
@@ -193,12 +214,25 @@ class WebPlayer implements Player {
   private wantsPlayback = false;
   private playRequestGeneration = 0;
   private activeSource?: PlaybackSource;
+  private sourceGeneration = 0;
+  private failedSourceGeneration?: number;
+  private hlsMediaRecovery?: ManagedHlsMediaRecoveryBudget;
 
   constructor(private readonly options: WebPlayerOptions = {}) {}
 
   attach(host: HTMLElement): void {
     this.host = host;
+    const video = this.video;
+    if (video && video.parentNode !== host) {
+      while (host.firstChild) host.removeChild(host.firstChild);
+      host.appendChild(video);
+    }
     this.log.debug('attach');
+  }
+
+  detachHost(): void {
+    this.log.debug('detach-host');
+    this.host = undefined;
   }
 
   detach(): void {
@@ -210,6 +244,8 @@ class WebPlayer implements Player {
   async play(source: PlaybackSource, positionMs = 0, startPaused = false): Promise<boolean> {
     if (!this.host) throw new Error('Player must be attached before playback');
     const playRequestGeneration = ++this.playRequestGeneration;
+    const sourceGeneration = ++this.sourceGeneration;
+    this.failedSourceGeneration = undefined;
     this.wantsPlayback = !startPaused;
     this.activeSource = source;
     this.log.info('source-load-begin', {
@@ -227,6 +263,7 @@ class WebPlayer implements Player {
     this.directReadAheadSourceUrl = undefined;
     this.hls?.destroy();
     this.hls = undefined;
+    this.hlsMediaRecovery = undefined;
 
     let video = this.video;
     if (video) {
@@ -300,7 +337,7 @@ class WebPlayer implements Player {
     if (isHls(source)) {
       if (shouldUseManagedHls(this.options.forceNativeHls, Hls.isSupported())) {
         this.log.info('hls-js-selected', { url: source.url });
-        this.attachHls(video, source.url, positionMs);
+        this.attachHls(video, source.url, positionMs, sourceGeneration);
       } else if (this.options.forceNativeHls || nativeHlsSupported(video)) {
         this.log.info('hls-native-selected', { url: source.url });
         video.src = source.url;
@@ -324,8 +361,10 @@ class WebPlayer implements Player {
       video.src = directUrl;
     }
 
+    if (sourceGeneration !== this.sourceGeneration || this.failedSourceGeneration === sourceGeneration) return false;
     const playStarted = performance.now();
     if (startPaused) {
+      this.stopManagedHlsLoad();
       video.pause();
       this.log.info('source-attached-paused', {
         elapsedMs: Math.round((performance.now() - playStarted) * 10) / 10,
@@ -604,11 +643,18 @@ class WebPlayer implements Player {
     await this.applySegmentedSubtitle(video, subtitleUrl, manifest, generation);
   }
 
+  private stopManagedHlsLoad(): void {
+    this.hls?.stopLoad();
+  }
+
   pause(): void {
     this.playRequestGeneration += 1;
     this.log.info('pause-request', this.video ? videoState(this.video) : undefined);
     this.wantsPlayback = false;
     setDirectPlayReadAheadMode(this.directReadAheadSourceUrl, 'paused');
+    // A paused transport must also quiesce source acquisition. Otherwise hls.js
+    // can keep filling its minute-scale buffer and keep the server session hot.
+    this.stopManagedHlsLoad();
     this.video?.pause();
   }
 
@@ -622,6 +668,7 @@ class WebPlayer implements Player {
     }
     this.log.info('resume-request', videoState(video));
     this.wantsPlayback = true;
+    if (this.hls) this.hls.startLoad(video.currentTime);
     this.requestPlay(video, 'resume');
   }
 
@@ -710,11 +757,14 @@ class WebPlayer implements Player {
 
   stop(): void {
     this.playRequestGeneration += 1;
+    this.sourceGeneration += 1;
+    this.failedSourceGeneration = undefined;
     this.wantsPlayback = false;
     this.activeSource = undefined;
     this.log.debug('stop', this.video ? videoState(this.video) : undefined);
     this.hls?.destroy();
     this.hls = undefined;
+    this.hlsMediaRecovery = undefined;
     this.initialSeekCleanup?.();
     this.initialSeekCleanup = undefined;
     releaseDirectPlayReadAhead(this.directReadAheadSourceUrl);
@@ -735,9 +785,30 @@ class WebPlayer implements Player {
     return () => this.listeners.delete(listener);
   }
 
-  private attachHls(video: HTMLVideoElement, url: string, positionMs: number): void {
+  subscribeFailure(listener: PlaybackFailureListener): () => void {
+    this.failureListeners.add(listener);
+    return () => this.failureListeners.delete(listener);
+  }
+
+  private failSourceGeneration(sourceGeneration: number, error: Error, detail?: unknown): void {
+    if (sourceGeneration !== this.sourceGeneration || this.failedSourceGeneration === sourceGeneration) return;
+    this.failedSourceGeneration = sourceGeneration;
+    this.playRequestGeneration += 1;
+    this.wantsPlayback = false;
+    this.log.error('source-terminal-failure', { error, detail });
+    const hls = this.hls;
+    this.hls = undefined;
+    this.hlsMediaRecovery = undefined;
+    hls?.destroy();
+    this.video?.pause();
+    for (const listener of this.failureListeners) listener(error);
+  }
+
+  private attachHls(video: HTMLVideoElement, url: string, positionMs: number, sourceGeneration: number): void {
     const hls = new Hls(webHlsBufferConfig(positionMs));
+    const mediaRecovery = new ManagedHlsMediaRecoveryBudget();
     this.hls = hls;
+    this.hlsMediaRecovery = mediaRecovery;
     const attachedAt = performance.now();
 
     hls.on(Hls.Events.MEDIA_ATTACHED, () => {
@@ -759,6 +830,7 @@ class WebPlayer implements Player {
     hls.on(Hls.Events.FRAG_LOADED, (_event, data) => this.log.debug('hls-fragment-loaded', hlsEventSummary(data)));
     hls.on(Hls.Events.FRAG_BUFFERED, (_event, data) => this.log.debug('hls-fragment-buffered', { data: hlsEventSummary(data), state: videoState(video) }));
     hls.on(Hls.Events.ERROR, (_event, data) => {
+      if (sourceGeneration !== this.sourceGeneration || this.hls !== hls) return;
       const payload = { data: hlsEventSummary(data), state: videoState(video) };
       if (!data.fatal) {
         this.log.warn('hls-error-nonfatal', payload);
@@ -767,15 +839,30 @@ class WebPlayer implements Player {
       this.log.error('hls-error-fatal', payload);
       if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
         this.log.warn('hls-recovery-network-start-load', payload);
-        hls.startLoad(video.currentTime);
-      } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
-        this.log.warn('hls-recovery-media', payload);
-        hls.recoverMediaError();
-      } else {
-        this.log.error('hls-unrecoverable-destroy', payload);
-        hls.destroy();
-        if (this.hls === hls) this.hls = undefined;
+        if (this.wantsPlayback) hls.startLoad(video.currentTime);
+        return;
       }
+      if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+        const decision = mediaRecovery.fatalMediaError(video.currentTime * 1000);
+        if (decision.action === 'recover') {
+          this.log.warn('hls-recovery-media', { ...payload, recovery: decision });
+          hls.recoverMediaError();
+          return;
+        }
+        const details = typeof data.details === 'string' ? data.details : 'mediaError';
+        this.failSourceGeneration(
+          sourceGeneration,
+          new Error(`Web HLS playback failed: the browser media pipeline repeatedly rejected the stream (${details}).`),
+          { ...payload, recovery: decision },
+        );
+        return;
+      }
+      const details = typeof data.details === 'string' ? data.details : String(data.type ?? 'unknown');
+      this.failSourceGeneration(
+        sourceGeneration,
+        new Error(`Web HLS playback failed with an unrecoverable player error (${details}).`),
+        payload,
+      );
     });
     hls.loadSource(url);
     hls.attachMedia(video);
@@ -825,6 +912,10 @@ class WebPlayer implements Player {
       bufferedRangesMs.push({ startMs, endMs });
       if (startMs <= currentMs + 250 && endMs >= currentMs) forwardBufferMs = Math.max(forwardBufferMs, endMs - currentMs);
     }
+    this.hlsMediaRecovery?.observePlaybackPosition(
+      currentMs,
+      !video.paused && !video.ended && !video.seeking,
+    );
     const event = {
       positionMs: currentMs,
       durationMs: duration,

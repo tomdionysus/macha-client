@@ -24,7 +24,7 @@ export function LazyArtwork({ api, artwork, alt = '', placeholder, draggable, ea
   return (
     <span ref={visibility.ref} className="lazy-artwork">
       {image
-        ? <img src={image} alt={alt} loading={eager ? 'eager' : 'lazy'} decoding="async" draggable={draggable} />
+        ? <img src={image} alt={alt} decoding="async" draggable={draggable} />
         : placeholder}
     </span>
   );

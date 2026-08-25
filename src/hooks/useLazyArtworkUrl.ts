@@ -72,7 +72,7 @@ export function useLazyArtworkUrl(
     let active = true;
     const handle = schedulerFor(api).request(
       ref.id,
-      () => fetchArtworkWithRetry(() => api.artwork(ref)),
+      (signal) => fetchArtworkWithRetry(() => api.artwork(ref, signal), signal),
       visible ? 'visible' : 'nearby',
     );
     handleRef.current = handle;

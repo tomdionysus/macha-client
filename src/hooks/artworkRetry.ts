@@ -51,6 +51,7 @@ export async function fetchArtworkWithRetry(
     try {
       return await load();
     } catch (error) {
+      if (signal?.aborted) throw abortError();
       const delayMs = delays[failedAttempts];
       failedAttempts += 1;
       if (delayMs === undefined || !isRetryableArtworkError(error)) throw error;

@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.7.2
+
+- bound managed Web HLS media recovery per source generation so repeated fatal MSE/SourceBuffer failures cannot recurse indefinitely through `recoverMediaError()`; a recovery must produce real timeline progress before another is permitted, with a hard per-generation ceiling;
+- add an explicit terminal player-failure channel from `Player` through `PlaybackCoordinator` into `PlaybackRuntime`, so unrecoverable HLS failures enter the existing failed state and immediately tear down the owned playback source/session instead of leaving a live failed generation;
+- preserve detailed hls.js SourceBuffer diagnostics (`details`, source buffer, MIME type, reason and underlying error) in the client trace, and add regression coverage for recovery budgeting, seek-discontinuity handling, failure propagation and lease cleanup.
+
+## 0.7.1
+
+- move playback lifetime out of React presentation components into one application-scoped `PlaybackRuntime` state machine that exclusively owns the platform player, coordinator and server playback-session lease;
+- serialize resource-changing playback generations so replacing an item cannot create a new server session until the previous generation has completed teardown, including sessions whose POST resolves after Stop;
+- make player-host mount/unmount presentation-only, allowing full/mini player transitions and React remounts to rebind the same player surface without destroying or renegotiating playback;
+- make final queue EOF terminate the owned playback lease, keep persisted queue/progress as resumable history rather than automatically resurrecting playback on ordinary startup, and use keepalive DELETE teardown on browser page exit;
+- suspend managed Web HLS loading while paused and restart acquisition on resume, so a paused transcoded stream does not continue filling its large forward buffer and touching the server session;
+- fix artwork lazy-load cancellation so obsolete in-flight requests are genuinely aborted and scheduler concurrency reflects real browser requests rather than released logical slots;
+- add playback-runtime, coordinator teardown and resolver keepalive regression coverage around single ownership, late session creation, ordered replacement, fatal source cleanup and page-exit teardown.
+
 ## 0.7.0
 
 - replace the accumulated player-screen seek/reload state machine with one playback coordinator that owns user intent, active source generation and coalesced server representation changes; transport controls never wait for source-generation work;

@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { shouldUseManagedHls, webHlsBufferConfig, webLocalSeekCoverage } from './WebPlatform';
+import {
+  hlsEventSummary,
+  shouldUseManagedHls,
+  webHlsBufferConfig,
+  webLocalSeekCoverage,
+} from './WebPlatform';
+import { ManagedHlsMediaRecoveryBudget } from './ManagedHlsRecovery';
 
 describe('Web HLS engine policy', () => {
   it('prefers hls.js/MSE on modern Web even when native HLS also exists', () => {
@@ -39,5 +45,70 @@ describe('Web local seek coverage', () => {
     expect(webLocalSeekCoverage({
       mediaId: 'm1', url: '/generation.m3u8', mimeType: 'application/vnd.apple.mpegurl', mode: 'transcode', durationMs: 600_000,
     }, buffered)).toEqual(buffered);
+  });
+});
+
+
+describe('Managed Web HLS recovery', () => {
+  it('allows one immediate media recovery but terminates a repeated fatal error without playback progress', () => {
+    const recovery = new ManagedHlsMediaRecoveryBudget();
+
+    expect(recovery.fatalMediaError(0)).toEqual({ action: 'recover', attempt: 1 });
+    expect(recovery.fatalMediaError(0)).toEqual({
+      action: 'fail',
+      reason: 'no-progress-after-recovery',
+      attempts: 1,
+    });
+  });
+
+  it('permits a later recovery only after meaningful timeline progress and still enforces a hard source-generation budget', () => {
+    const recovery = new ManagedHlsMediaRecoveryBudget(2, 2_000);
+
+    expect(recovery.fatalMediaError(10_000)).toEqual({ action: 'recover', attempt: 1 });
+    recovery.observePlaybackPosition(10_800, true);
+    recovery.observePlaybackPosition(11_700, true);
+    expect(recovery.fatalMediaError(11_700)).toMatchObject({ action: 'fail', reason: 'no-progress-after-recovery' });
+
+    recovery.observePlaybackPosition(12_200, true);
+    expect(recovery.fatalMediaError(12_200)).toEqual({ action: 'recover', attempt: 2 });
+    recovery.observePlaybackPosition(14_500, true);
+    expect(recovery.fatalMediaError(14_500)).toEqual({
+      action: 'fail',
+      reason: 'recovery-budget-exhausted',
+      attempts: 2,
+    });
+  });
+
+  it('does not count seek discontinuities as evidence that media recovery succeeded', () => {
+    const recovery = new ManagedHlsMediaRecoveryBudget();
+
+    recovery.fatalMediaError(0);
+    recovery.observePlaybackPosition(120_000, false);
+    recovery.observePlaybackPosition(120_500, true);
+
+    expect(recovery.fatalMediaError(120_500)).toMatchObject({
+      action: 'fail',
+      reason: 'no-progress-after-recovery',
+    });
+  });
+
+  it('retains SourceBuffer diagnostics needed to identify browser append failures', () => {
+    expect(hlsEventSummary({
+      type: 'mediaError',
+      details: 'bufferAppendError',
+      fatal: true,
+      sourceBufferName: 'video',
+      mimeType: 'video/mp4; codecs="avc1.640028"',
+      reason: 'appendBuffer failed',
+      error: new Error('SourceBuffer append failed'),
+    })).toMatchObject({
+      type: 'mediaError',
+      details: 'bufferAppendError',
+      fatal: true,
+      sourceBufferName: 'video',
+      mimeType: 'video/mp4; codecs="avc1.640028"',
+      reason: 'appendBuffer failed',
+      error: { name: 'Error', message: 'SourceBuffer append failed' },
+    });
   });
 });

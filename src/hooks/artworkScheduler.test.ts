@@ -80,13 +80,20 @@ describe('ArtworkRequestScheduler', () => {
     expect(loads).toBe(0);
   });
 
-  it('does not let cancelled in-flight nearby work block newly visible artwork', async () => {
+  it('aborts cancelled in-flight work before starting newly visible artwork', async () => {
     const scheduler = new ArtworkRequestScheduler<string>(1);
-    const staleGate = deferred<string>();
     const staleStarted = deferred<void>();
-    const stale = scheduler.request('left-of-screen', async () => {
+    let staleAborted = false;
+    const stale = scheduler.request('left-of-screen', async (signal) => {
       staleStarted.resolve();
-      return staleGate.promise;
+      return await new Promise<string>((resolve, reject) => {
+        signal?.addEventListener('abort', () => {
+          staleAborted = true;
+          const error = new Error('aborted');
+          error.name = 'AbortError';
+          reject(error);
+        }, { once: true });
+      });
     }, 'nearby');
     void stale.promise.catch(() => undefined);
 
@@ -98,12 +105,37 @@ describe('ArtworkRequestScheduler', () => {
       visibleLoads += 1;
       return 'visible';
     }, 'visible');
-    void visible.promise.catch(() => undefined);
+
+    await expect(visible.promise).resolves.toBe('visible');
+    expect(staleAborted).toBe(true);
+    expect(visibleLoads).toBe(1);
+  });
+
+  it('does not fake-release a slot when a cancelled load ignores abort', async () => {
+    const scheduler = new ArtworkRequestScheduler<string>(1);
+    const staleGate = deferred<string>();
+    const staleStarted = deferred<void>();
+    const stale = scheduler.request('stale', async () => {
+      staleStarted.resolve();
+      return staleGate.promise;
+    });
+    void stale.promise.catch(() => undefined);
+
+    await staleStarted.promise;
+    stale.cancel();
+
+    let visibleLoads = 0;
+    const visible = scheduler.request('visible', async () => {
+      visibleLoads += 1;
+      return 'visible';
+    }, 'visible');
 
     await Promise.resolve();
     await Promise.resolve();
-    expect(visibleLoads).toBe(1);
+    expect(visibleLoads).toBe(0);
 
     staleGate.resolve('stale');
+    await expect(visible.promise).resolves.toBe('visible');
+    expect(visibleLoads).toBe(1);
   });
 });

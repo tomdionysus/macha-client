@@ -7,6 +7,7 @@ import type {
   PlaybackPreferencesUpdate,
   PlaybackResolver,
   PlaybackSession,
+  PlaybackStopOptions,
   PlaybackStreamInfo,
   PlaybackUpdate,
 } from './PlaybackResolver';
@@ -213,11 +214,14 @@ export class MachaPlaybackResolver implements PlaybackResolver {
     return session;
   }
 
-  async stop(sessionId: string): Promise<void> {
-    this.log.info('session-stop', { sessionId });
+  async stop(sessionId: string, options: PlaybackStopOptions = {}): Promise<void> {
+    this.log.info('session-stop', { sessionId, keepalive: options.keepalive ?? false });
     try {
-      await this.request<void>(`/api/v1/playback/sessions/${encodeURIComponent(sessionId)}`, { method: 'DELETE' });
-      this.log.info('session-stopped', { sessionId });
+      await this.request<void>(`/api/v1/playback/sessions/${encodeURIComponent(sessionId)}`, {
+        method: 'DELETE',
+        keepalive: options.keepalive,
+      });
+      this.log.info('session-stopped', { sessionId, keepalive: options.keepalive ?? false });
     } catch (error) {
       // Session expiry and explicit cleanup are equivalent from the client's point of view.
       if (error instanceof MachaPlaybackError && error.status === 404) {

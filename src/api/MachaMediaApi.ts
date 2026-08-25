@@ -19,7 +19,8 @@ function optionalNumber(value: number | null): number | undefined {
 }
 
 export class MachaMediaApi implements MediaApi {
-  private readonly artworkCache = new Map<string, Promise<Blob>>();
+  private readonly artworkCache = new Map<string, Blob>();
+  private readonly artworkRequests = new Map<string, Promise<Blob>>();
 
   constructor(private readonly catalogue: CatalogueApi) {}
 
@@ -113,12 +114,33 @@ export class MachaMediaApi implements MediaApi {
     return (await this.catalogue.search(query, 50)).map((item) => this.media(item));
   }
 
-  artwork(ref: ArtworkRef): Promise<Blob> {
-    let pending = this.artworkCache.get(ref.id);
+  artwork(ref: ArtworkRef, signal?: AbortSignal): Promise<Blob> {
+    const cached = this.artworkCache.get(ref.id);
+    if (cached) return Promise.resolve(cached);
+
+    // Abortable artwork requests are used by viewport-driven lazy loading. They
+    // must not share an in-flight request with unrelated consumers: when the
+    // card scrolls away its request needs to be genuinely cancellable without
+    // aborting somebody else's detail/backdrop fetch. LazyArtwork already
+    // coalesces duplicate artwork IDs in its request scheduler.
+    if (signal) {
+      return this.catalogue.artwork(ref.id, signal).then((blob) => {
+        this.artworkCache.set(ref.id, blob);
+        return blob;
+      });
+    }
+
+    let pending = this.artworkRequests.get(ref.id);
     if (!pending) {
-      pending = this.catalogue.artwork(ref.id);
-      this.artworkCache.set(ref.id, pending);
-      pending.catch(() => this.artworkCache.delete(ref.id));
+      pending = this.catalogue.artwork(ref.id).then((blob) => {
+        this.artworkCache.set(ref.id, blob);
+        this.artworkRequests.delete(ref.id);
+        return blob;
+      }, (error) => {
+        this.artworkRequests.delete(ref.id);
+        throw error;
+      });
+      this.artworkRequests.set(ref.id, pending);
     }
     return pending;
   }

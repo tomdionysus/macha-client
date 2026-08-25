@@ -29,7 +29,7 @@ class FakeCatalogue implements CatalogueApi {
   status(): Promise<CatalogueStatus> { throw new Error('not used'); }
   update(item: CatalogueItem): Promise<CatalogueItem> { return Promise.resolve(item); }
   clearMetadata(): Promise<void> { return Promise.resolve(); }
-  artwork(id: string): Promise<Blob> { return Promise.resolve(new Blob([id])); }
+  artwork(id: string, _signal?: AbortSignal): Promise<Blob> { return Promise.resolve(new Blob([id])); }
   search(): Promise<CatalogueItem[]> { return Promise.resolve([]); }
   get(id: string): Promise<CatalogueItem> {
     if (id === 'show') return Promise.resolve(catalogueItem('show', 'show', { title: 'Show' }));

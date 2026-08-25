@@ -2,11 +2,12 @@ export type ArtworkRequestPriority = 'visible' | 'nearby';
 
 interface PendingArtworkRequest<T> {
   key: string;
-  load: () => Promise<T>;
+  load: (signal?: AbortSignal) => Promise<T>;
   priority: ArtworkRequestPriority;
   sequence: number;
   subscribers: number;
   started: boolean;
+  controller?: AbortController;
   promise: Promise<T>;
   resolve: (value: T) => void;
   reject: (reason?: unknown) => void;
@@ -40,7 +41,7 @@ export class ArtworkRequestScheduler<T> {
     }
   }
 
-  request(key: string, load: () => Promise<T>, priority: ArtworkRequestPriority = 'nearby'): ArtworkRequestHandle<T> {
+  request(key: string, load: (signal?: AbortSignal) => Promise<T>, priority: ArtworkRequestPriority = 'nearby'): ArtworkRequestHandle<T> {
     let request = this.requests.get(key);
     if (request) {
       request.subscribers += 1;
@@ -85,10 +86,12 @@ export class ArtworkRequestScheduler<T> {
         request.subscribers = Math.max(0, request.subscribers - 1);
         if (request.subscribers !== 0) return;
         if (request.started) {
-          request.started = false;
-          this.active -= 1;
+          // Do not release the concurrency slot until the underlying operation
+          // has actually settled. Releasing it here only changes our accounting:
+          // the browser request remains alive and can exhaust the HTTP/1.1
+          // connection pool, starving newly-visible artwork.
           if (this.requests.get(request.key) === request) this.requests.delete(request.key);
-          this.pump();
+          request.controller?.abort();
           return;
         }
         const index = this.pending.indexOf(request);
@@ -114,12 +117,14 @@ export class ArtworkRequestScheduler<T> {
       const request = this.pending.shift()!;
       if (request.subscribers === 0) continue;
       request.started = true;
+      request.controller = typeof AbortController === 'undefined' ? undefined : new AbortController();
       this.active += 1;
-      void Promise.resolve().then(request.load).then(request.resolve, request.reject).finally(() => {
+      void Promise.resolve().then(() => request.load(request.controller?.signal)).then(request.resolve, request.reject).finally(() => {
         if (request.started) {
           request.started = false;
           this.active -= 1;
         }
+        request.controller = undefined;
         if (this.requests.get(request.key) === request) this.requests.delete(request.key);
         this.pump();
       });

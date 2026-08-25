@@ -118,10 +118,15 @@ export interface PlaybackUpdate {
   mediaId?: string;
 }
 
+export interface PlaybackStopOptions {
+  /** Keep the teardown request alive while the browser is navigating away. */
+  keepalive?: boolean;
+}
+
 /** Server-side playback negotiation and session-control seam. */
 export interface PlaybackResolver {
   readonly available: boolean;
   resolve(media: MediaSummary, capabilities: PlaybackCapabilities, seekMs?: number): Promise<PlaybackSession>;
   update(sessionId: string, update: PlaybackUpdate): Promise<PlaybackSession>;
-  stop(sessionId: string): Promise<void>;
+  stop(sessionId: string, options?: PlaybackStopOptions): Promise<void>;
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { Player, PlaybackListener } from '../platform/Platform';
+import type { Player, PlaybackFailureListener, PlaybackListener } from '../platform/Platform';
 import type { MediaSummary, PlaybackCapabilities, PlaybackEvent, PlaybackSource, PlaybackTimeRange } from '../types';
 import type { PlaybackResolver, PlaybackSession, PlaybackUpdate } from './PlaybackResolver';
 import { generationLocalPosition, PlaybackCoordinator, mergePlaybackUpdate } from './PlaybackCoordinator';
@@ -13,16 +13,19 @@ function deferred<T>() {
 
 class FakePlayer implements Player {
   listener?: PlaybackListener;
+  failureListener?: PlaybackFailureListener;
   playCalls: Array<{ source: PlaybackSource; positionMs: number; startPaused: boolean }> = [];
   seekCalls: number[] = [];
   pauseCalls = 0;
   resumeCalls = 0;
+  detachCalls = 0;
+  stopCalls = 0;
   subtitleCalls: Array<string | undefined> = [];
   playResult: Promise<boolean> = Promise.resolve(true);
   localSeekRanges: PlaybackTimeRange[] = [];
 
   attach(): void {}
-  detach(): void {}
+  detach(): void { this.detachCalls += 1; }
   play(source: PlaybackSource, positionMs = 0, startPaused = false): Promise<boolean> {
     this.playCalls.push({ source, positionMs, startPaused });
     return this.playResult;
@@ -38,12 +41,17 @@ class FakePlayer implements Player {
   }
   setVolume(): void {}
   setSubtitle(subtitleUrl?: string): void { this.subtitleCalls.push(subtitleUrl); }
-  stop(): void {}
+  stop(): void { this.stopCalls += 1; }
   subscribe(listener: PlaybackListener): () => void {
     this.listener = listener;
     return () => { if (this.listener === listener) this.listener = undefined; };
   }
+  subscribeFailure(listener: PlaybackFailureListener): () => void {
+    this.failureListener = listener;
+    return () => { if (this.failureListener === listener) this.failureListener = undefined; };
+  }
   emit(event: PlaybackEvent): void { this.listener?.(event); }
+  fail(error: Error): void { this.failureListener?.(error); }
 }
 
 function media(): MediaSummary {
@@ -76,7 +84,7 @@ function session(overrides: Partial<PlaybackSession> = {}): PlaybackSession {
   };
 }
 
-function resolver(initial: PlaybackSession, updateImpl?: (update: PlaybackUpdate) => Promise<PlaybackSession>): PlaybackResolver & { resolve: ReturnType<typeof vi.fn>; update: ReturnType<typeof vi.fn> } {
+function resolver(initial: PlaybackSession, updateImpl?: (update: PlaybackUpdate) => Promise<PlaybackSession>): PlaybackResolver & { resolve: ReturnType<typeof vi.fn>; update: ReturnType<typeof vi.fn>; stop: ReturnType<typeof vi.fn> } {
   return {
     available: true,
     resolve: vi.fn(async () => initial),
@@ -329,5 +337,53 @@ describe('generationLocalPosition', () => {
     const transformed = session({ mode: 'remux', seekMs: 30_000 });
     expect(generationLocalPosition(transformed, 40_000)).toBe(10_000);
     expect(generationLocalPosition(transformed, 29_999)).toBeUndefined();
+  });
+});
+
+
+describe('PlaybackCoordinator player failures', () => {
+  it('promotes a terminal platform-source failure into coordinator fatal state', async () => {
+    const player = new FakePlayer();
+    const api = resolver(session({ mode: 'transcode' }));
+    const coordinator = new PlaybackCoordinator({ media: media(), player, resolver: api, capabilities: async () => capabilities(), initialPositionMs: 0 });
+    await coordinator.start();
+
+    player.fail(new Error('Web HLS media recovery exhausted'));
+
+    expect(coordinator.getSnapshot().fatalError?.message).toBe('Web HLS media recovery exhausted');
+    expect(coordinator.getSnapshot().starting).toBe(false);
+  });
+});
+
+
+describe('PlaybackCoordinator lease teardown', () => {
+  it('waits for an in-flight session create and deletes the late lease before close resolves', async () => {
+    const player = new FakePlayer();
+    const pending = deferred<PlaybackSession>();
+    const api = resolver(session());
+    api.resolve.mockImplementationOnce(async () => pending.promise);
+    const coordinator = new PlaybackCoordinator({ media: media(), player, resolver: api, capabilities: async () => capabilities(), initialPositionMs: 0 });
+
+    const starting = coordinator.start();
+    await vi.waitFor(() => expect(api.resolve).toHaveBeenCalledTimes(1));
+    const closing = coordinator.close();
+    pending.resolve(session());
+    await Promise.all([starting, closing]);
+
+    expect(api.stop).toHaveBeenCalledWith('s1', {});
+    expect(player.playCalls).toHaveLength(0);
+    expect(player.stopCalls).toBe(1);
+    expect(player.detachCalls).toBe(0);
+  });
+
+  it('propagates keepalive to the owned lease teardown', async () => {
+    const player = new FakePlayer();
+    const api = resolver(session());
+    const coordinator = new PlaybackCoordinator({ media: media(), player, resolver: api, capabilities: async () => capabilities(), initialPositionMs: 0 });
+    await coordinator.start();
+
+    await coordinator.close({ keepalive: true });
+
+    expect(api.stop).toHaveBeenCalledWith('s1', { keepalive: true });
   });
 });

@@ -5,6 +5,7 @@ import type {
   PlaybackPreferencesUpdate,
   PlaybackResolver,
   PlaybackSession,
+  PlaybackStopOptions,
   PlaybackUpdate,
 } from './PlaybackResolver';
 
@@ -111,7 +112,11 @@ export class PlaybackCoordinator {
   private readonly log: ReturnType<typeof createClientLogger>;
   private readonly listeners = new Set<Listener>();
   private readonly unsubscribePlayer: () => void;
+  private readonly unsubscribePlayerFailure?: () => void;
   private disposed = false;
+  private startPromise?: Promise<void>;
+  private closePromise?: Promise<void>;
+  private closeOptions: PlaybackStopOptions = {};
   private mutationLoop?: Promise<void>;
   private pendingMutation?: PendingMutation;
   private mutationRevision = 0;
@@ -139,6 +144,7 @@ export class PlaybackCoordinator {
       preparingSource: false,
     };
     this.unsubscribePlayer = options.player.subscribe((event) => this.onPlayerEvent(event));
+    this.unsubscribePlayerFailure = options.player.subscribeFailure?.((error) => this.fail(error));
   }
 
   subscribe(listener: Listener): () => void {
@@ -155,7 +161,12 @@ export class PlaybackCoordinator {
     };
   }
 
-  async start(): Promise<void> {
+  start(): Promise<void> {
+    if (!this.startPromise) this.startPromise = this.startInternal();
+    return this.startPromise;
+  }
+
+  private async startInternal(): Promise<void> {
     if (this.disposed) return;
     const startedAt = performance.now();
     try {
@@ -165,7 +176,7 @@ export class PlaybackCoordinator {
       const requestedPositionRevision = this.positionRevision;
       const session = await this.options.resolver.resolve(this.options.media, capabilities, requestedPositionMs);
       if (this.disposed) {
-        await this.options.resolver.stop(session.sessionId).catch(() => undefined);
+        await this.options.resolver.stop(session.sessionId, this.closeOptions).catch(() => undefined);
         return;
       }
       this.log.info('initial-generation-ready', {
@@ -202,17 +213,39 @@ export class PlaybackCoordinator {
     }
   }
 
-  dispose(): void {
-    if (this.disposed) return;
+  close(options: PlaybackStopOptions = {}): Promise<void> {
+    if (options.keepalive) this.closeOptions = { ...this.closeOptions, keepalive: true };
+    if (this.closePromise) return this.closePromise;
+
     this.disposed = true;
     this.mutationRevision += 1;
     this.sourceActivationRevision += 1;
     this.pendingMutation = undefined;
     this.unsubscribePlayer();
-    this.options.player.detach();
-    const session = this.serverSession ?? this.snapshot.session;
-    if (session) void this.options.resolver.stop(session.sessionId).catch(() => undefined);
-    this.listeners.clear();
+    this.unsubscribePlayerFailure?.();
+    // Coordinator teardown ends source acquisition immediately, but deliberately
+    // leaves DOM-host ownership to PlaybackRuntime/PlayerHost.
+    this.options.player.stop();
+    const ownedAtClose = this.serverSession ?? this.snapshot.session;
+
+    this.closePromise = (async () => {
+      await this.startPromise?.catch(() => undefined);
+      await this.mutationLoop?.catch(() => undefined);
+      const session = this.serverSession ?? this.snapshot.session ?? ownedAtClose;
+      if (session) {
+        try {
+          await this.options.resolver.stop(session.sessionId, this.closeOptions);
+        } catch (error) {
+          this.log.warn('session-close-failed', { sessionId: session.sessionId, error });
+        }
+      }
+      this.listeners.clear();
+    })();
+    return this.closePromise;
+  }
+
+  ownedSessionId(): string | undefined {
+    return (this.serverSession ?? this.snapshot.session)?.sessionId;
   }
 
   setPaused(paused: boolean): void {
@@ -518,6 +551,7 @@ export class PlaybackCoordinator {
   }
 
   private fail(error: unknown): void {
+    if (this.disposed || this.snapshot.fatalError) return;
     const fatalError = error instanceof Error ? error : new Error(String(error));
     this.log.error('fatal', fatalError);
     this.patchSnapshot({ fatalError, notice: undefined, starting: false, preparingSource: false });

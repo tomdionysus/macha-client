@@ -13,7 +13,7 @@ export function useArtworkUrl(api: MediaApi, ref?: ArtworkRef): string | undefin
     setUrl(undefined);
     if (!ref) return;
 
-    void fetchArtworkWithRetry(() => api.artwork(ref), controller?.signal).then((blob) => {
+    void fetchArtworkWithRetry(() => api.artwork(ref, controller?.signal), controller?.signal).then((blob) => {
       if (!active) return;
       objectUrl = URL.createObjectURL(blob);
       setUrl(objectUrl);

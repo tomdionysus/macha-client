@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Navigate, NavLink, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { MachaCatalogueApi } from './api/MachaCatalogueApi';
 import type { CatalogueApi } from './api/CatalogueApi';
@@ -14,6 +14,7 @@ import type { Platform } from './platform/Platform';
 import type { PlaybackResolver } from './playback/PlaybackResolver';
 import { DemoPlaybackResolver } from './playback/DemoPlaybackResolver';
 import { MachaPlaybackResolver } from './playback/MachaPlaybackResolver';
+import { PlaybackRuntime } from './playback/PlaybackRuntime';
 import { DemoServerApi, MachaServerApi, type ServerApi } from './api/MachaServerApi';
 import { DemoAcquisitionApi, MachaAcquisitionApi } from './api/MachaAcquisitionApi';
 import { SERVER_UNREACHABLE_EVENT, SERVER_UNREACHABLE_MESSAGE } from './api/serverConnection';
@@ -40,7 +41,7 @@ import { SeriesScreen } from './screens/SeriesScreen';
 import { SeasonScreen } from './screens/SeasonScreen';
 import { ArtistScreen } from './screens/ArtistScreen';
 import { AlbumScreen } from './screens/AlbumScreen';
-import { PlayerHost, type PlayerHostRequest } from './screens/PlayerScreen';
+import { PlayerHost } from './screens/PlayerScreen';
 import { SettingsScreen } from './screens/SettingsScreen';
 import { SponsorScreen } from './screens/SponsorScreen';
 import { MetadataEditorScreen } from './screens/MetadataEditorScreen';
@@ -51,10 +52,6 @@ interface Props {
   platform: Platform;
   apiOverride?: MediaApi;
   playbackOverride?: PlaybackResolver;
-}
-
-interface ActivePlayback extends PlayerHostRequest {
-  returnTo: string;
 }
 
 interface StartPlaybackOptions {
@@ -270,13 +267,9 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
   const queueStore = useMemo(() => new PlaybackQueueStore(clientId), [clientId]);
   const playlistStore = useMemo(() => new MusicPlaylistStore(clientId), [clientId]);
   const volumeStore = useMemo(() => new VolumeStore(clientId), [clientId]);
-  const requestSequence = useRef(0);
-  const restoredPersistedPlayback = useRef(false);
-  const stoppingPlayback = useRef(false);
   const [queueState, setQueueState] = useState<PlaybackQueueState | undefined>(() => queueStore.load());
   const [playlistEntries, setPlaylistEntries] = useState<MusicPlaylistEntry[]>(() => playlistStore.load());
   const [volume, setVolume] = useState(() => platform.initialVolume?.() ?? volumeStore.load());
-  const [activePlayback, setActivePlayback] = useState<ActivePlayback>();
   const [continueWatching, setContinueWatching] = useState<PlaybackProgress[]>(() => (
     progressStore.list().filter((entry) => !needsEpisodeContextMigration(entry))
   ));
@@ -295,6 +288,23 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
     return demo ? new DemoPlaybackResolver() : new MachaPlaybackResolver(serverUrl, apiToken);
   }, [apiToken, demo, playbackOverride, serverUrl]);
 
+  // PlaybackRuntime is application-scoped: React routes and player chrome are
+  // presentation over one resource owner, never owners of server/player state.
+  const playbackRuntime = useMemo(() => new PlaybackRuntime(platform, playbackResolver), [platform]);
+  const [playbackRuntimeState, setPlaybackRuntimeState] = useState(() => playbackRuntime.getSnapshot());
+  const activePlayback = playbackRuntimeState.request;
+
+  useEffect(() => playbackRuntime.subscribeLifecycle(setPlaybackRuntimeState), [playbackRuntime]);
+  useEffect(() => { playbackRuntime.setResolver(playbackResolver); }, [playbackResolver, playbackRuntime]);
+  useEffect(() => () => { void playbackRuntime.dispose(); }, [playbackRuntime]);
+  useEffect(() => {
+    const onPageHide = (event: PageTransitionEvent) => {
+      if (!event.persisted) playbackRuntime.terminateForPageExit();
+    };
+    window.addEventListener('pagehide', onPageHide);
+    return () => window.removeEventListener('pagehide', onPageHide);
+  }, [playbackRuntime]);
+
   const serverApi = useMemo<ServerApi>(() => (
     demo ? new DemoServerApi() : new MachaServerApi(serverUrl, apiToken)
   ), [apiToken, demo, serverUrl]);
@@ -306,6 +316,7 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
   const samsungBack = useCallback(() => {
     if (import.meta.env.MODE !== 'samsung') return false;
     if (location.pathname === routes.home) {
+      playbackRuntime.terminateForPageExit();
       platform.exitApplication?.();
       return true;
     }
@@ -314,7 +325,7 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
       .then((target) => { if (target) navigate(target); })
       .catch(() => navigate(routes.home));
     return true;
-  }, [activePlayback?.returnTo, api, location.pathname, navigate, platform]);
+  }, [activePlayback?.returnTo, api, location.pathname, navigate, platform, playbackRuntime]);
 
   useTvNavigation(samsungBack);
 
@@ -370,7 +381,6 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
   }, [progressStore]);
 
   const startPlayback = useCallback((item: MediaSummary, options: StartPlaybackOptions = {}) => {
-    stoppingPlayback.current = false;
     const queue = options.queue?.length ? options.queue : [item];
     const requestedIndex = options.queueIndex ?? queue.findIndex((candidate) => candidate.id === item.id);
     const index = requestedIndex >= 0 ? requestedIndex : 0;
@@ -381,13 +391,11 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
     const returnTo = playerRouteActive
       ? activePlayback?.returnTo ?? pathForMedia(item)
       : `${location.pathname}${location.search}`;
-    const request: ActivePlayback = {
+    void playbackRuntime.play({
       media: item,
       startPositionMs: options.fromStart ? 0 : storedPosition,
-      requestId: ++requestSequence.current,
       returnTo,
-    };
-    setActivePlayback(request);
+    });
 
     const state: PlaybackRouteState = {
       media: item,
@@ -396,7 +404,7 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
       returnTo,
     };
     navigate(options.fromStart ? routes.playerFromStart(item.id) : routes.player(item.id), { state });
-  }, [activePlayback?.returnTo, location.pathname, location.search, navigate, playerRouteActive, progressStore, queueStore]);
+  }, [activePlayback?.returnTo, location.pathname, location.search, navigate, playbackRuntime, playerRouteActive, progressStore, queueStore]);
 
   const open = useCallback((item: MediaSummary) => navigate(pathForMedia(item)), [navigate]);
   const openPlayer = useCallback((item: MediaSummary) => startPlayback(item), [startPlayback]);
@@ -496,7 +504,7 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
   // reloaded on that URL, reconstruct the playback request from route state,
   // the persisted queue, Continue Watching metadata, or finally the catalogue.
   useEffect(() => {
-    if (stoppingPlayback.current) return undefined;
+    if (playbackRuntimeState.phase === 'stopping') return undefined;
     if (!playerItemId || activePlayback?.media.id === playerItemId) return undefined;
     let cancelled = false;
     const routeState = (location.state as PlaybackRouteState | null) ?? undefined;
@@ -527,10 +535,9 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
 
       const storedPosition = progressStore.list().find((entry) => entry.mediaId === playerItemId)?.positionMs ?? 0;
       const queuePosition = nextQueue.items[nextQueue.currentIndex]?.id === playerItemId ? nextQueue.positionMs : 0;
-      setActivePlayback({
+      void playbackRuntime.play({
         media,
         startPositionMs: fromStart ? 0 : Math.max(storedPosition, queuePosition, persistedRoutePosition),
-        requestId: ++requestSequence.current,
         returnTo: routeState?.returnTo ?? pathForMedia(media),
       });
     })().catch((error) => {
@@ -538,22 +545,7 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
     });
 
     return () => { cancelled = true; };
-  }, [activePlayback?.media.id, api, location.search, location.state, playerItemId, progressStore, queueStore]);
-
-  useEffect(() => {
-    if (restoredPersistedPlayback.current) return;
-    restoredPersistedPlayback.current = true;
-    if (playerRouteActive || activePlayback || !queueState) return;
-    const media = queueState.items[queueState.currentIndex];
-    if (!media) return;
-    const storedPosition = progressStore.list().find((entry) => entry.mediaId === media.id)?.positionMs ?? 0;
-    setActivePlayback({
-      media,
-      startPositionMs: Math.max(storedPosition, queueState.positionMs),
-      requestId: ++requestSequence.current,
-      returnTo: `${location.pathname}${location.search}`,
-    });
-  }, [activePlayback, location.pathname, location.search, playerRouteActive, progressStore, queueState]);
+  }, [activePlayback?.media.id, api, location.search, location.state, playbackRuntime, playbackRuntimeState.phase, playerItemId, progressStore, queueStore]);
 
   const persistPlaybackPosition = useCallback((media: MediaSummary, positionMs: number) => {
     const persisted = queueStore.load();
@@ -567,12 +559,11 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
     if (!nextQueue) return;
     const media = nextQueue.items[nextIndex];
     setQueueState(nextQueue);
-    setActivePlayback((current) => ({
+    void playbackRuntime.play({
       media,
       startPositionMs: 0,
-      requestId: ++requestSequence.current,
-      returnTo: current?.returnTo ?? currentBrowsePath,
-    }));
+      returnTo: activePlayback?.returnTo ?? currentBrowsePath,
+    });
 
     if (playerRouteActive) {
       const state: PlaybackRouteState = {
@@ -583,7 +574,7 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
       };
       navigate(routes.player(media.id), { replace: true, state });
     }
-  }, [activePlayback?.returnTo, currentBrowsePath, navigate, playerRouteActive, queueState, queueStore]);
+  }, [activePlayback?.returnTo, currentBrowsePath, navigate, playbackRuntime, playerRouteActive, queueState, queueStore]);
 
   const canPrevious = Boolean(queueState && queueState.currentIndex > 0);
   const canNext = Boolean(queueState && queueState.currentIndex + 1 < queueState.items.length);
@@ -599,7 +590,10 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
       return;
     }
     queueStore.updatePosition(0);
-  }, [queueState, queueStore, selectQueueIndex]);
+    const returnTo = activePlayback?.returnTo ?? routes.home;
+    if (playerRouteActive) navigate(returnTo, { replace: true });
+    void playbackRuntime.stop();
+  }, [activePlayback?.returnTo, navigate, playbackRuntime, playerRouteActive, queueState, queueStore, selectQueueIndex]);
 
   const minimizePlayer = useCallback(() => {
     if (!activePlayback) return;
@@ -609,7 +603,7 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
   const expandPlayer = useCallback(() => {
     if (!activePlayback) return;
     const returnTo = playerRouteActive ? activePlayback.returnTo : `${location.pathname}${location.search}`;
-    setActivePlayback((current) => current ? { ...current, returnTo } : current);
+    playbackRuntime.setReturnTo(returnTo);
     const state: PlaybackRouteState = {
       media: activePlayback.media,
       queue: queueState?.items,
@@ -617,38 +611,37 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
       returnTo,
     };
     navigate(routes.player(activePlayback.media.id), { state });
-  }, [activePlayback, location.pathname, location.search, navigate, playerRouteActive, queueState]);
+  }, [activePlayback, location.pathname, location.search, navigate, playbackRuntime, playerRouteActive, queueState]);
 
   const stopPlayback = useCallback(() => {
     const returnTo = activePlayback?.returnTo ?? routes.home;
-    // Clearing activePlayback while /play/... is still current would otherwise
-    // trigger the route restoration effect, which can resurrect the just-closed
-    // session from route state and leave it running as the mini-player.
-    stoppingPlayback.current = true;
     if (playerRouteActive) navigate(returnTo, { replace: true });
-    setActivePlayback(undefined);
     setQueueState(undefined);
     queueStore.clear();
-  }, [activePlayback?.returnTo, navigate, playerRouteActive, queueStore]);
-
-  useEffect(() => {
-    if (!playerRouteActive) stoppingPlayback.current = false;
-  }, [playerRouteActive]);
+    void playbackRuntime.stop();
+  }, [activePlayback?.returnTo, navigate, playbackRuntime, playerRouteActive, queueStore]);
 
   const saveServer = useCallback((url: string, token: string) => {
     setConnectionNotice(undefined);
-    persistServerUrl(url);
-    persistApiToken(token);
-    setServerUrl(url.trim().replace(/\/+$/, ''));
-    setApiToken(token.trim());
-    navigate(routes.home, { replace: true });
-  }, [navigate]);
+    const normalizedUrl = url.trim().replace(/\/+$/, '');
+    const normalizedToken = token.trim();
+    // A resolver/server boundary cannot change underneath an owned lease.
+    // Close the old session first, then make the new server authoritative.
+    void playbackRuntime.stop().finally(() => {
+      persistServerUrl(url);
+      persistApiToken(token);
+      setServerUrl(normalizedUrl);
+      setApiToken(normalizedToken);
+      navigate(routes.home, { replace: true });
+    });
+  }, [navigate, playbackRuntime]);
 
   const openMetadataEditor = useCallback((id: string) => {
     navigate(routes.edit(id));
   }, [navigate]);
 
-  const miniPlayerActive = Boolean(activePlayback && !playerRouteActive);
+  const playerVisible = Boolean(activePlayback && playbackRuntimeState.phase !== 'stopping');
+  const miniPlayerActive = Boolean(playerVisible && !playerRouteActive);
   const musicSectionActive = location.pathname === routes.music || location.pathname.startsWith(`${routes.music}/`);
 
   return (
@@ -707,12 +700,12 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
         </Routes>
       </main>
 
-      {activePlayback && (
+      {playerVisible && activePlayback && (
         <PlayerHost
           api={api}
           request={activePlayback}
           platform={platform}
-          playbackResolver={playbackResolver}
+          runtime={playbackRuntime}
           presentation={playerRouteActive ? 'full' : 'mini'}
           onProgress={updateProgress}
           onPosition={persistPlaybackPosition}

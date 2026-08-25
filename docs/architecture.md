@@ -11,9 +11,13 @@
                 |                    |
           MachaMediaApi       PlaybackResolver
                 |                    |
-                +---------+----------+
+                |             PlaybackRuntime
+                |              /          \
+                |   PlaybackCoordinator   Player
+                |                    |       |
+                +---------+----------+-------+
                           |
-                  React application
+                  React presentation
               + browser-history router
                           |
            +--------------+--------------+
@@ -43,7 +47,7 @@ Production web hosting must fall back to `index.html` for unknown application pa
 - The client never transcodes.
 - The server chooses Direct Play first, Remux second and Transcode only when required.
 - Platform-specific code is restricted to capabilities, playback, application lifecycle and remote-key integration.
-- React owns catalogue browsing, routes, search, hierarchy, focus navigation and playback chrome.
+- React owns catalogue browsing, routes, search, hierarchy, focus navigation and playback chrome; it does not own playback resources.
 - Continue Watching is installation-local state, bounded to three unfinished items and never uploaded.
 - There is no cloud service, account system, advertising, recommendations, social activity or global watchlist.
 
@@ -63,14 +67,18 @@ user intent ── play / pause / seek ─────────────�
                                               apply latest user intent
 ```
 
-`PlaybackCoordinator` is the sole owner of playback intent and source-generation transitions. React renders its snapshot and forwards controls; it does not serialize transport operations or infer completion from `waiting`/`seeked` event combinations.
+`PlaybackRuntime` is the application-scoped resource owner and playback state machine. It owns one platform `Player` and at most one `PlaybackCoordinator`; the coordinator in turn owns the active server playback-session lease and source-generation transitions. React renders snapshots and provides presentation hosts only. Full-screen/mini-player route changes may rebind the existing player surface, but they cannot create, replace or destroy playback sessions.
+
+Resource-changing generations are ordered: replacement cannot acquire a new server lease until the prior coordinator has completed teardown. Persisted queue/progress state is resumable history, not proof that a live playback lease exists. `PlaybackCoordinator` remains the sole owner of playback intent within the active generation, so transport controls stay independent from source preparation.
 
 The invariants are:
 
+- `PlaybackRuntime.phase === 'idle'` implies no owned coordinator/session/source acquisition.
 - Viewer demand is never queued behind caching, session bookkeeping or speculative work.
 - Play, pause and any seek representable by the active source generation are local transport commands.
 - A server playback update is a request for a new source generation, not a transport operation.
 - Newer user intent supersedes older intent while server work is in flight; intermediate generations are not needlessly attached.
-- Modern Web transformed playback uses hls.js/MSE with a bounded forward buffer; Samsung keeps its legacy native-HLS path.
+- Modern Web transformed playback uses hls.js/MSE with a bounded forward buffer; Pause stops managed HLS acquisition and Resume restarts it. Fatal media recovery is bounded per source generation and must demonstrate playback progress before another recovery is allowed; terminal player failures propagate into the coordinator/runtime failed state and trigger generation teardown. Samsung keeps its legacy native-HLS path.
 - Direct Play read-ahead is optional. If its Service Worker is not already usable, playback takes the native URL immediately.
 - Buffering is observable state, never a lock that disables or serializes controls.
+- Browser/app exit performs best-effort explicit session teardown; server idle expiry is only the crash/network-loss fallback.

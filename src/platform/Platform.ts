@@ -1,13 +1,20 @@
 import type { PlaybackCapabilities, PlaybackEvent, PlaybackSource, PlaybackTimeRange } from '../types';
 
 export type PlaybackListener = (event: PlaybackEvent) => void;
+export type PlaybackFailureListener = (error: Error) => void;
 
 export interface Player {
+  /** Bind the existing player surface to a presentation host. Must not create a playback session. */
   attach(host: HTMLElement): void;
+  /** Unbind presentation without changing playback/resource ownership. */
+  detachHost?(): void;
+  /** Final player destruction. This is resource-destructive. */
   detach(): void;
   /** Attach a source and request playback. Resolves once the request is dispatched, never when buffering completes. */
   play(source: PlaybackSource, positionMs?: number, startPaused?: boolean): Promise<boolean>;
+  /** Pause transport and suspend avoidable/speculative source acquisition. */
   pause(): void;
+  /** Resume source acquisition as necessary and continue the active generation. */
   resume(): void;
   seek(positionMs: number): void;
   /**
@@ -18,8 +25,11 @@ export interface Player {
   setVolume(volume: number): void;
   /** Replace the subtitle resource without touching active A/V playback. */
   setSubtitle?(subtitleUrl?: string): Promise<void> | void;
+  /** Release all source-side resources and cancel active acquisition. */
   stop(): void;
   subscribe(listener: PlaybackListener): () => void;
+  /** Subscribe to terminal source/player failures that require generation teardown. */
+  subscribeFailure?(listener: PlaybackFailureListener): () => void;
 }
 
 export interface Platform {

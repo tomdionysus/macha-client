@@ -79,8 +79,9 @@ export class MachaCatalogueApi implements CatalogueApi {
     return response.items;
   }
 
-  async artwork(id: string): Promise<Blob> {
-    const response = await this.fetch(`/api/v1/catalogue/artwork/${encodeURIComponent(id)}`, 'image/*');
+  async artwork(id: string, signal?: AbortSignal): Promise<Blob> {
+    const init: RequestInit = signal ? { method: 'GET', signal } : { method: 'GET' };
+    const response = await this.fetch(`/api/v1/catalogue/artwork/${encodeURIComponent(id)}`, 'image/*', init);
     if (!response.ok) await this.throwResponseError(response);
     return response.blob();
   }
@@ -104,7 +105,8 @@ export class MachaCatalogueApi implements CatalogueApi {
     });
     try {
       return await fetch(`${this.baseUrl}${path}`, { ...init, headers });
-    } catch {
+    } catch (error) {
+      if (error && typeof error === 'object' && (error as { name?: unknown }).name === 'AbortError') throw error;
       throw serverUnreachable();
     }
   }

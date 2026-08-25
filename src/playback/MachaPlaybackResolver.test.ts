@@ -296,6 +296,19 @@ describe('MachaPlaybackResolver', () => {
     );
   });
 
+  it('can keep the DELETE alive during browser navigation teardown', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const resolver = new MachaPlaybackResolver('http://node.test', 'secret');
+
+    await resolver.stop('session-1', { keepalive: true });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://node.test/api/v1/playback/sessions/session-1',
+      expect.objectContaining({ method: 'DELETE', keepalive: true }),
+    );
+  });
+
   it('surfaces structured server playback errors without object coercion', async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
       error: {

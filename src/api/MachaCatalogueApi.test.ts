@@ -68,6 +68,18 @@ describe('MachaCatalogueApi', () => {
     expect(new Headers(init.headers).get('Authorization')).toBe('Bearer secret');
   });
 
+  it('passes artwork cancellation through to fetch', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(new Blob(['image']), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const api = new MachaCatalogueApi('http://node.test');
+    const controller = new AbortController();
+
+    await api.artwork('abcd', controller.signal);
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(init.signal).toBe(controller.signal);
+  });
+
   it('clears catalogue metadata with optimistic revision protection', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
     vi.stubGlobal('fetch', fetchMock);
