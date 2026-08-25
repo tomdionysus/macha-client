@@ -1,6 +1,8 @@
 import { createClientLogger } from '../diagnostics/ClientLog';
 import type { PlaybackSource } from '../types';
 
+export type DirectPlayReadAheadMode = 'bootstrap' | 'playing' | 'seeking' | 'paused';
+
 export interface DirectPlayReadAheadMetrics {
   fetchedBytes: number;
   servedBytes: number;
@@ -12,6 +14,15 @@ export interface DirectPlayReadAheadMetrics {
   lastFetchMbps: number;
   demandWaitCount: number;
   demandWaitMs: number;
+  demandFetches: number;
+  demandBytes: number;
+  demandFirstByteMs: number;
+  demandBlockedByPrefetchMs: number;
+  prefetchFetches: number;
+  prefetchBytes: number;
+  prefetchAbortsForDemand: number;
+  generation: number;
+  mode: DirectPlayReadAheadMode;
 }
 
 interface ReadAheadMetricsMessage {
@@ -57,7 +68,7 @@ function proxyBaseUrl(): URL {
 function validMetrics(value: unknown): value is DirectPlayReadAheadMetrics {
   if (!value || typeof value !== 'object') return false;
   const candidate = value as Partial<DirectPlayReadAheadMetrics>;
-  return [
+  const numbers = [
     candidate.fetchedBytes,
     candidate.servedBytes,
     candidate.cacheHitBytes,
@@ -68,7 +79,17 @@ function validMetrics(value: unknown): value is DirectPlayReadAheadMetrics {
     candidate.lastFetchMbps,
     candidate.demandWaitCount,
     candidate.demandWaitMs,
-  ].every((number) => typeof number === 'number' && Number.isFinite(number) && number >= 0);
+    candidate.demandFetches,
+    candidate.demandBytes,
+    candidate.demandFirstByteMs,
+    candidate.demandBlockedByPrefetchMs,
+    candidate.prefetchFetches,
+    candidate.prefetchBytes,
+    candidate.prefetchAbortsForDemand,
+    candidate.generation,
+  ];
+  return numbers.every((number) => typeof number === 'number' && Number.isFinite(number) && number >= 0)
+    && (candidate.mode === 'bootstrap' || candidate.mode === 'playing' || candidate.mode === 'seeking' || candidate.mode === 'paused');
 }
 
 function installMessageListener(): void {
@@ -216,6 +237,17 @@ export async function directPlayReadAheadUrl(source: PlaybackSource): Promise<st
     sizeBytes: source.sizeBytes,
   });
   return buildDirectPlayReadAheadProxyUrl(sourceKey);
+}
+
+export function setDirectPlayReadAheadMode(sourceUrl: string | undefined, mode: DirectPlayReadAheadMode): void {
+  if (!sourceUrl) return;
+  const sourceKey = keyBySource.get(sourceUrl);
+  if (!sourceKey || !serviceWorkerAvailable()) return;
+  navigator.serviceWorker.controller?.postMessage({
+    type: 'macha-direct-read-ahead-state',
+    sourceKey,
+    mode,
+  });
 }
 
 export function releaseDirectPlayReadAhead(sourceUrl: string | undefined): void {

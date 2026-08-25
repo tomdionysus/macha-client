@@ -134,6 +134,18 @@ describe('MachaPlaybackResolver', () => {
     }));
   });
 
+  it('includes the initial resume position in session creation', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(sessionResponse({ seek_ms: 42_000 }), 201));
+    vi.stubGlobal('fetch', fetchMock);
+    const resolver = new MachaPlaybackResolver('http://node.test', 'secret');
+
+    const session = await resolver.resolve(media, capabilities, 42_000);
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(String(init.body))).toEqual(expect.objectContaining({ seek_ms: 42_000 }));
+    expect(session.seekMs).toBe(42_000);
+  });
+
   it('only sends decoder resolution limits when the platform explicitly reports them', async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse(sessionResponse(), 201));
     vi.stubGlobal('fetch', fetchMock);

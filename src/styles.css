@@ -635,6 +635,8 @@ h2 { font-size: clamp(1.2rem, 2vw, 1.75rem); letter-spacing: -.01em; margin: 1.1
 .player-option-group { display: grid; grid-template-columns: 6.5rem 1fr; gap: .8rem; align-items: start; }
 .player-option-group > span { padding-top: .45rem; color: var(--text-faint); font-size: .78rem; text-transform: uppercase; letter-spacing: .08em; }
 .player-option-group > div { display: flex; flex-wrap: wrap; gap: .4rem; }
+.player-option-note { grid-column: 2; color: var(--text-faint); font-size: .75rem; line-height: 1.35; }
+.player-options-loading { color: var(--text-faint); font-size: .82rem; }
 .player-option-group button {
   border: 1px solid #3a3a40;
   border-radius: 999px;
@@ -814,6 +816,7 @@ h2 { font-size: clamp(1.2rem, 2vw, 1.75rem); letter-spacing: -.01em; margin: 1.1
   .player-button-row { gap: .35rem; }
   .player-option-group { grid-template-columns: 1fr; gap: .25rem; }
   .player-option-group > span { padding-top: 0; }
+  .player-option-note { grid-column: 1; }
   .player-presentation-mini { left: .5rem; right: .5rem; bottom: .5rem; }
   .player-presentation-mini .player-host { width: 104px; }
   .player-presentation-mini .player-mini-chrome { left: 104px; }

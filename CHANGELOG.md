@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.6.9
+
+- keep player controls live during startup, seeks and representation changes: play/pause and pre-start seek intents are applied to the eventual stream, while overlapping seek/option changes are coalesced and serialized instead of disabling the UI;
+- make Web Left/Right seek -/+10 seconds, including when the progress or volume range control has focus, while preserving native arrow editing for text/select controls;
+- always expose the server-advertised Audio section and show the resolved audio processing state (copy/transcode/output codec) independently from video;
+- treat a user pause that aborts a pending Web `video.play()` as an intentional state transition rather than a playback failure.
+
+## 0.6.8
+
+- make Web Direct Play viewer demand bypass the read-ahead scheduler entirely: exact browser byte ranges now stream from the upstream response as bytes arrive instead of waiting for an 8 MiB cache chunk to complete;
+- keep speculative read-ahead disabled during container bootstrap and seeking, enabling it only after established playback and a short demand-quiescence interval;
+- abort active speculative fetches immediately when new viewer demand arrives, preserving the invariant that read-ahead can never delay current playback demand;
+- treat each seek as a new read-ahead generation while retaining old resident ranges until normal eviction, so nearby/back seeks can still hit memory without continuing to invest in the old playback location;
+- extend Direct Play diagnostics with demand first-byte latency, demand/prefetch byte and fetch counts, prefetch aborts, playback mode/generation, and an explicit zero-by-design demand-blocked-by-prefetch metric;
+- handle Service Worker source release and browser cancellation without leaking the previous read-ahead AbortError as an unhandled FetchEvent rejection.
+
 ## 0.6.7
 
 - always expose Direct next to Auto in playback mode controls on Web and Samsung, regardless of capability-derived server mode options;

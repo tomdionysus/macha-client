@@ -63,7 +63,7 @@ export class MachaPlaybackResolver {
         this.bearerToken = bearerToken;
         this.baseUrl = normalizeBaseUrl(baseUrl);
     }
-    async resolve(media, capabilities) {
+    async resolve(media, capabilities, seekMs) {
         this.log.info('session-create', {
             mediaId: media.id,
             mediaKind: media.kind,
@@ -75,6 +75,7 @@ export class MachaPlaybackResolver {
             maxWidth: capabilities.maxWidth ?? 'none',
             maxHeight: capabilities.maxHeight ?? 'none',
             hdr: capabilities.hdr.length > 0 ? capabilities.hdr.join(', ') : 'not-advertised',
+            seekMs: seekMs ?? 0,
         });
         const wireCapabilities = {
             containers: capabilities.containers,
@@ -93,6 +94,8 @@ export class MachaPlaybackResolver {
                 mode: capabilities.platform === 'tizen' ? 'direct' : 'auto',
             },
         };
+        if (seekMs !== undefined)
+            body.seek_ms = Math.max(0, Math.round(seekMs));
         const session = this.mapSession(await this.request('/api/v1/playback/sessions', {
             method: 'POST',
             body: JSON.stringify(body),

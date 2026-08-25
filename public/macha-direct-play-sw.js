@@ -1,34 +1,24 @@
 /* Macha Direct Play rolling read-ahead service worker.
  *
- * This is intentionally an in-memory cache. It does not use Cache Storage or
- * IndexedDB: media bytes disappear when playback releases the source or when
- * the worker is terminated. The browser continues to own demuxing/decoding.
+ * Viewer demand is never scheduled behind read-ahead. Cache misses are proxied
+ * as native streaming HTTP range requests; speculative fetches run only after
+ * established playback has gone briefly quiet and are aborted immediately by
+ * new demand or a seek. The cache is memory-only and contains only completed
+ * speculative ranges, so read-ahead can improve future demand without ever
+ * becoming a prerequisite for current demand.
  */
 'use strict';
 
 const PROXY_PATH_SUFFIX = '/__macha_direct_cache__';
-const CHUNK_SIZE = 8 * 1024 * 1024;
+const PREFETCH_BLOCK_BYTES = 8 * 1024 * 1024;
 const TARGET_AHEAD_BYTES = 64 * 1024 * 1024;
 const MAX_RESIDENT_BYTES = 96 * 1024 * 1024;
-const MAX_FETCHES = 2;
-const MAX_PREFETCH_FETCHES = 1;
+const PREFETCH_QUIET_MS = 150;
 const DEMAND_WAIT_WARN_MS = 250;
 const SOURCE_IDLE_MS = 5 * 60 * 1000;
 
 const sourceConfigs = new Map();
 const sourceCaches = new Map();
-const demandQueue = [];
-const prefetchQueue = [];
-let activeFetches = 0;
-let activePrefetchFetches = 0;
-
-class RangeUnsupportedError extends Error {
-  constructor(status) {
-    super(`Upstream range request returned ${status}`);
-    this.name = 'RangeUnsupportedError';
-    this.status = status;
-  }
-}
 
 function now() {
   return typeof performance !== 'undefined' ? performance.now() : Date.now();
@@ -37,6 +27,10 @@ function now() {
 function rounded(value, places = 1) {
   const scale = Math.pow(10, places);
   return Math.round(value * scale) / scale;
+}
+
+function abortError(message) {
+  return new DOMException(message, 'AbortError');
 }
 
 function sourceCredentials(sourceUrl) {
@@ -59,10 +53,20 @@ function newMetrics() {
     lastFetchMbps: 0,
     demandWaitCount: 0,
     demandWaitMs: 0,
+    demandFetches: 0,
+    demandBytes: 0,
+    demandFirstByteMs: 0,
+    demandBlockedByPrefetchMs: 0,
+    prefetchFetches: 0,
+    prefetchBytes: 0,
+    prefetchAbortsForDemand: 0,
+    generation: 0,
+    mode: 'bootstrap',
   };
 }
 
 function getSourceCache(sourceKey, sourceUrl, totalSize, mimeType) {
+  const config = sourceConfigs.get(sourceKey);
   let cache = sourceCaches.get(sourceKey);
   if (cache && cache.totalSize !== totalSize) {
     releaseSource(cache);
@@ -74,15 +78,22 @@ function getSourceCache(sourceKey, sourceUrl, totalSize, mimeType) {
       sourceUrl,
       totalSize,
       mimeType: mimeType || 'application/octet-stream',
-      chunks: new Map(),
-      pending: new Map(),
-      abortControllers: new Set(),
+      segments: new Map(),
+      prefetchController: undefined,
+      prefetchRange: undefined,
+      prefetchTimer: undefined,
       metrics: newMetrics(),
       lastAccess: Date.now(),
       lastMetricsAt: 0,
       lastServedOffset: 0,
+      lastDemandAt: now(),
+      pendingDemandWaits: 0,
+      generation: config?.generation || 0,
+      mode: config?.mode || 'bootstrap',
       released: false,
     };
+    cache.metrics.generation = cache.generation;
+    cache.metrics.mode = cache.mode;
     sourceCaches.set(sourceKey, cache);
   } else {
     cache.lastAccess = Date.now();
@@ -92,12 +103,27 @@ function getSourceCache(sourceKey, sourceUrl, totalSize, mimeType) {
   return cache;
 }
 
+function clearPrefetchTimer(cache) {
+  if (cache.prefetchTimer !== undefined) {
+    clearTimeout(cache.prefetchTimer);
+    cache.prefetchTimer = undefined;
+  }
+}
+
+function abortPrefetch(cache, forDemand) {
+  clearPrefetchTimer(cache);
+  const controller = cache.prefetchController;
+  if (!controller) return;
+  if (forDemand && !controller.signal.aborted) cache.metrics.prefetchAbortsForDemand += 1;
+  cache.prefetchController = undefined;
+  cache.prefetchRange = undefined;
+  controller.abort();
+}
+
 function releaseSource(cache) {
   cache.released = true;
-  for (const controller of cache.abortControllers) controller.abort();
-  cache.abortControllers.clear();
-  cache.chunks.clear();
-  cache.pending.clear();
+  abortPrefetch(cache, false);
+  cache.segments.clear();
   cache.metrics.residentBytes = 0;
   cache.metrics.aheadBytes = 0;
   sourceCaches.delete(cache.sourceKey);
@@ -110,103 +136,91 @@ function pruneIdleSources() {
   }
 }
 
-function schedule(priority, cache, run) {
-  return new Promise((resolve, reject) => {
-    const task = { priority, cache, run, resolve, reject, started: false };
-    (priority === 'demand' ? demandQueue : prefetchQueue).push(task);
-    drainQueue();
-  });
+function activeFetchStarted(cache) {
+  cache.metrics.activeFetches += 1;
+  cache.metrics.peakFetches = Math.max(cache.metrics.peakFetches, cache.metrics.activeFetches);
 }
 
-function promotePending(pending) {
-  const task = pending.task;
-  if (!task || task.started || task.priority === 'demand') return;
-  const index = prefetchQueue.indexOf(task);
-  if (index >= 0) prefetchQueue.splice(index, 1);
-  task.priority = 'demand';
-  demandQueue.push(task);
-  drainQueue();
-}
-
-function nextTask() {
-  while (demandQueue.length > 0) {
-    const task = demandQueue.shift();
-    if (!task.cache.released) return task;
-    task.reject(new DOMException('Read-ahead source released', 'AbortError'));
-  }
-  if (activePrefetchFetches >= MAX_PREFETCH_FETCHES) return undefined;
-  while (prefetchQueue.length > 0) {
-    const task = prefetchQueue.shift();
-    if (!task.cache.released) return task;
-    task.reject(new DOMException('Read-ahead source released', 'AbortError'));
-  }
-  return undefined;
-}
-
-function drainQueue() {
-  while (activeFetches < MAX_FETCHES) {
-    const task = nextTask();
-    if (!task) return;
-    task.started = true;
-    activeFetches += 1;
-    if (task.priority === 'prefetch') activePrefetchFetches += 1;
-    task.cache.metrics.activeFetches += 1;
-    task.cache.metrics.peakFetches = Math.max(task.cache.metrics.peakFetches, task.cache.metrics.activeFetches);
-    Promise.resolve()
-      .then(task.run)
-      .then(task.resolve, task.reject)
-      .finally(() => {
-        activeFetches -= 1;
-        if (task.priority === 'prefetch') activePrefetchFetches -= 1;
-        task.cache.metrics.activeFetches = Math.max(0, task.cache.metrics.activeFetches - 1);
-        void postMetrics(task.cache, true);
-        drainQueue();
-      });
-  }
-}
-
-function touchChunk(cache, index) {
-  const entry = cache.chunks.get(index);
-  if (entry) entry.lastAccess = Date.now();
+function activeFetchFinished(cache) {
+  cache.metrics.activeFetches = Math.max(0, cache.metrics.activeFetches - 1);
+  void postMetrics(cache, true);
 }
 
 function residentBytes(cache) {
   let bytes = 0;
-  for (const entry of cache.chunks.values()) bytes += entry.buffer.byteLength;
+  for (const entry of cache.segments.values()) bytes += entry.buffer.byteLength;
   cache.metrics.residentBytes = bytes;
   return bytes;
 }
 
-
-function updateAheadBytes(cache) {
-  let cursor = Math.max(0, Math.min(cache.totalSize, cache.lastServedOffset || 0));
-  let ahead = 0;
-  while (cursor < cache.totalSize) {
-    const index = Math.floor(cursor / CHUNK_SIZE);
-    const entry = cache.chunks.get(index);
-    if (!entry) break;
-    const offset = cursor - index * CHUNK_SIZE;
-    const available = Math.max(0, entry.buffer.byteLength - offset);
-    if (available <= 0) break;
-    ahead += available;
-    cursor += available;
-    if (entry.buffer.byteLength < CHUNK_SIZE) break;
+function segmentContaining(cache, offset, touch = false) {
+  let best;
+  for (const entry of cache.segments.values()) {
+    if (entry.start <= offset && entry.end >= offset && (!best || entry.end > best.end)) best = entry;
   }
-  cache.metrics.aheadBytes = ahead;
+  if (best && touch) best.lastAccess = Date.now();
+  return best;
 }
 
-function evict(cache, protectedIndex) {
+function contiguousCachedEnd(cache, start, limit = cache.totalSize - 1) {
+  let cursor = start;
+  while (cursor <= limit) {
+    const entry = segmentContaining(cache, cursor);
+    if (!entry) break;
+    cursor = Math.min(limit + 1, entry.end + 1);
+  }
+  return cursor - 1;
+}
+
+function updateAheadBytes(cache) {
+  const cursor = Math.max(0, Math.min(cache.totalSize, cache.lastServedOffset || 0));
+  if (cursor >= cache.totalSize) {
+    cache.metrics.aheadBytes = 0;
+    return;
+  }
+  const end = contiguousCachedEnd(cache, cursor);
+  cache.metrics.aheadBytes = end >= cursor ? end - cursor + 1 : 0;
+}
+
+function evict(cache) {
   let bytes = residentBytes(cache);
   if (bytes <= MAX_RESIDENT_BYTES) return;
-  const candidates = [...cache.chunks.entries()]
-    .filter(([index]) => index !== protectedIndex)
-    .sort((left, right) => left[1].lastAccess - right[1].lastAccess);
-  for (const [index, entry] of candidates) {
+  const candidates = [...cache.segments.entries()].sort((left, right) => {
+    const generationDelta = left[1].generation - right[1].generation;
+    return generationDelta !== 0 ? generationDelta : left[1].lastAccess - right[1].lastAccess;
+  });
+  for (const [start, entry] of candidates) {
     if (bytes <= MAX_RESIDENT_BYTES) break;
-    cache.chunks.delete(index);
+    cache.segments.delete(start);
     bytes -= entry.buffer.byteLength;
   }
   cache.metrics.residentBytes = Math.max(0, bytes);
+  updateAheadBytes(cache);
+}
+
+function storeSegment(cache, start, buffer) {
+  if (!buffer || buffer.byteLength <= 0 || cache.released) return;
+  const end = start + buffer.byteLength - 1;
+  // Drop ranges wholly covered by the new range, and avoid storing an exact
+  // duplicate. Partial overlap is harmless and rare because prefetch walks the
+  // contiguous-ahead frontier.
+  for (const [existingStart, existing] of cache.segments.entries()) {
+    if (existing.start === start && existing.end === end) {
+      existing.lastAccess = Date.now();
+      existing.generation = cache.generation;
+      return;
+    }
+    if (existing.start >= start && existing.end <= end) cache.segments.delete(existingStart);
+  }
+  cache.segments.set(start, {
+    start,
+    end,
+    buffer,
+    lastAccess: Date.now(),
+    generation: cache.generation,
+  });
+  evict(cache);
+  updateAheadBytes(cache);
 }
 
 function parseContentRange(value) {
@@ -220,98 +234,17 @@ function parseContentRange(value) {
   };
 }
 
-function loadChunk(cache, index, priority) {
-  const cached = cache.chunks.get(index);
-  if (cached) {
-    cached.lastAccess = Date.now();
-    return Promise.resolve(cached.buffer);
-  }
-  const existing = cache.pending.get(index);
-  if (existing) {
-    if (priority === 'demand') promotePending(existing);
-    return existing.promise;
-  }
-
-  const start = index * CHUNK_SIZE;
-  if (start >= cache.totalSize) return Promise.reject(new RangeError('Chunk starts beyond end of source'));
-  const end = Math.min(cache.totalSize - 1, start + CHUNK_SIZE - 1);
-  const taskHolder = { task: undefined, promise: undefined };
-  const promise = schedule(priority, cache, async () => {
-    if (cache.released) throw new DOMException('Read-ahead source released', 'AbortError');
-    const abortController = new AbortController();
-    cache.abortControllers.add(abortController);
-    const startedAt = now();
-    try {
-      const response = await fetch(cache.sourceUrl, {
-        method: 'GET',
-        headers: {
-          Accept: cache.mimeType || '*/*',
-          Range: `bytes=${start}-${end}`,
-        },
-        credentials: sourceCredentials(cache.sourceUrl),
-        cache: 'no-store',
-        signal: abortController.signal,
-      });
-      if (response.status !== 206) throw new RangeUnsupportedError(response.status);
-      const contentRange = parseContentRange(response.headers.get('content-range'));
-      if (!contentRange || contentRange.start !== start) {
-        throw new Error(`Invalid upstream Content-Range for chunk ${index}`);
-      }
-      if (contentRange.total && contentRange.total !== cache.totalSize) {
-        cache.totalSize = contentRange.total;
-        const config = sourceConfigs.get(cache.sourceKey);
-        if (config) config.totalSize = contentRange.total;
-      }
-      const contentType = response.headers.get('content-type');
-      if (contentType) cache.mimeType = contentType;
-      const buffer = await response.arrayBuffer();
-      if (buffer.byteLength === 0) throw new Error(`Empty upstream range for chunk ${index}`);
-      const elapsedMs = Math.max(1, now() - startedAt);
-      cache.metrics.fetchedBytes += buffer.byteLength;
-      cache.metrics.lastFetchMbps = rounded((buffer.byteLength * 8) / (elapsedMs * 1000), 2);
-      cache.chunks.set(index, { buffer, lastAccess: Date.now() });
-      cache.lastAccess = Date.now();
-      evict(cache, index);
-      updateAheadBytes(cache);
-      void postMetrics(cache, false);
-      return buffer;
-    } finally {
-      cache.abortControllers.delete(abortController);
-    }
-  });
-  const queue = priority === 'demand' ? demandQueue : prefetchQueue;
-  taskHolder.task = queue[queue.length - 1];
-  taskHolder.promise = promise;
-  cache.pending.set(index, taskHolder);
-  promise.finally(() => {
-    if (cache.pending.get(index) === taskHolder) cache.pending.delete(index);
-  }).catch(() => undefined);
-  return promise;
-}
-
-function prefetchAhead(cache, currentIndex) {
-  if (cache.released) return;
-  const chunksAhead = Math.ceil(TARGET_AHEAD_BYTES / CHUNK_SIZE);
-  const lastIndex = Math.ceil(cache.totalSize / CHUNK_SIZE) - 1;
-  for (let offset = 1; offset <= chunksAhead; offset += 1) {
-    const index = currentIndex + offset;
-    if (index > lastIndex) break;
-    void loadChunk(cache, index, 'prefetch').catch(() => undefined);
-  }
-}
-
 function parseRequestedRange(header, totalSize) {
-  if (!header) return { start: 0, end: totalSize - 1, partial: false };
+  if (!header) return { start: 0, end: totalSize - 1, partial: false, openEnded: true };
   if (header.includes(',')) return undefined;
   const match = /^bytes=(\d+)-(\d*)$/i.exec(header.trim());
   if (!match) return undefined;
   const start = Number(match[1]);
-  if (!Number.isSafeInteger(start) || start < 0 || start >= totalSize) {
-    return { unsatisfiable: true };
-  }
-  const requestedEnd = match[2] ? Number(match[2]) : totalSize - 1;
+  if (!Number.isSafeInteger(start) || start < 0 || start >= totalSize) return { unsatisfiable: true };
+  const openEnded = match[2] === '';
+  const requestedEnd = openEnded ? totalSize - 1 : Number(match[2]);
   if (!Number.isSafeInteger(requestedEnd) || requestedEnd < start) return undefined;
-  return { start, end: Math.min(totalSize - 1, requestedEnd), partial: true };
+  return { start, end: Math.min(totalSize - 1, requestedEnd), partial: true, openEnded };
 }
 
 function responseHeaders(cache, start, end, partial) {
@@ -324,17 +257,22 @@ function responseHeaders(cache, start, end, partial) {
   return headers;
 }
 
-async function directFetch(request, sourceUrl) {
+function upstreamHeaders(request, rangeOverride) {
   const headers = new Headers();
-  const range = request.headers.get('range');
+  const range = rangeOverride === undefined ? request.headers.get('range') : rangeOverride;
   const accept = request.headers.get('accept');
   if (range) headers.set('Range', range);
   if (accept) headers.set('Accept', accept);
+  return headers;
+}
+
+async function directFetch(request, sourceUrl, signal, rangeOverride) {
   return await fetch(sourceUrl, {
     method: request.method,
-    headers,
+    headers: upstreamHeaders(request, rangeOverride),
     credentials: sourceCredentials(sourceUrl),
     cache: 'no-store',
+    signal,
   });
 }
 
@@ -343,6 +281,8 @@ async function postMetrics(cache, force) {
   const timestamp = now();
   if (!force && timestamp - cache.lastMetricsAt < 500) return;
   cache.lastMetricsAt = timestamp;
+  cache.metrics.generation = cache.generation;
+  cache.metrics.mode = cache.mode;
   const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
   const payload = {
     type: 'macha-direct-read-ahead-metrics',
@@ -352,12 +292,390 @@ async function postMetrics(cache, force) {
   for (const client of clients) client.postMessage(payload);
 }
 
+function disableReadAhead(cache) {
+  const config = sourceConfigs.get(cache.sourceKey);
+  if (config) config.rangeUnsupported = true;
+  abortPrefetch(cache, false);
+  cache.segments.clear();
+  cache.metrics.residentBytes = 0;
+  cache.metrics.aheadBytes = 0;
+}
+
+function noteDemand(cache) {
+  cache.lastDemandAt = now();
+  cache.lastAccess = Date.now();
+  abortPrefetch(cache, true);
+}
+
+function demandWaitStarted(cache) {
+  cache.pendingDemandWaits += 1;
+  noteDemand(cache);
+}
+
+function demandWaitFinished(cache) {
+  cache.pendingDemandWaits = Math.max(0, cache.pendingDemandWaits - 1);
+}
+
+function schedulePrefetch(cache) {
+  if (cache.released || cache.mode !== 'playing' || cache.pendingDemandWaits > 0) return;
+  clearPrefetchTimer(cache);
+  const quietFor = now() - cache.lastDemandAt;
+  const delay = Math.max(0, PREFETCH_QUIET_MS - quietFor);
+  cache.prefetchTimer = setTimeout(() => {
+    cache.prefetchTimer = undefined;
+    void pumpPrefetch(cache);
+  }, delay);
+}
+
+async function pumpPrefetch(cache) {
+  if (cache.released || cache.mode !== 'playing' || cache.prefetchController || cache.pendingDemandWaits > 0) return;
+  const quietFor = now() - cache.lastDemandAt;
+  if (quietFor < PREFETCH_QUIET_MS) {
+    schedulePrefetch(cache);
+    return;
+  }
+
+  updateAheadBytes(cache);
+  if (cache.metrics.aheadBytes >= TARGET_AHEAD_BYTES) return;
+  const start = Math.max(0, Math.min(cache.totalSize, cache.lastServedOffset));
+  if (start >= cache.totalSize) return;
+  const cachedEnd = contiguousCachedEnd(cache, start);
+  const fetchStart = cachedEnd >= start ? cachedEnd + 1 : start;
+  if (fetchStart >= cache.totalSize) return;
+  const fetchEnd = Math.min(cache.totalSize - 1, fetchStart + PREFETCH_BLOCK_BYTES - 1);
+
+  const controller = new AbortController();
+  cache.prefetchController = controller;
+  cache.prefetchRange = { start: fetchStart, end: fetchEnd };
+  cache.metrics.prefetchFetches += 1;
+  activeFetchStarted(cache);
+  const startedAt = now();
+  try {
+    const response = await fetch(cache.sourceUrl, {
+      method: 'GET',
+      headers: {
+        Accept: cache.mimeType || '*/*',
+        Range: `bytes=${fetchStart}-${fetchEnd}`,
+      },
+      credentials: sourceCredentials(cache.sourceUrl),
+      cache: 'no-store',
+      signal: controller.signal,
+    });
+    if (response.status !== 206) {
+      disableReadAhead(cache);
+      return;
+    }
+    const contentRange = parseContentRange(response.headers.get('content-range'));
+    if (!contentRange || contentRange.start !== fetchStart) {
+      disableReadAhead(cache);
+      return;
+    }
+    if (contentRange.total && contentRange.total !== cache.totalSize) {
+      cache.totalSize = contentRange.total;
+      const config = sourceConfigs.get(cache.sourceKey);
+      if (config) config.totalSize = contentRange.total;
+    }
+    const contentType = response.headers.get('content-type');
+    if (contentType) cache.mimeType = contentType;
+    const buffer = await response.arrayBuffer();
+    if (controller.signal.aborted || cache.released || cache.mode !== 'playing') return;
+    if (buffer.byteLength === 0) return;
+    const elapsedMs = Math.max(1, now() - startedAt);
+    cache.metrics.fetchedBytes += buffer.byteLength;
+    cache.metrics.prefetchBytes += buffer.byteLength;
+    cache.metrics.lastFetchMbps = rounded((buffer.byteLength * 8) / (elapsedMs * 1000), 2);
+    storeSegment(cache, fetchStart, buffer);
+    cache.lastAccess = Date.now();
+    void postMetrics(cache, false);
+  } catch (error) {
+    if (!(error && error.name === 'AbortError')) {
+      // Speculation is never allowed to become a playback failure. A failed
+      // speculative fetch is simply abandoned; later demand goes direct.
+      void postMetrics(cache, true);
+    }
+  } finally {
+    if (cache.prefetchController === controller) {
+      cache.prefetchController = undefined;
+      cache.prefetchRange = undefined;
+    }
+    activeFetchFinished(cache);
+  }
+
+  if (!cache.released && cache.mode === 'playing' && now() - cache.lastDemandAt >= PREFETCH_QUIET_MS) {
+    void pumpPrefetch(cache);
+  }
+}
+
+function setMode(sourceKey, mode) {
+  const config = sourceConfigs.get(sourceKey);
+  if (!config) return;
+  if (mode === 'seeking' && config.mode !== 'seeking') config.generation += 1;
+  config.mode = mode;
+  config.lastAccess = Date.now();
+  const cache = sourceCaches.get(sourceKey);
+  if (!cache) return;
+  cache.mode = mode;
+  cache.generation = config.generation;
+  cache.metrics.generation = cache.generation;
+  cache.metrics.mode = mode;
+  if (mode === 'playing') schedulePrefetch(cache);
+  else abortPrefetch(cache, false);
+  updateAheadBytes(cache);
+  void postMetrics(cache, true);
+}
+
+function cacheStream(cache, start, end) {
+  let cursor = start;
+  return new ReadableStream({
+    pull(controller) {
+      if (cursor > end) {
+        controller.close();
+        return;
+      }
+      noteDemand(cache);
+      const entry = segmentContaining(cache, cursor, true);
+      if (!entry) {
+        controller.error(new Error(`Read-ahead cache lost byte ${cursor}`));
+        return;
+      }
+      entry.generation = cache.generation;
+      const offset = cursor - entry.start;
+      const available = Math.min(end - cursor + 1, entry.buffer.byteLength - offset);
+      if (available <= 0) {
+        controller.error(new Error(`Read-ahead cache entry did not contain byte ${cursor}`));
+        return;
+      }
+      controller.enqueue(new Uint8Array(entry.buffer, offset, available));
+      cache.metrics.servedBytes += available;
+      cache.metrics.cacheHitBytes += available;
+      cache.metrics.demandBytes += available;
+      cursor += available;
+      cache.lastServedOffset = cursor;
+      updateAheadBytes(cache);
+      schedulePrefetch(cache);
+      void postMetrics(cache, false);
+    },
+  });
+}
+
+function wrapDemandResponse(cache, response, requestedStart, requestStartedAt, abortController) {
+  if (!response.body) {
+    activeFetchFinished(cache);
+    return response;
+  }
+  const reader = response.body.getReader();
+  let cursor = requestedStart;
+  let firstByte = true;
+  return new Response(new ReadableStream({
+    async pull(controller) {
+      noteDemand(cache);
+      try {
+        demandWaitStarted(cache);
+        let result;
+        try {
+          result = await reader.read();
+        } finally {
+          demandWaitFinished(cache);
+        }
+        if (result.done) {
+          controller.close();
+          schedulePrefetch(cache);
+          activeFetchFinished(cache);
+          return;
+        }
+        const value = result.value;
+        if (firstByte) {
+          firstByte = false;
+          const firstByteMs = Math.max(0, now() - requestStartedAt);
+          cache.metrics.demandFirstByteMs = rounded(firstByteMs, 1);
+          if (firstByteMs >= DEMAND_WAIT_WARN_MS) {
+            cache.metrics.demandWaitCount += 1;
+            cache.metrics.demandWaitMs = rounded(cache.metrics.demandWaitMs + firstByteMs, 1);
+          }
+        }
+        const byteLength = value.byteLength || 0;
+        cache.metrics.fetchedBytes += byteLength;
+        cache.metrics.demandBytes += byteLength;
+        cache.metrics.servedBytes += byteLength;
+        cursor += byteLength;
+        cache.lastServedOffset = cursor;
+        cache.lastAccess = Date.now();
+        updateAheadBytes(cache);
+        controller.enqueue(value);
+        schedulePrefetch(cache);
+        void postMetrics(cache, false);
+      } catch (error) {
+        activeFetchFinished(cache);
+        if (error && error.name === 'AbortError') controller.error(abortError('Direct Play demand fetch aborted'));
+        else controller.error(error);
+      }
+    },
+    async cancel(reason) {
+      try {
+        await reader.cancel(reason);
+      } catch {
+        // Browser cancellation is normal during media probing and seeking.
+      }
+      if (!abortController.signal.aborted) abortController.abort();
+      schedulePrefetch(cache);
+      activeFetchFinished(cache);
+    },
+  }), {
+    status: response.status,
+    statusText: response.statusText,
+    headers: response.headers,
+  });
+}
+
+async function demandFetch(cache, request, sourceUrl, rangeOverride, requestedStart) {
+  noteDemand(cache);
+  const controller = new AbortController();
+  const startedAt = now();
+  cache.metrics.demandFetches += 1;
+  activeFetchStarted(cache);
+  try {
+    demandWaitStarted(cache);
+    let response;
+    try {
+      response = await directFetch(request, sourceUrl, controller.signal, rangeOverride);
+    } finally {
+      demandWaitFinished(cache);
+    }
+    if (rangeOverride && response.status !== 206) disableReadAhead(cache);
+    return wrapDemandResponse(cache, response, requestedStart, startedAt, controller);
+  } catch (error) {
+    activeFetchFinished(cache);
+    throw error;
+  }
+}
+
+function cacheThenDemandResponse(cache, request, sourceUrl, requested, cachedEnd) {
+  noteDemand(cache);
+  const networkStart = cachedEnd + 1;
+  const abortController = new AbortController();
+  const networkStartedAt = now();
+  cache.metrics.demandFetches += 1;
+  cache.metrics.demandFirstByteMs = 0;
+  activeFetchStarted(cache);
+
+  let networkReader;
+  let networkFinished = false;
+  const finishNetwork = () => {
+    if (networkFinished) return;
+    networkFinished = true;
+    activeFetchFinished(cache);
+  };
+  const networkReaderPromise = directFetch(
+    request,
+    sourceUrl,
+    abortController.signal,
+    `bytes=${networkStart}-${requested.end}`,
+  ).then((response) => {
+    if (response.status !== 206) throw new Error(`Demand continuation returned ${response.status}`);
+    const contentRange = parseContentRange(response.headers.get('content-range'));
+    if (!contentRange || contentRange.start !== networkStart) {
+      throw new Error(`Invalid demand continuation Content-Range at ${networkStart}`);
+    }
+    if (!response.body) throw new Error('Demand continuation returned an empty body');
+    networkReader = response.body.getReader();
+    return networkReader;
+  }).catch((error) => {
+    finishNetwork();
+    throw error;
+  });
+
+  let cursor = requested.start;
+  let firstNetworkByte = true;
+  const stream = new ReadableStream({
+    async pull(controller) {
+      noteDemand(cache);
+      if (cursor <= cachedEnd) {
+        const entry = segmentContaining(cache, cursor, true);
+        if (!entry) {
+          controller.error(new Error(`Read-ahead cache lost byte ${cursor}`));
+          return;
+        }
+        entry.generation = cache.generation;
+        const offset = cursor - entry.start;
+        const available = Math.min(cachedEnd - cursor + 1, entry.buffer.byteLength - offset);
+        if (available <= 0) {
+          controller.error(new Error(`Read-ahead cache entry did not contain byte ${cursor}`));
+          return;
+        }
+        controller.enqueue(new Uint8Array(entry.buffer, offset, available));
+        cache.metrics.servedBytes += available;
+        cache.metrics.cacheHitBytes += available;
+        cache.metrics.demandBytes += available;
+        cursor += available;
+        cache.lastServedOffset = cursor;
+        updateAheadBytes(cache);
+        void postMetrics(cache, false);
+        return;
+      }
+
+      try {
+        demandWaitStarted(cache);
+        let result;
+        try {
+          const reader = await networkReaderPromise;
+          result = await reader.read();
+        } finally {
+          demandWaitFinished(cache);
+        }
+        if (result.done) {
+          controller.close();
+          finishNetwork();
+          schedulePrefetch(cache);
+          return;
+        }
+        if (firstNetworkByte) {
+          firstNetworkByte = false;
+          const networkFirstByteMs = Math.max(0, now() - networkStartedAt);
+          if (networkFirstByteMs >= DEMAND_WAIT_WARN_MS) {
+            cache.metrics.demandWaitCount += 1;
+            cache.metrics.demandWaitMs = rounded(cache.metrics.demandWaitMs + networkFirstByteMs, 1);
+          }
+        }
+        const value = result.value;
+        const byteLength = value.byteLength || 0;
+        cache.metrics.fetchedBytes += byteLength;
+        cache.metrics.demandBytes += byteLength;
+        cache.metrics.servedBytes += byteLength;
+        cursor += byteLength;
+        cache.lastServedOffset = cursor;
+        cache.lastAccess = Date.now();
+        updateAheadBytes(cache);
+        controller.enqueue(value);
+        schedulePrefetch(cache);
+        void postMetrics(cache, false);
+      } catch (error) {
+        finishNetwork();
+        if (error && error.name === 'AbortError') controller.error(abortError('Direct Play demand continuation aborted'));
+        else controller.error(error);
+      }
+    },
+    async cancel(reason) {
+      try {
+        if (networkReader) await networkReader.cancel(reason);
+      } catch {
+        // Browser cancellation is normal during media probing and seeking.
+      }
+      if (!abortController.signal.aborted) abortController.abort();
+      finishNetwork();
+      schedulePrefetch(cache);
+    },
+  });
+
+  return new Response(stream, {
+    status: 206,
+    headers: responseHeaders(cache, requested.start, requested.end, true),
+  });
+}
+
 async function handleProxy(request, url) {
   const sourceKey = url.searchParams.get('key');
   const config = sourceKey ? sourceConfigs.get(sourceKey) : undefined;
-  if (!sourceKey || !config) {
-    return new Response('Unknown Macha direct-play read-ahead source', { status: 404 });
-  }
+  if (!sourceKey || !config) return new Response('Unknown Macha direct-play read-ahead source', { status: 404 });
   const { sourceUrl, totalSize, mimeType } = config;
   config.lastAccess = Date.now();
   if (config.rangeUnsupported) return await directFetch(request, sourceUrl);
@@ -377,73 +695,27 @@ async function handleProxy(request, url) {
 
   const cache = getSourceCache(sourceKey, sourceUrl, totalSize, mimeType);
   cache.lastAccess = Date.now();
-  const firstIndex = Math.floor(requested.start / CHUNK_SIZE);
 
-  if (request.method === 'HEAD') {
-    return new Response(null, {
-      status: requested.partial ? 206 : 200,
-      headers: responseHeaders(cache, requested.start, requested.end, requested.partial),
-    });
+  if (request.method === 'HEAD') return await directFetch(request, sourceUrl);
+
+  // A complete resident range is an immediate memory hit. Otherwise demand is
+  // proxied as the browser asked for it; there is deliberately no 8 MiB
+  // completion barrier and no speculative queue in front of it.
+  if (requested.partial) {
+    const cachedEnd = contiguousCachedEnd(cache, requested.start, requested.end);
+    if (cachedEnd >= requested.end) {
+      return new Response(cacheStream(cache, requested.start, requested.end), {
+        status: 206,
+        headers: responseHeaders(cache, requested.start, requested.end, true),
+      });
+    }
+    if (cachedEnd >= requested.start) {
+      return cacheThenDemandResponse(cache, request, sourceUrl, requested, cachedEnd);
+    }
   }
 
-  try {
-    await loadChunk(cache, firstIndex, 'demand');
-  } catch (error) {
-    if (error && error.name === 'AbortError') throw error;
-    // Some legacy/proxy HTTP paths may not honour Range. Preserve Direct Play
-    // by bypassing read-ahead rather than converting that into a playback error.
-    config.rangeUnsupported = true;
-    releaseSource(cache);
-    return await directFetch(request, sourceUrl);
-  }
-  prefetchAhead(cache, firstIndex);
-
-  let cursor = requested.start;
-  const stream = new ReadableStream({
-    async pull(controller) {
-      if (cursor > requested.end) {
-        controller.close();
-        return;
-      }
-      const index = Math.floor(cursor / CHUNK_SIZE);
-      const chunkOffset = cursor - index * CHUNK_SIZE;
-      const wanted = Math.min(requested.end - cursor + 1, CHUNK_SIZE - chunkOffset);
-      const wasCached = cache.chunks.has(index);
-      const waitStartedAt = now();
-      let buffer;
-      try {
-        buffer = await loadChunk(cache, index, 'demand');
-      } catch (error) {
-        controller.error(error);
-        return;
-      }
-      const waitMs = now() - waitStartedAt;
-      if (!wasCached && waitMs >= DEMAND_WAIT_WARN_MS) {
-        cache.metrics.demandWaitCount += 1;
-        cache.metrics.demandWaitMs = rounded(cache.metrics.demandWaitMs + waitMs, 1);
-      }
-      touchChunk(cache, index);
-      const available = Math.min(wanted, Math.max(0, buffer.byteLength - chunkOffset));
-      if (available <= 0) {
-        controller.error(new Error(`Read-ahead chunk ${index} did not contain requested bytes`));
-        return;
-      }
-      controller.enqueue(new Uint8Array(buffer, chunkOffset, available));
-      cache.metrics.servedBytes += available;
-      if (wasCached) cache.metrics.cacheHitBytes += available;
-      cursor += available;
-      cache.lastServedOffset = cursor;
-      updateAheadBytes(cache);
-      cache.lastAccess = Date.now();
-      prefetchAhead(cache, index);
-      void postMetrics(cache, false);
-    },
-  });
-
-  return new Response(stream, {
-    status: requested.partial ? 206 : 200,
-    headers: responseHeaders(cache, requested.start, requested.end, requested.partial),
-  });
+  const rangeOverride = requested.partial ? `bytes=${requested.start}-${requested.end}` : undefined;
+  return await demandFetch(cache, request, sourceUrl, rangeOverride, requested.start);
 }
 
 self.addEventListener('install', () => {
@@ -469,9 +741,23 @@ self.addEventListener('message', (event) => {
       validSource = false;
     }
     if (sourceKey && validSource && Number.isSafeInteger(totalSize) && totalSize > 0) {
-      sourceConfigs.set(sourceKey, { sourceUrl, totalSize, mimeType, lastAccess: Date.now(), rangeUnsupported: false });
+      sourceConfigs.set(sourceKey, {
+        sourceUrl,
+        totalSize,
+        mimeType,
+        lastAccess: Date.now(),
+        rangeUnsupported: false,
+        mode: 'bootstrap',
+        generation: 0,
+      });
       const port = event.ports && event.ports[0];
       if (port) port.postMessage({ type: 'macha-direct-read-ahead-configured', sourceKey });
+    }
+    return;
+  }
+  if (data.type === 'macha-direct-read-ahead-state' && typeof data.sourceKey === 'string') {
+    if (data.mode === 'bootstrap' || data.mode === 'playing' || data.mode === 'seeking' || data.mode === 'paused') {
+      setMode(data.sourceKey, data.mode);
     }
     return;
   }
@@ -485,5 +771,10 @@ self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET' && event.request.method !== 'HEAD') return;
   const url = new URL(event.request.url);
   if (!url.pathname.endsWith(PROXY_PATH_SUFFIX)) return;
-  event.respondWith(handleProxy(event.request, url));
+  event.respondWith(handleProxy(event.request, url).catch((error) => {
+    // Source release/browser cancellation is routine during navigation and
+    // seek probing. Do not leak a rejected FetchEvent promise to the console.
+    if (error && error.name === 'AbortError') return new Response(null, { status: 499 });
+    throw error;
+  }));
 });

@@ -121,7 +121,7 @@ export interface PlaybackUpdate {
 /** Server-side playback negotiation and session-control seam. */
 export interface PlaybackResolver {
   readonly available: boolean;
-  resolve(media: MediaSummary, capabilities: PlaybackCapabilities): Promise<PlaybackSession>;
+  resolve(media: MediaSummary, capabilities: PlaybackCapabilities, seekMs?: number): Promise<PlaybackSession>;
   update(sessionId: string, update: PlaybackUpdate): Promise<PlaybackSession>;
   stop(sessionId: string): Promise<void>;
 }

@@ -31,7 +31,7 @@ function validMetrics(value) {
     if (!value || typeof value !== 'object')
         return false;
     const candidate = value;
-    return [
+    const numbers = [
         candidate.fetchedBytes,
         candidate.servedBytes,
         candidate.cacheHitBytes,
@@ -42,7 +42,17 @@ function validMetrics(value) {
         candidate.lastFetchMbps,
         candidate.demandWaitCount,
         candidate.demandWaitMs,
-    ].every((number) => typeof number === 'number' && Number.isFinite(number) && number >= 0);
+        candidate.demandFetches,
+        candidate.demandBytes,
+        candidate.demandFirstByteMs,
+        candidate.demandBlockedByPrefetchMs,
+        candidate.prefetchFetches,
+        candidate.prefetchBytes,
+        candidate.prefetchAbortsForDemand,
+        candidate.generation,
+    ];
+    return numbers.every((number) => typeof number === 'number' && Number.isFinite(number) && number >= 0)
+        && (candidate.mode === 'bootstrap' || candidate.mode === 'playing' || candidate.mode === 'seeking' || candidate.mode === 'paused');
 }
 function installMessageListener() {
     if (messageListenerInstalled || !serviceWorkerAvailable())
@@ -197,6 +207,18 @@ export async function directPlayReadAheadUrl(source) {
         sizeBytes: source.sizeBytes,
     });
     return buildDirectPlayReadAheadProxyUrl(sourceKey);
+}
+export function setDirectPlayReadAheadMode(sourceUrl, mode) {
+    if (!sourceUrl)
+        return;
+    const sourceKey = keyBySource.get(sourceUrl);
+    if (!sourceKey || !serviceWorkerAvailable())
+        return;
+    navigator.serviceWorker.controller?.postMessage({
+        type: 'macha-direct-read-ahead-state',
+        sourceKey,
+        mode,
+    });
 }
 export function releaseDirectPlayReadAhead(sourceUrl) {
     if (!sourceUrl)

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isSubtitleOnlyUpdate, webSeekDeltaForKey, webSeekHasResumed } from './PlayerScreen';
+import { appendQueuedPlaybackControl, isSubtitleOnlyUpdate, startupTransformedServerSeekTarget, webSeekDeltaForKey, webSeekHasResumed, webTransformedLocalSeekPosition } from './PlayerScreen';
 import { nextDesiredSeekPosition, preserveSeekSubtitleState } from '../playback/SeekState';
 describe('isSubtitleOnlyUpdate', () => {
     it('recognises subtitle selection and disable patches', () => {
@@ -11,6 +11,22 @@ describe('isSubtitleOnlyUpdate', () => {
         expect(isSubtitleOnlyUpdate({ preferences: { audioStream: 2 } })).toBe(false);
         expect(isSubtitleOnlyUpdate({ preferences: { mode: 'transcode', subtitleStream: 5 } })).toBe(false);
         expect(isSubtitleOnlyUpdate({ mediaId: 'file:other', preferences: { subtitleStream: 5 } })).toBe(false);
+    });
+});
+describe('queued player controls', () => {
+    it('coalesces consecutive seeks so the latest user intent wins', () => {
+        let queue = appendQueuedPlaybackControl([], { kind: 'seek', positionMs: 10_000 });
+        queue = appendQueuedPlaybackControl(queue, { kind: 'seek', positionMs: 20_000 });
+        queue = appendQueuedPlaybackControl(queue, { kind: 'seek', positionMs: 30_000 });
+        expect(queue).toEqual([{ kind: 'seek', positionMs: 30_000 }]);
+    });
+    it('merges consecutive representation changes without crossing a seek boundary', () => {
+        let queue = appendQueuedPlaybackControl([], { kind: 'update', update: { preferences: { mode: 'remux' } } });
+        queue = appendQueuedPlaybackControl(queue, { kind: 'update', update: { preferences: { audioStream: 2, audioLanguage: '' } } });
+        expect(queue).toEqual([{ kind: 'update', update: { preferences: { mode: 'remux', audioStream: 2, audioLanguage: '' } } }]);
+        queue = appendQueuedPlaybackControl(queue, { kind: 'seek', positionMs: 42_000 });
+        queue = appendQueuedPlaybackControl(queue, { kind: 'update', update: { preferences: { subtitleStream: 5 } } });
+        expect(queue.map((item) => item.kind)).toEqual(['update', 'seek', 'update']);
     });
 });
 describe('Web player seek UX', () => {
@@ -45,6 +61,27 @@ describe('Web player seek UX', () => {
     it('clamps desired skip targets to the media bounds', () => {
         expect(nextDesiredSeekPosition(5_000, 5_000, -10_000, 60_000)).toBe(0);
         expect(nextDesiredSeekPosition(55_000, 55_000, 10_000, 60_000)).toBe(60_000);
+    });
+    it('maps Web transformed HLS seeks into the current VOD generation', () => {
+        const session = { mode: 'transcode', mimeType: 'application/vnd.apple.mpegurl', seekMs: 30_000 };
+        expect(webTransformedLocalSeekPosition(session, 30_000)).toBe(0);
+        expect(webTransformedLocalSeekPosition(session, 40_000)).toBe(10_000);
+        expect(webTransformedLocalSeekPosition(session, 120_000)).toBe(90_000);
+    });
+    it('accepts the server-aligned generation for the startup request already made', () => {
+        const session = { mode: 'transcode', mimeType: 'application/vnd.apple.mpegurl', seekMs: 33_000 };
+        expect(startupTransformedServerSeekTarget(session, 30_000, 30_000, true)).toBeUndefined();
+    });
+    it('only reissues startup seek for a newer target outside the returned generation', () => {
+        const session = { mode: 'transcode', mimeType: 'application/vnd.apple.mpegurl', seekMs: 33_000 };
+        expect(startupTransformedServerSeekTarget(session, 45_000, 30_000, true)).toBeUndefined();
+        expect(startupTransformedServerSeekTarget(session, 20_000, 30_000, true)).toBe(20_000);
+    });
+    it('requires a new transformed generation only when seeking before its start', () => {
+        const session = { mode: 'remux', mimeType: 'application/vnd.apple.mpegurl', seekMs: 30_000 };
+        expect(webTransformedLocalSeekPosition(session, 29_999)).toBeUndefined();
+        expect(webTransformedLocalSeekPosition({ ...session, mode: 'direct' }, 40_000)).toBeUndefined();
+        expect(webTransformedLocalSeekPosition({ ...session, mimeType: 'video/mp4' }, 40_000)).toBeUndefined();
     });
 });
 describe('seek session state preservation', () => {

@@ -7,6 +7,7 @@ import {
   directPlayReadAheadMetrics,
   directPlayReadAheadUrl,
   releaseDirectPlayReadAhead,
+  setDirectPlayReadAheadMode,
 } from '../playback/directPlayReadAhead';
 
 interface SubtitleSegmentManifest {
@@ -163,6 +164,7 @@ class WebPlayer implements Player {
   private volume = 1;
   private directReadAheadSourceUrl?: string;
   private wantsPlayback = false;
+  private playRequestGeneration = 0;
 
   constructor(private readonly options: WebPlayerOptions = {}) {}
 
@@ -179,6 +181,7 @@ class WebPlayer implements Player {
 
   async play(source: PlaybackSource, positionMs = 0): Promise<boolean> {
     if (!this.host) throw new Error('Player must be attached before playback');
+    const playRequestGeneration = ++this.playRequestGeneration;
     this.log.info('source-load-begin', {
       mode: source.mode,
       mimeType: source.mimeType,
@@ -274,7 +277,10 @@ class WebPlayer implements Player {
       const directUrl = source.mode === 'direct' && this.options.directPlayReadAhead !== false
         ? await directPlayReadAheadUrl(source)
         : source.url;
-      if (directUrl !== source.url) this.directReadAheadSourceUrl = source.url;
+      if (directUrl !== source.url) {
+        this.directReadAheadSourceUrl = source.url;
+        setDirectPlayReadAheadMode(this.directReadAheadSourceUrl, 'bootstrap');
+      }
       this.log.info('direct-source-selected', {
         url: source.url,
         mimeType: source.mimeType,
@@ -306,6 +312,18 @@ class WebPlayer implements Player {
         state: videoState(video),
       });
     } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError'
+        && (playRequestGeneration !== this.playRequestGeneration || !this.wantsPlayback)) {
+        // Controls and stream changes are live during startup. Pausing,
+        // resuming or replacing the source may intentionally abort this older
+        // play() promise; that is supersession, not a source-load failure.
+        this.log.info('autoplay-superseded-by-control', {
+          elapsedMs: Math.round((performance.now() - playStarted) * 10) / 10,
+          state: videoState(video),
+        });
+        publish();
+        return false;
+      }
       if (error instanceof DOMException && error.name === 'NotAllowedError') {
         this.log.warn('autoplay-blocked', {
           elapsedMs: Math.round((performance.now() - playStarted) * 10) / 10,
@@ -584,12 +602,15 @@ class WebPlayer implements Player {
   }
 
   pause(): void {
+    this.playRequestGeneration += 1;
     this.log.info('pause-request', this.video ? videoState(this.video) : undefined);
     this.wantsPlayback = false;
+    setDirectPlayReadAheadMode(this.directReadAheadSourceUrl, 'paused');
     this.video?.pause();
   }
 
   resume(): void {
+    this.playRequestGeneration += 1;
     const video = this.video;
     if (!video) {
       this.log.warn('resume-request-without-media');
@@ -627,6 +648,7 @@ class WebPlayer implements Player {
       return;
     }
     this.log.info('local-seek-request', { positionMs, state: videoState(this.video) });
+    setDirectPlayReadAheadMode(this.directReadAheadSourceUrl, 'seeking');
     this.video.currentTime = Math.max(0, positionMs / 1000);
   }
 
@@ -643,6 +665,7 @@ class WebPlayer implements Player {
   }
 
   stop(): void {
+    this.playRequestGeneration += 1;
     this.wantsPlayback = false;
     this.log.debug('stop', this.video ? videoState(this.video) : undefined);
     this.hls?.destroy();
@@ -734,6 +757,10 @@ class WebPlayer implements Player {
     ] as const;
     for (const name of stateEvents) {
       video.addEventListener(name, () => {
+        if (name === 'playing') setDirectPlayReadAheadMode(this.directReadAheadSourceUrl, 'playing');
+        else if (name === 'seeking') setDirectPlayReadAheadMode(this.directReadAheadSourceUrl, 'seeking');
+        else if (name === 'seeked') setDirectPlayReadAheadMode(this.directReadAheadSourceUrl, video.paused ? 'paused' : 'playing');
+        else if (name === 'pause' || name === 'ended') setDirectPlayReadAheadMode(this.directReadAheadSourceUrl, 'paused');
         const state = videoState(video);
         const readAhead = directPlayReadAheadMetrics(this.directReadAheadSourceUrl);
         const detail = readAhead ? { ...state, directReadAhead: readAhead } : state;

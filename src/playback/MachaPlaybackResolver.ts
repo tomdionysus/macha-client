@@ -159,7 +159,7 @@ export class MachaPlaybackResolver implements PlaybackResolver {
     this.baseUrl = normalizeBaseUrl(baseUrl);
   }
 
-  async resolve(media: MediaSummary, capabilities: PlaybackCapabilities): Promise<PlaybackSession> {
+  async resolve(media: MediaSummary, capabilities: PlaybackCapabilities, seekMs?: number): Promise<PlaybackSession> {
     this.log.info('session-create', {
       mediaId: media.id,
       mediaKind: media.kind,
@@ -171,6 +171,7 @@ export class MachaPlaybackResolver implements PlaybackResolver {
       maxWidth: capabilities.maxWidth ?? 'none',
       maxHeight: capabilities.maxHeight ?? 'none',
       hdr: capabilities.hdr.length > 0 ? capabilities.hdr.join(', ') : 'not-advertised',
+      seekMs: seekMs ?? 0,
     });
     const wireCapabilities: Record<string, unknown> = {
       containers: capabilities.containers,
@@ -181,13 +182,14 @@ export class MachaPlaybackResolver implements PlaybackResolver {
     if (capabilities.maxWidth !== undefined) wireCapabilities.max_width = capabilities.maxWidth;
     if (capabilities.maxHeight !== undefined) wireCapabilities.max_height = capabilities.maxHeight;
 
-    const body = {
+    const body: Record<string, unknown> = {
       item_id: media.id,
       capabilities: wireCapabilities,
       preferences: {
         mode: capabilities.platform === 'tizen' ? 'direct' : 'auto',
       },
     };
+    if (seekMs !== undefined) body.seek_ms = Math.max(0, Math.round(seekMs));
     const session = this.mapSession(await this.request<WireSession>('/api/v1/playback/sessions', {
       method: 'POST',
       body: JSON.stringify(body),
