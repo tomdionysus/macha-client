@@ -79,4 +79,31 @@ describe('ArtworkRequestScheduler', () => {
     await Promise.resolve();
     expect(loads).toBe(0);
   });
+
+  it('does not let cancelled in-flight nearby work block newly visible artwork', async () => {
+    const scheduler = new ArtworkRequestScheduler<string>(1);
+    const staleGate = deferred<string>();
+    const staleStarted = deferred<void>();
+    const stale = scheduler.request('left-of-screen', async () => {
+      staleStarted.resolve();
+      return staleGate.promise;
+    }, 'nearby');
+    void stale.promise.catch(() => undefined);
+
+    await staleStarted.promise;
+    stale.cancel();
+
+    let visibleLoads = 0;
+    const visible = scheduler.request('right-of-screen', async () => {
+      visibleLoads += 1;
+      return 'visible';
+    }, 'visible');
+    void visible.promise.catch(() => undefined);
+
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(visibleLoads).toBe(1);
+
+    staleGate.resolve('stale');
+  });
 });

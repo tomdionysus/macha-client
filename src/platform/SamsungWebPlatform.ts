@@ -13,6 +13,7 @@ export class SamsungWebPlatform implements Platform {
   private readonly web = new WebPlatform({
     directPlayReadAhead: false,
     legacyMediaElement: true,
+    forceNativeHls: true,
   });
   private readonly log = createClientLogger('playback.capabilities.samsung');
 

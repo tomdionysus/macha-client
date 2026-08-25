@@ -31,7 +31,7 @@ Developed with substantial use of AI-assisted implementation
 - Client-local persisted playback queue. Albums queue their ordered tracks, seasons queue their ordered episodes, and playback advances automatically to the next queued item.
 - Macha 0.9.1 playback-session negotiation with Direct Play, remux and transcode modes.
 - In-session quality, audio, subtitle and media-representation switching.
-- Browser HLS playback through native HLS where available or hls.js otherwise.
+- Browser HLS playback through hls.js/MSE on modern Web, with native HLS retained for the Samsung legacy target.
 - Android Media3 host stubs plus a Samsung Tizen legacy-Web target using the shared HTML5 player.
 
 Continue Watching and the playback queue are local browser/application state. They are never sent to Macha.
@@ -148,7 +148,7 @@ Starting a different item creates the normal Macha playback session with the pla
 
 The playback queue is client-local and persisted per client ID. Album track clicks initialise the queue from the album order; season episode clicks initialise it from season order. Previous/Next operate on that queue and reaching the end of an item advances automatically where another item exists. A hard browser reload cannot preserve a live server capability/session URL, so the client reconstructs a fresh session from the persisted queue/current item and position checkpoint instead.
 
-Direct streams use the platform player directly. On Web, transformed fragmented-MP4 HLS uses native HLS where the browser provides it and hls.js otherwise. Permanent API Bearer authentication is used only for playback-session control; the returned stream/subtitle capability URLs are loaded directly by the player.
+Direct streams use the platform player directly. On modern Web, transformed fragmented-MP4 HLS is managed by hls.js/MSE with a bounded forward buffer so ordinary seeks can stay in browser memory; Samsung keeps the TV browser native-HLS path. Permanent API Bearer authentication is used only for playback-session control; the returned stream/subtitle capability URLs are loaded directly by the player.
 
 The persistent React player depends only on `PlaybackResolver` and `Platform.Player`, so future native platform players can implement the same session/control model without changing the UI.
 

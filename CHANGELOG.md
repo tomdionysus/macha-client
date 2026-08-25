@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.7.0
+
+- replace the accumulated player-screen seek/reload state machine with one playback coordinator that owns user intent, active source generation and coalesced server representation changes; transport controls never wait for source-generation work;
+- make Direct and in-generation Web HLS seeks purely local transport operations, with server seeks reserved for transformed targets outside the active immutable generation;
+- keep the current source playing while replacement generations are prepared, then apply the latest position/play-pause intent when the newest generation is ready;
+- prefer hls.js/MSE on modern Web with a bounded 60-second forward buffer so nearby seeks normally stay inside browser memory, retaining native HLS for the Samsung legacy target;
+- make Web source attachment non-blocking: media `play()` readiness is observed rather than awaited by application orchestration, eliminating decoder/network readiness as a control-state lock;
+- make Direct Play read-ahead setup opportunistic and non-blocking, cache demand bytes as they stream, and keep speculative fetches subordinate/preemptible;
+- mount React immediately while the boot splash runs as a presentation overlay instead of deliberately delaying application startup;
+- remove emitted JavaScript duplicates from `src` and generated Vite/TypeScript outputs, making TypeScript the single executable source of truth;
+- add coordinator-level regression tests for Direct/HLS local seeks, keyframe-aligned startup, source-preparation coalescence, controls during server work and non-blocking source attachment.
+
 ## 0.6.9
 
 - keep player controls live during startup, seeks and representation changes: play/pause and pre-start seek intents are applied to the eventual stream, while overlapping seek/option changes are coalesced and serialized instead of disabling the UI;

@@ -37,8 +37,8 @@ export async function waitForSplashMinimum(startedAt: number, durationMs: number
 }
 
 /**
- * Own the boot splash outside React. The application is not mounted until the
- * configured minimum visible lifetime has elapsed.
+ * Own the boot splash outside React. Its minimum visual lifetime is independent
+ * of application mount and may never delay application work.
  */
 export async function runBootSplash(root: HTMLElement, clock: SplashClock = browserClock): Promise<void> {
   const durationMs = uiSettings.splashDurationMs;

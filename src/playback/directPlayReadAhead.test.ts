@@ -1,9 +1,21 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { buildDirectPlayReadAheadProxyUrl, directPlayReadAheadUrl } from './directPlayReadAhead';
 import type { PlaybackSource } from '../types';
 
+function source(): PlaybackSource {
+  return {
+    mediaId: 'file:test',
+    url: 'https://node.test/api/v1/playback/stream/session/cap/secret/file.mkv',
+    mimeType: 'video/x-matroska',
+    mode: 'direct',
+    sizeBytes: 1024 * 1024 * 1024,
+  };
+}
+
 describe('Direct Play read-ahead client', () => {
-  it('builds a local proxy URL containing only the opaque source key', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('builds a local proxy URL containing only the opaque source key when no descriptor is supplied', () => {
     const url = new URL(buildDirectPlayReadAheadProxyUrl('source-key-123', 'https://client.test'));
     expect(url.origin).toBe('https://client.test');
     expect(url.pathname).toBe('/__macha_direct_cache__');
@@ -11,14 +23,33 @@ describe('Direct Play read-ahead client', () => {
     expect(url.search).not.toContain('playback');
   });
 
-  it('falls back to the original source outside a Service Worker browser environment', async () => {
-    const source: PlaybackSource = {
-      mediaId: 'file:test',
-      url: 'https://node.test/api/v1/playback/stream/session/cap/secret/file.mkv',
-      mimeType: 'video/x-matroska',
-      mode: 'direct',
-      sizeBytes: 1024 * 1024 * 1024,
-    };
-    await expect(directPlayReadAheadUrl(source)).resolves.toBe(source.url);
+  it('can self-describe a proxy request so fetch dispatch never waits for worker message ordering', () => {
+    const direct = source();
+    const url = new URL(buildDirectPlayReadAheadProxyUrl('source-key-123', 'https://client.test', direct));
+    expect(url.searchParams.get('source')).toBe(direct.url);
+    expect(url.searchParams.get('size')).toBe(String(direct.sizeBytes));
+    expect(url.searchParams.get('mime')).toBe(direct.mimeType);
+  });
+
+  it('falls back synchronously outside a Service Worker browser environment', () => {
+    expect(directPlayReadAheadUrl(source())).toBe(source().url);
+  });
+
+  it('never waits for Service Worker registration when the page is not controlled yet', () => {
+    const register = vi.fn(() => new Promise<ServiceWorkerRegistration>(() => undefined));
+    vi.stubGlobal('window', { isSecureContext: true, location: { origin: 'https://client.test' } });
+    vi.stubGlobal('navigator', {
+      serviceWorker: {
+        controller: null,
+        register,
+        addEventListener: vi.fn(),
+      },
+    });
+
+    const startedAt = performance.now();
+    const result = directPlayReadAheadUrl(source());
+    expect(result).toBe(source().url);
+    expect(performance.now() - startedAt).toBeLessThan(20);
+    expect(register).toHaveBeenCalledOnce();
   });
 });

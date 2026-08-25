@@ -83,7 +83,14 @@ export class ArtworkRequestScheduler<T> {
         if (cancelled) return;
         cancelled = true;
         request.subscribers = Math.max(0, request.subscribers - 1);
-        if (request.subscribers !== 0 || request.started) return;
+        if (request.subscribers !== 0) return;
+        if (request.started) {
+          request.started = false;
+          this.active -= 1;
+          if (this.requests.get(request.key) === request) this.requests.delete(request.key);
+          this.pump();
+          return;
+        }
         const index = this.pending.indexOf(request);
         if (index >= 0) this.pending.splice(index, 1);
         this.requests.delete(request.key);
@@ -109,8 +116,11 @@ export class ArtworkRequestScheduler<T> {
       request.started = true;
       this.active += 1;
       void Promise.resolve().then(request.load).then(request.resolve, request.reject).finally(() => {
-        this.active -= 1;
-        this.requests.delete(request.key);
+        if (request.started) {
+          request.started = false;
+          this.active -= 1;
+        }
+        if (this.requests.get(request.key) === request) this.requests.delete(request.key);
         this.pump();
       });
     }

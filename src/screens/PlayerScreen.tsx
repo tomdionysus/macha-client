@@ -13,11 +13,10 @@ import type {
   PlaybackStreamInfo,
   PlaybackUpdate,
 } from '../playback/PlaybackResolver';
+import { PlaybackCoordinator, isSubtitleOnlyPlaybackUpdate, type PlaybackCoordinatorSnapshot } from '../playback/PlaybackCoordinator';
 import { uiSettings } from '../settings';
 import { describePlaybackSession } from '../playback/PlaybackStatus';
-import { DirectSeekSessionSync } from '../playback/DirectSeekSync';
-import { nextDesiredSeekPosition, preserveSeekSubtitleState } from '../playback/SeekState';
-import type { MediaSummary, PlaybackEvent, PlaybackMode, PlaybackProgress } from '../types';
+import type { MediaSummary, PlaybackMode, PlaybackProgress } from '../types';
 
 export interface PlayerHostRequest {
   media: MediaSummary;
@@ -163,73 +162,7 @@ export function webArrowTargetOwnsKey(target: EventTarget | null): boolean {
   return Boolean(target.closest('textarea, select, [contenteditable="true"], input:not([type="range"])'));
 }
 
-export type QueuedPlaybackControl =
-  | { kind: 'seek'; positionMs: number }
-  | { kind: 'update'; update: PlaybackUpdate };
-
-export function appendQueuedPlaybackControl(queue: QueuedPlaybackControl[], next: QueuedPlaybackControl): QueuedPlaybackControl[] {
-  const previous = queue.at(-1);
-  if (previous?.kind === 'seek' && next.kind === 'seek') {
-    return [...queue.slice(0, -1), next];
-  }
-  if (previous?.kind === 'update' && next.kind === 'update') {
-    return [
-      ...queue.slice(0, -1),
-      {
-        kind: 'update',
-        update: {
-          ...previous.update,
-          ...next.update,
-          preferences: previous.update.preferences || next.update.preferences
-            ? { ...previous.update.preferences, ...next.update.preferences }
-            : undefined,
-        },
-      },
-    ];
-  }
-  return [...queue, next];
-}
-
-export function webSeekHasResumed(event: PlaybackEvent, targetMs: number, resumeAfterSeek: boolean): boolean {
-  if (Math.abs(event.positionMs - targetMs) > 1_500) return false;
-  if (event.seeking) return false;
-  if (!resumeAfterSeek) return true;
-  return !event.paused && !event.buffering;
-}
-
-export function webTransformedLocalSeekPosition(session: PlaybackSession, absolutePositionMs: number): number | undefined {
-  if (session.mode === 'direct') return undefined;
-  if (!session.mimeType.toLowerCase().includes('mpegurl')) return undefined;
-  const generationStartMs = Math.max(0, session.seekMs);
-  if (absolutePositionMs < generationStartMs) return undefined;
-  return absolutePositionMs - generationStartMs;
-}
-
-export function startupTransformedServerSeekTarget(
-  session: PlaybackSession,
-  desiredPositionMs: number,
-  preparedPositionMs: number,
-  webControls: boolean,
-): number | undefined {
-  // The server may align a transformed generation to a keyframe after the
-  // requested seek position. That session is still the completed result of
-  // the request we just made; never PATCH the same request repeatedly trying
-  // to make session.seekMs equal the unaligned target.
-  if (Math.round(desiredPositionMs) === Math.round(preparedPositionMs)) return undefined;
-
-  // If the user changed the target while the server request was in flight, a
-  // Web HLS generation can absorb any newer target at/after its actual start.
-  if (webControls && webTransformedLocalSeekPosition(session, desiredPositionMs) !== undefined) return undefined;
-  return desiredPositionMs;
-}
-
-export function isSubtitleOnlyUpdate(update: PlaybackUpdate): boolean {
-  if (update.seekMs !== undefined || update.mediaId !== undefined || !update.preferences) return false;
-  const keys = Object.entries(update.preferences)
-    .filter(([, value]) => value !== undefined)
-    .map(([key]) => key);
-  return keys.length > 0 && keys.every((key) => key === 'subtitleStream' || key === 'subtitleLanguage');
-}
+export const isSubtitleOnlyUpdate = isSubtitleOnlyPlaybackUpdate;
 
 function PlayerOptions({
   session,
@@ -377,55 +310,29 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
   const pageRef = useRef<HTMLElement | null>(null);
   const hostRef = useRef<HTMLDivElement | null>(null);
   const chromeRef = useRef<HTMLDivElement | null>(null);
-  const player = useMemo(() => platform.createPlayer(), [platform]);
-  const log = useMemo(() => createClientLogger('playback.screen', { mediaId: media.id }), [media.id]);
-  const initialStartPositionMs = useRef(Math.max(0, startPositionMs)).current;
-  const initialEvent = useMemo<PlaybackEvent>(() => ({
-    positionMs: initialStartPositionMs,
-    durationMs: media.durationMs ?? 0,
-    paused: true,
-    ended: false,
-  }), [initialStartPositionMs, media.durationMs]);
-  const latestRef = useRef(initialEvent);
-  const sessionRef = useRef<PlaybackSession | undefined>(undefined);
-  const streamOffsetRef = useRef(0);
-  const reloadingRef = useRef(false);
-  const lastReportRef = useRef(0);
-  const lastPositionPersistRef = useRef(0);
   const hideTimerRef = useRef<number | undefined>(undefined);
   const scrubValueRef = useRef<number | undefined>(undefined);
-  const committedSeekRef = useRef<number | undefined>(undefined);
-  const desiredSeekRef = useRef<number | undefined>(undefined);
-  const pendingStartupPositionRef = useRef(initialStartPositionMs);
-  const desiredPausedRef = useRef(false);
-  const queuedControlsRef = useRef<QueuedPlaybackControl[]>([]);
-  const controlBusyRef = useRef(false);
-  const seekActionRef = useRef<(positionMs: number) => Promise<boolean>>(async () => false);
-  const updateActionRef = useRef<(update: PlaybackUpdate) => Promise<void>>(async () => undefined);
-  const directSeekDispatchTimerRef = useRef<number | undefined>(undefined);
-  const directSeekLastDispatchRef = useRef(0);
-  const directSeekSyncRef = useRef<DirectSeekSessionSync | undefined>(undefined);
-  const directSeekResumeRef = useRef<{ targetMs: number; resumeAfterSeek: boolean } | undefined>(undefined);
-  const mountedRef = useRef(true);
+  const lastReportRef = useRef(0);
+  const lastPositionPersistRef = useRef(0);
   const endedHandledRef = useRef(false);
-  const [event, setEvent] = useState(initialEvent);
-  const [session, setSession] = useState<PlaybackSession>();
-  const [starting, setStarting] = useState(!initialFatalError);
-  const [fatalError, setFatalError] = useState<Error | undefined>(initialFatalError);
-  const [playbackNotice, setPlaybackNotice] = useState<string>();
+  const player = useMemo(() => platform.createPlayer(), [platform]);
+  const log = useMemo(() => createClientLogger('playback.screen', { mediaId: media.id }), [media.id]);
   const webControls = platform.name === 'web';
   const samsungControls = import.meta.env.MODE === 'samsung';
-  const html5Player = webControls || samsungControls;
   const interactionControlled = webControls || samsungControls;
+  const coordinator = useMemo(() => new PlaybackCoordinator({
+    media,
+    player,
+    resolver: playbackResolver,
+    capabilities: () => platform.capabilities(),
+    initialPositionMs: Math.max(0, startPositionMs),
+  }), [media, platform, playbackResolver, player, startPositionMs, webControls]);
+  const [playback, setPlayback] = useState<PlaybackCoordinatorSnapshot>(() => coordinator.getSnapshot());
   const [controlsVisible, setControlsVisible] = useState(!interactionControlled);
   const [fullscreen, setFullscreen] = useState(false);
   const [optionsVisible, setOptionsVisible] = useState(false);
-  const [controlBusy, setControlBusy] = useState(false);
-  const [queuedControlGeneration, setQueuedControlGeneration] = useState(0);
-  const [desiredPaused, setDesiredPaused] = useState(false);
-  const [seekInFlight, setSeekInFlight] = useState(false);
-  const [seekFeedbackGeneration, setSeekFeedbackGeneration] = useState(0);
   const [scrubValue, setScrubValue] = useState<number>();
+  const [localNotice, setLocalNotice] = useState<string>();
   const backdrop = useArtworkUrl(api, media.artwork?.backdrop ?? media.artwork?.thumbnail ?? media.artwork?.poster);
   const cover = useArtworkUrl(api, media.kind === 'track' ? media.artwork?.poster ?? media.artwork?.thumbnail : undefined);
 
@@ -434,76 +341,69 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
   }, [player, samsungControls, volume]);
 
   useEffect(() => {
-    const sync = new DirectSeekSessionSync(
-      (sessionId, positionMs) => playbackResolver.update(sessionId, { seekMs: positionMs }),
-      (next, request) => {
-        if (!mountedRef.current) return;
-        const current = sessionRef.current;
-        if (!current || current.sessionId !== request.sessionId || current.mode !== 'direct') return;
-        const preserved = preserveSeekSubtitleState(current, next);
-        sessionRef.current = preserved;
-        setSession(preserved);
-        log.info('seek-direct-session-synced', {
-          sessionId: request.sessionId,
-          positionMs: request.positionMs,
-          sequence: request.sequence,
-        });
-      },
-      (error, request) => {
-        log.warn('seek-direct-session-sync-failed', {
-          sessionId: request.sessionId,
-          positionMs: request.positionMs,
-          sequence: request.sequence,
-          error,
-        });
-      },
-    );
-    directSeekSyncRef.current = sync;
+    const host = hostRef.current;
+    if (!host) return;
+    log.info('player-mount', {
+      itemId: media.id,
+      mediaKind: media.kind,
+      startPositionMs,
+      catalogueDurationMs: media.durationMs,
+      platform: platform.name,
+    });
+    player.attach(host);
+    const unsubscribe = coordinator.subscribe(setPlayback);
+    if (!initialFatalError) void coordinator.start();
     return () => {
-      sync.dispose();
-      if (directSeekSyncRef.current === sync) directSeekSyncRef.current = undefined;
+      log.info('player-unmount', { sessionId: coordinator.getSnapshot().session?.sessionId, latest: coordinator.getSnapshot().event });
+      unsubscribe();
+      coordinator.dispose();
     };
-  }, [log, playbackResolver]);
+  }, [coordinator, initialFatalError, log, media.durationMs, media.id, media.kind, platform.name, player, startPositionMs]);
 
-  const beginSeekFeedback = useCallback(() => {
-    setSeekFeedbackGeneration((generation) => generation + 1);
-    setSeekInFlight(true);
-  }, []);
-
-  const publish = useCallback((next: PlaybackEvent) => {
-    const previous = latestRef.current;
-    latestRef.current = next;
-    if (previous.paused !== next.paused || previous.ended !== next.ended) {
-      log.debug('playback-state', { previous, next, streamOffsetMs: streamOffsetRef.current });
-    }
-    setEvent(next);
+  useEffect(() => {
+    const event = playback.event;
     const now = Date.now();
-    if (next.paused || next.ended || now - lastPositionPersistRef.current >= 5_000) {
+    if (event.paused || event.ended || now - lastPositionPersistRef.current >= 5_000) {
       lastPositionPersistRef.current = now;
-      onPosition(media, next.positionMs, next.durationMs);
+      onPosition(media, event.positionMs, event.durationMs);
     }
-    if (!shouldTrackProgress(media)) return;
-    if (next.ended || now - lastReportRef.current >= 10_000) {
+    if (shouldTrackProgress(media) && (event.ended || now - lastReportRef.current >= 10_000)) {
       lastReportRef.current = now;
       onProgress({
         mediaId: media.id,
-        positionMs: next.positionMs,
-        durationMs: next.durationMs,
+        positionMs: event.positionMs,
+        durationMs: event.durationMs,
         updatedAt: now,
         media,
       });
     }
-  }, [log, media, onPosition, onProgress]);
+  }, [media, onPosition, onProgress, playback.event]);
+
+  useEffect(() => () => {
+    if (!shouldTrackProgress(media)) return;
+    const event = coordinator.getSnapshot().event;
+    if (!event.durationMs) return;
+    onProgress({
+      mediaId: media.id,
+      positionMs: event.positionMs,
+      durationMs: event.durationMs,
+      updatedAt: Date.now(),
+      media,
+    });
+  }, [coordinator, media, onProgress]);
 
   useEffect(() => {
-    if (!event.ended) {
+    if (!playback.event.ended) {
       endedHandledRef.current = false;
       return;
     }
     if (endedHandledRef.current) return;
     endedHandledRef.current = true;
     onEnded();
-  }, [event.ended, onEnded]);
+  }, [onEnded, playback.event.ended]);
+
+  const fatalError = initialFatalError ?? playback.fatalError;
+  const playbackNotice = localNotice ?? playback.notice;
 
   const hideControls = useCallback(() => {
     if (hideTimerRef.current !== undefined) {
@@ -513,13 +413,9 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
     if (fatalError) return;
     setControlsVisible(false);
     setOptionsVisible(false);
-
-    // Do not leave Samsung focus parked on invisible player controls.
     const chrome = chromeRef.current;
     if (!chrome) return;
-    for (const selected of chrome.querySelectorAll<HTMLElement>('[data-tv-selected]')) {
-      selected.removeAttribute('data-tv-selected');
-    }
+    for (const selected of chrome.querySelectorAll<HTMLElement>('[data-tv-selected]')) selected.removeAttribute('data-tv-selected');
     const active = document.activeElement;
     if (active instanceof HTMLElement && chrome.contains(active)) active.blur();
   }, [fatalError]);
@@ -528,12 +424,9 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
     if (hideTimerRef.current !== undefined) window.clearTimeout(hideTimerRef.current);
     hideTimerRef.current = undefined;
     if (fatalError) return;
-
-    // Web and Samsung always auto-hide. Preserve the older pause/options
-    // behaviour for any other platform adapter.
-    if (!interactionControlled && (latestRef.current.paused || optionsVisible || controlBusy)) return;
+    if (!interactionControlled && (playback.intent.paused || optionsVisible)) return;
     hideTimerRef.current = window.setTimeout(hideControls, uiSettings.playerControlsHideDelayMs);
-  }, [controlBusy, fatalError, hideControls, interactionControlled, optionsVisible]);
+  }, [fatalError, hideControls, interactionControlled, optionsVisible, playback.intent.paused]);
 
   const showControls = useCallback(() => {
     setControlsVisible(true);
@@ -565,245 +458,49 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
     setScrubValue(positionMs);
   }, []);
 
-  const clearCommittedSeek = useCallback(() => {
-    committedSeekRef.current = undefined;
-    setScrubPosition(undefined);
-  }, [setScrubPosition]);
-
-  const clearDesiredSeek = useCallback(() => {
-    desiredSeekRef.current = undefined;
-    directSeekResumeRef.current = undefined;
-    if (directSeekDispatchTimerRef.current !== undefined) {
-      window.clearTimeout(directSeekDispatchTimerRef.current);
-      directSeekDispatchTimerRef.current = undefined;
+  const setPaused = useCallback((paused: boolean) => {
+    setLocalNotice(undefined);
+    coordinator.setPaused(paused);
+    if (!interactionControlled) {
+      if (paused) {
+        setControlsVisible(true);
+        if (hideTimerRef.current !== undefined) window.clearTimeout(hideTimerRef.current);
+      } else {
+        showControls();
+      }
     }
+  }, [coordinator, interactionControlled, showControls]);
+
+  const seek = useCallback((positionMs: number) => {
+    setLocalNotice(undefined);
     setScrubPosition(undefined);
-  }, [setScrubPosition]);
+    const accepted = coordinator.seek(positionMs);
+    if (!accepted) setLocalNotice(coordinator.getSnapshot().notice);
+    if (!interactionControlled) showControls();
+    return accepted;
+  }, [coordinator, interactionControlled, setScrubPosition, showControls]);
 
-  const setDesiredSeek = useCallback((positionMs: number) => {
-    desiredSeekRef.current = positionMs;
-    setScrubPosition(positionMs);
-  }, [setScrubPosition]);
+  const seekBy = useCallback((deltaMs: number) => {
+    setLocalNotice(undefined);
+    setScrubPosition(undefined);
+    coordinator.seekBy(deltaMs);
+    if (!interactionControlled) showControls();
+  }, [coordinator, interactionControlled, setScrubPosition, showControls]);
 
-  const setPausedIntent = useCallback((paused: boolean) => {
-    desiredPausedRef.current = paused;
-    setDesiredPaused(paused);
-  }, []);
-
-  const setControlsBusy = useCallback((busy: boolean) => {
-    controlBusyRef.current = busy;
-    setControlBusy(busy);
-  }, []);
-
-  const queueControl = useCallback((control: QueuedPlaybackControl) => {
-    queuedControlsRef.current = appendQueuedPlaybackControl(queuedControlsRef.current, control);
-    setQueuedControlGeneration((generation) => generation + 1);
-  }, []);
-
-  const loadSession = useCallback(async (next: PlaybackSession, absolutePositionMs: number, resumeAfterLoad?: boolean) => {
-    if (resumeAfterLoad !== undefined) setPausedIntent(!resumeAfterLoad);
-    const bounded = Math.max(0, Math.min(next.durationMs || Number.MAX_SAFE_INTEGER, absolutePositionMs));
-    const serverSeek = Math.max(0, Math.min(next.durationMs || Number.MAX_SAFE_INTEGER, next.seekMs));
-    const transformedLocalPosition = webControls ? webTransformedLocalSeekPosition(next, bounded) : undefined;
-    const effectivePosition = next.mode === 'direct' || transformedLocalPosition !== undefined ? bounded : serverSeek;
-    const localPosition = next.mode === 'direct' ? bounded : transformedLocalPosition ?? 0;
-    streamOffsetRef.current = next.mode === 'direct' ? 0 : serverSeek;
-    sessionRef.current = next;
-    setSession(next);
-    reloadingRef.current = true;
-    const startedAt = performance.now();
-    log.info('session-load-begin', {
-      sessionId: next.sessionId,
-      mode: next.mode,
-      mediaId: next.mediaId,
-      absolutePositionMs,
-      boundedPositionMs: bounded,
-      serverSeekMs: next.seekMs,
-      effectivePositionMs: effectivePosition,
-      localPlayerPositionMs: localPosition,
-      streamOffsetMs: streamOffsetRef.current,
-      source: next.source,
+  const playFromStart = useCallback(() => {
+    log.info('restart-ui-request', {
+      sessionId: playback.session?.sessionId,
+      mode: playback.session?.mode,
+      currentPositionMs: playback.event.positionMs,
     });
-    try {
-      const started = await player.play(next.source, localPosition);
-      const resumeNow = !desiredPausedRef.current;
-      if (!resumeNow && started) player.pause();
-      log.info('session-load-ready', {
-        sessionId: next.sessionId,
-        mode: next.mode,
-        started,
-        resumeAfterLoad: resumeNow,
-        elapsedMs: Math.round((performance.now() - startedAt) * 10) / 10,
-        absolutePositionMs: effectivePosition,
-      });
-      publish({
-        positionMs: effectivePosition,
-        durationMs: next.durationMs,
-        paused: resumeNow ? !started : true,
-        ended: false,
-      });
-    } catch (error) {
-      log.error('session-load-failed', {
-        sessionId: next.sessionId,
-        mode: next.mode,
-        elapsedMs: Math.round((performance.now() - startedAt) * 10) / 10,
-        error,
-      });
-      throw error;
-    } finally {
-      reloadingRef.current = false;
-    }
-  }, [log, player, publish, setPausedIntent, webControls]);
+    coordinator.seek(0);
+    coordinator.setPaused(false);
+  }, [coordinator, log, playback.event.positionMs, playback.session?.mode, playback.session?.sessionId]);
 
-  useEffect(() => {
-    mountedRef.current = true;
-    const host = hostRef.current;
-    if (!host) return;
-    log.info('player-mount', {
-      itemId: media.id,
-      mediaKind: media.kind,
-      startPositionMs: initialStartPositionMs,
-      catalogueDurationMs: media.durationMs,
-      platform: platform.name,
-    });
-    player.attach(host);
-    const unsubscribe = player.subscribe((next) => {
-      if (!mountedRef.current || reloadingRef.current) return;
-      const activeSession = sessionRef.current;
-      const durationMs = activeSession?.durationMs || next.durationMs;
-      const absolutePositionMs = next.positionMs + streamOffsetRef.current;
-      const committedSeek = committedSeekRef.current;
-      if (committedSeek !== undefined) {
-        // Native and server-backed transformed seeks use a committed target because
-        // the old generation may publish stale events while it is being replaced.
-        if (Math.abs(absolutePositionMs - committedSeek) > 1_500) return;
-        clearCommittedSeek();
-      }
-      const absoluteEvent = {
-        ...next,
-        positionMs: absolutePositionMs,
-        durationMs,
-      };
-      const pendingDirectSeek = directSeekResumeRef.current;
-      const desiredSeek = desiredSeekRef.current;
-      if (pendingDirectSeek && desiredSeek !== undefined
-        && webSeekHasResumed(absoluteEvent, desiredSeek, pendingDirectSeek.resumeAfterSeek)) {
-        const targetMs = desiredSeek;
-        clearDesiredSeek();
-        setSeekInFlight(false);
-        log.info(activeSession?.mode === 'direct' ? 'seek-direct-resumed' : 'seek-hls-local-resumed', {
-          sessionId: sessionRef.current?.sessionId,
-          positionMs: absolutePositionMs,
-          targetMs,
-          buffering: absoluteEvent.buffering,
-        });
-      }
-      publish(absoluteEvent);
-    });
-
-    void (async () => {
-      if (initialFatalError) {
-        setStarting(false);
-        return;
-      }
-      let resolved: PlaybackSession | undefined;
-      try {
-        const capabilitiesStartedAt = performance.now();
-        const capabilities = await platform.capabilities();
-        log.debug('capabilities-ready', { elapsedMs: Math.round((performance.now() - capabilitiesStartedAt) * 10) / 10, capabilities });
-        const resolveStartedAt = performance.now();
-        let preparedStartupPosition = pendingStartupPositionRef.current;
-        resolved = await playbackResolver.resolve(media, capabilities, preparedStartupPosition);
-        log.info('session-resolved', {
-          elapsedMs: Math.round((performance.now() - resolveStartedAt) * 10) / 10,
-          sessionId: resolved.sessionId,
-          mode: resolved.mode,
-          durationMs: resolved.durationMs,
-          startPositionMs: initialStartPositionMs,
-        });
-        if (!mountedRef.current) {
-          await playbackResolver.stop(resolved.sessionId);
-          return;
-        }
-        let absolutePosition = Math.min(
-          pendingStartupPositionRef.current,
-          resolved.durationMs || pendingStartupPositionRef.current,
-        );
-        if (absolutePosition > 0 && resolved.mode !== 'direct' && !resolved.options.canSeek) {
-          setPlaybackNotice('This stream cannot seek; starting from the beginning.');
-          absolutePosition = 0;
-          pendingStartupPositionRef.current = 0;
-          setScrubPosition(0);
-        }
-        if (resolved.mode !== 'direct' && resolved.options.canSeek) {
-          // The initial resume position is sent with session creation. On Web,
-          // a transformed HLS generation is a complete VOD presentation from
-          // resolved.seekMs onward, so any newer forward seek intent can be
-          // satisfied locally. Only a target before the generation start needs
-          // a replacement server generation. Other platforms retain their
-          // established server-backed transformed seek behaviour.
-          while (mountedRef.current) {
-            absolutePosition = Math.min(
-              pendingStartupPositionRef.current,
-              resolved.durationMs || pendingStartupPositionRef.current,
-            );
-            const serverSeekTarget = startupTransformedServerSeekTarget(
-              resolved,
-              absolutePosition,
-              preparedStartupPosition,
-              webControls,
-            );
-            if (serverSeekTarget === undefined) break;
-            preparedStartupPosition = serverSeekTarget;
-            const initialSeekStartedAt = performance.now();
-            log.info('initial-server-seek-begin', { sessionId: resolved.sessionId, positionMs: serverSeekTarget, mode: resolved.mode });
-            resolved = await playbackResolver.update(resolved.sessionId, { seekMs: serverSeekTarget });
-            log.info('initial-server-seek-complete', {
-              sessionId: resolved.sessionId,
-              positionMs: absolutePosition,
-              mode: resolved.mode,
-              elapsedMs: Math.round((performance.now() - initialSeekStartedAt) * 10) / 10,
-            });
-            if (!mountedRef.current) {
-              await playbackResolver.stop(resolved.sessionId).catch(() => undefined);
-              return;
-            }
-          }
-        }
-        await loadSession(resolved, absolutePosition);
-      } catch (error) {
-        log.error('player-startup-failed', error);
-        if (!mountedRef.current) return;
-        const failedSessionId = sessionRef.current?.sessionId ?? resolved?.sessionId;
-        sessionRef.current = undefined;
-        setSession(undefined);
-        try {
-          player.stop();
-        } catch (stopError) {
-          log.warn('failed-native-player-stop-failed', { error: stopError });
-        }
-        if (failedSessionId) {
-          await playbackResolver.stop(failedSessionId).catch((stopError) => {
-            log.warn('failed-session-stop-failed', { sessionId: failedSessionId, error: stopError });
-          });
-        }
-        setFatalError(error instanceof Error ? error : new Error(String(error)));
-      } finally {
-        if (mountedRef.current) setStarting(false);
-      }
-    })();
-
-    return () => {
-      log.info('player-unmount', { sessionId: sessionRef.current?.sessionId, latest: latestRef.current });
-      mountedRef.current = false;
-      if (directSeekDispatchTimerRef.current !== undefined) window.clearTimeout(directSeekDispatchTimerRef.current);
-      directSeekDispatchTimerRef.current = undefined;
-      unsubscribe();
-      player.detach();
-      const activeSession = sessionRef.current;
-      if (activeSession) void playbackResolver.stop(activeSession.sessionId).catch(() => undefined);
-    };
-  }, [clearCommittedSeek, clearDesiredSeek, initialFatalError, initialStartPositionMs, loadSession, log, media, platform, playbackResolver, player, publish, webControls]);
+  const reconfigure = useCallback((update: PlaybackUpdate) => {
+    setLocalNotice(undefined);
+    coordinator.update(update);
+  }, [coordinator]);
 
   useEffect(() => {
     if (presentation === 'full') {
@@ -823,343 +520,6 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
     setOptionsVisible(false);
     if (hideTimerRef.current !== undefined) window.clearTimeout(hideTimerRef.current);
   }, [fatalError]);
-
-  useEffect(() => () => {
-    if (!shouldTrackProgress(media)) return;
-    const latest = latestRef.current;
-    if (!latest.durationMs) return;
-    onProgress({
-      mediaId: media.id,
-      positionMs: latest.positionMs,
-      durationMs: latest.durationMs,
-      updatedAt: Date.now(),
-      media,
-    });
-  }, [media, onProgress]);
-
-  const setPaused = useCallback((paused: boolean) => {
-    setPausedIntent(paused);
-    const activeSession = sessionRef.current;
-    if (!activeSession) {
-      if (fatalError) {
-        setPlaybackNotice(fatalError.message);
-        return;
-      }
-      log.info('pause-intent-queued', { paused, positionMs: pendingStartupPositionRef.current });
-      publish({ ...latestRef.current, paused });
-    } else {
-      log.info(paused ? 'pause-ui-request' : 'play-ui-request', { sessionId: activeSession.sessionId, positionMs: latestRef.current.positionMs });
-      if (paused) player.pause();
-      else player.resume();
-      publish({ ...latestRef.current, paused });
-    }
-    if (!interactionControlled) {
-      if (paused) {
-        setControlsVisible(true);
-        if (hideTimerRef.current !== undefined) window.clearTimeout(hideTimerRef.current);
-      } else {
-        showControls();
-      }
-    }
-  }, [fatalError, interactionControlled, log, player, publish, setPausedIntent, showControls]);
-
-  const seek = useCallback(async (positionMs: number) => {
-    const activeSession = sessionRef.current;
-    if (!activeSession) {
-      if (fatalError) {
-        setPlaybackNotice(fatalError.message);
-        return false;
-      }
-      const knownDuration = media.durationMs || latestRef.current.durationMs || Number.MAX_SAFE_INTEGER;
-      const bounded = Math.max(0, Math.min(knownDuration, positionMs));
-      pendingStartupPositionRef.current = bounded;
-      setScrubPosition(bounded);
-      publish({ ...latestRef.current, positionMs: bounded, ended: false });
-      log.info('seek-intent-queued-before-session', { requestedPositionMs: positionMs, boundedPositionMs: bounded });
-      return true;
-    }
-    if (!activeSession.options.canSeek) {
-      setPlaybackNotice('This stream cannot seek.');
-      return false;
-    }
-    const bounded = Math.max(0, Math.min(activeSession.durationMs, positionMs));
-    if (controlBusyRef.current) {
-      setScrubPosition(bounded);
-      queueControl({ kind: 'seek', positionMs: bounded });
-      log.info('seek-intent-queued', { sessionId: activeSession.sessionId, mode: activeSession.mode, positionMs: bounded });
-      return true;
-    }
-    const previous = latestRef.current;
-    const resumeAfterSeek = !previous.paused;
-    log.info('seek-ui-request', {
-      sessionId: activeSession.sessionId,
-      mode: activeSession.mode,
-      requestedPositionMs: positionMs,
-      boundedPositionMs: bounded,
-      currentPositionMs: previous.positionMs,
-      resumeAfterSeek,
-    });
-
-    const transformedLocalPosition = webControls
-      ? webTransformedLocalSeekPosition(activeSession, bounded)
-      : undefined;
-    const localHtml5Seek = (activeSession.mode === 'direct' && html5Player)
-      || transformedLocalPosition !== undefined;
-    if (!localHtml5Seek) {
-      committedSeekRef.current = bounded;
-      setScrubPosition(bounded);
-    }
-    if (!interactionControlled) {
-      setControlsVisible(true);
-      if (hideTimerRef.current !== undefined) window.clearTimeout(hideTimerRef.current);
-    }
-
-    if (activeSession.mode === 'direct' || transformedLocalPosition !== undefined) {
-      const localSeekStartedAt = performance.now();
-      let sequence: number | undefined;
-      if (html5Player) {
-        // Keep the user's requested absolute position separate from the media
-        // element's reported time. Direct playback uses absolute media time; a
-        // transformed HLS generation uses time relative to session.seekMs.
-        // Repeated arrows/buttons accumulate against the latest desired target
-        // and are coalesced so held keys do not thrash the demuxer.
-        setDesiredSeek(bounded);
-        directSeekResumeRef.current = { targetMs: bounded, resumeAfterSeek };
-        beginSeekFeedback();
-        const dispatch = () => {
-          directSeekDispatchTimerRef.current = undefined;
-          const targetMs = desiredSeekRef.current;
-          if (targetMs === undefined) return;
-          const targetPlayerMs = activeSession.mode === 'direct'
-            ? targetMs
-            : webTransformedLocalSeekPosition(activeSession, targetMs);
-          // A subsequent input can cross backwards before this HLS generation
-          // while a local dispatch is pending. That invocation switches to the
-          // server-backed fallback and clears this timer/desired seek.
-          if (targetPlayerMs === undefined) return;
-          directSeekLastDispatchRef.current = performance.now();
-          directSeekResumeRef.current = {
-            targetMs,
-            resumeAfterSeek: directSeekResumeRef.current?.resumeAfterSeek ?? resumeAfterSeek,
-          };
-          player.seek(targetPlayerMs);
-        };
-        const elapsed = performance.now() - directSeekLastDispatchRef.current;
-        const delayMs = Math.max(0, 120 - elapsed);
-        if (delayMs === 0) {
-          if (directSeekDispatchTimerRef.current !== undefined) {
-            window.clearTimeout(directSeekDispatchTimerRef.current);
-            directSeekDispatchTimerRef.current = undefined;
-          }
-          dispatch();
-        } else if (directSeekDispatchTimerRef.current === undefined) {
-          directSeekDispatchTimerRef.current = window.setTimeout(dispatch, delayMs);
-        }
-        if (activeSession.mode === 'direct') {
-          sequence = directSeekSyncRef.current?.schedule(activeSession.sessionId, bounded);
-        }
-      } else {
-        // Preserve the established native-player Direct behaviour on Android/Tizen.
-        player.pause();
-        publish({ ...previous, positionMs: bounded, paused: true, ended: false });
-        player.seek(bounded);
-        if (resumeAfterSeek) player.resume();
-      }
-      log.info(activeSession.mode === 'direct' ? 'seek-direct-dispatched' : 'seek-hls-local-dispatched', {
-        elapsedMs: Math.round((performance.now() - localSeekStartedAt) * 10) / 10,
-        positionMs: bounded,
-        localPositionMs: activeSession.mode === 'direct' ? bounded : transformedLocalPosition,
-        streamOffsetMs: streamOffsetRef.current,
-        resumeAfterSeek,
-        optimistic: html5Player,
-        sessionSyncSequence: sequence,
-      });
-      return true;
-    }
-
-    directSeekSyncRef.current?.clearPending();
-    clearDesiredSeek();
-
-    // Server-backed seek generations can take long enough to be perceptible.
-    // Pause the old stream immediately but delay the spinner so a fast restart
-    // looks like one continuous interaction rather than a flash of loading UI.
-    reloadingRef.current = true;
-    player.pause();
-    publish({ ...previous, positionMs: bounded, paused: true, ended: false });
-    setControlsBusy(true);
-    beginSeekFeedback();
-    setPlaybackNotice('Seeking…');
-    const seekStartedAt = performance.now();
-    try {
-      const selectedSubtitle = activeSession.selected.subtitleStream;
-      const updated = await playbackResolver.update(activeSession.sessionId, {
-        seekMs: bounded,
-        // A seek creates a new transformed stream generation. Preserve the
-        // currently selected subtitle explicitly so the server issues the
-        // matching subtitle capability/manifest for that generation instead
-        // of falling back to the session default (usually Off).
-        preferences: {
-          subtitleStream: selectedSubtitle >= 0 ? selectedSubtitle : null,
-          subtitleLanguage: activeSession.preferences.subtitleLanguage,
-        },
-      });
-      const next = preserveSeekSubtitleState(activeSession, updated);
-      log.info('seek-server-updated', {
-        sessionId: next.sessionId,
-        mode: next.mode,
-        positionMs: bounded,
-        elapsedMs: Math.round((performance.now() - seekStartedAt) * 10) / 10,
-      });
-      if (!mountedRef.current) {
-        await playbackResolver.stop(next.sessionId).catch(() => undefined);
-        return false;
-      }
-      await loadSession(next, bounded, resumeAfterSeek);
-      clearCommittedSeek();
-      log.info('seek-complete', {
-        sessionId: next.sessionId,
-        mode: next.mode,
-        positionMs: bounded,
-        elapsedMs: Math.round((performance.now() - seekStartedAt) * 10) / 10,
-        resumeAfterSeek,
-      });
-      setPlaybackNotice(undefined);
-      return true;
-    } catch (error) {
-      log.error('seek-failed', {
-        sessionId: activeSession.sessionId,
-        mode: activeSession.mode,
-        positionMs: bounded,
-        elapsedMs: Math.round((performance.now() - seekStartedAt) * 10) / 10,
-        error,
-      });
-      reloadingRef.current = false;
-      clearCommittedSeek();
-      publish(previous);
-      if (resumeAfterSeek) player.resume();
-      if (mountedRef.current) setPlaybackNotice(error instanceof Error ? error.message : String(error));
-      return false;
-    } finally {
-      reloadingRef.current = false;
-      if (mountedRef.current) {
-        setSeekInFlight(false);
-        setControlsBusy(false);
-      }
-    }
-  }, [beginSeekFeedback, clearCommittedSeek, clearDesiredSeek, fatalError, html5Player, interactionControlled, loadSession, log, media.durationMs, playbackResolver, player, publish, queueControl, setControlsBusy, setDesiredSeek, setScrubPosition, webControls]);
-
-  const seekBy = useCallback((deltaMs: number) => {
-    const activeSession = sessionRef.current;
-    const durationMs = activeSession?.durationMs || media.durationMs || latestRef.current.durationMs || Number.MAX_SAFE_INTEGER;
-    const actualPositionMs = activeSession ? latestRef.current.positionMs : pendingStartupPositionRef.current;
-    const target = nextDesiredSeekPosition(
-      desiredSeekRef.current,
-      actualPositionMs,
-      deltaMs,
-      durationMs,
-    );
-    void seek(target);
-  }, [media.durationMs, seek]);
-
-  const playFromStart = useCallback(async () => {
-    const activeSession = sessionRef.current;
-    log.info('restart-ui-request', {
-      sessionId: activeSession?.sessionId,
-      mode: activeSession?.mode,
-      currentPositionMs: latestRef.current.positionMs,
-    });
-    const restarted = await seek(0);
-    if (!restarted || !mountedRef.current) return;
-    setPaused(false);
-  }, [log, seek, setPaused]);
-
-  const reconfigure = useCallback(async (update: PlaybackUpdate) => {
-    const activeSession = sessionRef.current;
-    if (!activeSession) {
-      setPlaybackNotice(fatalError ? fatalError.message : 'Playback options are still loading.');
-      return;
-    }
-    if (controlBusyRef.current) {
-      queueControl({ kind: 'update', update });
-      log.info('stream-update-intent-queued', { sessionId: activeSession.sessionId, update });
-      return;
-    }
-    const position = latestRef.current.positionMs;
-    const subtitleOnly = isSubtitleOnlyUpdate(update);
-    if (subtitleOnly && !player.setSubtitle) {
-      setPlaybackNotice('This platform cannot change subtitles without restarting playback.');
-      return;
-    }
-    const updateStartedAt = performance.now();
-    log.info('stream-update-ui-request', { sessionId: activeSession.sessionId, positionMs: position, subtitleOnly, update });
-    directSeekSyncRef.current?.clearPending();
-    clearDesiredSeek();
-    setSeekInFlight(false);
-    setControlsBusy(true);
-    setPlaybackNotice(subtitleOnly ? 'Loading subtitles…' : 'Updating stream…');
-    try {
-      const request = subtitleOnly
-        ? update
-        : {
-            ...update,
-            seekMs: activeSession.options.canSeek ? position : update.seekMs,
-          };
-      const next = await playbackResolver.update(activeSession.sessionId, request);
-      log.info('stream-update-server-complete', {
-        sessionId: next.sessionId,
-        mode: next.mode,
-        positionMs: position,
-        subtitleOnly,
-        elapsedMs: Math.round((performance.now() - updateStartedAt) * 10) / 10,
-      });
-      if (!mountedRef.current) {
-        await playbackResolver.stop(next.sessionId).catch(() => undefined);
-        return;
-      }
-      if (subtitleOnly) {
-        await player.setSubtitle!(next.source.subtitleUrl);
-        sessionRef.current = next;
-        setSession(next);
-      } else {
-        await loadSession(next, position, !latestRef.current.paused);
-      }
-      log.info('stream-update-complete', {
-        sessionId: next.sessionId,
-        mode: next.mode,
-        positionMs: position,
-        subtitleOnly,
-        elapsedMs: Math.round((performance.now() - updateStartedAt) * 10) / 10,
-      });
-      setPlaybackNotice(undefined);
-    } catch (error) {
-      log.error('stream-update-failed', {
-        sessionId: activeSession.sessionId,
-        positionMs: position,
-        subtitleOnly,
-        elapsedMs: Math.round((performance.now() - updateStartedAt) * 10) / 10,
-        update,
-        error,
-      });
-      if (mountedRef.current) setPlaybackNotice(error instanceof Error ? error.message : String(error));
-    } finally {
-      if (mountedRef.current) setControlsBusy(false);
-    }
-  }, [clearDesiredSeek, fatalError, loadSession, log, playbackResolver, player, queueControl, setControlsBusy]);
-
-  seekActionRef.current = seek;
-  updateActionRef.current = reconfigure;
-
-  useEffect(() => {
-    if (controlBusy || queuedControlsRef.current.length === 0) return;
-    const next = queuedControlsRef.current.shift();
-    if (!next) return;
-    // A direct seek does not enter the busy state, so explicitly advance the
-    // drain generation after consuming an item. Server-backed updates/seeks
-    // will additionally retrigger this effect when their busy state clears.
-    setQueuedControlGeneration((generation) => generation + 1);
-    if (next.kind === 'seek') void seekActionRef.current(next.positionMs);
-    else void updateActionRef.current(next.update);
-  }, [controlBusy, queuedControlGeneration]);
 
   useEffect(() => {
     const onFullscreenChange = () => {
@@ -1211,7 +571,6 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
         onMinimize();
         return;
       }
-
       if (presentation === 'full' && samsungOk && !controlsVisible) {
         keyEvent.preventDefault();
         keyEvent.stopPropagation();
@@ -1219,18 +578,14 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
         window.setTimeout(focusSamsungControls, 0);
         return;
       }
-
       if (presentation === 'full' && samsungDirection) {
         if (!controlsVisible) {
-          // Hidden player controls are the only Samsung navigation target on
-          // the full player. Do not let D-pad input move focus behind it.
           keyEvent.preventDefault();
           keyEvent.stopPropagation();
           return;
         }
         armControlsHide();
       }
-
       if (presentation === 'full' && !samsungControls && keyEvent.key === 'Escape' && document.fullscreenElement) return;
       if (presentation === 'full' && !samsungControls && (keyEvent.key === 'Escape' || keyEvent.key === 'Backspace')) {
         keyEvent.preventDefault();
@@ -1242,7 +597,7 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
       if (keyEvent.key === 'MediaPlayPause' || (presentation === 'full' && keyEvent.key === ' ')) {
         keyEvent.preventDefault();
         keyEvent.stopPropagation();
-        setPaused(starting || controlBusyRef.current ? !desiredPausedRef.current : !latestRef.current.paused);
+        setPaused(!playback.intent.paused);
         return;
       }
       if (keyEvent.key === 'MediaPlay') {
@@ -1259,8 +614,7 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
       }
       if (presentation === 'full' && webControls && !keyEvent.altKey && !keyEvent.ctrlKey && !keyEvent.metaKey) {
         const delta = webSeekDeltaForKey(keyEvent.key);
-        const targetOwnsArrowKeys = webArrowTargetOwnsKey(keyEvent.target);
-        if (delta !== undefined && !targetOwnsArrowKeys) {
+        if (delta !== undefined && !webArrowTargetOwnsKey(keyEvent.target)) {
           keyEvent.preventDefault();
           keyEvent.stopPropagation();
           showControls();
@@ -1284,18 +638,21 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
     };
     window.addEventListener('keydown', onKeyDown, true);
     return () => window.removeEventListener('keydown', onKeyDown, true);
-  }, [armControlsHide, controlsVisible, focusSamsungControls, hideControls, interactionControlled, onMinimize, optionsVisible, presentation, samsungControls, seekBy, setPaused, showControls, starting, webControls]);
+  }, [armControlsHide, controlsVisible, focusSamsungControls, interactionControlled, onMinimize, optionsVisible, playback.intent.paused, presentation, samsungControls, seekBy, setPaused, showControls, webControls]);
 
-  const duration = session?.durationMs || event.durationMs || 1;
-  const displayedProgress = scrubValue ?? Math.min(duration, event.positionMs);
+  const session = playback.session;
+  const event = playback.event;
+  const duration = session?.durationMs || event.durationMs || media.durationMs || 1;
+  const displayedProgress = scrubValue ?? Math.min(duration, playback.intent.positionMs);
   const audio = media.kind === 'track';
   const streamStatus = describePlaybackSession(session);
   const mediaSubtitle = media.kind === 'episode'
     ? `${media.playbackContext?.series.title ?? ''} ${media.subtitle ?? ''}`.trim()
     : media.subtitle;
-  const pausedForControl = starting || controlBusy ? desiredPaused : event.paused;
+  const pausedForControl = playback.intent.paused;
   const queueLabel = queuePosition && queuePosition.total > 1 ? `${queuePosition.index + 1} of ${queuePosition.total}` : undefined;
   const playerSubtitle = [mediaSubtitle, queueLabel].filter(Boolean).join(' · ');
+  const showBuffering = !fatalError && (playback.starting || Boolean(event.buffering));
 
   return (
     <section
@@ -1331,8 +688,7 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
           {cover ? <img src={cover} alt="" /> : <div className="audio-player-placeholder">♪</div>}
         </div>
       )}
-      {starting && <Loading />}
-      {seekInFlight && <Loading key={seekFeedbackGeneration} delayMs={uiSettings.playerSeekSpinnerDelayMs} />}
+      {showBuffering && <Loading delayMs={playback.starting ? 0 : uiSettings.playerSeekSpinnerDelayMs} />}
 
       {fatalError && (
         <div className="player-fatal-error" role="alert">
@@ -1354,6 +710,8 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
           <div className="player-stream-status" aria-live="polite">
             {playbackNotice ? (
               <small>{playbackNotice}</small>
+            ) : playback.preparingSource ? (
+              <small>Preparing new stream…</small>
             ) : (
               <>
                 {streamStatus?.video && <small>{streamStatus.video}</small>}
@@ -1366,10 +724,7 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
 
         {optionsVisible && (
           session ? (
-            <PlayerOptions
-              session={session}
-              onApply={(update) => void reconfigure(update)}
-            />
+            <PlayerOptions session={session} onApply={reconfigure} />
           ) : (
             <div className="player-options player-options-loading" aria-live="polite">
               Playback options are loading. Transport controls remain available.
@@ -1400,21 +755,18 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
               value={displayedProgress}
               aria-label="Playback position"
               data-tv-focusable="true"
-              aria-busy={controlBusy || undefined}
-              onChange={(changeEvent: ChangeEvent<HTMLInputElement>) => {
-                setScrubPosition(Number(changeEvent.target.value));
-              }}
+              onChange={(changeEvent: ChangeEvent<HTMLInputElement>) => setScrubPosition(Number(changeEvent.target.value))}
               onPointerUp={() => {
                 const position = scrubValueRef.current;
-                if (position !== undefined) void seek(position);
+                if (position !== undefined) seek(position);
               }}
               onKeyUp={(keyEvent: ReactKeyboardEvent<HTMLInputElement>) => {
                 const position = scrubValueRef.current;
-                if (position !== undefined && ['Home', 'End'].includes(keyEvent.key)) void seek(position);
+                if (position !== undefined && ['Home', 'End'].includes(keyEvent.key)) seek(position);
               }}
               onBlur={() => {
                 const position = scrubValueRef.current;
-                if (position !== undefined) void seek(position);
+                if (position !== undefined) seek(position);
               }}
             />
           )}
@@ -1424,24 +776,16 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
         <div className="player-button-row">
           <button type="button" data-tv-focusable="true" onClick={onMinimize} aria-label="Minimise player"><PlayerIcon name="back" /></button>
           {queuePosition && queuePosition.total > 1 && (
-            <button type="button" data-tv-focusable="true" onClick={() => { if (canPrevious) onPrevious(); else setPlaybackNotice('Already at the first item.'); }} aria-label="Previous item"><PlayerIcon name="previous" /></button>
+            <button type="button" data-tv-focusable="true" onClick={() => { if (canPrevious) onPrevious(); else setLocalNotice('Already at the first item.'); }} aria-label="Previous item"><PlayerIcon name="previous" /></button>
           )}
-          <button
-            type="button"
-            data-tv-focusable="true"
-            onClick={() => void playFromStart()}
-            aria-label="Play from start"
-            title="Play from start"
-          >
-            <RestartIcon />
-          </button>
+          <button type="button" data-tv-focusable="true" onClick={playFromStart} aria-label="Play from start" title="Play from start"><RestartIcon /></button>
           <button type="button" data-tv-focusable="true" onClick={() => seekBy(-10_000)} aria-label="Seek backward"><PlayerIcon name="rewind" /></button>
           <button type="button" data-tv-focusable="true" data-tv-default-focus={samsungControls ? 'true' : undefined} onClick={() => setPaused(!pausedForControl)} aria-label={pausedForControl ? 'Play' : 'Pause'}>
             {pausedForControl ? <PlayIcon /> : <PlayerIcon name="pause" />}
           </button>
           <button type="button" data-tv-focusable="true" onClick={() => seekBy(10_000)} aria-label="Seek forward"><PlayerIcon name="forward" /></button>
           {queuePosition && queuePosition.total > 1 && (
-            <button type="button" data-tv-focusable="true" onClick={() => { if (canNext) onNext(); else setPlaybackNotice('Already at the last item.'); }} aria-label="Next item"><PlayerIcon name="next" /></button>
+            <button type="button" data-tv-focusable="true" onClick={() => { if (canNext) onNext(); else setLocalNotice('Already at the last item.'); }} aria-label="Next item"><PlayerIcon name="next" /></button>
           )}
           <button
             type="button"
@@ -1457,13 +801,7 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
           </button>
           {!samsungControls && <VolumeControl volume={volume} onChange={onVolumeChange} />}
           {platform.name === 'web' && document.fullscreenEnabled && (
-            <button
-              type="button"
-              data-tv-focusable="true"
-              onClick={() => void toggleFullscreen()}
-              aria-label={fullscreen ? 'Exit fullscreen' : 'Fullscreen'}
-              title={fullscreen ? 'Exit fullscreen' : 'Fullscreen'}
-            >
+            <button type="button" data-tv-focusable="true" onClick={() => void toggleFullscreen()} aria-label={fullscreen ? 'Exit fullscreen' : 'Fullscreen'} title={fullscreen ? 'Exit fullscreen' : 'Fullscreen'}>
               <PlayerIcon name={fullscreen ? 'fullscreen-exit' : 'fullscreen'} />
             </button>
           )}
@@ -1474,21 +812,19 @@ function PlayerSession({ api, media, platform, playbackResolver, startPositionMs
       <div className="player-mini-chrome" aria-label="Now playing">
         <button className="player-mini-copy" type="button" data-tv-focusable="true" onClick={onExpand} aria-label={`Open player for ${media.title}`}>
           <span className="player-mini-title">{media.title}</span>
-          <span className="player-mini-subtitle">
-            {fatalError ? `Playback failed · ${fatalError.message}` : playerSubtitle || 'Now playing'}
-          </span>
+          <span className="player-mini-subtitle">{fatalError ? `Playback failed · ${fatalError.message}` : playerSubtitle || 'Now playing'}</span>
           <span className="player-mini-time">{formatTime(displayedProgress)} / {formatTime(duration)}</span>
           <span className="player-mini-progress" aria-hidden="true"><span style={{ width: `${Math.min(100, displayedProgress / Math.max(1, duration) * 100)}%` }} /></span>
         </button>
         <div className="player-mini-controls">
           {queuePosition && queuePosition.total > 1 && (
-            <button type="button" data-tv-focusable="true" onClick={() => { if (canPrevious) onPrevious(); else setPlaybackNotice('Already at the first item.'); }} aria-label="Previous item"><PlayerIcon name="previous" /></button>
+            <button type="button" data-tv-focusable="true" onClick={() => { if (canPrevious) onPrevious(); else setLocalNotice('Already at the first item.'); }} aria-label="Previous item"><PlayerIcon name="previous" /></button>
           )}
           <button type="button" data-tv-focusable="true" data-tv-default-focus={samsungControls ? 'true' : undefined} onClick={() => setPaused(!pausedForControl)} aria-label={pausedForControl ? 'Play' : 'Pause'}>
             {pausedForControl ? <PlayIcon /> : <PlayerIcon name="pause" />}
           </button>
           {queuePosition && queuePosition.total > 1 && (
-            <button type="button" data-tv-focusable="true" onClick={() => { if (canNext) onNext(); else setPlaybackNotice('Already at the last item.'); }} aria-label="Next item"><PlayerIcon name="next" /></button>
+            <button type="button" data-tv-focusable="true" onClick={() => { if (canNext) onNext(); else setLocalNotice('Already at the last item.'); }} aria-label="Next item"><PlayerIcon name="next" /></button>
           )}
           {!samsungControls && <VolumeControl volume={volume} onChange={onVolumeChange} compact />}
           <button type="button" data-tv-focusable="true" onClick={onExpand} aria-label="Open full player"><PlayerIcon name="expand" /></button>

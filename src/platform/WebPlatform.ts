@@ -1,7 +1,7 @@
 import Hls from 'hls.js';
 import { createClientLogger } from '../diagnostics/ClientLog';
 import type { Platform, PlaybackListener, Player } from './Platform';
-import type { PlaybackCapabilities, PlaybackSource } from '../types';
+import type { PlaybackCapabilities, PlaybackSource, PlaybackTimeRange } from '../types';
 import { detectWebMediaCodecCapabilities } from './WebMediaCapabilities';
 import {
   directPlayReadAheadMetrics,
@@ -59,6 +59,33 @@ function isHls(source: PlaybackSource): boolean {
 
 function nativeHlsSupported(video: HTMLVideoElement): boolean {
   return video.canPlayType('application/vnd.apple.mpegurl') !== '' || video.canPlayType('application/x-mpegURL') !== '';
+}
+
+export function shouldUseManagedHls(forceNativeHls: boolean | undefined, managedSupported: boolean): boolean {
+  return forceNativeHls !== true && managedSupported;
+}
+
+export function webHlsBufferConfig(positionMs: number): Record<string, number | boolean> {
+  return {
+    enableWorker: true,
+    // Local Macha VOD should keep ordinary navigation in browser memory while
+    // retaining a hard byte ceiling for very high bitrate sources.
+    maxBufferLength: 60,
+    maxMaxBufferLength: 120,
+    maxBufferSize: 128 * 1024 * 1024,
+    backBufferLength: 30,
+    startPosition: Math.max(0, positionMs / 1000),
+  };
+}
+
+/** Web transport policy for source-local seeks that need no session mutation. */
+export function webLocalSeekCoverage(
+  source: PlaybackSource,
+  bufferedRanges: readonly PlaybackTimeRange[],
+): readonly PlaybackTimeRange[] {
+  return source.mode === 'direct'
+    ? [{ startMs: 0, endMs: Number.POSITIVE_INFINITY }]
+    : bufferedRanges;
 }
 
 function ranges(rangesValue: TimeRanges): Array<{ start: number; end: number }> {
@@ -157,7 +184,7 @@ class WebPlayer implements Player {
   private readonly log = createClientLogger('playback.web', { playerId: this.playerId });
   private lastTimeLogMs = 0;
   private lastProgressLogMs = 0;
-  private pendingInitialPositionMs = 0;
+  private initialSeekCleanup?: () => void;
   private subtitleGeneration = 0;
   private subtitleCleanup?: () => void;
   private subtitleTextTrack?: TextTrack;
@@ -165,6 +192,7 @@ class WebPlayer implements Player {
   private directReadAheadSourceUrl?: string;
   private wantsPlayback = false;
   private playRequestGeneration = 0;
+  private activeSource?: PlaybackSource;
 
   constructor(private readonly options: WebPlayerOptions = {}) {}
 
@@ -179,9 +207,11 @@ class WebPlayer implements Player {
     this.host = undefined;
   }
 
-  async play(source: PlaybackSource, positionMs = 0): Promise<boolean> {
+  async play(source: PlaybackSource, positionMs = 0, startPaused = false): Promise<boolean> {
     if (!this.host) throw new Error('Player must be attached before playback');
     const playRequestGeneration = ++this.playRequestGeneration;
+    this.wantsPlayback = !startPaused;
+    this.activeSource = source;
     this.log.info('source-load-begin', {
       mode: source.mode,
       mimeType: source.mimeType,
@@ -191,7 +221,8 @@ class WebPlayer implements Player {
       requestedPositionMs: positionMs,
       hls: isHls(source),
     });
-    this.pendingInitialPositionMs = positionMs;
+    this.initialSeekCleanup?.();
+    this.initialSeekCleanup = undefined;
     releaseDirectPlayReadAhead(this.directReadAheadSourceUrl);
     this.directReadAheadSourceUrl = undefined;
     this.hls?.destroy();
@@ -234,48 +265,52 @@ class WebPlayer implements Player {
       video.addEventListener('seeked', publish);
       video.addEventListener('canplay', publish);
       video.addEventListener('ended', publish);
-      if (this.options.legacyMediaElement) {
-        const resumeWhenReady = () => {
-          if (!this.wantsPlayback || !video!.paused) return;
-          this.requestLegacyPlay(video!, 'media-ready');
-        };
-        video.addEventListener('loadedmetadata', resumeWhenReady);
-        video.addEventListener('loadeddata', resumeWhenReady);
-        video.addEventListener('canplay', resumeWhenReady);
-      }
-      video.addEventListener('loadedmetadata', () => {
-        const requestedPositionMs = this.pendingInitialPositionMs;
-        if (requestedPositionMs > 0) {
-          this.log.info('initial-local-seek', { requestedPositionMs, before: videoState(video!) });
-          video!.currentTime = requestedPositionMs / 1000;
-        }
-        publish();
-      });
+      const resumeWhenReady = () => {
+        if (!this.wantsPlayback || !video!.paused) return;
+        this.requestPlay(video!, 'media-ready');
+      };
+      // Source attachment and MSE setup are asynchronous. A play() request made
+      // before the media element has a usable source may be rejected by Chromium;
+      // readiness events retry the *same viewer intent* without making readiness
+      // part of application control flow.
+      video.addEventListener('loadedmetadata', resumeWhenReady);
+      video.addEventListener('loadeddata', resumeWhenReady);
+      video.addEventListener('canplay', resumeWhenReady);
       this.video = video;
       while (this.host.firstChild) this.host.removeChild(this.host.firstChild);
       this.host.appendChild(video);
     }
 
     const publish = () => this.publish(video!);
+    if (positionMs > 0) {
+      const initialSeek = () => {
+        if (playRequestGeneration !== this.playRequestGeneration || video !== this.video) return;
+        this.log.info('initial-local-seek', { requestedPositionMs: positionMs, before: videoState(video) });
+        video.currentTime = positionMs / 1000;
+        publish();
+      };
+      video.addEventListener('loadedmetadata', initialSeek, { once: true });
+      this.initialSeekCleanup = () => video.removeEventListener('loadedmetadata', initialSeek);
+    }
 
     void this.applySubtitle(video, source.subtitleUrl).catch((error) => {
       this.log.warn('subtitle-initial-load-failed', { url: source.subtitleUrl, error: error instanceof Error ? error.message : String(error) });
     });
 
     if (isHls(source)) {
-      if (this.options.forceNativeHls || nativeHlsSupported(video)) {
+      if (shouldUseManagedHls(this.options.forceNativeHls, Hls.isSupported())) {
+        this.log.info('hls-js-selected', { url: source.url });
+        this.attachHls(video, source.url, positionMs);
+      } else if (this.options.forceNativeHls || nativeHlsSupported(video)) {
         this.log.info('hls-native-selected', { url: source.url });
         video.src = source.url;
-      } else if (Hls.isSupported()) {
-        this.log.info('hls-js-selected', { url: source.url });
-        await this.attachHls(video, source.url);
       } else {
         this.log.error('hls-unsupported', { url: source.url });
         throw new Error('This browser cannot play fragmented-MP4 HLS.');
       }
     } else {
       const directUrl = source.mode === 'direct' && this.options.directPlayReadAhead !== false
-        ? await directPlayReadAheadUrl(source)
+        ? directPlayReadAheadUrl(source)
         : source.url;
       if (directUrl !== source.url) {
         this.directReadAheadSourceUrl = source.url;
@@ -290,53 +325,21 @@ class WebPlayer implements Player {
     }
 
     const playStarted = performance.now();
-    this.wantsPlayback = true;
-    if (this.options.legacyMediaElement) {
-      // Chrome 47 predates the standardized Promise-returning play(). Setting
-      // autoplay before the source and issuing play explicitly gives the TV
-      // both mechanisms; readiness events retry the request if it was early.
-      video.muted = false;
-      video.defaultMuted = false;
-      video.removeAttribute('muted');
-      this.requestLegacyPlay(video, 'source-ready');
-      this.log.info('autoplay-requested-legacy', {
+    if (startPaused) {
+      video.pause();
+      this.log.info('source-attached-paused', {
         elapsedMs: Math.round((performance.now() - playStarted) * 10) / 10,
         state: videoState(video),
       });
-      return true;
+    } else {
+      this.requestPlay(video, 'source-attached', playRequestGeneration);
     }
-    try {
-      await video.play();
-      this.log.info('autoplay-started', {
-        elapsedMs: Math.round((performance.now() - playStarted) * 10) / 10,
-        state: videoState(video),
-      });
-    } catch (error) {
-      if (error instanceof DOMException && error.name === 'AbortError'
-        && (playRequestGeneration !== this.playRequestGeneration || !this.wantsPlayback)) {
-        // Controls and stream changes are live during startup. Pausing,
-        // resuming or replacing the source may intentionally abort this older
-        // play() promise; that is supersession, not a source-load failure.
-        this.log.info('autoplay-superseded-by-control', {
-          elapsedMs: Math.round((performance.now() - playStarted) * 10) / 10,
-          state: videoState(video),
-        });
-        publish();
-        return false;
-      }
-      if (error instanceof DOMException && error.name === 'NotAllowedError') {
-        this.log.warn('autoplay-blocked', {
-          elapsedMs: Math.round((performance.now() - playStarted) * 10) / 10,
-          error,
-          state: videoState(video),
-        });
-        publish();
-        return false;
-      }
-      this.log.error('autoplay-failed', { error, state: videoState(video) });
-      throw error;
-    }
-    return !video.paused;
+    this.log.info('source-load-dispatched', {
+      elapsedMs: Math.round((performance.now() - playStarted) * 10) / 10,
+      startPaused,
+      state: videoState(video),
+    });
+    return true;
   }
 
   async setSubtitle(subtitleUrl?: string): Promise<void> {
@@ -613,33 +616,66 @@ class WebPlayer implements Player {
     this.playRequestGeneration += 1;
     const video = this.video;
     if (!video) {
-      this.log.warn('resume-request-without-media');
+      this.wantsPlayback = true;
+      this.log.debug('resume-intent-before-media');
       return;
     }
     this.log.info('resume-request', videoState(video));
     this.wantsPlayback = true;
-    if (this.options.legacyMediaElement) {
-      this.requestLegacyPlay(video, 'resume');
-      return;
-    }
-    void video.play()
-      .then(() => this.log.info('resume-started', videoState(video)))
-      .catch((error) => this.log.error('resume-failed', { error, state: videoState(video) }));
+    this.requestPlay(video, 'resume');
   }
 
-  private requestLegacyPlay(video: HTMLVideoElement, reason: string): void {
+  private requestPlay(video: HTMLVideoElement, reason: string, expectedGeneration = this.playRequestGeneration): void {
+    if (!this.wantsPlayback || expectedGeneration !== this.playRequestGeneration || video !== this.video) return;
     try {
       const result = video.play() as Promise<void> | undefined;
-      if (result && typeof result.then === 'function') {
-        void result
-          .then(() => this.log.info('legacy-play-started', { reason, state: videoState(video) }))
-          .catch((error) => this.log.warn('legacy-play-deferred', { reason, error, state: videoState(video) }));
-      } else {
-        this.log.debug('legacy-play-requested', { reason, state: videoState(video) });
+      if (!result || typeof result.then !== 'function') {
+        this.log.debug('play-requested-legacy', { reason, state: videoState(video) });
+        return;
       }
+      void result.then(() => {
+        if (!this.wantsPlayback || expectedGeneration !== this.playRequestGeneration || video !== this.video) return;
+        this.log.info(reason === 'resume' ? 'resume-started' : 'autoplay-started', { reason, state: videoState(video) });
+      }).catch((error) => {
+        if (!this.wantsPlayback || expectedGeneration !== this.playRequestGeneration || video !== this.video) {
+          this.log.debug('play-superseded-by-control', { reason, error, state: videoState(video) });
+          return;
+        }
+        if (error instanceof DOMException && error.name === 'NotAllowedError') {
+          this.log.warn('autoplay-blocked', { reason, error, state: videoState(video) });
+          return;
+        }
+        // AbortError is normal when another media operation supersedes play().
+        // NotSupportedError/HAVE_NOTHING commonly means hls.js has not attached
+        // its MediaSource yet; loadedmetadata/loadeddata/canplay will retry.
+        if ((error instanceof DOMException && (error.name === 'AbortError' || error.name === 'NotSupportedError'))
+            || video.readyState === HTMLMediaElement.HAVE_NOTHING) {
+          this.log.debug('play-deferred-until-media-ready', { reason, error, state: videoState(video) });
+          return;
+        }
+        this.log.warn('play-request-failed', { reason, error, state: videoState(video) });
+      });
     } catch (error) {
-      this.log.warn('legacy-play-request-failed', { reason, error, state: videoState(video) });
+      if (!this.wantsPlayback || expectedGeneration !== this.playRequestGeneration || video !== this.video) return;
+      this.log.debug('play-request-threw-before-media-ready', { reason, error, state: videoState(video) });
     }
+  }
+
+  localSeekCoverage(): readonly PlaybackTimeRange[] {
+    const source = this.activeSource;
+    if (!source) return [];
+
+    const video = this.video;
+    const bufferedRanges: PlaybackTimeRange[] = [];
+    if (video) {
+      for (let index = 0; index < video.buffered.length; index += 1) {
+        bufferedRanges.push({
+          startMs: video.buffered.start(index) * 1000,
+          endMs: video.buffered.end(index) * 1000,
+        });
+      }
+    }
+    return webLocalSeekCoverage(source, bufferedRanges);
   }
 
   seek(positionMs: number): void {
@@ -647,9 +683,17 @@ class WebPlayer implements Player {
       this.log.warn('local-seek-without-media', { positionMs });
       return;
     }
-    this.log.info('local-seek-request', { positionMs, state: videoState(this.video) });
+    const targetSeconds = Math.max(0, positionMs / 1000);
+    let bufferedHit = false;
+    for (let index = 0; index < this.video.buffered.length; index += 1) {
+      if (this.video.buffered.start(index) <= targetSeconds && this.video.buffered.end(index) >= targetSeconds) {
+        bufferedHit = true;
+        break;
+      }
+    }
+    this.log.info('local-seek-request', { positionMs, bufferedHit, state: videoState(this.video) });
     setDirectPlayReadAheadMode(this.directReadAheadSourceUrl, 'seeking');
-    this.video.currentTime = Math.max(0, positionMs / 1000);
+    this.video.currentTime = targetSeconds;
   }
 
   setVolume(volume: number): void {
@@ -667,9 +711,12 @@ class WebPlayer implements Player {
   stop(): void {
     this.playRequestGeneration += 1;
     this.wantsPlayback = false;
+    this.activeSource = undefined;
     this.log.debug('stop', this.video ? videoState(this.video) : undefined);
     this.hls?.destroy();
     this.hls = undefined;
+    this.initialSeekCleanup?.();
+    this.initialSeekCleanup = undefined;
     releaseDirectPlayReadAhead(this.directReadAheadSourceUrl);
     this.directReadAheadSourceUrl = undefined;
     const video = this.video;
@@ -688,65 +735,50 @@ class WebPlayer implements Player {
     return () => this.listeners.delete(listener);
   }
 
-  private attachHls(video: HTMLVideoElement, url: string): Promise<void> {
-    return new Promise((resolve, reject) => {
-      const hls = new Hls({ enableWorker: true });
-      this.hls = hls;
-      let settled = false;
-      const attachedAt = performance.now();
+  private attachHls(video: HTMLVideoElement, url: string, positionMs: number): void {
+    const hls = new Hls(webHlsBufferConfig(positionMs));
+    this.hls = hls;
+    const attachedAt = performance.now();
 
-      const fail = (message: string) => {
-        if (settled) return;
-        settled = true;
-        this.log.error('hls-startup-failed', { message, elapsedMs: Math.round((performance.now() - attachedAt) * 10) / 10 });
+    hls.on(Hls.Events.MEDIA_ATTACHED, () => {
+      this.log.debug('hls-media-attached');
+      this.requestPlay(video, 'hls-media-attached');
+    });
+    hls.on(Hls.Events.MANIFEST_LOADING, (_event, data) => this.log.debug('hls-manifest-loading', hlsEventSummary(data)));
+    hls.on(Hls.Events.MANIFEST_LOADED, (_event, data) => this.log.debug('hls-manifest-loaded', hlsEventSummary(data)));
+    hls.on(Hls.Events.MANIFEST_PARSED, (_event, data) => {
+      this.log.info('hls-manifest-parsed', {
+        elapsedMs: Math.round((performance.now() - attachedAt) * 10) / 10,
+        data: hlsEventSummary(data),
+      });
+      this.requestPlay(video, 'hls-manifest-parsed');
+    });
+    hls.on(Hls.Events.LEVEL_SWITCHING, (_event, data) => this.log.debug('hls-level-switching', hlsEventSummary(data)));
+    hls.on(Hls.Events.LEVEL_SWITCHED, (_event, data) => this.log.debug('hls-level-switched', hlsEventSummary(data)));
+    hls.on(Hls.Events.FRAG_LOADING, (_event, data) => this.log.debug('hls-fragment-loading', hlsEventSummary(data)));
+    hls.on(Hls.Events.FRAG_LOADED, (_event, data) => this.log.debug('hls-fragment-loaded', hlsEventSummary(data)));
+    hls.on(Hls.Events.FRAG_BUFFERED, (_event, data) => this.log.debug('hls-fragment-buffered', { data: hlsEventSummary(data), state: videoState(video) }));
+    hls.on(Hls.Events.ERROR, (_event, data) => {
+      const payload = { data: hlsEventSummary(data), state: videoState(video) };
+      if (!data.fatal) {
+        this.log.warn('hls-error-nonfatal', payload);
+        return;
+      }
+      this.log.error('hls-error-fatal', payload);
+      if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+        this.log.warn('hls-recovery-network-start-load', payload);
+        hls.startLoad(video.currentTime);
+      } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+        this.log.warn('hls-recovery-media', payload);
+        hls.recoverMediaError();
+      } else {
+        this.log.error('hls-unrecoverable-destroy', payload);
         hls.destroy();
         if (this.hls === hls) this.hls = undefined;
-        reject(new Error(message));
-      };
-
-      hls.on(Hls.Events.MEDIA_ATTACHED, () => this.log.debug('hls-media-attached'));
-      hls.on(Hls.Events.MANIFEST_LOADING, (_event, data) => this.log.debug('hls-manifest-loading', hlsEventSummary(data)));
-      hls.on(Hls.Events.MANIFEST_LOADED, (_event, data) => this.log.debug('hls-manifest-loaded', hlsEventSummary(data)));
-      hls.on(Hls.Events.MANIFEST_PARSED, (_event, data) => {
-        this.log.info('hls-manifest-parsed', {
-          elapsedMs: Math.round((performance.now() - attachedAt) * 10) / 10,
-          data: hlsEventSummary(data),
-        });
-        if (settled) return;
-        settled = true;
-        resolve();
-      });
-      hls.on(Hls.Events.LEVEL_SWITCHING, (_event, data) => this.log.debug('hls-level-switching', hlsEventSummary(data)));
-      hls.on(Hls.Events.LEVEL_SWITCHED, (_event, data) => this.log.debug('hls-level-switched', hlsEventSummary(data)));
-      hls.on(Hls.Events.FRAG_LOADING, (_event, data) => this.log.debug('hls-fragment-loading', hlsEventSummary(data)));
-      hls.on(Hls.Events.FRAG_LOADED, (_event, data) => this.log.debug('hls-fragment-loaded', hlsEventSummary(data)));
-      hls.on(Hls.Events.FRAG_BUFFERED, (_event, data) => this.log.debug('hls-fragment-buffered', { data: hlsEventSummary(data), state: videoState(video) }));
-      hls.on(Hls.Events.ERROR, (_event, data) => {
-        const payload = { data: hlsEventSummary(data), state: videoState(video) };
-        if (!data.fatal) {
-          this.log.warn('hls-error-nonfatal', payload);
-          return;
-        }
-        this.log.error('hls-error-fatal', payload);
-        if (!settled) {
-          fail(`HLS startup error: ${data.details}`);
-          return;
-        }
-        if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-          this.log.warn('hls-recovery-network-start-load', payload);
-          hls.startLoad();
-        } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
-          this.log.warn('hls-recovery-media', payload);
-          hls.recoverMediaError();
-        } else {
-          this.log.error('hls-unrecoverable-destroy', payload);
-          hls.destroy();
-        }
-      });
-      this.log.debug('hls-load-source', { url });
-      hls.loadSource(url);
-      hls.attachMedia(video);
+      }
     });
+    hls.loadSource(url);
+    hls.attachMedia(video);
   }
 
   private attachMediaDiagnostics(video: HTMLVideoElement): void {
@@ -784,8 +816,17 @@ class WebPlayer implements Player {
 
   private publish(video: HTMLVideoElement): void {
     const duration = Number.isFinite(video.duration) ? video.duration * 1000 : 0;
+    const bufferedRangesMs: Array<{ startMs: number; endMs: number }> = [];
+    let forwardBufferMs = 0;
+    const currentMs = video.currentTime * 1000;
+    for (let index = 0; index < video.buffered.length; index += 1) {
+      const startMs = video.buffered.start(index) * 1000;
+      const endMs = video.buffered.end(index) * 1000;
+      bufferedRangesMs.push({ startMs, endMs });
+      if (startMs <= currentMs + 250 && endMs >= currentMs) forwardBufferMs = Math.max(forwardBufferMs, endMs - currentMs);
+    }
     const event = {
-      positionMs: video.currentTime * 1000,
+      positionMs: currentMs,
       durationMs: duration,
       paused: video.paused,
       ended: video.ended,
@@ -793,6 +834,8 @@ class WebPlayer implements Player {
       buffering: !video.paused
         && !video.ended
         && (video.seeking || video.readyState < HTMLMediaElement.HAVE_FUTURE_DATA),
+      bufferedRangesMs,
+      forwardBufferMs,
     };
     this.listeners.forEach((listener) => listener(event));
   }

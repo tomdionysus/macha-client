@@ -46,3 +46,31 @@ Production web hosting must fall back to `index.html` for unknown application pa
 - React owns catalogue browsing, routes, search, hierarchy, focus navigation and playback chrome.
 - Continue Watching is installation-local state, bounded to three unfinished items and never uploaded.
 - There is no cloud service, account system, advertising, recommendations, social activity or global watchlist.
+
+## Playback critical path
+
+Playback is intentionally split into two planes:
+
+```text
+user intent ── play / pause / seek ───────────────► active player immediately
+     │
+     └── source-generation change required? ─────► server preparation
+                                                       │
+                                                       ▼
+                                              newest generation ready
+                                                       │
+                                                       ▼
+                                              apply latest user intent
+```
+
+`PlaybackCoordinator` is the sole owner of playback intent and source-generation transitions. React renders its snapshot and forwards controls; it does not serialize transport operations or infer completion from `waiting`/`seeked` event combinations.
+
+The invariants are:
+
+- Viewer demand is never queued behind caching, session bookkeeping or speculative work.
+- Play, pause and any seek representable by the active source generation are local transport commands.
+- A server playback update is a request for a new source generation, not a transport operation.
+- Newer user intent supersedes older intent while server work is in flight; intermediate generations are not needlessly attached.
+- Modern Web transformed playback uses hls.js/MSE with a bounded forward buffer; Samsung keeps its legacy native-HLS path.
+- Direct Play read-ahead is optional. If its Service Worker is not already usable, playback takes the native URL immediately.
+- Buffering is observable state, never a lock that disables or serializes controls.

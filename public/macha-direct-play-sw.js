@@ -3,9 +3,11 @@
  * Viewer demand is never scheduled behind read-ahead. Cache misses are proxied
  * as native streaming HTTP range requests; speculative fetches run only after
  * established playback has gone briefly quiet and are aborted immediately by
- * new demand or a seek. The cache is memory-only and contains only completed
- * speculative ranges, so read-ahead can improve future demand without ever
- * becoming a prerequisite for current demand.
+ * new demand or a seek. The cache is memory-only. Viewer bytes are delivered
+ * first and copied into resident cache opportunistically; completed speculative
+ * ranges share the same cache. Cache bookkeeping is never a prerequisite for
+ * current demand, so bytes already paid for can accelerate later seeks/repeats
+ * without extending the viewer-critical path.
  */
 'use strict';
 
@@ -200,27 +202,51 @@ function evict(cache) {
 
 function storeSegment(cache, start, buffer) {
   if (!buffer || buffer.byteLength <= 0 || cache.released) return;
-  const end = start + buffer.byteLength - 1;
-  // Drop ranges wholly covered by the new range, and avoid storing an exact
-  // duplicate. Partial overlap is harmless and rare because prefetch walks the
-  // contiguous-ahead frontier.
+  let mergedStart = start;
+  let mergedBuffer = buffer;
+  let mergedEnd = start + buffer.byteLength - 1;
+  // Demand streaming often arrives in small transport chunks. Coalesce adjacent
+  // chunks into modest resident entries off the viewer path so cache lookup does
+  // not degrade into a huge linear segment list during long Direct Play sessions.
+  const MAX_DEMAND_SEGMENT_BYTES = 2 * 1024 * 1024;
   for (const [existingStart, existing] of cache.segments.entries()) {
-    if (existing.start === start && existing.end === end) {
+    if (existing.start === mergedStart && existing.end === mergedEnd) {
       existing.lastAccess = Date.now();
       existing.generation = cache.generation;
       return;
     }
-    if (existing.start >= start && existing.end <= end) cache.segments.delete(existingStart);
+    if (existing.end + 1 === mergedStart
+        && existing.buffer.byteLength + mergedBuffer.byteLength <= MAX_DEMAND_SEGMENT_BYTES) {
+      const joined = new Uint8Array(existing.buffer.byteLength + mergedBuffer.byteLength);
+      joined.set(new Uint8Array(existing.buffer), 0);
+      joined.set(new Uint8Array(mergedBuffer), existing.buffer.byteLength);
+      cache.segments.delete(existingStart);
+      mergedStart = existing.start;
+      mergedBuffer = joined.buffer;
+      mergedEnd = mergedStart + mergedBuffer.byteLength - 1;
+      break;
+    }
   }
-  cache.segments.set(start, {
-    start,
-    end,
-    buffer,
+  // Drop ranges wholly covered by the new range. Partial overlap is harmless
+  // and rare because speculative fetches walk the contiguous-ahead frontier.
+  for (const [existingStart, existing] of cache.segments.entries()) {
+    if (existing.start >= mergedStart && existing.end <= mergedEnd) cache.segments.delete(existingStart);
+  }
+  cache.segments.set(mergedStart, {
+    start: mergedStart,
+    end: mergedEnd,
+    buffer: mergedBuffer,
     lastAccess: Date.now(),
     generation: cache.generation,
   });
   evict(cache);
   updateAheadBytes(cache);
+}
+
+function storeStreamChunk(cache, start, value) {
+  if (!value || !value.byteLength) return;
+  const buffer = value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength);
+  storeSegment(cache, start, buffer);
 }
 
 function parseContentRange(value) {
@@ -497,11 +523,16 @@ function wrapDemandResponse(cache, response, requestedStart, requestStartedAt, a
         cache.metrics.fetchedBytes += byteLength;
         cache.metrics.demandBytes += byteLength;
         cache.metrics.servedBytes += byteLength;
+        const chunkStart = cursor;
         cursor += byteLength;
         cache.lastServedOffset = cursor;
         cache.lastAccess = Date.now();
-        updateAheadBytes(cache);
         controller.enqueue(value);
+        // Caching is a beneficiary of demand, never a prerequisite for it.
+        // Copy/cache after enqueue so cache bookkeeping cannot extend first-byte
+        // or steady-state demand delivery latency.
+        queueMicrotask(() => storeStreamChunk(cache, chunkStart, value));
+        updateAheadBytes(cache);
         schedulePrefetch(cache);
         void postMetrics(cache, false);
       } catch (error) {
@@ -641,11 +672,16 @@ function cacheThenDemandResponse(cache, request, sourceUrl, requested, cachedEnd
         cache.metrics.fetchedBytes += byteLength;
         cache.metrics.demandBytes += byteLength;
         cache.metrics.servedBytes += byteLength;
+        const chunkStart = cursor;
         cursor += byteLength;
         cache.lastServedOffset = cursor;
         cache.lastAccess = Date.now();
-        updateAheadBytes(cache);
         controller.enqueue(value);
+        // Caching is a beneficiary of demand, never a prerequisite for it.
+        // Copy/cache after enqueue so cache bookkeeping cannot extend first-byte
+        // or steady-state demand delivery latency.
+        queueMicrotask(() => storeStreamChunk(cache, chunkStart, value));
+        updateAheadBytes(cache);
         schedulePrefetch(cache);
         void postMetrics(cache, false);
       } catch (error) {
@@ -672,10 +708,42 @@ function cacheThenDemandResponse(cache, request, sourceUrl, requested, cachedEnd
   });
 }
 
+function validHttpSource(sourceUrl) {
+  try {
+    const parsed = new URL(sourceUrl);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+function sourceConfigForProxy(sourceKey, url) {
+  const existing = sourceConfigs.get(sourceKey);
+  if (existing) return existing;
+
+  const sourceUrl = url.searchParams.get('source') || '';
+  const totalSize = Number(url.searchParams.get('size'));
+  const mimeType = url.searchParams.get('mime') || 'application/octet-stream';
+  if (!validHttpSource(sourceUrl) || !Number.isSafeInteger(totalSize) || totalSize <= 0) return undefined;
+
+  const config = {
+    sourceUrl,
+    totalSize,
+    mimeType,
+    lastAccess: Date.now(),
+    rangeUnsupported: false,
+    mode: 'bootstrap',
+    generation: 0,
+  };
+  sourceConfigs.set(sourceKey, config);
+  return config;
+}
+
 async function handleProxy(request, url) {
   const sourceKey = url.searchParams.get('key');
-  const config = sourceKey ? sourceConfigs.get(sourceKey) : undefined;
-  if (!sourceKey || !config) return new Response('Unknown Macha direct-play read-ahead source', { status: 404 });
+  if (!sourceKey) return new Response('Unknown Macha direct-play read-ahead source', { status: 404 });
+  const config = sourceConfigForProxy(sourceKey, url);
+  if (!config) return new Response('Unknown Macha direct-play read-ahead source', { status: 404 });
   const { sourceUrl, totalSize, mimeType } = config;
   config.lastAccess = Date.now();
   if (config.rangeUnsupported) return await directFetch(request, sourceUrl);
@@ -733,14 +801,7 @@ self.addEventListener('message', (event) => {
     const sourceUrl = typeof data.sourceUrl === 'string' ? data.sourceUrl : '';
     const totalSize = Number(data.sizeBytes);
     const mimeType = typeof data.mimeType === 'string' && data.mimeType ? data.mimeType : 'application/octet-stream';
-    let validSource = false;
-    try {
-      const parsed = new URL(sourceUrl);
-      validSource = parsed.protocol === 'http:' || parsed.protocol === 'https:';
-    } catch {
-      validSource = false;
-    }
-    if (sourceKey && validSource && Number.isSafeInteger(totalSize) && totalSize > 0) {
+    if (sourceKey && validHttpSource(sourceUrl) && Number.isSafeInteger(totalSize) && totalSize > 0) {
       sourceConfigs.set(sourceKey, {
         sourceUrl,
         totalSize,

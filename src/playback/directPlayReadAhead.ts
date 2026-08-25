@@ -34,8 +34,6 @@ interface ReadAheadMetricsMessage {
 const log = createClientLogger('playback.readahead');
 const WORKER_FILE = 'macha-direct-play-sw.js';
 const PROXY_PATH = '__macha_direct_cache__';
-const CONTROL_WAIT_MS = 1_500;
-const CONFIGURE_WAIT_MS = 750;
 const metricsBySource = new Map<string, DirectPlayReadAheadMetrics>();
 const keyBySource = new Map<string, string>();
 const sourceByKey = new Map<string, string>();
@@ -107,22 +105,6 @@ function installMessageListener(): void {
   });
 }
 
-async function waitForController(timeoutMs: number): Promise<ServiceWorker | undefined> {
-  if (navigator.serviceWorker.controller) return navigator.serviceWorker.controller;
-  return await new Promise<ServiceWorker | undefined>((resolve) => {
-    let settled = false;
-    const finish = (worker?: ServiceWorker) => {
-      if (settled) return;
-      settled = true;
-      window.clearTimeout(timer);
-      navigator.serviceWorker.removeEventListener('controllerchange', changed);
-      resolve(worker);
-    };
-    const changed = () => finish(navigator.serviceWorker.controller ?? undefined);
-    const timer = window.setTimeout(() => finish(navigator.serviceWorker.controller ?? undefined), timeoutMs);
-    navigator.serviceWorker.addEventListener('controllerchange', changed);
-  });
-}
 
 async function ensureRegistration(): Promise<ServiceWorkerRegistration | undefined> {
   if (!serviceWorkerAvailable()) return undefined;
@@ -142,14 +124,7 @@ async function ensureRegistration(): Promise<ServiceWorkerRegistration | undefin
       }
     })();
   }
-  return await registrationPromise;
-}
-
-async function controller(): Promise<ServiceWorker | undefined> {
-  const registration = await ensureRegistration();
-  if (!registration) return undefined;
-  if (navigator.serviceWorker.controller) return navigator.serviceWorker.controller;
-  return await waitForController(CONTROL_WAIT_MS);
+  return registrationPromise;
 }
 
 function newSourceKey(): string {
@@ -162,11 +137,23 @@ function newSourceKey(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 }
 
-export function buildDirectPlayReadAheadProxyUrl(sourceKey: string, origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost'): string {
+export function buildDirectPlayReadAheadProxyUrl(
+  sourceKey: string,
+  origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost',
+  source?: PlaybackSource,
+): string {
   const proxy = typeof window !== 'undefined'
     ? proxyBaseUrl()
     : new URL(`/${PROXY_PATH}`, origin);
   proxy.searchParams.set('key', sourceKey);
+  // Self-describe the proxy request so a fetch can never wait for Service Worker
+  // message ordering. The configure message still establishes mode/metrics state,
+  // but demand has everything it needs in the URL and can start immediately.
+  if (source?.sizeBytes && source.sizeBytes > 0) {
+    proxy.searchParams.set('source', source.url);
+    proxy.searchParams.set('size', String(Math.floor(source.sizeBytes)));
+    proxy.searchParams.set('mime', source.mimeType ?? 'application/octet-stream');
+  }
   return proxy.toString();
 }
 
@@ -180,63 +167,51 @@ function eligible(source: PlaybackSource, origin = typeof window !== 'undefined'
   }
 }
 
-async function configureSource(activeController: ServiceWorker, source: PlaybackSource): Promise<string | undefined> {
+function configureSource(activeController: ServiceWorker, source: PlaybackSource): string {
   const existing = keyBySource.get(source.url);
   if (existing) return existing;
   const sourceKey = newSourceKey();
-  const channel = new MessageChannel();
-  const acknowledged = new Promise<boolean>((resolve) => {
-    let settled = false;
-    const finish = (value: boolean) => {
-      if (settled) return;
-      settled = true;
-      window.clearTimeout(timer);
-      resolve(value);
-    };
-    const timer = window.setTimeout(() => finish(false), CONFIGURE_WAIT_MS);
-    channel.port1.onmessage = (event: MessageEvent<unknown>) => {
-      const value = event.data as { type?: string; sourceKey?: string } | undefined;
-      finish(value?.type === 'macha-direct-read-ahead-configured' && value.sourceKey === sourceKey);
-    };
-  });
+  // Configuration is intentionally fire-and-forget. The proxy URL itself is
+  // self-describing, so Service Worker message ordering can never delay demand.
+  keyBySource.set(source.url, sourceKey);
+  sourceByKey.set(sourceKey, source.url);
   activeController.postMessage({
     type: 'macha-direct-read-ahead-configure',
     sourceKey,
     sourceUrl: source.url,
     sizeBytes: Math.floor(source.sizeBytes ?? 0),
     mimeType: source.mimeType ?? 'application/octet-stream',
-  }, [channel.port2]);
-  if (!await acknowledged) return undefined;
-  keyBySource.set(source.url, sourceKey);
-  sourceByKey.set(sourceKey, source.url);
+  });
   return sourceKey;
 }
 
-/** Warm the worker during application boot so first playback normally has a controller already. */
+/** Warm the worker during application boot. This never delays application mount. */
 export function warmDirectPlayReadAhead(): void {
   if (!serviceWorkerAvailable()) return;
-  void ensureRegistration().then(() => waitForController(CONTROL_WAIT_MS)).catch(() => undefined);
+  void ensureRegistration().catch(() => undefined);
 }
 
-/** Return a transparent local proxy URL when read-ahead is available, otherwise the original direct URL. */
-export async function directPlayReadAheadUrl(source: PlaybackSource): Promise<string> {
+/**
+ * Return a read-ahead proxy only when a Service Worker already controls this
+ * page. Registration/configuration are never awaited by playback; first use
+ * simply falls back to the native source if the optional cache is not ready.
+ */
+export function directPlayReadAheadUrl(source: PlaybackSource): string {
   if (!eligible(source) || !serviceWorkerAvailable()) return source.url;
-  const activeController = await controller();
+  installMessageListener();
+  const activeController = navigator.serviceWorker.controller;
   if (!activeController) {
-    log.warn('worker-not-controlling-fallback', { sourceUrl: source.url });
+    void ensureRegistration();
+    log.debug('worker-not-ready-native-path', { sourceUrl: source.url });
     return source.url;
   }
-  const sourceKey = await configureSource(activeController, source);
-  if (!sourceKey) {
-    log.warn('worker-configure-timeout-fallback', { sourceUrl: source.url });
-    return source.url;
-  }
+  const sourceKey = configureSource(activeController, source);
   log.info('enabled', {
     sourceUrl: source.url,
     sourceKey,
     sizeBytes: source.sizeBytes,
   });
-  return buildDirectPlayReadAheadProxyUrl(sourceKey);
+  return buildDirectPlayReadAheadProxyUrl(sourceKey, window.location.origin, source);
 }
 
 export function setDirectPlayReadAheadMode(sourceUrl: string | undefined, mode: DirectPlayReadAheadMode): void {

@@ -126,6 +126,11 @@ export interface PlaybackSource {
   headers?: Record<string, string>;
 }
 
+export interface PlaybackTimeRange {
+  startMs: number;
+  endMs: number;
+}
+
 export interface PlaybackEvent {
   positionMs: number;
   durationMs: number;
@@ -135,4 +140,8 @@ export interface PlaybackEvent {
   seeking?: boolean;
   /** True while playback wants to run but lacks enough media to continue. */
   buffering?: boolean;
+  /** Buffered media-time ranges reported by the active player. */
+  bufferedRangesMs?: PlaybackTimeRange[];
+  /** Contiguous buffered runway ahead of the current media position. */
+  forwardBufferMs?: number;
 }

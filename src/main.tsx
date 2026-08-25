@@ -55,8 +55,15 @@ async function boot(): Promise<void> {
   if (!rootElement) throw new Error('Missing #root element');
 
   log.info('boot-start', { href: window.location.href, userAgent: navigator.userAgent });
-  await runBootSplash(rootElement);
-  log.debug('splash-complete');
+  // The splash is presentation, never a boot dependency. Mount the application
+  // immediately and let the fixed overlay finish its visual lifetime in parallel.
+  const splashHost = document.createElement('div');
+  splashHost.style.pointerEvents = 'none';
+  document.body.appendChild(splashHost);
+  void runBootSplash(splashHost).finally(() => {
+    splashHost.remove();
+    log.debug('splash-complete');
+  });
 
   const platform = detectPlatform();
   log.info('platform-detected', { platform: platform.name });
