@@ -1,11 +1,16 @@
-import type { PlaybackResolver, PlaybackSession, PlaybackUpdate } from './PlaybackResolver';
+import type { PlaybackPreferencesUpdate, PlaybackResolver, PlaybackSession, PlaybackUpdate } from './PlaybackResolver';
 import type { MediaSummary, PlaybackCapabilities } from '../types';
 
 export class DemoPlaybackResolver implements PlaybackResolver {
   readonly available = true;
   private current?: PlaybackSession;
 
-  async resolve(media: MediaSummary, capabilities: PlaybackCapabilities): Promise<PlaybackSession> {
+  async resolve(
+    media: MediaSummary,
+    capabilities: PlaybackCapabilities,
+    _seekMs?: number,
+    preferences?: PlaybackPreferencesUpdate,
+  ): Promise<PlaybackSession> {
     this.current = {
       sessionId: `demo-${media.id}`,
       itemId: media.id,
@@ -21,13 +26,13 @@ export class DemoPlaybackResolver implements PlaybackResolver {
       durationMs: media.durationMs ?? 0,
       seekMs: 0,
       preferences: {
-        mode: capabilities.platform === 'tizen' ? 'direct' : 'auto',
-        maxHeight: null,
-        maxBitrate: null,
-        audioStream: null,
-        subtitleStream: null,
-        audioLanguage: '',
-        subtitleLanguage: '',
+        mode: preferences?.mode ?? (capabilities.platform === 'tizen' ? 'direct' : 'auto'),
+        maxHeight: preferences?.maxHeight ?? null,
+        maxBitrate: preferences?.maxBitrate ?? null,
+        audioStream: preferences?.audioStream ?? null,
+        subtitleStream: preferences?.subtitleStream ?? null,
+        audioLanguage: preferences?.audioLanguage ?? '',
+        subtitleLanguage: preferences?.subtitleLanguage ?? '',
       },
       sourceInfo: { path: '/demo/sample.mp4', format: 'mp4', size: 0, bitrate: 0, streams: [] },
       output: { format: 'mp4' },

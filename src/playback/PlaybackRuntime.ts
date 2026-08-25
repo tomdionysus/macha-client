@@ -6,6 +6,7 @@ import {
   type PlaybackCoordinatorSnapshot,
 } from './PlaybackCoordinator';
 import type {
+  PlaybackPreferencesUpdate,
   PlaybackResolver,
   PlaybackStopOptions,
   PlaybackUpdate,
@@ -132,7 +133,7 @@ export class PlaybackRuntime {
     this.player.detachHost?.();
   }
 
-  play(request: PlaybackRuntimeRequest): Promise<void> {
+  play(request: PlaybackRuntimeRequest, initialPreferences?: PlaybackPreferencesUpdate): Promise<void> {
     if (this.disposed) return Promise.resolve();
     const generation = ++this.generation;
     this.wakeHostWaiters();
@@ -171,6 +172,7 @@ export class PlaybackRuntime {
         resolver: this.resolver,
         capabilities: () => this.platform.capabilities(),
         initialPositionMs: Math.max(0, request.startPositionMs),
+        initialPreferences: initialPreferences ? { ...initialPreferences } : undefined,
       });
       this.coordinator = coordinator;
       this.unsubscribeCoordinator = coordinator.subscribe((snapshot) => {
@@ -220,19 +222,79 @@ export class PlaybackRuntime {
   }
 
   setPaused(paused: boolean): void {
-    this.coordinator?.setPaused(paused);
+    if (this.coordinator) {
+      this.coordinator.setPaused(paused);
+      return;
+    }
+    // A terminal source failure has already released the failed generation.
+    // Play is therefore an explicit retry command, not a mutation of a dead
+    // coordinator/session.
+    if (!paused && this.lifecycle.phase === 'failed') void this.retry();
   }
 
   seek(positionMs: number): boolean {
-    return this.coordinator?.seek(positionMs) ?? false;
+    if (this.coordinator) return this.coordinator.seek(positionMs);
+    if (this.lifecycle.phase !== 'failed' || !this.lifecycle.request) return false;
+    const bounded = Math.max(0, Number.isFinite(positionMs) ? positionMs : 0);
+    this.patchLifecycle({
+      ...this.lifecycle,
+      request: { ...this.lifecycle.request, startPositionMs: bounded },
+    });
+    if (this.playback) {
+      this.publishPlayback({
+        ...this.playback,
+        intent: { ...this.playback.intent, positionMs: bounded },
+        event: { ...this.playback.event, positionMs: bounded, ended: false },
+      });
+    }
+    return true;
   }
 
   seekBy(deltaMs: number): boolean {
-    return this.coordinator?.seekBy(deltaMs) ?? false;
+    if (this.coordinator) return this.coordinator.seekBy(deltaMs);
+    if (this.lifecycle.phase !== 'failed' || !this.lifecycle.request) return false;
+    return this.seek(this.lifecycle.request.startPositionMs + deltaMs);
   }
 
   update(update: PlaybackUpdate): void {
-    this.coordinator?.update(update);
+    if (this.coordinator) {
+      this.coordinator.update(update);
+      return;
+    }
+    // Options remain useful after a terminal source failure. Reconfiguring a
+    // failed generation means acquiring a fresh generation with the selected
+    // preferences; PATCHing the released session would be meaningless.
+    if (this.lifecycle.phase === 'failed' && update.preferences) {
+      void this.retry(update.preferences);
+    }
+  }
+
+  retry(preferences?: PlaybackPreferencesUpdate): Promise<void> {
+    if (this.disposed || this.lifecycle.phase !== 'failed' || !this.lifecycle.request) {
+      return Promise.resolve();
+    }
+    const failedRequest = this.lifecycle.request;
+    const failedPreferences = this.playback?.session?.preferences;
+    const initialPreferences: PlaybackPreferencesUpdate | undefined = failedPreferences || preferences
+      ? {
+          ...(failedPreferences ? {
+            mode: failedPreferences.mode,
+            maxHeight: failedPreferences.maxHeight,
+            maxBitrate: failedPreferences.maxBitrate,
+            audioStream: failedPreferences.audioStream,
+            subtitleStream: failedPreferences.subtitleStream,
+            audioLanguage: failedPreferences.audioLanguage,
+            subtitleLanguage: failedPreferences.subtitleLanguage,
+          } : {}),
+          ...preferences,
+        }
+      : undefined;
+    this.log.info('retry-failed-generation', {
+      mediaId: failedRequest.media.id,
+      positionMs: failedRequest.startPositionMs,
+      preferences: initialPreferences,
+    });
+    return this.play({ ...failedRequest }, initialPreferences);
   }
 
   setVolume(volume: number): void {
@@ -319,7 +381,9 @@ export class PlaybackRuntime {
       this.patchLifecycle({
         phase: 'failed',
         generation,
-        request: this.lifecycle.request,
+        request: this.lifecycle.request
+          ? { ...this.lifecycle.request, startPositionMs: Math.max(0, snapshot.intent.positionMs) }
+          : undefined,
         fatalError: snapshot.fatalError,
       });
       this.cleanupFailedGeneration(generation);

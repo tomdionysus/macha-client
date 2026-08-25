@@ -16,6 +16,7 @@ import { isSubtitleOnlyPlaybackUpdate, type PlaybackCoordinatorSnapshot } from '
 import { PlaybackRuntime, type PlaybackRuntimeRequest, type PlaybackRuntimeSnapshot } from '../playback/PlaybackRuntime';
 import { uiSettings } from '../settings';
 import { describePlaybackSession } from '../playback/PlaybackStatus';
+import { bufferedTimelineSegments } from '../playback/BufferedTimeline';
 import type { MediaSummary, PlaybackEvent, PlaybackMode, PlaybackProgress } from '../types';
 
 interface Props {
@@ -38,6 +39,7 @@ interface Props {
   volume: number;
   onVolumeChange: (volume: number) => void;
 }
+
 
 function formatTime(ms: number): string {
   const total = Math.max(0, Math.floor(ms / 1000));
@@ -142,6 +144,10 @@ export function webSeekDeltaForKey(key: string): number | undefined {
   if (key === 'ArrowLeft') return -10_000;
   if (key === 'ArrowRight') return 10_000;
   return undefined;
+}
+
+export function playerControlShowsPlay(intentPaused: boolean, failed: boolean): boolean {
+  return failed || intentPaused;
 }
 
 export function webArrowTargetOwnsKey(target: EventTarget | null): boolean {
@@ -654,12 +660,29 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
   const event = playback.event;
   const duration = session?.durationMs || event.durationMs || media.durationMs || 1;
   const displayedProgress = scrubValue ?? Math.min(duration, playback.intent.positionMs);
+  const playedPercent = Math.max(0, Math.min(100, displayedProgress / Math.max(1, duration) * 100));
+  const bufferedSegments = useMemo(
+    () => bufferedTimelineSegments(playback.event.bufferedRangesMs, duration),
+    [duration, playback.event.bufferedRangesMs],
+  );
+  const scrubberVisual = (
+    <span className="player-scrubber-visual" aria-hidden="true">
+      {bufferedSegments.map((range, index) => (
+        <span
+          className="player-scrubber-buffered"
+          key={`${index}:${range.leftPercent.toFixed(4)}:${range.widthPercent.toFixed(4)}`}
+          style={{ left: `${range.leftPercent}%`, width: `${range.widthPercent}%` }}
+        />
+      ))}
+      <span className="player-scrubber-played" style={{ width: `${playedPercent}%` }} />
+    </span>
+  );
   const audio = media.kind === 'track';
   const streamStatus = describePlaybackSession(session);
   const mediaSubtitle = media.kind === 'episode'
     ? `${media.playbackContext?.series.title ?? ''} ${media.subtitle ?? ''}`.trim()
     : media.subtitle;
-  const pausedForControl = playback.intent.paused;
+  const pausedForControl = playerControlShowsPlay(playback.intent.paused, Boolean(fatalError));
   const queueLabel = queuePosition && queuePosition.total > 1 ? `${queuePosition.index + 1} of ${queuePosition.total}` : undefined;
   const playerSubtitle = [mediaSubtitle, queueLabel].filter(Boolean).join(' · ');
   const showBuffering = !fatalError && (playback.starting || Boolean(event.buffering));
@@ -746,39 +769,42 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
           <span>{formatTime(displayedProgress)}</span>
           {samsungControls ? (
             <div
-              className="player-scrubber-display"
+              className="player-scrubber-shell player-scrubber-display"
               role="progressbar"
               aria-label="Playback position"
               aria-valuemin={0}
               aria-valuemax={Math.max(1, duration)}
               aria-valuenow={Math.max(0, Math.min(duration, displayedProgress))}
             >
-              <span style={{ width: `${Math.min(100, displayedProgress / Math.max(1, duration) * 100)}%` }} />
+              {scrubberVisual}
             </div>
           ) : (
-            <input
-              className="player-scrubber"
-              type="range"
-              min={0}
-              max={Math.max(1, duration)}
-              step={1_000}
-              value={displayedProgress}
-              aria-label="Playback position"
-              data-tv-focusable="true"
-              onChange={(changeEvent: ChangeEvent<HTMLInputElement>) => setScrubPosition(Number(changeEvent.target.value))}
-              onPointerUp={() => {
-                const position = scrubValueRef.current;
-                if (position !== undefined) seek(position);
-              }}
-              onKeyUp={(keyEvent: ReactKeyboardEvent<HTMLInputElement>) => {
-                const position = scrubValueRef.current;
-                if (position !== undefined && ['Home', 'End'].includes(keyEvent.key)) seek(position);
-              }}
-              onBlur={() => {
-                const position = scrubValueRef.current;
-                if (position !== undefined) seek(position);
-              }}
-            />
+            <div className="player-scrubber-shell">
+              {scrubberVisual}
+              <input
+                className="player-scrubber"
+                type="range"
+                min={0}
+                max={Math.max(1, duration)}
+                step={1_000}
+                value={displayedProgress}
+                aria-label="Playback position"
+                data-tv-focusable="true"
+                onChange={(changeEvent: ChangeEvent<HTMLInputElement>) => setScrubPosition(Number(changeEvent.target.value))}
+                onPointerUp={() => {
+                  const position = scrubValueRef.current;
+                  if (position !== undefined) seek(position);
+                }}
+                onKeyUp={(keyEvent: ReactKeyboardEvent<HTMLInputElement>) => {
+                  const position = scrubValueRef.current;
+                  if (position !== undefined && ['Home', 'End'].includes(keyEvent.key)) seek(position);
+                }}
+                onBlur={() => {
+                  const position = scrubValueRef.current;
+                  if (position !== undefined) seek(position);
+                }}
+              />
+            </div>
           )}
           <span>{formatTime(duration)}</span>
         </div>

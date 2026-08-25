@@ -30,6 +30,7 @@ export interface PlaybackCoordinatorOptions {
   resolver: PlaybackResolver;
   capabilities: () => Promise<PlaybackCapabilities>;
   initialPositionMs: number;
+  initialPreferences?: PlaybackPreferencesUpdate;
 }
 
 type Listener = (snapshot: PlaybackCoordinatorSnapshot) => void;
@@ -174,7 +175,12 @@ export class PlaybackCoordinator {
       if (this.disposed) return;
       const requestedPositionMs = this.snapshot.intent.positionMs;
       const requestedPositionRevision = this.positionRevision;
-      const session = await this.options.resolver.resolve(this.options.media, capabilities, requestedPositionMs);
+      const session = await this.options.resolver.resolve(
+        this.options.media,
+        capabilities,
+        requestedPositionMs,
+        this.options.initialPreferences,
+      );
       if (this.disposed) {
         await this.options.resolver.stop(session.sessionId, this.closeOptions).catch(() => undefined);
         return;
@@ -485,6 +491,10 @@ export class PlaybackCoordinator {
         durationMs: session.durationMs,
         paused: this.snapshot.intent.paused,
         ended: false,
+        // Buffer residency belongs to a source generation. Never carry the old
+        // generation's ranges across a transformed source activation.
+        bufferedRangesMs: [],
+        forwardBufferMs: 0,
       },
     });
 

@@ -1,6 +1,6 @@
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import type { MediaApi } from '../api/MediaApi';
-import { useArtworkVisibility, useLazyArtworkUrl } from '../hooks/useLazyArtworkUrl';
+import { useViewportArtworkUrl } from '../hooks/useViewportArtworkUrl';
 import type { ArtworkRef } from '../types';
 
 interface Props {
@@ -13,16 +13,11 @@ interface Props {
 }
 
 export function LazyArtwork({ api, artwork, alt = '', placeholder, draggable, eager = false }: Props) {
-  const visibility = useArtworkVisibility(eager);
-  const image = useLazyArtworkUrl(
-    api,
-    artwork,
-    eager || visibility.nearby,
-    eager || visibility.visible,
-  );
+  const [element, setElement] = useState<HTMLSpanElement | null>(null);
+  const image = useViewportArtworkUrl(api, artwork, element, eager);
 
   return (
-    <span ref={visibility.ref} className="lazy-artwork">
+    <span ref={setElement} className="lazy-artwork">
       {image
         ? <img src={image} alt={alt} decoding="async" draggable={draggable} />
         : placeholder}

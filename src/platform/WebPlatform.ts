@@ -1,9 +1,10 @@
 import Hls from 'hls.js';
 import { createClientLogger } from '../diagnostics/ClientLog';
 import type { Platform, PlaybackFailureListener, PlaybackListener, Player } from './Platform';
-import type { PlaybackCapabilities, PlaybackSource, PlaybackTimeRange } from '../types';
+import type { PlaybackCapabilities, PlaybackEvent, PlaybackSource, PlaybackTimeRange } from '../types';
 import { ManagedHlsMediaRecoveryBudget } from './ManagedHlsRecovery';
 import { detectWebMediaCodecCapabilities } from './WebMediaCapabilities';
+import { WebMediaTimeline } from './WebMediaTimeline';
 import {
   directPlayReadAheadMetrics,
   directPlayReadAheadUrl,
@@ -87,6 +88,17 @@ export function webLocalSeekCoverage(
   return source.mode === 'direct'
     ? [{ startMs: 0, endMs: Number.POSITIVE_INFINITY }]
     : bufferedRanges;
+}
+
+function playbackTimeRanges(rangesValue: TimeRanges): PlaybackTimeRange[] {
+  const out: PlaybackTimeRange[] = [];
+  for (let index = 0; index < rangesValue.length; index += 1) {
+    out.push({
+      startMs: rangesValue.start(index) * 1000,
+      endMs: rangesValue.end(index) * 1000,
+    });
+  }
+  return out;
 }
 
 function ranges(rangesValue: TimeRanges): Array<{ start: number; end: number }> {
@@ -217,6 +229,8 @@ class WebPlayer implements Player {
   private sourceGeneration = 0;
   private failedSourceGeneration?: number;
   private hlsMediaRecovery?: ManagedHlsMediaRecoveryBudget;
+  private mediaTimeline?: WebMediaTimeline;
+  private lastPublishedEvent?: PlaybackEvent;
 
   constructor(private readonly options: WebPlayerOptions = {}) {}
 
@@ -247,7 +261,12 @@ class WebPlayer implements Player {
     const sourceGeneration = ++this.sourceGeneration;
     this.failedSourceGeneration = undefined;
     this.wantsPlayback = !startPaused;
-    this.activeSource = source;
+    // Suppress media-element teardown events from the previous source. The new
+    // generation timeline must not observe or learn an origin from old buffer
+    // residency on the reused <video> element.
+    this.activeSource = undefined;
+    this.mediaTimeline = undefined;
+    this.lastPublishedEvent = undefined;
     this.log.info('source-load-begin', {
       mode: source.mode,
       mimeType: source.mimeType,
@@ -294,13 +313,18 @@ class WebPlayer implements Player {
 
       const publish = () => this.publish(video!);
       video.addEventListener('timeupdate', publish);
+      video.addEventListener('progress', publish);
       video.addEventListener('pause', publish);
       video.addEventListener('play', publish);
       video.addEventListener('playing', publish);
       video.addEventListener('waiting', publish);
       video.addEventListener('seeking', publish);
       video.addEventListener('seeked', publish);
+      video.addEventListener('loadedmetadata', publish);
+      video.addEventListener('loadeddata', publish);
+      video.addEventListener('durationchange', publish);
       video.addEventListener('canplay', publish);
+      video.addEventListener('emptied', publish);
       video.addEventListener('ended', publish);
       const resumeWhenReady = () => {
         if (!this.wantsPlayback || !video!.paused) return;
@@ -318,16 +342,40 @@ class WebPlayer implements Player {
       this.host.appendChild(video);
     }
 
+    this.activeSource = source;
+    this.mediaTimeline = new WebMediaTimeline(source.mode, positionMs);
+
     const publish = () => this.publish(video!);
     if (positionMs > 0) {
+      const readinessEvents = ['loadedmetadata', 'loadeddata', 'canplay'] as const;
+      const cleanupInitialSeek = () => {
+        for (const name of readinessEvents) video.removeEventListener(name, initialSeek);
+        if (this.initialSeekCleanup === cleanupInitialSeek) this.initialSeekCleanup = undefined;
+      };
       const initialSeek = () => {
-        if (playRequestGeneration !== this.playRequestGeneration || video !== this.video) return;
-        this.log.info('initial-local-seek', { requestedPositionMs: positionMs, before: videoState(video) });
-        video.currentTime = positionMs / 1000;
+        if (playRequestGeneration !== this.playRequestGeneration || video !== this.video) {
+          cleanupInitialSeek();
+          return;
+        }
+        // publish() establishes the generation's browser-media timestamp origin
+        // as soon as residency is observable. Never write a source-local time
+        // directly into currentTime for transformed HLS: MSE may expose a
+        // non-zero/absolute media clock for this generation.
+        publish();
+        const targetMediaMs = this.mediaTimeline?.toMediaTime(positionMs);
+        if (targetMediaMs === undefined) return;
+        this.log.info('initial-local-seek', {
+          requestedPositionMs: positionMs,
+          targetMediaMs,
+          mediaOriginMs: this.mediaTimeline?.mediaOriginMs,
+          before: videoState(video),
+        });
+        video.currentTime = targetMediaMs / 1000;
+        cleanupInitialSeek();
         publish();
       };
-      video.addEventListener('loadedmetadata', initialSeek, { once: true });
-      this.initialSeekCleanup = () => video.removeEventListener('loadedmetadata', initialSeek);
+      for (const name of readinessEvents) video.addEventListener(name, initialSeek);
+      this.initialSeekCleanup = cleanupInitialSeek;
     }
 
     void this.applySubtitle(video, source.subtitleUrl).catch((error) => {
@@ -711,36 +759,40 @@ class WebPlayer implements Player {
   localSeekCoverage(): readonly PlaybackTimeRange[] {
     const source = this.activeSource;
     if (!source) return [];
+    if (source.mode === 'direct') return webLocalSeekCoverage(source, []);
 
     const video = this.video;
-    const bufferedRanges: PlaybackTimeRange[] = [];
-    if (video) {
-      for (let index = 0; index < video.buffered.length; index += 1) {
-        bufferedRanges.push({
-          startMs: video.buffered.start(index) * 1000,
-          endMs: video.buffered.end(index) * 1000,
-        });
-      }
-    }
-    return webLocalSeekCoverage(source, bufferedRanges);
+    if (!video) return [];
+    // Synchronously refresh the same normalized snapshot published to the UI.
+    // This gives local-seek admission and the buffer indicator one authority.
+    this.publish(video);
+    return this.lastPublishedEvent?.bufferedRangesMs ?? [];
   }
 
   seek(positionMs: number): void {
-    if (!this.video) {
+    const video = this.video;
+    if (!video) {
       this.log.warn('local-seek-without-media', { positionMs });
       return;
     }
-    const targetSeconds = Math.max(0, positionMs / 1000);
-    let bufferedHit = false;
-    for (let index = 0; index < this.video.buffered.length; index += 1) {
-      if (this.video.buffered.start(index) <= targetSeconds && this.video.buffered.end(index) >= targetSeconds) {
-        bufferedHit = true;
-        break;
-      }
+
+    this.publish(video);
+    const targetMediaMs = this.mediaTimeline?.toMediaTime(positionMs);
+    if (targetMediaMs === undefined) {
+      this.log.warn('local-seek-before-timeline-origin', { positionMs, state: videoState(video) });
+      return;
     }
-    this.log.info('local-seek-request', { positionMs, bufferedHit, state: videoState(this.video) });
+    const bufferedHit = this.activeSource?.mode === 'direct'
+      || (this.lastPublishedEvent?.bufferedRangesMs ?? []).some((range) => range.startMs <= positionMs && range.endMs >= positionMs);
+    this.log.info('local-seek-request', {
+      positionMs,
+      targetMediaMs,
+      mediaOriginMs: this.mediaTimeline?.mediaOriginMs,
+      bufferedHit,
+      state: videoState(video),
+    });
     setDirectPlayReadAheadMode(this.directReadAheadSourceUrl, 'seeking');
-    this.video.currentTime = targetSeconds;
+    video.currentTime = targetMediaMs / 1000;
   }
 
   setVolume(volume: number): void {
@@ -761,6 +813,8 @@ class WebPlayer implements Player {
     this.failedSourceGeneration = undefined;
     this.wantsPlayback = false;
     this.activeSource = undefined;
+    this.mediaTimeline = undefined;
+    this.lastPublishedEvent = undefined;
     this.log.debug('stop', this.video ? videoState(this.video) : undefined);
     this.hls?.destroy();
     this.hls = undefined;
@@ -828,7 +882,11 @@ class WebPlayer implements Player {
     hls.on(Hls.Events.LEVEL_SWITCHED, (_event, data) => this.log.debug('hls-level-switched', hlsEventSummary(data)));
     hls.on(Hls.Events.FRAG_LOADING, (_event, data) => this.log.debug('hls-fragment-loading', hlsEventSummary(data)));
     hls.on(Hls.Events.FRAG_LOADED, (_event, data) => this.log.debug('hls-fragment-loaded', hlsEventSummary(data)));
-    hls.on(Hls.Events.FRAG_BUFFERED, (_event, data) => this.log.debug('hls-fragment-buffered', { data: hlsEventSummary(data), state: videoState(video) }));
+    hls.on(Hls.Events.FRAG_BUFFERED, (_event, data) => {
+      this.log.debug('hls-fragment-buffered', { data: hlsEventSummary(data), state: videoState(video) });
+      this.publish(video);
+    });
+    hls.on(Hls.Events.BUFFER_FLUSHED, () => this.publish(video));
     hls.on(Hls.Events.ERROR, (_event, data) => {
       if (sourceGeneration !== this.sourceGeneration || this.hls !== hls) return;
       const payload = { data: hlsEventSummary(data), state: videoState(video) };
@@ -843,7 +901,11 @@ class WebPlayer implements Player {
         return;
       }
       if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
-        const decision = mediaRecovery.fatalMediaError(video.currentTime * 1000);
+        // Recovery progress uses the same generation-local clock as normal
+        // playback publication. Mixing raw MSE time here would make a non-zero
+        // timestamp origin look like enormous playback progress.
+        this.publish(video);
+        const decision = mediaRecovery.fatalMediaError(this.lastPublishedEvent?.positionMs ?? 0);
         if (decision.action === 'recover') {
           this.log.warn('hls-recovery-media', { ...payload, recovery: decision });
           hls.recoverMediaError();
@@ -902,21 +964,34 @@ class WebPlayer implements Player {
   }
 
   private publish(video: HTMLVideoElement): void {
+    const timeline = this.mediaTimeline;
+    if (!timeline || video !== this.video) return;
+
+    const rawBufferedRangesMs = playbackTimeRanges(video.buffered);
+    const normalized = timeline.sample({
+      positionMs: video.currentTime * 1000,
+      bufferedRangesMs: rawBufferedRangesMs,
+      seekableRangesMs: playbackTimeRanges(video.seekable),
+    });
+    // During a transformed source swap the reused <video> element can emit
+    // teardown/readiness events before the new generation establishes its MSE
+    // timestamp origin. Suppress those ambiguous observations rather than
+    // interpreting them on the wrong generation timeline.
+    if (!normalized) return;
+
     const duration = Number.isFinite(video.duration) ? video.duration * 1000 : 0;
-    const bufferedRangesMs: Array<{ startMs: number; endMs: number }> = [];
+    const currentMs = normalized.positionMs;
     let forwardBufferMs = 0;
-    const currentMs = video.currentTime * 1000;
-    for (let index = 0; index < video.buffered.length; index += 1) {
-      const startMs = video.buffered.start(index) * 1000;
-      const endMs = video.buffered.end(index) * 1000;
-      bufferedRangesMs.push({ startMs, endMs });
-      if (startMs <= currentMs + 250 && endMs >= currentMs) forwardBufferMs = Math.max(forwardBufferMs, endMs - currentMs);
+    for (const range of normalized.bufferedRangesMs) {
+      if (range.startMs <= currentMs + 250 && range.endMs >= currentMs) {
+        forwardBufferMs = Math.max(forwardBufferMs, range.endMs - currentMs);
+      }
     }
     this.hlsMediaRecovery?.observePlaybackPosition(
       currentMs,
       !video.paused && !video.ended && !video.seeking,
     );
-    const event = {
+    const event: PlaybackEvent = {
       positionMs: currentMs,
       durationMs: duration,
       paused: video.paused,
@@ -925,11 +1000,33 @@ class WebPlayer implements Player {
       buffering: !video.paused
         && !video.ended
         && (video.seeking || video.readyState < HTMLMediaElement.HAVE_FUTURE_DATA),
-      bufferedRangesMs,
+      bufferedRangesMs: normalized.bufferedRangesMs,
       forwardBufferMs,
     };
+    if (webPlaybackEventsEqual(this.lastPublishedEvent, event)) return;
+    this.lastPublishedEvent = event;
     this.listeners.forEach((listener) => listener(event));
   }
+}
+
+export function webPlaybackEventsEqual(previous: PlaybackEvent | undefined, next: PlaybackEvent): boolean {
+  if (!previous
+    || previous.positionMs !== next.positionMs
+    || previous.durationMs !== next.durationMs
+    || previous.paused !== next.paused
+    || previous.ended !== next.ended
+    || previous.seeking !== next.seeking
+    || previous.buffering !== next.buffering
+    || previous.forwardBufferMs !== next.forwardBufferMs) return false;
+
+  const previousRanges = previous.bufferedRangesMs ?? [];
+  const nextRanges = next.bufferedRangesMs ?? [];
+  if (previousRanges.length !== nextRanges.length) return false;
+  for (let index = 0; index < previousRanges.length; index += 1) {
+    if (previousRanges[index].startMs !== nextRanges[index].startMs
+      || previousRanges[index].endMs !== nextRanges[index].endMs) return false;
+  }
+  return true;
 }
 
 function supportedMime(media: HTMLMediaElement, mime: string): boolean {

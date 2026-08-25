@@ -144,4 +144,28 @@ describe('MachaMediaApi', () => {
     expect(movies[0]?.catalogueUpdatedNs).toBe(123456789);
   });
 
+  it('coalesces non-cancellable artwork demand and caches the completed blob', async () => {
+    const catalogue = new FakeCatalogue();
+    let resolveArtwork!: (blob: Blob) => void;
+    let requests = 0;
+    catalogue.artwork = () => {
+      requests += 1;
+      return new Promise<Blob>((resolve) => { resolveArtwork = resolve; });
+    };
+    const api = new MachaMediaApi(catalogue);
+    const ref = { id: 'poster-1', mimeType: 'image/jpeg' };
+
+    const first = api.artwork(ref);
+    const second = api.artwork(ref);
+    expect(requests).toBe(1);
+
+    const blob = new Blob(['poster']);
+    resolveArtwork(blob);
+    await expect(first).resolves.toBe(blob);
+    await expect(second).resolves.toBe(blob);
+
+    await expect(api.artwork(ref)).resolves.toBe(blob);
+    expect(requests).toBe(1);
+  });
+
 });

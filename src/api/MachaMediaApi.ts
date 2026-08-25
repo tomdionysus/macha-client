@@ -118,11 +118,11 @@ export class MachaMediaApi implements MediaApi {
     const cached = this.artworkCache.get(ref.id);
     if (cached) return Promise.resolve(cached);
 
-    // Abortable artwork requests are used by viewport-driven lazy loading. They
-    // must not share an in-flight request with unrelated consumers: when the
-    // card scrolls away its request needs to be genuinely cancellable without
-    // aborting somebody else's detail/backdrop fetch. LazyArtwork already
-    // coalesces duplicate artwork IDs in its request scheduler.
+    // Signal-bearing requests are reserved for explicitly cancellable consumers
+    // such as detail/backdrop hooks. Viewport artwork deliberately calls this
+    // without a signal: once an image is demanded it is allowed to finish, and
+    // these shared requests coalesce here and populate the Blob cache for any
+    // card that is mounted later.
     if (signal) {
       return this.catalogue.artwork(ref.id, signal).then((blob) => {
         this.artworkCache.set(ref.id, blob);

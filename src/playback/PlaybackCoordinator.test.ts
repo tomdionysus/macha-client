@@ -251,6 +251,37 @@ describe('PlaybackCoordinator transport invariants', () => {
     expect(coordinator.getSnapshot().event.bufferedRangesMs).toEqual([{ startMs: 35_000, endMs: 105_000 }]);
     expect(coordinator.getSnapshot().event.forwardBufferMs).toBe(65_000);
   });
+
+  it('clears old-generation buffer residency when a transformed source generation is replaced', async () => {
+    const player = new FakePlayer();
+    player.localSeekRanges = [{ startMs: 0, endMs: 60_000 }];
+    const initial = session({ mode: 'transcode', seekMs: 0 });
+    const api = resolver(initial, async (update) => session({
+      mode: 'transcode',
+      seekMs: update.seekMs ?? 0,
+      source: { ...initial.source, url: `/generation-${update.seekMs ?? 0}.m3u8` },
+    }));
+    const coordinator = new PlaybackCoordinator({ media: media(), player, resolver: api, capabilities: async () => capabilities(), initialPositionMs: 0 });
+    await coordinator.start();
+
+    player.emit({
+      positionMs: 20_000,
+      durationMs: 600_000,
+      paused: false,
+      ended: false,
+      bufferedRangesMs: [{ startMs: 0, endMs: 60_000 }],
+      forwardBufferMs: 40_000,
+    });
+    expect(coordinator.getSnapshot().event.bufferedRangesMs).toEqual([{ startMs: 0, endMs: 60_000 }]);
+
+    coordinator.seek(240_000);
+    await vi.waitFor(() => {
+      expect(player.playCalls.at(-1)?.source.url).toBe('/generation-240000.m3u8');
+    });
+
+    expect(coordinator.getSnapshot().event.bufferedRangesMs).toEqual([]);
+    expect(coordinator.getSnapshot().event.forwardBufferMs).toBe(0);
+  });
 });
 
 

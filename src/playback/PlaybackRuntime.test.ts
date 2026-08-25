@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { Platform, Player, PlaybackFailureListener, PlaybackListener } from '../platform/Platform';
 import type { MediaSummary, PlaybackCapabilities, PlaybackEvent, PlaybackSource, PlaybackTimeRange } from '../types';
-import type { PlaybackResolver, PlaybackSession, PlaybackStopOptions, PlaybackUpdate } from './PlaybackResolver';
+import type { PlaybackPreferencesUpdate, PlaybackResolver, PlaybackSession, PlaybackStopOptions, PlaybackUpdate } from './PlaybackResolver';
 import { PlaybackRuntime } from './PlaybackRuntime';
 
 function deferred<T>() {
@@ -179,6 +179,73 @@ describe('PlaybackRuntime ownership state machine', () => {
     await vi.waitFor(() => expect(api.stop).toHaveBeenCalledWith('session:A', {}));
     expect(runtime.getSnapshot().fatalError?.message).toBe('Web HLS media recovery exhausted');
     expect(player.stopCalls).toBeGreaterThanOrEqual(1);
+  });
+
+  it('treats an option change after terminal failure as a fresh generation with explicit preferences', async () => {
+    const player = new FakePlayer();
+    const api = resolver();
+    const firstStop = deferred<void>();
+    api.stop.mockImplementation(async (sessionId: string) => {
+      if (sessionId === 'session:A:1') await firstStop.promise;
+    });
+    let resolveCount = 0;
+    api.resolve.mockImplementation(async (media: MediaSummary, _capabilities: PlaybackCapabilities, _seekMs?: number, preferences?: PlaybackPreferencesUpdate) => {
+      resolveCount += 1;
+      const resolved = session(media, `session:${media.id}:${resolveCount}`);
+      if (preferences?.mode === 'transcode') {
+        return {
+          ...resolved,
+          mode: 'transcode',
+          source: { ...resolved.source, mode: 'transcode', mimeType: 'application/vnd.apple.mpegurl' },
+          preferences: { ...resolved.preferences, mode: 'transcode' },
+          options: { ...resolved.options, modes: ['direct', 'transcode'] },
+        };
+      }
+      return resolved;
+    });
+    const runtime = new PlaybackRuntime(new FakePlatform(player), api);
+    runtime.attach(host());
+
+    await runtime.play({ media: movie('A'), startPositionMs: 0, returnTo: '/movies/A' });
+    player.fail(new Error('bufferAppendError'));
+    await vi.waitFor(() => expect(runtime.getSnapshot().phase).toBe('failed'));
+    await vi.waitFor(() => expect(api.stop).toHaveBeenCalledWith('session:A:1', {}));
+
+    runtime.update({ preferences: { mode: 'transcode' } });
+    await Promise.resolve();
+    expect(api.resolve).toHaveBeenCalledTimes(1);
+
+    firstStop.resolve();
+    await vi.waitFor(() => expect(api.resolve).toHaveBeenCalledTimes(2));
+    expect(api.resolve.mock.calls[1]?.[3]).toEqual(expect.objectContaining({ mode: 'transcode' }));
+    await vi.waitFor(() => expect(runtime.getSnapshot().phase).toBe('playing'));
+    expect(runtime.getPlaybackSnapshot()?.session?.preferences.mode).toBe('transcode');
+    await runtime.stop();
+  });
+
+  it('treats Play after terminal failure as an explicit retry of the failed intent', async () => {
+    const player = new FakePlayer();
+    const api = resolver();
+    let resolveCount = 0;
+    api.resolve.mockImplementation(async (media: MediaSummary) => {
+      resolveCount += 1;
+      return session(media, `session:${media.id}:${resolveCount}`);
+    });
+    const runtime = new PlaybackRuntime(new FakePlatform(player), api);
+    runtime.attach(host());
+
+    await runtime.play({ media: movie('A'), startPositionMs: 12_000, returnTo: '/movies/A' });
+    player.fail(new Error('decoder failed'));
+    await vi.waitFor(() => expect(runtime.getSnapshot().phase).toBe('failed'));
+    await vi.waitFor(() => expect(api.stop).toHaveBeenCalledWith('session:A:1', {}));
+
+    expect(runtime.seek(30_000)).toBe(true);
+    runtime.setPaused(false);
+
+    await vi.waitFor(() => expect(api.resolve).toHaveBeenCalledTimes(2));
+    expect(api.resolve.mock.calls[1]?.[2]).toBe(30_000);
+    await vi.waitFor(() => expect(runtime.getSnapshot().phase).toBe('playing'));
+    await runtime.stop();
   });
 
   it('automatically releases the server lease when source activation fails', async () => {

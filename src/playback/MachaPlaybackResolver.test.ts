@@ -146,6 +146,26 @@ describe('MachaPlaybackResolver', () => {
     expect(session.seekMs).toBe(42_000);
   });
 
+  it('applies explicit initial playback preferences during session creation', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(sessionResponse({
+      mode: 'transcode',
+      preferences: {
+        mode: 'transcode', max_height: 720, max_bitrate: null,
+        audio_stream: null, subtitle_stream: null, audio_language: '', subtitle_language: '',
+      },
+    }), 201));
+    vi.stubGlobal('fetch', fetchMock);
+    const resolver = new MachaPlaybackResolver('http://node.test', 'secret');
+
+    await resolver.resolve(media, capabilities, 42_000, { mode: 'transcode', maxHeight: 720 });
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(String(init.body))).toEqual(expect.objectContaining({
+      seek_ms: 42_000,
+      preferences: { mode: 'transcode', max_height: 720 },
+    }));
+  });
+
   it('only sends decoder resolution limits when the platform explicitly reports them', async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse(sessionResponse(), 201));
     vi.stubGlobal('fetch', fetchMock);

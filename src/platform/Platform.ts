@@ -10,7 +10,7 @@ export interface Player {
   detachHost?(): void;
   /** Final player destruction. This is resource-destructive. */
   detach(): void;
-  /** Attach a source and request playback. Resolves once the request is dispatched, never when buffering completes. */
+  /** Attach a source at a source-generation-local position and request playback. Resolves once dispatched, never when buffering completes. */
   play(source: PlaybackSource, positionMs?: number, startPaused?: boolean): Promise<boolean>;
   /** Pause transport and suspend avoidable/speculative source acquisition. */
   pause(): void;
@@ -18,8 +18,10 @@ export interface Player {
   resume(): void;
   seek(positionMs: number): void;
   /**
-   * Source-local timeline ranges that the active player can seek to without
-   * changing the playback session or creating another source generation.
+   * Source-generation-local timeline ranges that the active player can seek to
+   * without changing the playback session or creating another source generation.
+   * Implementations must normalize platform/media timestamp origins before
+   * exposing these ranges; seek() uses this same coordinate system.
    */
   localSeekCoverage(): readonly PlaybackTimeRange[];
   setVolume(volume: number): void;

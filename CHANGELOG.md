@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.7.5
+
+- render the active player's current buffered media-time ranges directly in the full seek bar, using a near-white light pink background for resident ranges and preserving disjoint ranges on both sides of the playhead;
+- make the played portion of the seek bar slightly translucent so buffered residency remains visible underneath already-played media, while keeping the thumb opaque and controls fully interactive;
+- publish buffer-state changes on media progress, completed HLS fragment appends and HLS buffer flush/eviction events, while suppressing duplicate player snapshots so buffer visualization adds negligible steady-state UI work;
+- clip and merge reported buffered ranges before rendering to bound DOM segment count after repeated seeks, with regression coverage for disjoint/back-buffer ranges, clipping/merging and duplicate-event suppression.
+
+## 0.7.4
+
+- replace the previous cancellable/prioritised lazy-artwork stack from scratch with a monotonic viewport-demand model: once artwork approaches the viewport its fetch is allowed to finish and scrolling away can never revoke that demand;
+- remove the custom artwork request scheduler, request priorities, scroll-driven AbortController cancellation and reversible IntersectionObserver state, leaving browser HTTP scheduling and `MachaMediaApi` request coalescing/cache as the only network concurrency mechanisms;
+- use one application-wide scroll/resize proximity registry with a 1000 px preload margin and one animation-frame geometry pass for all pending cards, including nested horizontal/vertical scrolling and an eager/non-browser fallback;
+- add regression coverage for vertical and horizontal preload geometry, one-shot/monotonic viewport triggering, and shared artwork request coalescing/cache behaviour.
+
+## 0.7.3
+
+- make terminal playback failure an actionable state rather than a dead end: Play now retries the failed playback intent and changing mode/quality/audio/subtitle after failure acquires a fresh source generation instead of silently PATCHing a released session;
+- allow playback-session creation to carry explicit initial preferences, so choosing `Transcode` (or another mode) after failure is honoured on the new POST before any source is attached rather than briefly re-entering `Auto`;
+- preserve the failed generation's last playback position and preferences across explicit retry while retaining the single-owner teardown barrier, and present the transport control as Play after failure;
+- add regression coverage for explicit-mode retry, Play-to-retry, initial preference propagation and failed-player transport presentation.
+
 ## 0.7.2
 
 - bound managed Web HLS media recovery per source generation so repeated fatal MSE/SourceBuffer failures cannot recurse indefinitely through `recoverMediaError()`; a recovery must produce real timeline progress before another is permitted, with a hard per-generation ceiling;

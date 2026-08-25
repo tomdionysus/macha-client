@@ -4,6 +4,7 @@ import {
   shouldUseManagedHls,
   webHlsBufferConfig,
   webLocalSeekCoverage,
+  webPlaybackEventsEqual,
 } from './WebPlatform';
 import { ManagedHlsMediaRecoveryBudget } from './ManagedHlsRecovery';
 
@@ -110,5 +111,31 @@ describe('Managed Web HLS recovery', () => {
       reason: 'appendBuffer failed',
       error: { name: 'Error', message: 'SourceBuffer append failed' },
     });
+  });
+});
+
+
+describe('Web playback event publication', () => {
+  const base = {
+    positionMs: 10_000,
+    durationMs: 100_000,
+    paused: false,
+    ended: false,
+    seeking: false,
+    buffering: false,
+    bufferedRangesMs: [{ startMs: 0, endMs: 30_000 }],
+    forwardBufferMs: 20_000,
+  };
+
+  it('suppresses duplicate media events so buffer refresh hooks do not create redundant UI work', () => {
+    expect(webPlaybackEventsEqual(base, { ...base, bufferedRangesMs: [{ startMs: 0, endMs: 30_000 }] })).toBe(true);
+  });
+
+  it('publishes when buffered residency changes, including eviction', () => {
+    expect(webPlaybackEventsEqual(base, {
+      ...base,
+      bufferedRangesMs: [{ startMs: 12_000, endMs: 30_000 }],
+      forwardBufferMs: 20_000,
+    })).toBe(false);
   });
 });

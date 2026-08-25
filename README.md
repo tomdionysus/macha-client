@@ -136,13 +136,15 @@ Opening a series therefore no longer downloads all of its episode metadata.
 
 Artwork is fetched through the API rather than placed directly in `<img src>`. This is necessary because a Macha API configured with `token_file` requires the Bearer token on artwork requests too.
 
+Grid/rail artwork uses a monotonic viewport-demand policy. A single application-wide proximity registry observes scroll/resize geometry with a 1000 px preload margin. Once a card enters that region, its artwork request is irrevocably started and is allowed to finish even if the card subsequently scrolls away or unmounts. There is no client-side artwork request queue, priority system, or scroll-driven network cancellation; the browser owns HTTP scheduling and `MachaMediaApi` coalesces duplicate unsignalled requests and retains completed Blobs for later mounts. Detail/backdrop hooks remain independently cancellable because they are presentation-specific rather than shared scrolling demand.
+
 The client reserves an optional full date field for season/episode presentation, but the current Macha catalogue API exposes only `year`. See [`TODO.md`](TODO.md) for the provider/server work required to populate TMDB dates later.
 
 See [`docs/server-api.md`](docs/server-api.md).
 
 ## Playback
 
-Macha 0.7.2 has one application-scoped `PlaybackRuntime` state machine. It is the sole owner of the platform `Player`, `PlaybackCoordinator`, and active server playback-session lease. React owns presentation only: `/play/:id` selects the full-screen presentation, while navigating back into the catalogue presents the same owned playback as the bottom Now Playing overlay. Full/mini transitions and transient React host remounts therefore do not create/delete a session, recreate the platform player, reload the media source, seek, or renegotiate playback.
+Macha 0.7.5 has one application-scoped `PlaybackRuntime` state machine. It is the sole owner of the platform `Player`, `PlaybackCoordinator`, and active server playback-session lease. React owns presentation only: `/play/:id` selects the full-screen presentation, while navigating back into the catalogue presents the same owned playback as the bottom Now Playing overlay. Full/mini transitions and transient React host remounts therefore do not create/delete a session, recreate the platform player, reload the media source, seek, or renegotiate playback.
 
 Resource-changing transitions are generation-ordered. Starting another item first closes the old coordinator and awaits its session teardown before the replacement is allowed to create a new server session; if an initial session POST completes after Stop, that late lease is deleted and never activated. Transport operations that do not change the source generation remain local and immediate. The server still selects Direct Play, remux or transcode from the platform capability profile, and the coordinator can update the owned logical session for transformed seeks, playback mode/quality, audio/subtitles, or media representation changes.
 
@@ -150,7 +152,9 @@ The playback queue and progress checkpoints are client-local and persisted per c
 
 Direct streams use the platform player directly. On modern Web, transformed fragmented-MP4 HLS is managed by hls.js/MSE with a bounded forward buffer so ordinary seeks can stay in browser memory; pausing also stops hls.js source loading, and resume explicitly restarts it. Fatal managed-HLS media recovery is source-generation scoped and bounded: one recovery may be attempted immediately, another is permitted only after observable timeline progress, and an exhausted/no-progress recovery becomes a terminal player failure that flows through the coordinator/runtime failed state and tears down the owned generation. Samsung keeps the TV browser native-HLS path. Permanent API Bearer authentication is used only for playback-session control; the returned stream/subtitle capability URLs are loaded directly by the player. Browser `pagehide` sends best-effort keepalive teardown for the currently owned lease, while server idle expiry remains crash/network-loss recovery rather than the normal lifecycle.
 
-`PlaybackRuntime` depends only on `PlaybackResolver` and `Platform.Player`, so future native platform players can implement the same ownership/state-machine contract without changing the UI.
+The full-player seek bar visualizes the platform player's *current* buffered media ranges rather than historical network fetches. Unbuffered track remains near-white, resident ranges are shown in light pink, and the played overlay is slightly translucent so retained back-buffer remains visible behind the playhead. Web uses `HTMLMediaElement.buffered` as the authority; normal media progress plus HLS append/flush events refresh residency, and duplicate snapshots are suppressed so the visualization does not introduce polling or high-frequency React work.
+
+`PlaybackRuntime` depends only on `PlaybackResolver` and `Platform.Player`, so future native platform players can implement the same ownership/state-machine contract without changing the UI. A terminal source failure releases its owned session immediately but retains resumable intent metadata: pressing Play retries from the last intent, while changing a playback option starts a fresh generation with that preference applied during session creation.
 
 
 ### Playback diagnostics
