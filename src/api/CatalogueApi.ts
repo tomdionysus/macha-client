@@ -30,6 +30,8 @@ export interface CatalogueItem {
   external_ids: Record<string, string>;
   media_ids: string[];
   artwork: CatalogueArtwork[];
+  /** Server-resolved display artwork. Derived only; never canonical metadata. */
+  effective_artwork?: CatalogueArtwork[];
   revision: number;
   updated_ns: number;
 }

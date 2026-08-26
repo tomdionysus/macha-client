@@ -129,8 +129,8 @@ a04182453e042d59908a3a4d45a4e7a3b7c0f00e57dbfb76f395919a0174864f  ./src/screens/
 162021d6d756635e5c7f77053ab8a604ad47999f90ede0787ea125279f842d37  ./src/screens/MetadataEditorScreen.tsx
 cd8438be5d704c141945d17b4511a3978832c0ce972b2eda28d86f6cbcbb47ad  ./src/screens/MusicPlaylistScreen.tsx
 2b71d59b8d6dcce3e0c97b5a2f173c6b0e25571fb4df483146850ca14a3b48ac  ./src/screens/MusicScreen.tsx
-585726dcb7397ddb6a3694ca84a7de4cf7685827ae897f57d4ef432652a1aeb9  ./src/screens/PlayerScreen.test.ts
-7f473477d0c7bb7a325d3554adb7d2d62c61026814a3ef0252ae781b751eef23  ./src/screens/PlayerScreen.tsx
+b4574ce5ca453f3ad8c3e6e2d8ad612bfd2c50030bc7ef9afc04d6232d2027a3  ./src/screens/PlayerScreen.test.ts
+1ccf7dffb3fbd9addf6734613d7277f23e8a4585070ff2d036b860b7b7f03dff  ./src/screens/PlayerScreen.tsx
 6dfd4a86e4a09df5e346ed32a4dbac12ed32b64d41419c81070bd51eddd10c68  ./src/screens/SearchScreen.tsx
 48c8258a2176dfc4f3be374115979feb889cf3bd2f50f7ad16fb461e946db1e2  ./src/screens/SeasonScreen.tsx
 b3f6ebf734596a3aec2cf6c4cf7b1a203e678c5cd7627913af2dc30337533e41  ./src/screens/SeriesScreen.tsx

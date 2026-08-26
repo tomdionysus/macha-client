@@ -165,7 +165,7 @@ export class MachaMediaApi implements MediaApi {
       subtitle: this.subtitle(item),
       year: optionalNumber(item.year),
       synopsis: item.synopsis || undefined,
-      artwork: this.mapArtwork(item.artwork),
+      artwork: this.mapArtwork(item.effective_artwork ?? item.artwork),
       parentId: item.parent_id ?? undefined,
       seasonNumber: optionalNumber(item.season_number),
       episodeNumber: optionalNumber(item.episode_number),

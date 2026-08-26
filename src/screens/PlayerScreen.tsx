@@ -146,6 +146,20 @@ export function webSeekDeltaForKey(key: string): number | undefined {
   return undefined;
 }
 
+export function samsungSeekDeltaForKey(key: string, keyCode: number, controlsVisible: boolean): number | undefined {
+  // When the control bar is visible left/right remain spatial-navigation keys.
+  // With playback chrome hidden they are transport shortcuts, matching TV-player
+  // convention without making the control row impossible to navigate.
+  if (controlsVisible) return undefined;
+  if (key === 'ArrowLeft' || key === 'Left' || keyCode === 37) return -10_000;
+  if (key === 'ArrowRight' || key === 'Right' || keyCode === 39) return 10_000;
+  return undefined;
+}
+
+export function playerBufferedTimelineEnabled(samsungControls: boolean): boolean {
+  return !samsungControls;
+}
+
 export function playerControlShowsPlay(intentPaused: boolean, failed: boolean): boolean {
   return failed || intentPaused;
 }
@@ -594,6 +608,15 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
         window.setTimeout(focusSamsungControls, 0);
         return;
       }
+      if (presentation === 'full' && samsungControls) {
+        const delta = samsungSeekDeltaForKey(keyEvent.key, keyEvent.keyCode, controlsVisible);
+        if (delta !== undefined) {
+          keyEvent.preventDefault();
+          keyEvent.stopPropagation();
+          seekBy(delta);
+          return;
+        }
+      }
       if (presentation === 'full' && samsungDirection) {
         if (!controlsVisible) {
           keyEvent.preventDefault();
@@ -662,8 +685,10 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
   const displayedProgress = scrubValue ?? Math.min(duration, playback.intent.positionMs);
   const playedPercent = Math.max(0, Math.min(100, displayedProgress / Math.max(1, duration) * 100));
   const bufferedSegments = useMemo(
-    () => bufferedTimelineSegments(playback.event.bufferedRangesMs, duration),
-    [duration, playback.event.bufferedRangesMs],
+    () => playerBufferedTimelineEnabled(samsungControls)
+      ? bufferedTimelineSegments(playback.event.bufferedRangesMs, duration)
+      : [],
+    [duration, playback.event.bufferedRangesMs, samsungControls],
   );
   const scrubberVisual = (
     <span className="player-scrubber-visual" aria-hidden="true">

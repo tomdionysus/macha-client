@@ -39,7 +39,10 @@ class FakeCatalogue implements CatalogueApi {
       title: 'Season 1',
       artwork: [{ role: 'poster', id: 'season-art', mime_type: 'image/jpeg' }],
     }));
-    if (id === 'artist-1') return Promise.resolve(catalogueItem('artist-1', 'artist', { title: 'Artist' }));
+    if (id === 'artist-1') return Promise.resolve(catalogueItem('artist-1', 'artist', {
+      title: 'Artist',
+      effective_artwork: [{ role: 'cover', id: 'artist-effective-art', mime_type: 'image/jpeg' }],
+    }));
     if (id === 'album-1') return Promise.resolve(catalogueItem('album-1', 'album', { parent_id: 'artist-1', title: 'Album' }));
     throw new Error('not found');
   }
@@ -68,12 +71,25 @@ class FakeCatalogue implements CatalogueApi {
     if (kind === 'track' && parent === 'album-1') {
       return Promise.resolve([
         catalogueItem('track-2', 'track', { parent_id: 'album-1', disc_number: 1, track_number: 2, title: 'Second', media_ids: ['file:2'] }),
-        catalogueItem('track-1', 'track', { parent_id: 'album-1', disc_number: 1, track_number: 1, title: 'First', media_ids: ['file:1'] }),
+        catalogueItem('track-1', 'track', {
+          parent_id: 'album-1',
+          disc_number: 1,
+          track_number: 1,
+          title: 'First',
+          media_ids: ['file:1'],
+          effective_artwork: [{ role: 'cover', id: 'album-effective-art', mime_type: 'image/jpeg' }],
+        }),
       ]);
     }
     if (kind === 'track' && parent === undefined) {
       return Promise.resolve([
-        catalogueItem('track-global', 'track', { parent_id: 'album-1', track_number: 3, title: 'Global Track', media_ids: ['file:3'] }),
+        catalogueItem('track-global', 'track', {
+          parent_id: 'album-1',
+          track_number: 3,
+          title: 'Global Track',
+          media_ids: ['file:3'],
+          effective_artwork: [{ role: 'cover', id: 'global-effective-art', mime_type: 'image/jpeg' }],
+        }),
       ]);
     }
     return Promise.resolve([]);
@@ -115,12 +131,14 @@ describe('MachaMediaApi', () => {
     expect(artist.kind).toBe('artist');
     if (artist.kind !== 'artist' || !('albums' in artist)) throw new Error('expected artist details');
     expect(artist.albums.map((item) => item.id)).toEqual(['album-1']);
+    expect(artist.artwork).toEqual({ poster: { id: 'artist-effective-art', mimeType: 'image/jpeg' } });
 
     const album = await api.details('album-1');
     expect(album.kind).toBe('album');
     if (album.kind !== 'album' || !('tracks' in album)) throw new Error('expected album details');
     expect(album.tracks.map((item) => item.id)).toEqual(['track-1', 'track-2']);
     expect(album.tracks[0].subtitle).toBe('Track 1');
+    expect(album.tracks[0].artwork).toEqual({ poster: { id: 'album-effective-art', mimeType: 'image/jpeg' } });
   });
 
   it('lists tracks directly for the top-level Music tracks grid', async () => {
@@ -131,6 +149,7 @@ describe('MachaMediaApi', () => {
       kind: 'track',
       parentId: 'album-1',
       subtitle: 'Track 3',
+      artwork: { poster: { id: 'global-effective-art', mimeType: 'image/jpeg' } },
     })]);
   });
 
