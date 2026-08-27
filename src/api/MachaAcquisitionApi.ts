@@ -83,6 +83,7 @@ export class MachaAcquisitionApi implements AcquisitionApi {
   }
   pauseTorrent(id: string): Promise<TorrentJob> { return this.torrentAction(id, 'pause'); }
   resumeTorrent(id: string): Promise<TorrentJob> { return this.torrentAction(id, 'resume'); }
+  retryTorrent(id: string): Promise<TorrentJob> { return this.torrentAction(id, 'retry'); }
   cancelTorrent(id: string): Promise<TorrentJob> { return this.torrentAction(id, 'cancel'); }
   async clearTorrent(id: string): Promise<void> {
     await this.request<ClearEnvelope>(`/api/v1/torrents/jobs/${encodeURIComponent(id)}/clear`, { method: 'POST' });
@@ -92,7 +93,7 @@ export class MachaAcquisitionApi implements AcquisitionApi {
     return this.request(`/api/v1/ingest/jobs/${encodeURIComponent(id)}/${action}`, { method: 'POST' });
   }
 
-  private torrentAction(id: string, action: 'pause' | 'resume' | 'cancel'): Promise<TorrentJob> {
+  private torrentAction(id: string, action: 'pause' | 'resume' | 'retry' | 'cancel'): Promise<TorrentJob> {
     return this.request(`/api/v1/torrents/jobs/${encodeURIComponent(id)}/${action}`, { method: 'POST' });
   }
 
@@ -154,6 +155,7 @@ export class DemoAcquisitionApi implements AcquisitionApi {
   clearIngest(): Promise<void> { return Promise.reject(new Error('Import is unavailable in demo mode.')); }
   pauseTorrent(): Promise<TorrentJob> { return Promise.reject(new Error('Torrent acquisition is unavailable in demo mode.')); }
   resumeTorrent(): Promise<TorrentJob> { return Promise.reject(new Error('Torrent acquisition is unavailable in demo mode.')); }
+  retryTorrent(): Promise<TorrentJob> { return Promise.reject(new Error('Torrent acquisition is unavailable in demo mode.')); }
   cancelTorrent(): Promise<TorrentJob> { return Promise.reject(new Error('Torrent acquisition is unavailable in demo mode.')); }
   clearTorrent(): Promise<void> { return Promise.reject(new Error('Torrent acquisition is unavailable in demo mode.')); }
 }

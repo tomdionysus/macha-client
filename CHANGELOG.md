@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.7.7
+
+- add a first-class Status section with live cluster health, known-versus-online durable/cache capacity, metadata quorum state and per-node telemetry;
+- add node detail views with runtime, storage, metadata and peer/RPC observations plus cluster/node connectivity re-check actions;
+- move Settings beneath Manage as a route-backed management tab while preserving direct navigation for server-unreachable recovery and Samsung back navigation;
+- add cluster-wide stale endpoint/IP → NodeId reset controls to Status, supporting host-only resets when the vanished node ID is unknown, with explicit destructive confirmation and no deletion of persisted node/MachaDFS state.
+
+## 0.7.6
+
+- add a Retry import action for downloaded torrents whose linked ingest job failed, reusing the server-side staged payload rather than starting the torrent again;
+- wire the torrent retry action through the acquisition API client while retaining Pause/Resume as distinct download controls.
+
 ## 0.7.5
 
 - render the active player's current buffered media-time ranges directly in the full seek bar, using a near-white light pink background for resident ranges and preserving disjoint ranges on both sides of the playhead;

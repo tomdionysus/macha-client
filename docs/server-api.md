@@ -128,3 +128,26 @@ Direct mode is handed straight to the platform player. Remux/transcode mode retu
 The API Bearer token is attached to session create/control requests. Returned `/api/v1/playback/stream/...` and subtitle URLs are capability URLs and are loaded without the permanent Bearer token.
 
 The client explicitly deletes the playback session when leaving the player.
+
+## Cluster status and management
+
+The Status section consumes the cluster status API rather than inferring server health from playback:
+
+```text
+GET  /api/v1/status
+GET  /api/v1/status/nodes/{node_id}
+POST /api/v1/status/connectivity/check
+POST /api/v1/status/nodes/{node_id}/connectivity/check
+```
+
+Node observations explicitly distinguish `live`, `stale`, and `last_known`. Cluster storage/cache totals distinguish known capacity from currently online capacity.
+
+Administrative mutations use the separate management namespace. The Status UI currently exposes the cluster-wide stale identity-association reset:
+
+```text
+GET  /api/v1/manage
+POST /api/v1/manage/identity-associations/reset
+POST /api/v1/manage/nodes/{node_id}/identity-association/reset
+```
+
+The general reset requires only a host/IP. Port and NodeId are optional so an obsolete association can still be cleared after the node identity is unknown; omitting the port clears stale associations for all ports on that host. The operation does not delete persisted node state or MachaDFS data and is guarded by an explicit confirmation in the UI.

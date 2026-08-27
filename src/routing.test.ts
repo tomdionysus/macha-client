@@ -20,6 +20,11 @@ describe('routes', () => {
     expect(routes.musicTracks).toBe('/music/tracks');
     expect(routes.musicPlaylist).toBe('/music/playlist');
     expect(routes.ingest).toBe('/ingest');
+    expect(routes.status).toBe('/status');
+    expect(routes.statusNode('node:one')).toBe('/status/nodes/node%3Aone');
+    expect(routes.manage).toBe('/manage');
+    expect(routes.manageFiles).toBe('/manage/files');
+    expect(routes.settings).toBe('/manage/settings');
     expect(routes.artist('artist:one')).toBe('/music/artists/artist%3Aone');
     expect(routes.album('album:one')).toBe('/music/albums/album%3Aone');
     expect(routes.track('track:one')).toBe('/music/tracks/track%3Aone');

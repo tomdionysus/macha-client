@@ -31,7 +31,11 @@ export const routes = {
   edit: (id: string) => `/items/${segment(id)}/edit`,
   search: '/search',
   ingest: '/ingest',
-  settings: '/settings',
+  status: '/status',
+  statusNode: (id: string) => `/status/nodes/${segment(id)}`,
+  manage: '/manage',
+  manageFiles: '/manage/files',
+  settings: '/manage/settings',
   sponsor: '/sponsor',
 } as const;
 

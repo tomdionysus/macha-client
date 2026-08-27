@@ -12,7 +12,7 @@ interface Props {
 }
 
 type JobKind = 'ingest' | 'torrent';
-type JobAction = 'pause' | 'resume' | 'remove';
+type JobAction = 'pause' | 'resume' | 'retry' | 'remove';
 
 const ingestPauseableStates = new Set(['queued', 'scanning', 'importing']);
 const ingestResumableStates = new Set(['paused', 'blocked', 'failed']);
@@ -90,10 +90,11 @@ function Progress({ value }: { value: number | null }) {
   );
 }
 
-function JobControls({ kind, id, state, busyAction, confirmRemove, onAction, onConfirmRemove }: {
+function JobControls({ kind, id, state, retryable = false, busyAction, confirmRemove, onAction, onConfirmRemove }: {
   kind: JobKind;
   id: string;
   state: string;
+  retryable?: boolean;
   busyAction: JobAction | undefined;
   confirmRemove: boolean;
   onAction: (kind: JobKind, id: string, state: string, action: JobAction) => void;
@@ -110,6 +111,11 @@ function JobControls({ kind, id, state, busyAction, confirmRemove, onAction, onC
       {canResume(kind, state) && (
         <button className="secondary-button" data-tv-focusable="true" disabled={active} onClick={() => onAction(kind, id, state, 'resume')}>
           {active && busyAction === 'resume' ? 'Resuming…' : 'Resume'}
+        </button>
+      )}
+      {kind === 'torrent' && retryable && (
+        <button className="secondary-button" data-tv-focusable="true" disabled={active} onClick={() => onAction(kind, id, state, 'retry')}>
+          {active && busyAction === 'retry' ? 'Retrying…' : 'Retry import'}
         </button>
       )}
       {confirmRemove && !isTerminal(state) && (
@@ -216,7 +222,16 @@ function TorrentJobCard({ job, linkedIngest, busyAction, confirmRemove, onAction
         </dl>
       )}
       {displayError && <p className="ingest-job-error">{displayError}</p>}
-      <JobControls kind="torrent" id={job.id} state={job.state} busyAction={busyAction} confirmRemove={confirmRemove} onAction={onAction} onConfirmRemove={onConfirmRemove} />
+      <JobControls
+        kind="torrent"
+        id={job.id}
+        state={job.state}
+        retryable={job.state === 'failed' && Boolean(job.ingest_job_id) && linkedIngest?.state === 'failed'}
+        busyAction={busyAction}
+        confirmRemove={confirmRemove}
+        onAction={onAction}
+        onConfirmRemove={onConfirmRemove}
+      />
     </article>
   );
 }
@@ -336,6 +351,7 @@ export function IngestScreen({ api }: Props) {
       } else {
         if (action === 'pause') await api.pauseTorrent(id);
         else if (action === 'resume') await api.resumeTorrent(id);
+        else if (action === 'retry') await api.retryTorrent(id);
         else {
           if (!isTerminal(state)) await api.cancelTorrent(id);
           await api.clearTorrent(id);

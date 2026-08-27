@@ -162,7 +162,7 @@ h1, h2, .card-title, .episode-heading strong, .track-title, .player-titlebar str
   outline: none !important;
   border-radius: 8px !important;
   background-color: transparent !important;
-  box-shadow: 0 0 0 2px #620014 !important;
+  box-shadow: 0 0 0 4px #620014 !important;
 }
 `
 

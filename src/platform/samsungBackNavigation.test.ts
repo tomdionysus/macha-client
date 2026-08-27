@@ -25,7 +25,11 @@ describe('Samsung Return hierarchy', () => {
     await expect(samsungBackTarget('/music/artists', api)).resolves.toBe('/');
     await expect(samsungBackTarget('/search', api)).resolves.toBe('/');
     await expect(samsungBackTarget('/ingest', api)).resolves.toBe('/');
-    await expect(samsungBackTarget('/settings', api)).resolves.toBe('/');
+    await expect(samsungBackTarget('/status/nodes/node', api)).resolves.toBe('/status');
+    await expect(samsungBackTarget('/status', api)).resolves.toBe('/');
+    await expect(samsungBackTarget('/manage/files', api)).resolves.toBe('/manage');
+    await expect(samsungBackTarget('/manage/settings', api)).resolves.toBe('/manage');
+    await expect(samsungBackTarget('/manage', api)).resolves.toBe('/');
     await expect(samsungBackTarget('/', api)).resolves.toBeUndefined();
   });
   it('returns the full player to its browse screen', async () => {

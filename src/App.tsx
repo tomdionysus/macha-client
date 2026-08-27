@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Navigate, NavLink, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { MachaCatalogueApi } from './api/MachaCatalogueApi';
+import { MachaManageApi } from './api/MachaManageApi';
 import type { CatalogueApi } from './api/CatalogueApi';
 import { MachaMediaApi } from './api/MachaMediaApi';
 import { MockMediaApi } from './api/MockMediaApi';
@@ -16,6 +17,7 @@ import { DemoPlaybackResolver } from './playback/DemoPlaybackResolver';
 import { MachaPlaybackResolver } from './playback/MachaPlaybackResolver';
 import { PlaybackRuntime } from './playback/PlaybackRuntime';
 import { DemoServerApi, MachaServerApi, type ServerApi } from './api/MachaServerApi';
+import { DemoClusterStatusApi, MachaClusterStatusApi, type ClusterStatusApi } from './api/ClusterStatusApi';
 import { DemoAcquisitionApi, MachaAcquisitionApi } from './api/MachaAcquisitionApi';
 import { SERVER_UNREACHABLE_EVENT, SERVER_UNREACHABLE_MESSAGE } from './api/serverConnection';
 import type { Episode, MediaSummary, PlaybackProgress, SeasonSummary } from './types';
@@ -46,6 +48,8 @@ import { SettingsScreen } from './screens/SettingsScreen';
 import { SponsorScreen } from './screens/SponsorScreen';
 import { MetadataEditorScreen } from './screens/MetadataEditorScreen';
 import { IngestScreen } from './screens/IngestScreen';
+import { ManageScreen } from './screens/ManageScreen';
+import { NodeStatusScreen, StatusScreen } from './screens/StatusScreen';
 import { pathForMedia, routes, type PlaybackRouteState } from './routing';
 
 interface Props {
@@ -67,7 +71,8 @@ const navItems = [
   { to: routes.music, label: 'Music', end: false },
   { to: routes.search, label: 'Search', end: false },
   { to: routes.ingest, label: 'Import', end: false },
-  { to: routes.settings, label: 'Settings', end: false },
+  { to: routes.status, label: 'Status', end: false },
+  { to: routes.manage, label: 'Manage', end: false },
 ] as const;
 
 function required(value: string | undefined, name: string): string {
@@ -275,7 +280,10 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
   ));
   const demo = import.meta.env.VITE_DEMO === 'true';
   const catalogueApi = useMemo(() => new MachaCatalogueApi(serverUrl, apiToken), [apiToken, serverUrl]);
-  const metadataEditingAvailable = !demo && !apiOverride;
+  const manageApi = useMemo(() => new MachaManageApi(serverUrl, apiToken), [apiToken, serverUrl]);
+  const managementAvailable = !demo && !apiOverride;
+  const metadataEditingAvailable = managementAvailable;
+  const [unmatchedCount, setUnmatchedCount] = useState(0);
 
   const api = useMemo<MediaApi>(() => {
     if (apiOverride) return apiOverride;
@@ -309,9 +317,25 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
     demo ? new DemoServerApi() : new MachaServerApi(serverUrl, apiToken)
   ), [apiToken, demo, serverUrl]);
 
+  const clusterStatusApi = useMemo<ClusterStatusApi>(() => (
+    demo ? new DemoClusterStatusApi() : new MachaClusterStatusApi(serverUrl, apiToken)
+  ), [apiToken, demo, serverUrl]);
+
   const acquisitionApi = useMemo(() => (
     demo ? new DemoAcquisitionApi() : new MachaAcquisitionApi(serverUrl, apiToken)
   ), [apiToken, demo, serverUrl]);
+
+  useEffect(() => {
+    if (!managementAvailable) {
+      setUnmatchedCount(0);
+      return undefined;
+    }
+    let cancelled = false;
+    void manageApi.unmatched()
+      .then((items) => { if (!cancelled) setUnmatchedCount(items.length); })
+      .catch(() => { /* Manage itself will surface API errors when opened. */ });
+    return () => { cancelled = true; };
+  }, [manageApi, managementAvailable]);
 
   const samsungBack = useCallback(() => {
     if (import.meta.env.MODE !== 'samsung') return false;
@@ -653,17 +677,21 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
           <span className="brand-name">Macha</span>
         </NavLink>
         <nav aria-label="Main navigation">
-          {navItems.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              end={item.end}
-              data-tv-focusable="true"
-              className={({ isActive }: { isActive: boolean }) => isActive ? 'active' : undefined}
-            >
-              {item.label}
-            </NavLink>
-          ))}
+          {navItems.map((item) => {
+            if (item.to === routes.manage && !managementAvailable) return null;
+            return (
+              <NavLink
+                key={item.to}
+                to={item.to}
+                end={item.end}
+                data-tv-focusable="true"
+                className={({ isActive }: { isActive: boolean }) => isActive ? 'active' : undefined}
+              >
+                {item.label}
+                {item.to === routes.manage && unmatchedCount > 0 && <span className="manage-badge">{unmatchedCount}</span>}
+              </NavLink>
+            );
+          })}
         </nav>
         <div className="platform-badge">{import.meta.env.MODE === 'samsung' ? 'SAMSUNG TV' : platform.name.toUpperCase()}</div>
       </header>
@@ -694,7 +722,12 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
           <Route path="/items/:itemId/edit" element={metadataEditingAvailable ? <MetadataEditorRoute api={catalogueApi} /> : <Navigate to={routes.home} replace />} />
           <Route path={routes.search} element={<SearchScreen api={api} onOpen={open} />} />
           <Route path={routes.ingest} element={<IngestScreen api={acquisitionApi} />} />
-          <Route path={routes.settings} element={<SettingsScreen api={api} serverApi={serverApi} serverUrl={serverUrl} apiToken={apiToken} connectionNotice={connectionNotice} onSave={saveServer} />} />
+          <Route path={routes.status} element={<StatusScreen api={clusterStatusApi} manageApi={managementAvailable ? manageApi : undefined} />} />
+          <Route path="/status/nodes/:nodeId" element={<NodeStatusScreen api={clusterStatusApi} manageApi={managementAvailable ? manageApi : undefined} />} />
+          <Route path={routes.manage} element={managementAvailable ? <ManageScreen api={manageApi} catalogueApi={catalogueApi} section="unmatched" settings={<SettingsScreen api={api} serverApi={serverApi} serverUrl={serverUrl} apiToken={apiToken} connectionNotice={connectionNotice} onSave={saveServer} />} managementAvailable={managementAvailable} onUnmatchedCountChange={setUnmatchedCount} /> : <Navigate to={routes.settings} replace />} />
+          <Route path={routes.manageFiles} element={managementAvailable ? <ManageScreen api={manageApi} catalogueApi={catalogueApi} section="files" settings={<SettingsScreen api={api} serverApi={serverApi} serverUrl={serverUrl} apiToken={apiToken} connectionNotice={connectionNotice} onSave={saveServer} />} managementAvailable={managementAvailable} onUnmatchedCountChange={setUnmatchedCount} /> : <Navigate to={routes.settings} replace />} />
+          <Route path={routes.settings} element={<ManageScreen api={manageApi} catalogueApi={catalogueApi} section="settings" settings={<SettingsScreen api={api} serverApi={serverApi} serverUrl={serverUrl} apiToken={apiToken} connectionNotice={connectionNotice} onSave={saveServer} />} managementAvailable={managementAvailable} />} />
+          <Route path="/settings" element={<Navigate to={routes.settings} replace />} />
           <Route path={routes.sponsor} element={<SponsorScreen />} />
           <Route path="*" element={<Navigate to={routes.home} replace />} />
         </Routes>

@@ -79,6 +79,7 @@ export interface AcquisitionApi {
   clearIngest(id: string): Promise<void>;
   pauseTorrent(id: string): Promise<TorrentJob>;
   resumeTorrent(id: string): Promise<TorrentJob>;
+  retryTorrent(id: string): Promise<TorrentJob>;
   cancelTorrent(id: string): Promise<TorrentJob>;
   clearTorrent(id: string): Promise<void>;
 }

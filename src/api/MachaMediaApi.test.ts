@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { CatalogueApi, CatalogueItem, CatalogueKind, CatalogueStatus } from './CatalogueApi';
+import type { CatalogueApi, CatalogueArtwork, CatalogueItem, CatalogueKind, CatalogueStatus } from './CatalogueApi';
 import { MachaMediaApi } from './MachaMediaApi';
 
 function catalogueItem(id: string, kind: CatalogueKind, partial: Partial<CatalogueItem> = {}): CatalogueItem {
@@ -29,6 +29,7 @@ class FakeCatalogue implements CatalogueApi {
   status(): Promise<CatalogueStatus> { throw new Error('not used'); }
   update(item: CatalogueItem): Promise<CatalogueItem> { return Promise.resolve(item); }
   clearMetadata(): Promise<void> { return Promise.resolve(); }
+  putArtwork(): Promise<CatalogueArtwork> { return Promise.resolve({ role: 'poster', id: 'artwork', mime_type: 'image/jpeg' }); }
   artwork(id: string, _signal?: AbortSignal): Promise<Blob> { return Promise.resolve(new Blob([id])); }
   search(): Promise<CatalogueItem[]> { return Promise.resolve([]); }
   get(id: string): Promise<CatalogueItem> {

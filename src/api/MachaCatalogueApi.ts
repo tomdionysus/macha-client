@@ -3,6 +3,7 @@ import { parseErrorEnvelope } from './errorEnvelope';
 import { isGatewayConnectionFailure, serverUnreachable } from './serverConnection';
 import type {
   CatalogueApi,
+  CatalogueArtwork,
   CatalogueItem,
   CatalogueKind,
   CatalogueStatus,
@@ -77,6 +78,15 @@ export class MachaCatalogueApi implements CatalogueApi {
     const params = queryString([['q', query], ['limit', String(limit)]]);
     const response = await this.getJson<ItemEnvelope>(`/api/v1/catalogue/search?${params}`);
     return response.items;
+  }
+
+  putArtwork(itemId: string, role: string, mimeType: string, data: Blob): Promise<CatalogueArtwork> {
+    const params = queryString([['role', role], ['mime', mimeType]]);
+    return this.request(`/api/v1/catalogue/items/${encodeURIComponent(itemId)}/artwork?${params}`, {
+      method: 'POST',
+      headers: { 'Content-Type': mimeType },
+      body: data,
+    });
   }
 
   async artwork(id: string, signal?: AbortSignal): Promise<Blob> {

@@ -58,6 +58,23 @@ describe('MachaCatalogueApi', () => {
     expect(new Headers(init.headers).get('Authorization')).toBe('Bearer secret');
   });
 
+  it('uploads manual artwork through the catalogue item artwork endpoint', async () => {
+    const artwork = { role: 'poster', id: 'sha256:abcd', mime_type: 'image/jpeg' };
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(artwork));
+    vi.stubGlobal('fetch', fetchMock);
+    const api = new MachaCatalogueApi('http://node.test', 'secret');
+    const blob = new Blob(['image'], { type: 'image/jpeg' });
+
+    await expect(api.putArtwork('movie:one', 'poster', 'image/jpeg', blob)).resolves.toEqual(artwork);
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('http://node.test/api/v1/catalogue/items/movie%3Aone/artwork?role=poster&mime=image%2Fjpeg');
+    expect(init.method).toBe('POST');
+    expect(init.body).toBe(blob);
+    expect(new Headers(init.headers).get('Content-Type')).toBe('image/jpeg');
+    expect(new Headers(init.headers).get('Authorization')).toBe('Bearer secret');
+  });
+
   it('fetches content-addressed artwork with authentication', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(new Blob(['image']), { status: 200, headers: { 'Content-Type': 'image/jpeg' } }));
     vi.stubGlobal('fetch', fetchMock);

@@ -55,5 +55,6 @@ export interface CatalogueApi {
   update(item: CatalogueItem, expectedRevision?: number): Promise<CatalogueItem>;
   clearMetadata(id: string, expectedRevision?: number): Promise<void>;
   search(query: string, limit?: number): Promise<CatalogueItem[]>;
+  putArtwork(itemId: string, role: string, mimeType: string, data: Blob): Promise<CatalogueArtwork>;
   artwork(id: string, signal?: AbortSignal): Promise<Blob>;
 }

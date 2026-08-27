@@ -35,5 +35,10 @@ export async function samsungBackTarget(pathname: string, api: MediaApi, playerR
   if (pathname === routes.music || pathname === routes.musicArtists || pathname === routes.musicAlbums
       || pathname === routes.musicTracks || pathname === routes.musicPlaylist) return routes.home;
 
+  if (/^\/status\/nodes\/[^/]+$/.test(pathname)) return routes.status;
+  if (pathname === routes.status) return routes.home;
+  if (pathname === routes.manageFiles || pathname === routes.settings) return routes.manage;
+  if (pathname === routes.manage) return routes.home;
+
   return routes.home;
 }
