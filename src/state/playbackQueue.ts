@@ -1,16 +1,11 @@
 import type { MediaSummary } from '../types';
+import { readValidatedJson, writeJson, type StorageLike } from './storage';
 
 export interface PlaybackQueueState {
   items: MediaSummary[];
   currentIndex: number;
   positionMs: number;
   updatedAt: number;
-}
-
-interface StorageLike {
-  getItem(key: string): string | null;
-  setItem(key: string, value: string): void;
-  removeItem(key: string): void;
 }
 
 function playable(item: MediaSummary): boolean {
@@ -39,19 +34,7 @@ export class PlaybackQueueStore {
   }
 
   load(): PlaybackQueueState | undefined {
-    const raw = this.storage.getItem(this.key);
-    if (!raw) return undefined;
-    try {
-      const parsed: unknown = JSON.parse(raw);
-      if (!validState(parsed)) {
-        this.storage.removeItem(this.key);
-        return undefined;
-      }
-      return parsed;
-    } catch {
-      this.storage.removeItem(this.key);
-      return undefined;
-    }
+    return readValidatedJson(this.storage, this.key, validState);
   }
 
   replace(items: MediaSummary[], currentIndex = 0): PlaybackQueueState {
@@ -64,24 +47,21 @@ export class PlaybackQueueStore {
       positionMs: 0,
       updatedAt: Date.now(),
     };
-    this.storage.setItem(this.key, JSON.stringify(next));
-    return next;
+    return writeJson(this.storage, this.key, next);
   }
 
   select(currentIndex: number): PlaybackQueueState | undefined {
     const current = this.load();
     if (!current || currentIndex < 0 || currentIndex >= current.items.length) return current;
     const next = { ...current, currentIndex, positionMs: 0, updatedAt: Date.now() };
-    this.storage.setItem(this.key, JSON.stringify(next));
-    return next;
+    return writeJson(this.storage, this.key, next);
   }
 
   updatePosition(positionMs: number): PlaybackQueueState | undefined {
     const current = this.load();
     if (!current) return undefined;
     const next = { ...current, positionMs: Number.isFinite(positionMs) ? Math.max(0, positionMs) : 0, updatedAt: Date.now() };
-    this.storage.setItem(this.key, JSON.stringify(next));
-    return next;
+    return writeJson(this.storage, this.key, next);
   }
 
   insertNext(items: MediaSummary[]): PlaybackQueueState | undefined {
@@ -95,8 +75,7 @@ export class PlaybackQueueStore {
       items: [...current.items.slice(0, insertAt), ...additions, ...current.items.slice(insertAt)],
       updatedAt: Date.now(),
     };
-    this.storage.setItem(this.key, JSON.stringify(next));
-    return next;
+    return writeJson(this.storage, this.key, next);
   }
 
   append(items: MediaSummary[]): PlaybackQueueState | undefined {
@@ -109,8 +88,7 @@ export class PlaybackQueueStore {
       items: [...current.items, ...additions],
       updatedAt: Date.now(),
     };
-    this.storage.setItem(this.key, JSON.stringify(next));
-    return next;
+    return writeJson(this.storage, this.key, next);
   }
 
   clear(): void {

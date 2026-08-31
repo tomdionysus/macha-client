@@ -1,4 +1,4 @@
-import { mergeRequestHeaders, queryString } from './httpCompat';
+import { authenticatedRequestHeaders, normalizeBaseUrl, queryString, readResponseBody } from './httpCompat';
 import { parseErrorEnvelope } from './errorEnvelope';
 import { isGatewayConnectionFailure, serverUnreachable } from './serverConnection';
 import type {
@@ -12,12 +12,6 @@ import type {
   UnmatchedDetail,
   UnmatchedFile,
 } from './ManageApi';
-
-function normalizeBaseUrl(value: string): string {
-  const trimmed = value.trim();
-  if (!trimmed || trimmed === '/') return '';
-  return trimmed.replace(/\/+$/, '');
-}
 
 export class MachaManageApi implements ManageApi {
   private readonly baseUrl: string;
@@ -107,11 +101,7 @@ export class MachaManageApi implements ManageApi {
   }
 
   private async request<T>(path: string, init: RequestInit): Promise<T> {
-    const token = this.bearerToken?.trim();
-    const headers = mergeRequestHeaders(init.headers, {
-      Accept: 'application/json',
-      Authorization: token ? `Bearer ${token}` : undefined,
-    });
+    const headers = authenticatedRequestHeaders(init.headers, this.bearerToken);
     let response: Response;
     try {
       response = await fetch(`${this.baseUrl}${path}`, { ...init, headers });
@@ -119,15 +109,8 @@ export class MachaManageApi implements ManageApi {
       throw serverUnreachable();
     }
     if (!response.ok) {
-      let body: unknown;
-      let bodyWasJson = false;
-      try {
-        body = await response.json() as unknown;
-        bodyWasJson = true;
-      } catch {
-        // handled below
-      }
-      if (isGatewayConnectionFailure(response, bodyWasJson)) throw serverUnreachable();
+      const { body, wasJson } = await readResponseBody(response);
+      if (isGatewayConnectionFailure(response, wasJson)) throw serverUnreachable();
       const parsed = parseErrorEnvelope(body, `${response.status} ${response.statusText}`);
       throw new Error(`Macha management request failed: ${parsed.message}`);
     }

@@ -12,6 +12,7 @@ import type {
   UnmatchedDetail,
   UnmatchedFile,
 } from '../api/ManageApi';
+import { errorMessage } from '../utils/errors';
 
 export type ManageSection = 'unmatched' | 'files' | 'settings';
 
@@ -44,10 +45,6 @@ function fileName(path: string): string {
 function joinPath(parent: string, name: string): string {
   if (parent === '/') return `/${name}`;
   return `${parent.replace(/\/+$/, '')}/${name}`;
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 function candidateSummary(candidate: MediaProbeCandidate): string {

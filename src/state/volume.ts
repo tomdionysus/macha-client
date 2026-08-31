@@ -1,7 +1,4 @@
-interface StorageLike {
-  getItem(key: string): string | null;
-  setItem(key: string, value: string): void;
-}
+import type { ReadWriteStorageLike } from './storage';
 
 function clampVolume(value: number): number {
   return Math.max(0, Math.min(1, Number.isFinite(value) ? value : 1));
@@ -10,7 +7,7 @@ function clampVolume(value: number): number {
 export class VolumeStore {
   private readonly key: string;
 
-  constructor(clientId: string, private readonly storage: StorageLike = window.localStorage) {
+  constructor(clientId: string, private readonly storage: ReadWriteStorageLike = window.localStorage) {
     this.key = `macha.volume.v1.${clientId}`;
   }
 

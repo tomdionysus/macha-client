@@ -1,5 +1,10 @@
 export type HeaderValues = Record<string, string | undefined>;
 
+export interface ParsedResponseBody {
+  body: unknown;
+  wasJson: boolean;
+}
+
 /**
  * Build a plain header object without relying on the Headers(init) constructor.
  * Older Tizen Chromium implements Fetch but only exposes the earliest Headers
@@ -37,4 +42,31 @@ export function queryString(entries: ReadonlyArray<readonly [string, string | un
     parts.push(`${encodeURIComponent(key)}=${encodeURIComponent(value)}`);
   }
   return parts.join('&');
+}
+
+export function normalizeBaseUrl(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed || trimmed === '/') return '';
+  return trimmed.replace(/\/+$/, '');
+}
+
+export function authenticatedRequestHeaders(
+  initial: HeadersInit | undefined,
+  bearerToken: string | undefined,
+  values: HeaderValues = {},
+): Record<string, string> {
+  const token = bearerToken?.trim();
+  return mergeRequestHeaders(initial, {
+    Accept: 'application/json',
+    Authorization: token ? `Bearer ${token}` : undefined,
+    ...values,
+  });
+}
+
+export async function readResponseBody(response: Response): Promise<ParsedResponseBody> {
+  try {
+    return { body: await response.json() as unknown, wasJson: true };
+  } catch {
+    return { body: undefined, wasJson: false };
+  }
 }

@@ -225,6 +225,9 @@ function samsungCssCompatibility(): Plugin {
   };
 }
 
+// Tizen config.xml exposes one package/test launcher icon. Samsung TV published 1:1,
+// 16:9 and 512x423 launcher artwork is supplied separately through Seller Office;
+// the corresponding build assets live under public/samsung/.
 function samsungManifest(version: string): Plugin {
   return {
     name: 'macha-samsung-manifest',
@@ -246,7 +249,7 @@ function samsungManifest(version: string): Plugin {
         required_version="2.4"/>
 
     <content src="index.html"/>
-    <icon src="macha-icon.png"/>
+    <icon src="samsung/macha-icon-package-117.png"/>
     <name>Macha</name>
 
     <tizen:profile name="tv-samsung"/>
@@ -291,6 +294,7 @@ export default defineConfig(({ mode }) => {
     } : undefined,
     test: {
       environment: 'node',
+      setupFiles: './src/test/setup.ts',
     },
   };
 });

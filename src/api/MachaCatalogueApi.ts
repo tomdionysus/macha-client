@@ -1,4 +1,4 @@
-import { mergeRequestHeaders, queryString } from './httpCompat';
+import { authenticatedRequestHeaders, normalizeBaseUrl, queryString, readResponseBody } from './httpCompat';
 import { parseErrorEnvelope } from './errorEnvelope';
 import { isGatewayConnectionFailure, serverUnreachable } from './serverConnection';
 import type {
@@ -21,12 +21,6 @@ export class MachaApiError extends Error {
   ) {
     super(message);
   }
-}
-
-function normalizeBaseUrl(value: string): string {
-  const trimmed = value.trim();
-  if (!trimmed || trimmed === '/') return '';
-  return trimmed.replace(/\/+$/, '');
 }
 
 export class MachaCatalogueApi implements CatalogueApi {
@@ -108,10 +102,8 @@ export class MachaCatalogueApi implements CatalogueApi {
   }
 
   private async fetch(path: string, accept: string, init: RequestInit = { method: 'GET' }): Promise<Response> {
-    const token = this.bearerToken?.trim();
-    const headers = mergeRequestHeaders(init.headers, {
+    const headers = authenticatedRequestHeaders(init.headers, this.bearerToken, {
       Accept: accept,
-      Authorization: token ? `Bearer ${token}` : undefined,
     });
     try {
       return await fetch(`${this.baseUrl}${path}`, { ...init, headers });
@@ -122,16 +114,8 @@ export class MachaCatalogueApi implements CatalogueApi {
   }
 
   private async throwResponseError(response: Response): Promise<never> {
-    let body: unknown;
-    let bodyWasJson = false;
-    try {
-      body = await response.json() as unknown;
-      bodyWasJson = true;
-    } catch {
-      // A proxy-generated 5xx with no Macha JSON envelope usually means its
-      // upstream server could not be reached.
-    }
-    if (isGatewayConnectionFailure(response, bodyWasJson)) throw serverUnreachable();
+    const { body, wasJson } = await readResponseBody(response);
+    if (isGatewayConnectionFailure(response, wasJson)) throw serverUnreachable();
     const parsed = parseErrorEnvelope(body, `${response.status} ${response.statusText}`);
     throw new MachaApiError(`Macha catalogue request failed: ${parsed.message}`, response.status, parsed.code);
   }

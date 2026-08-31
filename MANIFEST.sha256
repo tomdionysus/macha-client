@@ -2,7 +2,7 @@ c5131b95a64da5a41f31bfdafa5bdf4f6e180e2f639d6f4d5db341c4be565910  ./.env.example
 266328b6b2ff4d5204e3991f348df54d00f071eb13011e2257812929e8dc1c5f  ./.env.local
 86965fdbea3aad45e25c2c0167d841a363606da713c201ab624d349a145d54ee  ./.env.samsung
 6319d256d5f9edb66341080a41d37da3111a7842c2ee3d68e93da0f81d5e5471  ./.gitignore
-a6eccc6e363f623cb725298018ec49b01c6b8593237543c9ce5ce346c2570b2f  ./CHANGELOG.md
+7d1a25ab9b6d43d1f7b2de178ed421a94f0a59077ca78fa9d79327371d40f5d4  ./CHANGELOG.md
 3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986  ./LICENSE
 150de8eff359873c95c6b64c52f609846537aced448d71be77e09dc2d40ea26e  ./README.md
 b6218b61bff628e30438936a31c59632edfc7ec39cd45926955007147fb65cf9  ./TODO.md
@@ -44,7 +44,7 @@ aef7f96bb85c1df5348ea57fc301f1939e0f345e280615354900d0469e9b1e93  ./platforms/ti
 a31725712bfd4d722ae584d426a558d303f1a4e03ac4a5923ee422ff90dac07d  ./public/macha-direct-play-sw.js
 3954712e2da77f24a9f9b7b67a641a0194e7e45f61c1f82ec63415c6ef296067  ./public/macha-icon.png
 e5a1b2ef05207608afcc50d24f05c9ba422903b740f678cadf46108d611a685c  ./public/macha-logo.svg
-02dd6c61700fb5717d51d3aa288b359ca1b935aa737abd16bf0da7ebc4abffa3  ./src/App.tsx
+7eb97477aaf0558eb945939b203d52157d73f6cc285c2a620af8a2d304d3a72b  ./src/App.tsx
 111a83f606816ff518b8f76f6763d267d0b9896a3e7647cf754907c333d22057  ./src/api/AcquisitionApi.ts
 5fc09e587f5b47ef1fd908eec8613f9429eebee9a4dc184ab21fae11859b92c0  ./src/api/CatalogueApi.ts
 a1bf09f8280336b364a59291aa05902ec204ef1e3a7ad847d528a43d23bcc516  ./src/api/ClusterStatusApi.test.ts
@@ -147,7 +147,7 @@ b4574ce5ca453f3ad8c3e6e2d8ad612bfd2c50030bc7ef9afc04d6232d2027a3  ./src/screens/
 b3f6ebf734596a3aec2cf6c4cf7b1a203e678c5cd7627913af2dc30337533e41  ./src/screens/SeriesScreen.tsx
 86e648bd4c2cbc41886b6ca4e01ed1d8da339a1b346325b4746cd650f2f05aea  ./src/screens/SettingsScreen.tsx
 7de6ad7be8c9006a5adae7eddc98932e1f5e88d40c49196ba63dfcc86f93606d  ./src/screens/SponsorScreen.tsx
-2830d0583783809889403236ac74155d8d606ebd2baf48aefb3065ebcd673a62  ./src/screens/StatusScreen.tsx
+506ee9806a03d7524c1a1123281c7865f136d2dd3f26fbdc1b6197a810b3f08b  ./src/screens/StatusScreen.tsx
 6cfc6fd4e6b0ffabb3e1f0aad8dca9154347463abc2f5b83c6e84f30e18ba413  ./src/settings.test.ts
 c1b7e00046ec5298c35eaa181e345953c2d896d1cf9da217cc24cc6773e14305  ./src/settings.ts
 ac25ab6fd80695c9f1cc2613d78b5c50706dc50a91ae9f9b635c1a0f46e6bced  ./src/state/client.ts
@@ -160,7 +160,7 @@ ac9a0e4fb41c9ba39652ec18cceefb9654dddfd48d46393f724f0000231f06c6  ./src/state/mu
 2a267e6c29280ff0b6a36e735361fc59b5b80a5e4f06aa6afdc3d3e4128fccd1  ./src/state/playbackQueue.ts
 a120da644e62851be414756503d96ff78f94144779cc632d8dddf55cc916c9d0  ./src/state/volume.test.ts
 a31ef5ac89dc525a157b503f65706392d289af5c881d4ccbd396ab4e9c1ae431  ./src/state/volume.ts
-15228ec2e9437f4dacea457eb5fa21428e706f45fb3ca7775e99cf9b4899959d  ./src/styles.css
+8c4271b1fa0aa38d516009304a310900466a56cfeed2866deb69e2e7f7130222  ./src/styles.css
 608836600e396f121378b083f437421f9c4508fe634057a014645bd214692dda  ./src/titleIndex.test.ts
 7c49a6e4a3457933bba9e58c922857c4ce8da57cfde99ea8b32760785bad1ef5  ./src/titleIndex.ts
 8b6c3b4c32fd86fb33de795b884068c0ec5d8f8120f307dcae256b3481180fa7  ./src/types.ts
@@ -170,4 +170,11 @@ b6c2fa15085cdae1af92a501c8f6d5967d0d288b3e739191fee8987d2272202a  ./tests/direct
 d6aeee4e6279e53de5467909449c40d904c5289bb62d2d116eace33ebefe0679  ./tsconfig.app.json
 770b4140bbb581e2dfd9ea9946ffc9c75a1d86ba7d2db5f77c83e37cbdf9d808  ./tsconfig.json
 db80ae24457200344abf5f126a4ca5889e964529368c38a66161d7dd270cd52e  ./tsconfig.node.json
-48af5498e6cc8bdb07e5b43e7e8cfc17eeea9a6475d3257b74a8f932943ee6dc  ./vite.config.ts
+64a2b7b99ede67c188f2317fe2da83a2f310f7229f068096b5d099ce22681f7d  ./vite.config.ts
+157ce87d67ca1ccfe0446b779167b9b6cda12c288e4e5fadeb4586f562d13ddd  ./public/samsung/macha-icon-background-1920x1080.png
+3d0edba70d0c50c11e306ac203341498a9694ce19dc5504c1ddfa0c185ba2db2  ./public/samsung/macha-icon-foreground-1920x1080.png
+add5edb91b0780ee4628c388c85f1affdb87678bcc6613842c458edbd87e8ad3  ./public/samsung/macha-icon-oblong-512x423.png
+45d33419a9b9de7a30ba4cac54c83f302c7653b3b1423364ba9ff309ad0c1895  ./public/samsung/macha-icon-package-117.png
+f44d43aaa28b7fc835c711ccbc34f938566972c8ebfe76eaf8efdc0fdade2b93  ./public/samsung/macha-icon-square-298.png
+7aa63e70ed2df84fb8b3391fefd645cc7b652e3e666e00cd63055766b9a9f853  ./public/samsung/macha-icon-square-512.png
+289de735da7c0d9230aece79fa137c056505124be781eb4937e7e338812e6a78  ./public/samsung/macha-logo-text.svg

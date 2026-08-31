@@ -7,7 +7,7 @@ import type {
   TorrentStatus,
 } from './AcquisitionApi';
 import { parseErrorEnvelope } from './errorEnvelope';
-import { mergeRequestHeaders } from './httpCompat';
+import { authenticatedRequestHeaders, normalizeBaseUrl, readResponseBody } from './httpCompat';
 import { isGatewayConnectionFailure, serverUnreachable } from './serverConnection';
 
 interface IngestJobsEnvelope { jobs: IngestJob[]; }
@@ -24,12 +24,6 @@ export class MachaAcquisitionApiError extends Error {
     super(message);
     this.name = 'MachaAcquisitionApiError';
   }
-}
-
-function normalizeBaseUrl(value: string): string {
-  const trimmed = value.trim();
-  if (!trimmed || trimmed === '/') return '';
-  return trimmed.replace(/\/+$/, '');
 }
 
 export class MachaAcquisitionApi implements AcquisitionApi {
@@ -102,11 +96,7 @@ export class MachaAcquisitionApi implements AcquisitionApi {
   }
 
   private async request<T>(path: string, init: RequestInit): Promise<T> {
-    const token = this.bearerToken?.trim();
-    const headers = mergeRequestHeaders(init.headers, {
-      Accept: 'application/json',
-      Authorization: token ? `Bearer ${token}` : undefined,
-    });
+    const headers = authenticatedRequestHeaders(init.headers, this.bearerToken);
 
     let response: Response;
     try {
@@ -120,15 +110,8 @@ export class MachaAcquisitionApi implements AcquisitionApi {
   }
 
   private async throwResponseError(response: Response): Promise<never> {
-    let body: unknown;
-    let bodyWasJson = false;
-    try {
-      body = await response.json() as unknown;
-      bodyWasJson = true;
-    } catch {
-      // A proxy-generated gateway failure may not contain a Macha JSON envelope.
-    }
-    if (isGatewayConnectionFailure(response, bodyWasJson)) throw serverUnreachable();
+    const { body, wasJson } = await readResponseBody(response);
+    if (isGatewayConnectionFailure(response, wasJson)) throw serverUnreachable();
     const parsed = parseErrorEnvelope(body, `${response.status} ${response.statusText}`);
     throw new MachaAcquisitionApiError(`Macha acquisition request failed: ${parsed.message}`, response.status, parsed.code);
   }

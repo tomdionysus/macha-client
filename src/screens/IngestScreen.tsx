@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from 'react';
+import { useCallback, useMemo, useState, type ChangeEvent, type FormEvent } from 'react';
 import { CardCloseButton } from '../components/CardCloseButton';
 import type {
   AcquisitionApi,
@@ -6,6 +6,8 @@ import type {
   IngestJob,
   TorrentJob,
 } from '../api/AcquisitionApi';
+import { usePollingTask } from '../hooks/usePollingTask';
+import { errorMessage } from '../utils/errors';
 
 interface Props {
   api: AcquisitionApi;
@@ -254,35 +256,20 @@ export function IngestScreen({ api }: Props) {
     return value;
   }, [api]);
 
-  useEffect(() => {
-    let active = true;
-    let running = false;
-    const poll = async () => {
-      if (running) return;
-      running = true;
-      try {
-        const value = await api.snapshot();
-        if (active) {
-          setSnapshot(value);
-          setError(undefined);
-          setLoading(false);
-        }
-      } catch (reason: unknown) {
-        if (active) {
-          setError(reason instanceof Error ? reason.message : String(reason));
-          setLoading(false);
-        }
-      } finally {
-        running = false;
-      }
-    };
-    void poll();
-    const timer = window.setInterval(() => { void poll(); }, 1500);
-    return () => {
-      active = false;
-      window.clearInterval(timer);
-    };
-  }, [api]);
+  usePollingTask({
+    load: () => api.snapshot(),
+    onValue: (value) => {
+      setSnapshot(value);
+      setError(undefined);
+      setLoading(false);
+    },
+    onError: (reason) => {
+      setError(errorMessage(reason));
+      setLoading(false);
+    },
+    intervalMs: 1500,
+    dependencies: [api],
+  });
 
   const filesystemJobs = useMemo(
     () => snapshot?.ingestJobs.filter((job) => job.source_type !== 'torrent') ?? [],
@@ -306,7 +293,7 @@ export function IngestScreen({ api }: Props) {
       setNotice(`Import queued: ${value}`);
       await refresh();
     } catch (reason: unknown) {
-      setError(reason instanceof Error ? reason.message : String(reason));
+      setError(errorMessage(reason));
     } finally {
       setSubmitting(undefined);
     }
@@ -329,7 +316,7 @@ export function IngestScreen({ api }: Props) {
       setNotice('Torrent queued.');
       await refresh();
     } catch (reason: unknown) {
-      setError(reason instanceof Error ? reason.message : String(reason));
+      setError(errorMessage(reason));
     } finally {
       setSubmitting(undefined);
     }
@@ -360,7 +347,7 @@ export function IngestScreen({ api }: Props) {
       if (action === 'remove') setConfirmRemove(undefined);
       await refresh();
     } catch (reason: unknown) {
-      setError(reason instanceof Error ? reason.message : String(reason));
+      setError(errorMessage(reason));
     } finally {
       setBusyByJob((current) => {
         if (current[key] !== action) return current;

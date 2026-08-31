@@ -6,33 +6,23 @@ import { ManagedHlsMediaRecoveryBudget } from './ManagedHlsRecovery';
 import { detectWebMediaCodecCapabilities } from './WebMediaCapabilities';
 import { WebMediaTimeline } from './WebMediaTimeline';
 import {
-  directPlayReadAheadMetrics,
   directPlayReadAheadUrl,
   releaseDirectPlayReadAhead,
   setDirectPlayReadAheadMode,
 } from '../playback/directPlayReadAhead';
+import { hlsEventSummary, videoState, WebMediaDiagnostics } from './WebMediaDiagnostics';
+import { managedHlsErrorAction, webHlsBufferConfig } from './WebHlsPolicy';
+import {
+  isLegacyWebVtt,
+  subtitleSegmentAt,
+  subtitleSegmentStarts,
+  subtitleSegmentWindow,
+  validSubtitleManifest,
+  type SubtitleSegmentManifest,
+} from './WebSubtitles';
 
-interface SubtitleSegmentManifest {
-  format: 'macha-webvtt-segments';
-  version: number;
-  stream_index: number;
-  segment_durations_ms: number[];
-}
-
-function isLegacyWebVtt(url: string): boolean {
-  return /\.vtt(?:$|[?#])/i.test(url);
-}
-
-function validSubtitleManifest(value: unknown): value is SubtitleSegmentManifest {
-  if (!value || typeof value !== 'object') return false;
-  const manifest = value as Partial<SubtitleSegmentManifest>;
-  return manifest.format === 'macha-webvtt-segments'
-    && manifest.version === 1
-    && Number.isInteger(manifest.stream_index)
-    && Array.isArray(manifest.segment_durations_ms)
-    && manifest.segment_durations_ms.length > 0
-    && manifest.segment_durations_ms.every((duration) => Number.isFinite(duration) && duration > 0);
-}
+export { hlsEventSummary } from './WebMediaDiagnostics';
+export { webHlsBufferConfig } from './WebHlsPolicy';
 
 function clearTextTrackCues(track: TextTrack): void {
   // TextTrack.cues may be null while disabled. Hidden keeps the track
@@ -67,19 +57,6 @@ export function shouldUseManagedHls(forceNativeHls: boolean | undefined, managed
   return forceNativeHls !== true && managedSupported;
 }
 
-export function webHlsBufferConfig(positionMs: number): Record<string, number | boolean> {
-  return {
-    enableWorker: true,
-    // Local Macha VOD should keep ordinary navigation in browser memory while
-    // retaining a hard byte ceiling for very high bitrate sources.
-    maxBufferLength: 60,
-    maxMaxBufferLength: 120,
-    maxBufferSize: 128 * 1024 * 1024,
-    backBufferLength: 30,
-    startPosition: Math.max(0, positionMs / 1000),
-  };
-}
-
 /** Web transport policy for source-local seeks that need no session mutation. */
 export function webLocalSeekCoverage(
   source: PlaybackSource,
@@ -101,101 +78,6 @@ function playbackTimeRanges(rangesValue: TimeRanges): PlaybackTimeRange[] {
   return out;
 }
 
-function ranges(rangesValue: TimeRanges): Array<{ start: number; end: number }> {
-  const out: Array<{ start: number; end: number }> = [];
-  for (let index = 0; index < rangesValue.length; index += 1) {
-    out.push({
-      start: Math.round(rangesValue.start(index) * 1000) / 1000,
-      end: Math.round(rangesValue.end(index) * 1000) / 1000,
-    });
-  }
-  return out;
-}
-
-function readyStateName(value: number): string {
-  return ['HAVE_NOTHING', 'HAVE_METADATA', 'HAVE_CURRENT_DATA', 'HAVE_FUTURE_DATA', 'HAVE_ENOUGH_DATA'][value] ?? String(value);
-}
-
-function networkStateName(value: number): string {
-  return ['NETWORK_EMPTY', 'NETWORK_IDLE', 'NETWORK_LOADING', 'NETWORK_NO_SOURCE'][value] ?? String(value);
-}
-
-function mediaError(video: HTMLVideoElement): Record<string, unknown> | undefined {
-  const error = video.error;
-  if (!error) return undefined;
-  return { code: error.code, message: error.message };
-}
-
-function videoState(video: HTMLVideoElement): Record<string, unknown> {
-  return {
-    currentTime: Math.round(video.currentTime * 1000) / 1000,
-    duration: Number.isFinite(video.duration) ? Math.round(video.duration * 1000) / 1000 : video.duration,
-    paused: video.paused,
-    ended: video.ended,
-    seeking: video.seeking,
-    readyState: readyStateName(video.readyState),
-    networkState: networkStateName(video.networkState),
-    buffered: ranges(video.buffered),
-    seekable: ranges(video.seekable),
-    playbackRate: video.playbackRate,
-    currentSrc: video.currentSrc,
-    error: mediaError(video),
-  };
-}
-
-function objectValue(value: unknown): Record<string, unknown> {
-  return value && typeof value === 'object' ? value as Record<string, unknown> : {};
-}
-
-function errorSummary(value: unknown): Record<string, unknown> | string | undefined {
-  if (value === undefined || value === null) return undefined;
-  if (value instanceof Error) return { name: value.name, message: value.message };
-  const object = objectValue(value);
-  if (Object.keys(object).length > 0) {
-    return {
-      name: object.name,
-      message: object.message,
-      code: object.code,
-    };
-  }
-  return String(value);
-}
-
-export function hlsEventSummary(value: unknown): Record<string, unknown> {
-  const data = objectValue(value);
-  const frag = objectValue(data.frag);
-  const response = objectValue(data.response);
-  const stats = objectValue(data.stats ?? frag.stats);
-  return {
-    type: data.type,
-    details: data.details,
-    fatal: data.fatal,
-    reason: data.reason,
-    sourceBufferName: data.sourceBufferName,
-    mimeType: data.mimeType,
-    parent: data.parent,
-    error: errorSummary(data.error),
-    level: data.level ?? frag.level,
-    sn: frag.sn,
-    start: frag.start,
-    duration: frag.duration,
-    url: data.url ?? frag.url,
-    response: Object.keys(response).length > 0 ? {
-      code: response.code,
-      text: response.text,
-      url: response.url,
-    } : undefined,
-    stats: Object.keys(stats).length > 0 ? {
-      loaded: stats.loaded,
-      total: stats.total,
-      aborted: stats.aborted,
-      loading: stats.loading,
-      parsing: stats.parsing,
-      buffering: stats.buffering,
-    } : undefined,
-  };
-}
-
 let webPlayerSequence = 0;
 
 export interface WebPlayerOptions {
@@ -215,8 +97,7 @@ class WebPlayer implements Player {
   private failureListeners = new Set<PlaybackFailureListener>();
   private readonly playerId = ++webPlayerSequence;
   private readonly log = createClientLogger('playback.web', { playerId: this.playerId });
-  private lastTimeLogMs = 0;
-  private lastProgressLogMs = 0;
+  private readonly diagnostics = new WebMediaDiagnostics(this.log);
   private initialSeekCleanup?: () => void;
   private subtitleGeneration = 0;
   private subtitleCleanup?: () => void;
@@ -309,7 +190,7 @@ class WebPlayer implements Player {
         video.setAttribute('autoplay', 'autoplay');
         video.setAttribute('preload', 'auto');
       }
-      this.attachMediaDiagnostics(video);
+      this.diagnostics.attach(video, () => this.directReadAheadSourceUrl);
 
       const publish = () => this.publish(video!);
       video.addEventListener('timeupdate', publish);
@@ -490,24 +371,8 @@ class WebPlayer implements Player {
     manifest: SubtitleSegmentManifest,
     generation: number,
   ): Promise<void> {
-    const starts: number[] = [];
-    let total = 0;
-    for (const duration of manifest.segment_durations_ms) {
-      starts.push(total);
-      total += duration;
-    }
-
-    const segmentAt = (positionMs: number): number => {
-      const bounded = Math.max(0, positionMs);
-      let low = 0;
-      let high = starts.length - 1;
-      while (low < high) {
-        const middle = Math.floor((low + high + 1) / 2);
-        if (starts[middle] <= bounded) low = middle;
-        else high = middle - 1;
-      }
-      return low;
-    };
+    const starts = subtitleSegmentStarts(manifest.segment_durations_ms);
+    const segmentAt = (positionMs: number): number => subtitleSegmentAt(starts, positionMs);
 
     const displayTrack = this.subtitleDisplayTrack(video);
     const segmentCues = new Map<number, TextTrackCue[]>();
@@ -617,8 +482,7 @@ class WebPlayer implements Player {
       wanted.clear();
       // Keep the immediately preceding segment so a cue may cross a segment
       // boundary, and prefetch the next segment before playback reaches it.
-      for (let index = current - 1; index <= current + 1; index += 1) {
-        if (index < 0 || index >= starts.length) continue;
+      for (const index of subtitleSegmentWindow(current, starts.length)) {
         wanted.add(index);
         void load(index).catch(() => undefined);
       }
@@ -890,77 +754,41 @@ class WebPlayer implements Player {
     hls.on(Hls.Events.ERROR, (_event, data) => {
       if (sourceGeneration !== this.sourceGeneration || this.hls !== hls) return;
       const payload = { data: hlsEventSummary(data), state: videoState(video) };
-      if (!data.fatal) {
+      // Sample the normalized generation-local clock before the recovery policy
+      // decides whether another media-pipeline recovery is permitted.
+      if (data.fatal && data.type === Hls.ErrorTypes.MEDIA_ERROR) this.publish(video);
+      const action = managedHlsErrorAction(data, mediaRecovery, this.lastPublishedEvent?.positionMs ?? 0);
+      if (action.action === 'nonfatal') {
         this.log.warn('hls-error-nonfatal', payload);
         return;
       }
       this.log.error('hls-error-fatal', payload);
-      if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+      if (action.action === 'restart-network') {
         this.log.warn('hls-recovery-network-start-load', payload);
         if (this.wantsPlayback) hls.startLoad(video.currentTime);
         return;
       }
-      if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
-        // Recovery progress uses the same generation-local clock as normal
-        // playback publication. Mixing raw MSE time here would make a non-zero
-        // timestamp origin look like enormous playback progress.
-        this.publish(video);
-        const decision = mediaRecovery.fatalMediaError(this.lastPublishedEvent?.positionMs ?? 0);
-        if (decision.action === 'recover') {
-          this.log.warn('hls-recovery-media', { ...payload, recovery: decision });
-          hls.recoverMediaError();
-          return;
-        }
-        const details = typeof data.details === 'string' ? data.details : 'mediaError';
+      if (action.action === 'recover-media') {
+        this.log.warn('hls-recovery-media', { ...payload, recovery: action.recovery });
+        hls.recoverMediaError();
+        return;
+      }
+      if (action.action === 'fail-media') {
         this.failSourceGeneration(
           sourceGeneration,
-          new Error(`Web HLS playback failed: the browser media pipeline repeatedly rejected the stream (${details}).`),
-          { ...payload, recovery: decision },
+          new Error(`Web HLS playback failed: the browser media pipeline repeatedly rejected the stream (${action.details}).`),
+          { ...payload, recovery: action.recovery },
         );
         return;
       }
-      const details = typeof data.details === 'string' ? data.details : String(data.type ?? 'unknown');
       this.failSourceGeneration(
         sourceGeneration,
-        new Error(`Web HLS playback failed with an unrecoverable player error (${details}).`),
+        new Error(`Web HLS playback failed with an unrecoverable player error (${action.details}).`),
         payload,
       );
     });
     hls.loadSource(url);
     hls.attachMedia(video);
-  }
-
-  private attachMediaDiagnostics(video: HTMLVideoElement): void {
-    const stateEvents = [
-      'loadstart', 'loadedmetadata', 'loadeddata', 'canplay', 'canplaythrough', 'playing', 'play', 'pause',
-      'waiting', 'stalled', 'suspend', 'seeking', 'seeked', 'ended', 'durationchange', 'ratechange', 'emptied',
-      'abort', 'error',
-    ] as const;
-    for (const name of stateEvents) {
-      video.addEventListener(name, () => {
-        if (name === 'playing') setDirectPlayReadAheadMode(this.directReadAheadSourceUrl, 'playing');
-        else if (name === 'seeking') setDirectPlayReadAheadMode(this.directReadAheadSourceUrl, 'seeking');
-        else if (name === 'seeked') setDirectPlayReadAheadMode(this.directReadAheadSourceUrl, video.paused ? 'paused' : 'playing');
-        else if (name === 'pause' || name === 'ended') setDirectPlayReadAheadMode(this.directReadAheadSourceUrl, 'paused');
-        const state = videoState(video);
-        const readAhead = directPlayReadAheadMetrics(this.directReadAheadSourceUrl);
-        const detail = readAhead ? { ...state, directReadAhead: readAhead } : state;
-        if (name === 'waiting' || name === 'stalled' || name === 'error' || name === 'abort') this.log.warn(`media-${name}`, detail);
-        else this.log.debug(`media-${name}`, detail);
-      });
-    }
-    video.addEventListener('progress', () => {
-      const now = performance.now();
-      if (now - this.lastProgressLogMs < 1_000) return;
-      this.lastProgressLogMs = now;
-      this.log.debug('media-progress', videoState(video));
-    });
-    video.addEventListener('timeupdate', () => {
-      const now = performance.now();
-      if (now - this.lastTimeLogMs < 2_000) return;
-      this.lastTimeLogMs = now;
-      this.log.debug('media-time', videoState(video));
-    });
   }
 
   private publish(video: HTMLVideoElement): void {

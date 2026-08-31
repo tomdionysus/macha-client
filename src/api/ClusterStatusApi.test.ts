@@ -9,7 +9,7 @@ describe('MachaClusterStatusApi', () => {
   afterEach(() => vi.unstubAllGlobals());
 
   it('loads cluster status through the status root with bearer authentication', async () => {
-    const payload = { cluster: { health: 'healthy' }, nodes: [], generated_at_unix_ms: 1 };
+    const payload = { cluster: { health: 'recovering' }, startup: { phase: 'recovering', control_plane: 'ready', api: 'ready' }, nodes: [], generated_at_unix_ms: 1 };
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse(payload));
     vi.stubGlobal('fetch', fetchMock);
     const api = new MachaClusterStatusApi('http://node.test/', 'secret');

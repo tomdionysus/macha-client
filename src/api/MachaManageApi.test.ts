@@ -46,7 +46,7 @@ describe('MachaManageApi', () => {
     await api.prospectiveMatches('hint/one', 'Alien (1979)');
 
     expect(fetchMock.mock.calls[0][0]).toBe(
-      'http://node.test/api/v1/manage/unmatched/hint%2Fone/matches?q=Alien%20%281979%29',
+      'http://node.test/api/v1/manage/unmatched/hint%2Fone/matches?q=Alien%20(1979)',
     );
   });
 

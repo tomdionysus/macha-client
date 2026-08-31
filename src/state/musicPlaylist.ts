@@ -1,14 +1,9 @@
 import type { MediaSummary } from '../types';
+import { readValidatedJson, writeJson, type StorageLike } from './storage';
 
 export interface MusicPlaylistEntry {
   entryId: string;
   track: MediaSummary;
-}
-
-interface StorageLike {
-  getItem(key: string): string | null;
-  setItem(key: string, value: string): void;
-  removeItem(key: string): void;
 }
 
 function validTrack(value: unknown): value is MediaSummary {
@@ -35,19 +30,7 @@ export class MusicPlaylistStore {
   }
 
   load(): MusicPlaylistEntry[] {
-    const raw = this.storage.getItem(this.key);
-    if (!raw) return [];
-    try {
-      const parsed: unknown = JSON.parse(raw);
-      if (!Array.isArray(parsed) || !parsed.every(validEntry)) {
-        this.storage.removeItem(this.key);
-        return [];
-      }
-      return parsed;
-    } catch {
-      this.storage.removeItem(this.key);
-      return [];
-    }
+    return readValidatedJson(this.storage, this.key, isValidPlaylist) ?? [];
   }
 
   add(tracks: MediaSummary[]): MusicPlaylistEntry[] {
@@ -93,7 +76,10 @@ export class MusicPlaylistStore {
       this.storage.removeItem(this.key);
       return [];
     }
-    this.storage.setItem(this.key, JSON.stringify(entries));
-    return entries;
+    return writeJson(this.storage, this.key, entries);
   }
+}
+
+function isValidPlaylist(value: unknown): value is MusicPlaylistEntry[] {
+  return Array.isArray(value) && value.every(validEntry);
 }

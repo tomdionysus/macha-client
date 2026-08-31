@@ -1,11 +1,29 @@
 import type { IdentityAssociationReset } from './ManageApi';
-import { mergeRequestHeaders } from './httpCompat';
+import { authenticatedRequestHeaders, normalizeBaseUrl, readResponseBody } from './httpCompat';
 import { isGatewayConnectionFailure, serverUnreachable } from './serverConnection';
 
 export type TelemetryFreshness = 'live' | 'stale' | 'last_known' | 'unavailable';
 export type NodeState = 'online' | 'offline';
-export type ClusterHealth = 'healthy' | 'degraded' | 'critical';
+export type ClusterHealth = 'healthy' | 'recovering' | 'degraded' | 'critical';
 export type MetadataAvailability = 'unavailable' | 'read-only' | 'writable';
+
+export type StartupPhase = 'starting' | 'recovering' | 'ready' | 'failed';
+export type StartupSubsystemState = 'starting' | 'recovering' | 'ready' | 'failed';
+
+export interface ClusterStartupStatus {
+  phase: StartupPhase;
+  control_plane: StartupSubsystemState;
+  api: StartupSubsystemState;
+  data_storage: StartupSubsystemState;
+  control_storage: StartupSubsystemState;
+  cache: StartupSubsystemState;
+  retention: StartupSubsystemState;
+  metadata: StartupSubsystemState;
+  services: StartupSubsystemState;
+  started_at_unix_ms: number;
+  ready_at_unix_ms: number | null;
+  error: string | null;
+}
 
 export interface ByteUsage {
   capacity_bytes: number;
@@ -65,9 +83,57 @@ export interface ClusterSummaryStatus {
   cache_online: ByteUsage;
 }
 
+export interface ConnectivityEndpoint {
+  host: string;
+  port: number;
+  source?: string;
+}
+
+export interface UpnpConnectivityStatus {
+  enabled: boolean;
+  support_built: boolean;
+  gateway_found: boolean;
+  mapping_active: boolean;
+  mapping_created: boolean;
+  mapping_owned: boolean;
+  private_wan: boolean;
+  lan_address: string | null;
+  external_address: string | null;
+  internal_port: number;
+  external_port: number;
+  lease_seconds: number;
+  igd_status: number;
+  error: string | null;
+}
+
+export interface ExternalIpConnectivityStatus {
+  enabled: boolean;
+  attempted: boolean;
+  address: string | null;
+  error: string | null;
+}
+
+export interface PublicConnectivityCheckStatus {
+  enabled: boolean;
+  self_probe: string;
+  error: string | null;
+  checked_at_unix_ms: number;
+  externally_verified: boolean;
+}
+
+export interface PublicConnectivityStatus {
+  configured: ConnectivityEndpoint;
+  advertised: ConnectivityEndpoint;
+  upnp: UpnpConnectivityStatus;
+  external_ip: ExternalIpConnectivityStatus;
+  check: PublicConnectivityCheckStatus;
+}
+
 export interface ClusterStatusSnapshot {
   cluster: ClusterSummaryStatus;
+  startup?: ClusterStartupStatus;
   nodes: ClusterNodeStatus[];
+  connectivity?: PublicConnectivityStatus;
   generated_at_unix_ms: number;
 }
 
@@ -79,6 +145,7 @@ export interface ConnectivityResult {
 
 export interface ConnectivityCheck {
   results: ConnectivityResult[];
+  connectivity?: PublicConnectivityStatus;
   checked_at_unix_ms: number;
 }
 
@@ -86,12 +153,6 @@ export interface ClusterStatusApi {
   status(): Promise<ClusterStatusSnapshot>;
   node(id: string): Promise<ClusterNodeStatus>;
   checkConnectivity(nodeId?: string): Promise<ConnectivityCheck>;
-}
-
-function normalizeBaseUrl(value: string): string {
-  const trimmed = value.trim();
-  if (!trimmed || trimmed === '/') return '';
-  return trimmed.replace(/\/+$/, '');
 }
 
 export class MachaClusterStatusApi implements ClusterStatusApi {
@@ -102,11 +163,7 @@ export class MachaClusterStatusApi implements ClusterStatusApi {
   }
 
   private async request<T>(path: string, method: 'GET' | 'POST'): Promise<T> {
-    const token = this.bearerToken?.trim();
-    const headers = mergeRequestHeaders(undefined, {
-      Accept: 'application/json',
-      Authorization: token ? `Bearer ${token}` : undefined,
-    });
+    const headers = authenticatedRequestHeaders(undefined, this.bearerToken);
 
     let response: Response;
     try {
@@ -115,15 +172,8 @@ export class MachaClusterStatusApi implements ClusterStatusApi {
       throw serverUnreachable();
     }
 
-    let body: unknown;
-    let bodyWasJson = false;
-    try {
-      body = await response.json() as unknown;
-      bodyWasJson = true;
-    } catch {
-      body = undefined;
-    }
-    if (isGatewayConnectionFailure(response, bodyWasJson)) throw serverUnreachable();
+    const { body, wasJson } = await readResponseBody(response);
+    if (isGatewayConnectionFailure(response, wasJson)) throw serverUnreachable();
     if (!response.ok) {
       const record = body && typeof body === 'object' && !Array.isArray(body)
         ? body as Record<string, unknown>
@@ -184,6 +234,12 @@ export class DemoClusterStatusApi implements ClusterStatusApi {
         metadata_quorum_validated_at_unix_ms: Date.now(),
         storage_known: node.storage, storage_online: node.storage,
         cache_known: node.cache, cache_online: node.cache,
+      },
+      startup: {
+        phase: 'ready', control_plane: 'ready', api: 'ready', data_storage: 'ready',
+        control_storage: 'ready', cache: 'ready', retention: 'ready', metadata: 'ready',
+        services: 'ready', started_at_unix_ms: Date.now() - 3_600_000,
+        ready_at_unix_ms: Date.now() - 3_599_000, error: null,
       },
       nodes: [node],
       generated_at_unix_ms: Date.now(),
