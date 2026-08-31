@@ -188,4 +188,18 @@ describe('MachaMediaApi', () => {
     expect(requests).toBe(1);
   });
 
+  it('evicts cached artwork rejected by the browser so it can be fetched again', async () => {
+    const catalogue = new FakeCatalogue();
+    let requests = 0;
+    catalogue.artwork = () => Promise.resolve(new Blob([`poster-${++requests}`]));
+    const api = new MachaMediaApi(catalogue);
+    const ref = { id: 'poster-1', mimeType: 'image/jpeg' };
+
+    const first = await api.artwork(ref);
+    expect(await api.artwork(ref)).toBe(first);
+    api.invalidateArtwork(ref);
+    expect(await api.artwork(ref)).not.toBe(first);
+    expect(requests).toBe(2);
+  });
+
 });

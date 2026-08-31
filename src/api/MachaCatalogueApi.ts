@@ -87,7 +87,13 @@ export class MachaCatalogueApi implements CatalogueApi {
     const init: RequestInit = signal ? { method: 'GET', signal } : { method: 'GET' };
     const response = await this.fetch(`/api/v1/catalogue/artwork/${encodeURIComponent(id)}`, 'image/*', init);
     if (!response.ok) await this.throwResponseError(response);
-    return response.blob();
+    const blob = await response.blob();
+    const contentType = blob.type || response.headers.get('Content-Type') || '';
+    if (blob.size === 0) throw new Error(`Macha catalogue returned empty artwork for ${id}.`);
+    if (contentType && !contentType.toLowerCase().startsWith('image/')) {
+      throw new Error(`Macha catalogue returned non-image artwork for ${id} (${contentType}).`);
+    }
+    return blob;
   }
 
   private getJson<T>(path: string): Promise<T> {

@@ -1,5 +1,5 @@
-import logoUrl from './assets/macha-logo.svg?url';
 import { splashFlashTiming, uiSettings } from './settings';
+import { machaLogoUrl as logoUrl } from './uiAssets';
 
 export interface SplashClock {
   now(): number;

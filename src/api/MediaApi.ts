@@ -13,4 +13,5 @@ export interface MediaApi {
   details(id: string): Promise<MediaDetails>;
   search(query: string): Promise<MediaSummary[]>;
   artwork(ref: ArtworkRef, signal?: AbortSignal): Promise<Blob>;
+  invalidateArtwork?(ref: ArtworkRef): void;
 }

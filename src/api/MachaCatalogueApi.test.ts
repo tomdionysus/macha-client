@@ -85,6 +85,17 @@ describe('MachaCatalogueApi', () => {
     expect(new Headers(init.headers).get('Authorization')).toBe('Bearer secret');
   });
 
+  it('rejects empty and non-image artwork responses', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(new Blob([]), { status: 200, headers: { 'Content-Type': 'image/jpeg' } }))
+      .mockResolvedValueOnce(new Response(new Blob(['not an image'], { type: 'text/plain' }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const api = new MachaCatalogueApi('http://node.test');
+
+    await expect(api.artwork('empty')).rejects.toThrow('empty artwork');
+    await expect(api.artwork('text')).rejects.toThrow('non-image artwork');
+  });
+
   it('passes artwork cancellation through to fetch', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(new Blob(['image']), { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);

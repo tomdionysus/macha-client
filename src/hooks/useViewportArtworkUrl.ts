@@ -17,6 +17,7 @@ export function useViewportArtworkUrl(
   ref: ArtworkRef | undefined,
   element: HTMLElement | null,
   eager = false,
+  retryKey = 0,
 ): string | undefined {
   const [url, setUrl] = useState<string>();
 
@@ -55,7 +56,7 @@ export function useViewportArtworkUrl(
       stopObserving?.();
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [api, eager, element, ref?.id]);
+  }, [api, eager, element, ref?.id, retryKey]);
 
   return url;
 }

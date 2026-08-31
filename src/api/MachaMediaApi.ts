@@ -145,6 +145,10 @@ export class MachaMediaApi implements MediaApi {
     return pending;
   }
 
+  invalidateArtwork(ref: ArtworkRef): void {
+    this.artworkCache.delete(ref.id);
+  }
+
   private seasonSummary(item: CatalogueItem, showId: string): SeasonSummary {
     const media = this.media(item);
     const seasonNumber = item.season_number ?? 0;

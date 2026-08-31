@@ -1,4 +1,6 @@
-const DEFAULT_RETRY_DELAYS_MS = [300, 1500] as const;
+// Artwork may be requested while a cluster node or its backing store is still
+// recovering. Keep retries bounded, but cover more than a brief network wobble.
+const DEFAULT_RETRY_DELAYS_MS = [300, 1500, 5000, 15000, 30000] as const;
 
 interface RetryOptions {
   delaysMs?: readonly number[];

@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import logoUrl from '../assets/macha-logo.svg?url';
+import { machaLogoUrl as logoUrl } from '../uiAssets';
 import { routes } from '../routing';
 
 export function SponsorScreen() {

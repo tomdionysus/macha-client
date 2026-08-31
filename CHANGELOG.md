@@ -2,6 +2,7 @@
 
 ## 0.7.7
 
+- preload the single canonical logo asset while keeping the application modules eagerly bundled, and harden intermittent poster loading with longer bounded transient retries, invalid-response rejection and browser decode recovery;
 - add a first-class Status section with live cluster health, known-versus-online durable/cache capacity, metadata quorum state and per-node telemetry;
 - add node detail views with runtime, storage, metadata and peer/RPC observations plus cluster/node connectivity re-check actions;
 - move Settings beneath Manage as a route-backed management tab while preserving direct navigation for server-unreachable recovery and Samsung back navigation;

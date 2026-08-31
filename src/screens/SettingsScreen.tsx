@@ -2,7 +2,7 @@ import { useState, type ChangeEvent } from 'react';
 import { Link } from 'react-router-dom';
 import type { MediaApi } from '../api/MediaApi';
 import type { ServerApi, ServerStatus } from '../api/MachaServerApi';
-import logoUrl from '../assets/macha-logo.svg?url';
+import { machaLogoUrl as logoUrl } from '../uiAssets';
 import { useAsync } from '../hooks/useAsync';
 import { routes } from '../routing';
 import { clientVersion } from '../version';

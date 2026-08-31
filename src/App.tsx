@@ -4,7 +4,7 @@ import type { CatalogueApi } from './api/CatalogueApi';
 import type { MediaApi } from './api/MediaApi';
 import { AppLogo } from './components/AppLogo';
 import { MusicNav } from './components/MusicNav';
-import logoUrl from './assets/macha-logo.svg?url';
+import { machaLogoUrl as logoUrl } from './uiAssets';
 import { useTvNavigation } from './hooks/useTvNavigation';
 import { samsungBackTarget } from './platform/samsungBackNavigation';
 import type { Platform } from './platform/Platform';
