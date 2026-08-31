@@ -46,6 +46,35 @@ describe('MachaCatalogueApi', () => {
     );
   });
 
+  it('reads immutable media profiles and treats profile_not_available as temporary', async () => {
+    const profile = { schema_version: 1, media_id: 'macha:abc', format: 'mp4', duration_ms: 60_000, bitrate: 1_000, streams: [] };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(profile))
+      .mockResolvedValueOnce(jsonResponse(
+        { error: 'profile_not_available', message: 'media profile is not available yet' },
+        { status: 404 },
+      ));
+    vi.stubGlobal('fetch', fetchMock);
+    const api = new MachaCatalogueApi('http://node.test');
+
+    await expect(api.mediaProfile('macha:abc')).resolves.toEqual(profile);
+    await expect(api.mediaProfile('macha:pending')).resolves.toBeUndefined();
+    await expect(api.mediaProfile('path:/mutable.mp4')).resolves.toBeUndefined();
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      'http://node.test/api/v1/catalogue/media/macha%3Aabc/profile',
+      'http://node.test/api/v1/catalogue/media/macha%3Apending/profile',
+    ]);
+  });
+
+  it('rejects a profile whose immutable identity does not match the request', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
+      schema_version: 1, media_id: 'macha:other', format: 'mp4', duration_ms: 1, bitrate: 1, streams: [],
+    })));
+    const api = new MachaCatalogueApi('http://node.test');
+
+    await expect(api.mediaProfile('macha:requested')).rejects.toMatchObject({ code: 'invalid_media_profile' });
+  });
+
   it('uses the catalogue search envelope and configured bearer token', async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ items: [item] }));
     vi.stubGlobal('fetch', fetchMock);

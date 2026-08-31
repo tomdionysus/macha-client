@@ -90,8 +90,8 @@ function getSourceCache(sourceKey, sourceUrl, totalSize, mimeType) {
       lastServedOffset: 0,
       lastDemandAt: now(),
       pendingDemandWaits: 0,
-      generation: config?.generation || 0,
-      mode: config?.mode || 'bootstrap',
+      generation: config ? config.generation || 0 : 0,
+      mode: config ? config.mode || 'bootstrap' : 'bootstrap',
       released: false,
     };
     cache.metrics.generation = cache.generation;
@@ -103,6 +103,16 @@ function getSourceCache(sourceKey, sourceUrl, totalSize, mimeType) {
     if (mimeType) cache.mimeType = mimeType;
   }
   return cache;
+}
+
+function configuredSourceUrls(config) {
+  const urls = Array.isArray(config.sourceUrls) ? config.sourceUrls : [config.sourceUrl];
+  return [config.sourceUrl, ...urls].filter((url, index, all) => validHttpSource(url) && all.indexOf(url) === index);
+}
+
+function preferSource(config, cache, sourceUrl) {
+  config.sourceUrl = sourceUrl;
+  if (cache) cache.sourceUrl = sourceUrl;
 }
 
 function clearPrefetchTimer(cache) {
@@ -302,6 +312,58 @@ async function directFetch(request, sourceUrl, signal, rangeOverride) {
   });
 }
 
+function retryableSourceStatus(status) {
+  return status === 408 || status === 425 || status === 429 || status >= 500;
+}
+
+async function directFetchWithFailover(request, config, cache, signal, rangeOverride, excluded = new Set()) {
+  let lastError;
+  for (const sourceUrl of configuredSourceUrls(config)) {
+    if (excluded.has(sourceUrl)) continue;
+    try {
+      const response = await directFetch(request, sourceUrl, signal, rangeOverride);
+      if (retryableSourceStatus(response.status)) {
+        lastError = new Error(`Direct Play source returned ${response.status}`);
+        if (response.body) void response.body.cancel().catch(() => undefined);
+        continue;
+      }
+      preferSource(config, cache, sourceUrl);
+      return { response, sourceUrl };
+    } catch (error) {
+      if (error && error.name === 'AbortError') throw error;
+      lastError = error;
+    }
+  }
+  throw lastError || new Error('No Direct Play source remains');
+}
+
+async function exactRangeReader(request, config, cache, signal, start, end, excluded) {
+  let lastError;
+  const range = `bytes=${start}-${end}`;
+  for (const sourceUrl of configuredSourceUrls(config)) {
+    if (excluded.has(sourceUrl)) continue;
+    try {
+      const response = await directFetch(request, sourceUrl, signal, range);
+      if (retryableSourceStatus(response.status)) {
+        lastError = new Error(`Direct Play source returned ${response.status}`);
+        if (response.body) void response.body.cancel().catch(() => undefined);
+        continue;
+      }
+      const contentRange = parseContentRange(response.headers.get('content-range'));
+      if (response.status !== 206 || !contentRange || contentRange.start !== start || !response.body) {
+        lastError = new Error(`Direct Play source did not return exact range at ${start}`);
+        continue;
+      }
+      preferSource(config, cache, sourceUrl);
+      return { reader: response.body.getReader(), sourceUrl };
+    } catch (error) {
+      if (error && error.name === 'AbortError') throw error;
+      lastError = error;
+    }
+  }
+  throw lastError || new Error(`No Direct Play source can continue at byte ${start}`);
+}
+
 async function postMetrics(cache, force) {
   if (cache.released) return;
   const timestamp = now();
@@ -484,70 +546,99 @@ function cacheStream(cache, start, end) {
   });
 }
 
-function wrapDemandResponse(cache, response, requestedStart, requestStartedAt, abortController) {
+function wrapDemandResponse(cache, response, request, config, requested, requestStartedAt, abortController, initialSourceUrl) {
   if (!response.body) {
     activeFetchFinished(cache);
     return response;
   }
-  const reader = response.body.getReader();
-  let cursor = requestedStart;
+  let reader = response.body.getReader();
+  const attemptedSources = new Set([initialSourceUrl]);
+  let cursor = requested.start;
   let firstByte = true;
   return new Response(new ReadableStream({
     async pull(controller) {
       noteDemand(cache);
-      try {
-        demandWaitStarted(cache);
-        let result;
+      while (true) {
         try {
-          result = await reader.read();
-        } finally {
-          demandWaitFinished(cache);
-        }
-        if (result.done) {
-          controller.close();
+          demandWaitStarted(cache);
+          let result;
+          try {
+            result = await reader.read();
+          } finally {
+            demandWaitFinished(cache);
+          }
+          if (result.done) {
+            if (requested.partial && cursor <= requested.end) {
+              if (abortController.signal.aborted) {
+                activeFetchFinished(cache);
+                return;
+              }
+              const replacement = await exactRangeReader(
+                request, config, cache, abortController.signal, cursor, requested.end, attemptedSources,
+              );
+              reader = replacement.reader;
+              attemptedSources.add(replacement.sourceUrl);
+              continue;
+            }
+            controller.close();
+            schedulePrefetch(cache);
+            activeFetchFinished(cache);
+            return;
+          }
+          const value = result.value;
+          if (firstByte) {
+            firstByte = false;
+            const firstByteMs = Math.max(0, now() - requestStartedAt);
+            cache.metrics.demandFirstByteMs = rounded(firstByteMs, 1);
+            if (firstByteMs >= DEMAND_WAIT_WARN_MS) {
+              cache.metrics.demandWaitCount += 1;
+              cache.metrics.demandWaitMs = rounded(cache.metrics.demandWaitMs + firstByteMs, 1);
+            }
+          }
+          const byteLength = value.byteLength || 0;
+          cache.metrics.fetchedBytes += byteLength;
+          cache.metrics.demandBytes += byteLength;
+          cache.metrics.servedBytes += byteLength;
+          const chunkStart = cursor;
+          cursor += byteLength;
+          cache.lastServedOffset = cursor;
+          cache.lastAccess = Date.now();
+          controller.enqueue(value);
+          // Caching is a beneficiary of demand, never a prerequisite for it.
+          // Copy/cache after enqueue so cache bookkeeping cannot extend first-byte
+          // or steady-state demand delivery latency.
+          queueMicrotask(() => storeStreamChunk(cache, chunkStart, value));
+          updateAheadBytes(cache);
           schedulePrefetch(cache);
-          activeFetchFinished(cache);
+          void postMetrics(cache, false);
           return;
-        }
-        const value = result.value;
-        if (firstByte) {
-          firstByte = false;
-          const firstByteMs = Math.max(0, now() - requestStartedAt);
-          cache.metrics.demandFirstByteMs = rounded(firstByteMs, 1);
-          if (firstByteMs >= DEMAND_WAIT_WARN_MS) {
-            cache.metrics.demandWaitCount += 1;
-            cache.metrics.demandWaitMs = rounded(cache.metrics.demandWaitMs + firstByteMs, 1);
+        } catch (error) {
+          if (error && error.name === 'AbortError') {
+            activeFetchFinished(cache);
+            controller.error(abortError('Direct Play demand fetch aborted'));
+            return;
+          }
+          try {
+            const replacement = await exactRangeReader(
+              request, config, cache, abortController.signal, cursor, requested.end, attemptedSources,
+            );
+            reader = replacement.reader;
+            attemptedSources.add(replacement.sourceUrl);
+          } catch (replacementError) {
+            activeFetchFinished(cache);
+            controller.error(replacementError);
+            return;
           }
         }
-        const byteLength = value.byteLength || 0;
-        cache.metrics.fetchedBytes += byteLength;
-        cache.metrics.demandBytes += byteLength;
-        cache.metrics.servedBytes += byteLength;
-        const chunkStart = cursor;
-        cursor += byteLength;
-        cache.lastServedOffset = cursor;
-        cache.lastAccess = Date.now();
-        controller.enqueue(value);
-        // Caching is a beneficiary of demand, never a prerequisite for it.
-        // Copy/cache after enqueue so cache bookkeeping cannot extend first-byte
-        // or steady-state demand delivery latency.
-        queueMicrotask(() => storeStreamChunk(cache, chunkStart, value));
-        updateAheadBytes(cache);
-        schedulePrefetch(cache);
-        void postMetrics(cache, false);
-      } catch (error) {
-        activeFetchFinished(cache);
-        if (error && error.name === 'AbortError') controller.error(abortError('Direct Play demand fetch aborted'));
-        else controller.error(error);
       }
     },
     async cancel(reason) {
+      if (!abortController.signal.aborted) abortController.abort();
       try {
         await reader.cancel(reason);
       } catch {
         // Browser cancellation is normal during media probing and seeking.
       }
-      if (!abortController.signal.aborted) abortController.abort();
       schedulePrefetch(cache);
       activeFetchFinished(cache);
     },
@@ -558,7 +649,7 @@ function wrapDemandResponse(cache, response, requestedStart, requestStartedAt, a
   });
 }
 
-async function demandFetch(cache, request, sourceUrl, rangeOverride, requestedStart) {
+async function demandFetch(cache, request, config, rangeOverride, requested) {
   noteDemand(cache);
   const controller = new AbortController();
   const startedAt = now();
@@ -566,21 +657,26 @@ async function demandFetch(cache, request, sourceUrl, rangeOverride, requestedSt
   activeFetchStarted(cache);
   try {
     demandWaitStarted(cache);
-    let response;
+    let opened;
     try {
-      response = await directFetch(request, sourceUrl, controller.signal, rangeOverride);
+      opened = await directFetchWithFailover(request, config, cache, controller.signal, rangeOverride);
     } finally {
       demandWaitFinished(cache);
     }
-    if (rangeOverride && response.status !== 206) disableReadAhead(cache);
-    return wrapDemandResponse(cache, response, requestedStart, startedAt, controller);
+    const { response, sourceUrl } = opened;
+    if (rangeOverride && response.status !== 206) {
+      disableReadAhead(cache);
+      activeFetchFinished(cache);
+      return response;
+    }
+    return wrapDemandResponse(cache, response, request, config, requested, startedAt, controller, sourceUrl);
   } catch (error) {
     activeFetchFinished(cache);
     throw error;
   }
 }
 
-function cacheThenDemandResponse(cache, request, sourceUrl, requested, cachedEnd) {
+function cacheThenDemandResponse(cache, request, config, requested, cachedEnd) {
   noteDemand(cache);
   const networkStart = cachedEnd + 1;
   const abortController = new AbortController();
@@ -590,25 +686,18 @@ function cacheThenDemandResponse(cache, request, sourceUrl, requested, cachedEnd
   activeFetchStarted(cache);
 
   let networkReader;
+  const attemptedSources = new Set();
   let networkFinished = false;
   const finishNetwork = () => {
     if (networkFinished) return;
     networkFinished = true;
     activeFetchFinished(cache);
   };
-  const networkReaderPromise = directFetch(
-    request,
-    sourceUrl,
-    abortController.signal,
-    `bytes=${networkStart}-${requested.end}`,
-  ).then((response) => {
-    if (response.status !== 206) throw new Error(`Demand continuation returned ${response.status}`);
-    const contentRange = parseContentRange(response.headers.get('content-range'));
-    if (!contentRange || contentRange.start !== networkStart) {
-      throw new Error(`Invalid demand continuation Content-Range at ${networkStart}`);
-    }
-    if (!response.body) throw new Error('Demand continuation returned an empty body');
-    networkReader = response.body.getReader();
+  const networkReaderPromise = exactRangeReader(
+    request, config, cache, abortController.signal, networkStart, requested.end, attemptedSources,
+  ).then((opened) => {
+    networkReader = opened.reader;
+    attemptedSources.add(opened.sourceUrl);
     return networkReader;
   }).catch((error) => {
     finishNetwork();
@@ -648,12 +737,24 @@ function cacheThenDemandResponse(cache, request, sourceUrl, requested, cachedEnd
         demandWaitStarted(cache);
         let result;
         try {
-          const reader = await networkReaderPromise;
-          result = await reader.read();
+          await networkReaderPromise;
+          result = await networkReader.read();
         } finally {
           demandWaitFinished(cache);
         }
         if (result.done) {
+          if (cursor <= requested.end) {
+            if (abortController.signal.aborted) {
+              finishNetwork();
+              return;
+            }
+            const replacement = await exactRangeReader(
+              request, config, cache, abortController.signal, cursor, requested.end, attemptedSources,
+            );
+            networkReader = replacement.reader;
+            attemptedSources.add(replacement.sourceUrl);
+            return;
+          }
           controller.close();
           finishNetwork();
           schedulePrefetch(cache);
@@ -685,18 +786,30 @@ function cacheThenDemandResponse(cache, request, sourceUrl, requested, cachedEnd
         schedulePrefetch(cache);
         void postMetrics(cache, false);
       } catch (error) {
-        finishNetwork();
-        if (error && error.name === 'AbortError') controller.error(abortError('Direct Play demand continuation aborted'));
-        else controller.error(error);
+        if (error && error.name === 'AbortError') {
+          finishNetwork();
+          controller.error(abortError('Direct Play demand continuation aborted'));
+          return;
+        }
+        try {
+          const replacement = await exactRangeReader(
+            request, config, cache, abortController.signal, cursor, requested.end, attemptedSources,
+          );
+          networkReader = replacement.reader;
+          attemptedSources.add(replacement.sourceUrl);
+        } catch (replacementError) {
+          finishNetwork();
+          controller.error(replacementError);
+        }
       }
     },
     async cancel(reason) {
+      if (!abortController.signal.aborted) abortController.abort();
       try {
         if (networkReader) await networkReader.cancel(reason);
       } catch {
         // Browser cancellation is normal during media probing and seeking.
       }
-      if (!abortController.signal.aborted) abortController.abort();
       finishNetwork();
       schedulePrefetch(cache);
     },
@@ -728,6 +841,7 @@ function sourceConfigForProxy(sourceKey, url) {
 
   const config = {
     sourceUrl,
+    sourceUrls: [sourceUrl],
     totalSize,
     mimeType,
     lastAccess: Date.now(),
@@ -746,14 +860,14 @@ async function handleProxy(request, url) {
   if (!config) return new Response('Unknown Macha direct-play read-ahead source', { status: 404 });
   const { sourceUrl, totalSize, mimeType } = config;
   config.lastAccess = Date.now();
-  if (config.rangeUnsupported) return await directFetch(request, sourceUrl);
+  if (config.rangeUnsupported) return (await directFetchWithFailover(request, config, undefined, undefined)).response;
   if (request.method !== 'GET' && request.method !== 'HEAD') {
     return new Response('Method not allowed', { status: 405, headers: { Allow: 'GET, HEAD' } });
   }
 
   pruneIdleSources();
   const requested = parseRequestedRange(request.headers.get('range'), totalSize);
-  if (!requested) return await directFetch(request, sourceUrl);
+  if (!requested) return (await directFetchWithFailover(request, config, undefined, undefined)).response;
   if (requested.unsatisfiable) {
     return new Response(null, {
       status: 416,
@@ -764,7 +878,7 @@ async function handleProxy(request, url) {
   const cache = getSourceCache(sourceKey, sourceUrl, totalSize, mimeType);
   cache.lastAccess = Date.now();
 
-  if (request.method === 'HEAD') return await directFetch(request, sourceUrl);
+  if (request.method === 'HEAD') return (await directFetchWithFailover(request, config, cache, undefined)).response;
 
   // A complete resident range is an immediate memory hit. Otherwise demand is
   // proxied as the browser asked for it; there is deliberately no 8 MiB
@@ -778,12 +892,12 @@ async function handleProxy(request, url) {
       });
     }
     if (cachedEnd >= requested.start) {
-      return cacheThenDemandResponse(cache, request, sourceUrl, requested, cachedEnd);
+      return cacheThenDemandResponse(cache, request, config, requested, cachedEnd);
     }
   }
 
   const rangeOverride = requested.partial ? `bytes=${requested.start}-${requested.end}` : undefined;
-  return await demandFetch(cache, request, sourceUrl, rangeOverride, requested.start);
+  return await demandFetch(cache, request, config, rangeOverride, requested);
 }
 
 self.addEventListener('install', () => {
@@ -804,6 +918,7 @@ self.addEventListener('message', (event) => {
     if (sourceKey && validHttpSource(sourceUrl) && Number.isSafeInteger(totalSize) && totalSize > 0) {
       sourceConfigs.set(sourceKey, {
         sourceUrl,
+        sourceUrls: [sourceUrl],
         totalSize,
         mimeType,
         lastAccess: Date.now(),
@@ -813,6 +928,17 @@ self.addEventListener('message', (event) => {
       });
       const port = event.ports && event.ports[0];
       if (port) port.postMessage({ type: 'macha-direct-read-ahead-configured', sourceKey });
+    }
+    return;
+  }
+  if (data.type === 'macha-direct-read-ahead-add-source') {
+    const sourceKey = typeof data.sourceKey === 'string' ? data.sourceKey : '';
+    const sourceUrl = typeof data.sourceUrl === 'string' ? data.sourceUrl : '';
+    const config = sourceConfigs.get(sourceKey);
+    if (config && validHttpSource(sourceUrl)) {
+      if (!Array.isArray(config.sourceUrls)) config.sourceUrls = [config.sourceUrl];
+      if (!config.sourceUrls.includes(sourceUrl)) config.sourceUrls.push(sourceUrl);
+      config.lastAccess = Date.now();
     }
     return;
   }

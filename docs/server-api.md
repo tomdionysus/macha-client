@@ -9,6 +9,7 @@ GET /api/v1/catalogue/status
 GET /api/v1/catalogue/items?type=show&parent=...
 GET /api/v1/catalogue/search?q=expanse&limit=50
 GET /api/v1/catalogue/items/{id}
+GET /api/v1/catalogue/media/{media_id}/profile
 GET /api/v1/catalogue/artwork/{sha256}
 ```
 
@@ -54,6 +55,17 @@ A catalogue item is:
 
 Supported catalogue kinds are `movie`, `show`, `season`, `episode`, `artist`, `album` and `track`.
 
+## Immutable media profiles
+
+Server support for `GET /api/v1/catalogue/media/{media_id}/profile` is implemented
+but was not yet deployed to the live nodes on 2026-08-31. The client requests it
+only for immutable `macha:` identities. A positive schema-v1 response is checked
+against the requested identity, coalesced, and cached by that identity; mutable
+paths are never profile keys. `404 profile_not_available` and generic route 404s
+from older nodes are temporary negatives and are not cached. Detail screens add
+the resulting duration, dimensions, codecs, and bitrate asynchronously, so
+profile rollout cannot delay or disable existing playback-session negotiation.
+
 ## Hierarchy
 
 Macha stores hierarchy through `parent_id`.
@@ -68,7 +80,7 @@ The server therefore does not need a client-specific nested show response or a s
 
 The current catalogue wire model has `year`, but no full release/air date. The UI deliberately treats `releaseDate` as optional and shows a placeholder when it is absent.
 
-Server/provider TODO: add an optional full date to the catalogue model and populate it from TMDB movie `release_date`, series `first_air_date`, season `air_date` and episode `air_date`. No provisional wire field is assumed by this client until the server contract is changed.
+Server/provider TODO: add an optional full date to the catalogue model and populate it from TMDB movie `release_date`, series `first_air_date`, season `air_date` and episode `air_date`. No provisional wire field is assumed by this client until the server contract is changed. This work is tracked in the [active client roadmap](../TODO/ACTIVE.md).
 
 ## Authentication
 
@@ -80,7 +92,22 @@ Authorization: Bearer <token>
 
 Artwork is fetched with `fetch()` and converted to a local object URL. It is not placed directly in `<img src>`, because a normal image element cannot attach the Bearer header.
 
-The token is stored locally by this client. It is sent only to the configured Macha API endpoint.
+The token is stored locally by this client. It is sent only to configured or
+cluster-advertised Macha API endpoints.
+
+## Bootstrap and endpoint discovery
+
+The configured API URLs are bootstrap seeds, not an authoritative membership
+list. With the current server, the client tries those seeds directly and keeps
+the last successful endpoint sticky. A future successful bootstrap response may
+advertise durable node IDs and one or more browser-reachable API base URLs per
+node; the client registry can refresh those discovered candidates without
+persisting them as user configuration.
+
+Cluster transport addresses such as the current status `host` and `port` fields
+are not HTTP API advertisements. The client never guesses an API URL from them.
+The future wire contract must explicitly identify client-facing HTTP(S) bases,
+including any LAN/WAN or address-family alternatives and their validity period.
 
 ## Browser deployment
 

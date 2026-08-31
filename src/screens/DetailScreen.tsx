@@ -1,4 +1,5 @@
 import type { MediaApi } from '../api/MediaApi';
+import type { CatalogueMediaProfile } from '../api/CatalogueApi';
 import { PlayIcon, RestartIcon } from '../components/PlaybackIcons';
 import type { MediaDetails, MediaSummary, PlaybackProgress } from '../types';
 import { useAsync } from '../hooks/useAsync';
@@ -27,8 +28,37 @@ function canResume(media: MediaSummary, progress?: PlaybackProgress): boolean {
     && Boolean(progress && progress.positionMs > 0 && progress.durationMs > 0);
 }
 
+function codecLabel(codec: string): string {
+  const normalized = codec.trim().toLowerCase();
+  if (normalized === 'h264') return 'H.264';
+  if (normalized === 'hevc' || normalized === 'h265') return 'HEVC';
+  if (normalized === 'aac') return 'AAC';
+  if (normalized === 'ac3') return 'AC-3';
+  if (normalized === 'eac3') return 'E-AC-3';
+  return codec.toUpperCase();
+}
+
+export function mediaProfileSummary(profile: CatalogueMediaProfile): string {
+  const parts: string[] = [];
+  const minutes = Math.floor(profile.duration_ms / 60_000);
+  if (minutes >= 60) parts.push(`${Math.floor(minutes / 60)}h ${minutes % 60}m`);
+  else if (minutes > 0) parts.push(`${minutes}m`);
+  const video = profile.streams.find((stream) => stream.type === 'video' && !stream.attached_picture);
+  const audio = profile.streams.find((stream) => stream.type === 'audio');
+  if (video?.width && video.height) parts.push(`${video.width}×${video.height}`);
+  if (video?.codec) parts.push(codecLabel(video.codec));
+  if (audio?.codec) parts.push(codecLabel(audio.codec));
+  if (profile.bitrate > 0) parts.push(`${(profile.bitrate / 1_000_000).toFixed(1)} Mbps`);
+  return parts.join(' · ');
+}
+
 export function DetailScreen({ api, itemId, onBack, onPlay, onPlayFromStart, progress, onEdit }: Props) {
   const details = useAsync(() => api.details(itemId), [api, itemId]);
+  const immutableMediaId = details.value?.mediaIds.find((mediaId) => mediaId.startsWith('macha:'));
+  const profile = useAsync(
+    () => immutableMediaId && api.mediaProfile ? api.mediaProfile(immutableMediaId) : Promise.resolve(undefined),
+    [api, immutableMediaId],
+  );
   const backdrop = useArtworkUrl(api, details.value?.artwork?.backdrop ?? details.value?.artwork?.poster ?? details.value?.artwork?.thumbnail);
   const poster = useArtworkUrl(api, details.value?.kind === 'movie' ? details.value.artwork?.poster : undefined);
   useEffect(() => {
@@ -47,6 +77,7 @@ export function DetailScreen({ api, itemId, onBack, onPlay, onPlayFromStart, pro
       <p className="eyebrow">{media.kind}{media.year ? ` · ${media.year}` : ''}</p>
       <h1>{media.title}</h1>
       {media.subtitle && <p className="subtitle">{media.subtitle}</p>}
+      {profile.value && <p className="media-profile-summary">{mediaProfileSummary(profile.value)}</p>}
       {media.synopsis && <p className="synopsis">{media.synopsis}</p>}
       {playable && (
         <div className="play-actions detail-play-controls" aria-label="Playback controls">

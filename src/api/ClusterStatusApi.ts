@@ -155,6 +155,13 @@ export interface ClusterStatusApi {
   checkConnectivity(nodeId?: string): Promise<ConnectivityCheck>;
 }
 
+export class MachaClusterStatusApiError extends Error {
+  constructor(message: string, public readonly status: number) {
+    super(message);
+    this.name = 'MachaClusterStatusApiError';
+  }
+}
+
 export class MachaClusterStatusApi implements ClusterStatusApi {
   private readonly baseUrl: string;
 
@@ -181,7 +188,7 @@ export class MachaClusterStatusApi implements ClusterStatusApi {
       const message = typeof record?.message === 'string'
         ? record.message
         : `${response.status} ${response.statusText}`;
-      throw new Error(message);
+      throw new MachaClusterStatusApiError(message, response.status);
     }
     return body as T;
   }

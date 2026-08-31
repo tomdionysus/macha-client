@@ -6,6 +6,7 @@ import type {
   CatalogueArtwork,
   CatalogueItem,
   CatalogueKind,
+  CatalogueMediaProfile,
   CatalogueStatus,
 } from './CatalogueApi';
 
@@ -46,6 +47,24 @@ export class MachaCatalogueApi implements CatalogueApi {
 
   get(id: string): Promise<CatalogueItem> {
     return this.getJson(`/api/v1/catalogue/items/${encodeURIComponent(id)}`);
+  }
+
+  async mediaProfile(mediaId: string): Promise<CatalogueMediaProfile | undefined> {
+    // Mutable path identities are deliberately ineligible for profile caching.
+    if (!mediaId.startsWith('macha:')) return undefined;
+    try {
+      const profile = await this.getJson<CatalogueMediaProfile>(`/api/v1/catalogue/media/${encodeURIComponent(mediaId)}/profile`);
+      if (profile.schema_version !== 1 || profile.media_id !== mediaId || !Array.isArray(profile.streams)) {
+        throw new MachaApiError('Macha catalogue returned an invalid immutable media profile.', 502, 'invalid_media_profile');
+      }
+      return profile;
+    } catch (error) {
+      // `profile_not_available` is the new contract. A generic 404 is also a
+      // temporary absence while older nodes without this route remain in a
+      // mixed-version endpoint set.
+      if (error instanceof MachaApiError && error.status === 404) return undefined;
+      throw error;
+    }
   }
 
   update(item: CatalogueItem, expectedRevision = item.revision): Promise<CatalogueItem> {

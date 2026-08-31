@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { buildDirectPlayReadAheadProxyUrl, directPlayReadAheadUrl } from './directPlayReadAhead';
+import { addDirectPlayReadAheadAlternative, buildDirectPlayReadAheadProxyUrl, directPlayReadAheadUrl } from './directPlayReadAhead';
 import type { PlaybackSource } from '../types';
 
 function source(): PlaybackSource {
@@ -51,5 +51,25 @@ describe('Direct Play read-ahead client', () => {
     expect(result).toBe(source().url);
     expect(performance.now() - startedAt).toBeLessThan(20);
     expect(register).toHaveBeenCalledOnce();
+  });
+
+  it('registers a prepared alternate without replacing the active proxy URL', () => {
+    const postMessage = vi.fn();
+    vi.stubGlobal('window', { isSecureContext: true, location: { origin: 'https://client.test' } });
+    vi.stubGlobal('navigator', {
+      serviceWorker: {
+        controller: { postMessage },
+        addEventListener: vi.fn(),
+      },
+    });
+    const primary = { ...source(), url: 'https://node-a.test/direct' };
+    const alternate = { ...source(), url: 'https://node-b.test/direct' };
+
+    expect(directPlayReadAheadUrl(primary)).not.toBe(primary.url);
+    expect(addDirectPlayReadAheadAlternative(primary, alternate)).toBe(true);
+    expect(postMessage).toHaveBeenLastCalledWith(expect.objectContaining({
+      type: 'macha-direct-read-ahead-add-source',
+      sourceUrl: alternate.url,
+    }));
   });
 });

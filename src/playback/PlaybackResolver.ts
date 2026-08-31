@@ -84,6 +84,8 @@ export interface PlaybackPreferences {
 
 export interface PlaybackSession {
   sessionId: string;
+  /** Node/API provenance for this disposable playback generation. */
+  endpoint?: { id: string; baseUrl: string };
   itemId?: string;
   mediaId: string;
   mode: PlaybackMode;
@@ -134,4 +136,20 @@ export interface PlaybackResolver {
   ): Promise<PlaybackSession>;
   update(sessionId: string, update: PlaybackUpdate): Promise<PlaybackSession>;
   stop(sessionId: string, options?: PlaybackStopOptions): Promise<void>;
+  /** Recreate client-owned playback intent on another node after source failure. */
+  failover?(
+    failedSession: PlaybackSession,
+    media: MediaSummary,
+    capabilities: PlaybackCapabilities,
+    seekMs: number,
+    preferences: PlaybackPreferencesUpdate,
+  ): Promise<PlaybackSession>;
+  /** Prepare one bounded standby generation without delaying active playback. */
+  prepareAlternate?(
+    activeSession: PlaybackSession,
+    media: MediaSummary,
+    capabilities: PlaybackCapabilities,
+    seekMs: number,
+    preferences: PlaybackPreferencesUpdate,
+  ): Promise<PlaybackSession | undefined>;
 }

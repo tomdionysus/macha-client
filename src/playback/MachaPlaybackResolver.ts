@@ -258,6 +258,7 @@ export class MachaPlaybackResolver implements PlaybackResolver {
     };
     return {
       sessionId: wire.session_id,
+      endpoint: { id: this.baseUrl || 'same-origin', baseUrl: this.baseUrl },
       itemId: wire.item_id,
       mediaId: wire.media_id,
       mode: wire.mode,

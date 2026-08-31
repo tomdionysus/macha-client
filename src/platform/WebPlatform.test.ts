@@ -5,6 +5,7 @@ import {
   webHlsBufferConfig,
   webLocalSeekCoverage,
   webPlaybackEventsEqual,
+  webMediaElementFailure,
 } from './WebPlatform';
 import { ManagedHlsMediaRecoveryBudget } from './ManagedHlsRecovery';
 
@@ -17,6 +18,15 @@ describe('Web HLS engine policy', () => {
   it('preserves the explicit native-HLS path for constrained/legacy targets', () => {
     expect(shouldUseManagedHls(true, true)).toBe(false);
     expect(shouldUseManagedHls(true, false)).toBe(false);
+  });
+});
+
+describe('Web media failure evidence', () => {
+  it('distinguishes endpoint-retryable network failure from decoder and compatibility failure', () => {
+    expect(webMediaElementFailure({ code: 2, message: 'connection lost' }).kind).toBe('stream');
+    expect(webMediaElementFailure({ code: 3, message: 'bad frame' }).kind).toBe('media');
+    expect(webMediaElementFailure({ code: 4, message: 'codec unavailable' }).kind).toBe('unsupported');
+    expect(webMediaElementFailure(null).kind).toBe('unknown');
   });
 });
 
@@ -51,6 +61,13 @@ describe('Web local seek coverage', () => {
 
 
 describe('Managed Web HLS recovery', () => {
+  it('permits only one fatal network restart per source generation', () => {
+    const recovery = new ManagedHlsMediaRecoveryBudget();
+
+    expect(recovery.fatalNetworkError()).toEqual({ action: 'restart', attempt: 1 });
+    expect(recovery.fatalNetworkError()).toEqual({ action: 'fail', attempts: 1 });
+  });
+
   it('allows one immediate media recovery but terminates a repeated fatal error without playback progress', () => {
     const recovery = new ManagedHlsMediaRecoveryBudget();
 

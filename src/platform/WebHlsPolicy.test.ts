@@ -4,10 +4,18 @@ import { ManagedHlsMediaRecoveryBudget } from './ManagedHlsRecovery';
 import { managedHlsErrorAction } from './WebHlsPolicy';
 
 describe('managed HLS error policy', () => {
-  it('distinguishes nonfatal and retryable network errors', () => {
+  it('bounds fatal network restart before exposing source failure for node failover', () => {
     const recovery = new ManagedHlsMediaRecoveryBudget();
     expect(managedHlsErrorAction({ fatal: false }, recovery, 0)).toEqual({ action: 'nonfatal' });
-    expect(managedHlsErrorAction({ fatal: true, type: Hls.ErrorTypes.NETWORK_ERROR }, recovery, 0)).toEqual({ action: 'restart-network' });
+    expect(managedHlsErrorAction({ fatal: true, type: Hls.ErrorTypes.NETWORK_ERROR }, recovery, 0)).toEqual({
+      action: 'restart-network',
+      attempt: 1,
+    });
+    expect(managedHlsErrorAction({ fatal: true, type: Hls.ErrorTypes.NETWORK_ERROR, details: 'fragLoadError' }, recovery, 0)).toEqual({
+      action: 'fail-network',
+      attempts: 1,
+      details: 'fragLoadError',
+    });
   });
 
   it('turns repeated no-progress media errors into terminal failure', () => {

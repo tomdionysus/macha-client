@@ -28,6 +28,10 @@ export class MachaMediaApi implements MediaApi {
     return this.catalogue.status();
   }
 
+  mediaProfile(mediaId: string) {
+    return this.catalogue.mediaProfile(mediaId);
+  }
+
   async home(): Promise<LibraryHome> {
     const [movies, shows, albums] = await Promise.all([this.movies(), this.shows(), this.albums()]);
     return { movies, shows, albums };

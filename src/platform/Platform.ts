@@ -3,6 +3,27 @@ import type { PlaybackCapabilities, PlaybackEvent, PlaybackSource, PlaybackTimeR
 export type PlaybackListener = (event: PlaybackEvent) => void;
 export type PlaybackFailureListener = (error: Error) => void;
 
+export type PlaybackFailureKind = 'stream' | 'media' | 'unsupported' | 'unknown';
+
+/** Terminal player evidence, kept distinct from endpoint/API failures. */
+export class PlaybackSourceError extends Error {
+  constructor(
+    message: string,
+    public readonly kind: PlaybackFailureKind,
+    public readonly cause?: unknown,
+  ) {
+    super(message);
+    this.name = 'PlaybackSourceError';
+  }
+}
+
+export function isEndpointRetryablePlaybackFailure(error: unknown): boolean {
+  // Existing/custom players historically emitted plain Error objects for
+  // source loss. Preserve that compatibility while allowing players with real
+  // decoder evidence to prevent pointless node churn.
+  return !(error instanceof PlaybackSourceError) || error.kind === 'stream' || error.kind === 'unknown';
+}
+
 export interface Player {
   /** Bind the existing player surface to a presentation host. Must not create a playback session. */
   attach(host: HTMLElement): void;
@@ -27,6 +48,8 @@ export interface Player {
   setVolume(volume: number): void;
   /** Replace the subtitle resource without touching active A/V playback. */
   setSubtitle?(subtitleUrl?: string): Promise<void> | void;
+  /** Add an equivalent Direct Play byte source without replacing active media. */
+  addDirectSourceAlternative?(activeSource: PlaybackSource, alternative: PlaybackSource): boolean;
   /** Release all source-side resources and cancel active acquisition. */
   stop(): void;
   subscribe(listener: PlaybackListener): () => void;

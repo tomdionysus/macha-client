@@ -404,6 +404,7 @@ h2 { font-size: clamp(1.2rem, 2vw, 1.75rem); letter-spacing: -.01em; margin: 1.1
 .series-content, .season-content { max-width: none; }
 .eyebrow { color: var(--text-dim); text-transform: uppercase; letter-spacing: .12em; font-size: .78rem; }
 .subtitle { color: var(--text-dim); font-size: 1.1rem; }
+.media-profile-summary { color: var(--text-dim); font-size: .95rem; letter-spacing: .025em; }
 .synopsis { max-width: 70ch; line-height: 1.65; font-size: clamp(1rem, 1.35vw, 1.25rem); color: #d1d1d5; }
 .primary-button, .secondary-button, .settings button {
   border: 0;
@@ -539,7 +540,8 @@ h2 { font-size: clamp(1.2rem, 2vw, 1.75rem); letter-spacing: -.01em; margin: 1.1
 .settings { width: 100%; }
 .settings label { display: block; color: var(--text-dim); margin: 1rem 0 .45rem; }
 .settings-line { display: flex; gap: .7rem; align-items: center; }
-.settings-line input { flex: 1; }
+.settings-line input, .settings-line textarea { flex: 1; }
+.settings-line textarea { min-height: 4.5rem; resize: vertical; }
 .settings button { margin: 0; }
 .settings p { color: var(--text-dim); line-height: 1.6; }
 
@@ -860,4 +862,3 @@ h2 { font-size: clamp(1.2rem, 2vw, 1.75rem); letter-spacing: -.01em; margin: 1.1
   .movie-detail-layout { grid-template-columns: 1fr; }
   .movie-detail-poster { width: min(58vw, 240px); }
 }
-

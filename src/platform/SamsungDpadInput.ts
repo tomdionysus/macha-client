@@ -67,10 +67,15 @@ export class SamsungDpadInput {
       event.stopPropagation();
       return;
     }
+    if (!this.handler(command, event)) {
+      // Unhandled keys belong to the focused native control (notably text
+      // editors). Do not let repeat suppression consume their next keydown.
+      this.lastCommand = undefined;
+      this.lastCommandAt = 0;
+      return;
+    }
     this.lastCommand = command;
     this.lastCommandAt = now;
-
-    if (!this.handler(command, event)) return;
     event.preventDefault();
     event.stopPropagation();
   };

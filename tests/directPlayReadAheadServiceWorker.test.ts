@@ -87,6 +87,13 @@ function createHarness(fetchImpl: (url: string, options?: FetchOptions) => Promi
     });
   }
 
+  function addSource(sourceUrl: string) {
+    listeners.get('message')?.({
+      data: { type: 'macha-direct-read-ahead-add-source', sourceKey, sourceUrl },
+      ports: [],
+    });
+  }
+
   function release() {
     listeners.get('message')?.({
       data: { type: 'macha-direct-read-ahead-release', sourceKey },
@@ -106,7 +113,7 @@ function createHarness(fetchImpl: (url: string, options?: FetchOptions) => Promi
     return await responsePromise;
   }
 
-  return { configure, setMode, release, request, metrics };
+  return { configure, addSource, setMode, release, request, metrics };
 }
 
 describe('Direct Play read-ahead Service Worker', () => {
@@ -189,6 +196,174 @@ describe('Direct Play read-ahead Service Worker', () => {
     const second = await harness.request('bytes=0-3');
     expect([...new Uint8Array(await second.arrayBuffer())]).toEqual([0, 1, 2, 3]);
     expect(calls).toEqual(['bytes=0-3']);
+  });
+
+  it('retries the exact demand range on an alternate when the primary fails before headers', async () => {
+    const calls: Array<{ url: string; range: string }> = [];
+    const harness = createHarness(async (url, options = {}) => {
+      const range = new Headers(options.headers).get('range') ?? '';
+      calls.push({ url, range });
+      if (url.includes('node.test')) throw new TypeError('primary unreachable');
+      return new Response(new Uint8Array([0, 1, 2, 3]), {
+        status: 206,
+        headers: { 'content-type': 'video/mp4', 'content-range': 'bytes 0-3/67108864' },
+      });
+    });
+    harness.configure();
+    harness.addSource('https://alternate.test/direct.mp4');
+    releases.push(harness.release);
+
+    const response = await harness.request('bytes=0-3');
+
+    expect([...new Uint8Array(await response.arrayBuffer())]).toEqual([0, 1, 2, 3]);
+    expect(calls).toEqual([
+      { url: 'https://node.test/direct.mp4', range: 'bytes=0-3' },
+      { url: 'https://alternate.test/direct.mp4', range: 'bytes=0-3' },
+    ]);
+  });
+
+  it('continues at the exact next byte on an alternate after a partial body failure', async () => {
+    const calls: Array<{ url: string; range: string }> = [];
+    const harness = createHarness(async (url, options = {}) => {
+      const range = new Headers(options.headers).get('range') ?? '';
+      calls.push({ url, range });
+      if (url.includes('node.test')) {
+        let emitted = false;
+        return new Response(new ReadableStream<Uint8Array>({
+          pull(controller) {
+            if (!emitted) {
+              emitted = true;
+              controller.enqueue(new Uint8Array([0, 1]));
+            } else {
+              controller.error(new TypeError('primary body failed'));
+            }
+          },
+        }), {
+          status: 206,
+          headers: { 'content-type': 'video/mp4', 'content-range': 'bytes 0-3/67108864' },
+        });
+      }
+      return new Response(new Uint8Array([2, 3]), {
+        status: 206,
+        headers: { 'content-type': 'video/mp4', 'content-range': 'bytes 2-3/67108864' },
+      });
+    });
+    harness.configure();
+    harness.addSource('https://alternate.test/direct.mp4');
+    releases.push(harness.release);
+
+    const response = await harness.request('bytes=0-3');
+
+    expect([...new Uint8Array(await response.arrayBuffer())]).toEqual([0, 1, 2, 3]);
+    expect(calls).toEqual([
+      { url: 'https://node.test/direct.mp4', range: 'bytes=0-3' },
+      { url: 'https://alternate.test/direct.mp4', range: 'bytes=2-3' },
+    ]);
+  });
+
+  it('keeps a resident prefix and obtains only the missing suffix from an alternate', async () => {
+    const calls: Array<{ url: string; range: string }> = [];
+    const harness = createHarness(async (url, options = {}) => {
+      const range = new Headers(options.headers).get('range') ?? '';
+      calls.push({ url, range });
+      if (range === 'bytes=0-3') return rangeResponse(0, 4, 16);
+      if (url.includes('node.test')) throw new TypeError('primary failed');
+      return new Response(new Uint8Array([4, 5, 6, 7]), {
+        status: 206,
+        headers: { 'content-type': 'video/mp4', 'content-range': 'bytes 4-7/16' },
+      });
+    });
+    harness.configure(16);
+    harness.addSource('https://alternate.test/direct.mp4');
+    releases.push(harness.release);
+    await (await harness.request('bytes=0-3', 16)).arrayBuffer();
+
+    const response = await harness.request('bytes=0-7', 16);
+
+    expect([...new Uint8Array(await response.arrayBuffer())]).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
+    expect(calls.slice(1)).toEqual([
+      { url: 'https://node.test/direct.mp4', range: 'bytes=4-7' },
+      { url: 'https://alternate.test/direct.mp4', range: 'bytes=4-7' },
+    ]);
+  });
+
+  it('serves an overlapping range from resident bytes and fetches only its missing suffix', async () => {
+    const calls: string[] = [];
+    const harness = createHarness(async (_url, options = {}) => {
+      const range = new Headers(options.headers).get('range') ?? '';
+      calls.push(range);
+      if (range === 'bytes=0-7') return new Response(new Uint8Array([0, 1, 2, 3, 4, 5, 6, 7]), {
+        status: 206,
+        headers: { 'content-type': 'video/mp4', 'content-range': 'bytes 0-7/16' },
+      });
+      if (range === 'bytes=8-11') return new Response(new Uint8Array([8, 9, 10, 11]), {
+        status: 206,
+        headers: { 'content-type': 'video/mp4', 'content-range': 'bytes 8-11/16' },
+      });
+      throw new Error(`Unexpected range ${range}`);
+    });
+    harness.configure(16);
+    releases.push(harness.release);
+    await (await harness.request('bytes=0-7', 16)).arrayBuffer();
+
+    const response = await harness.request('bytes=4-11', 16);
+
+    expect([...new Uint8Array(await response.arrayBuffer())]).toEqual([4, 5, 6, 7, 8, 9, 10, 11]);
+    expect(calls).toEqual(['bytes=0-7', 'bytes=8-11']);
+  });
+
+  it('does not splice an alternate over a non-retryable HTTP response', async () => {
+    const calls: string[] = [];
+    const harness = createHarness(async (url) => {
+      calls.push(url);
+      return new Response('not found', { status: 404 });
+    });
+    harness.configure();
+    harness.addSource('https://alternate.test/direct.mp4');
+    releases.push(harness.release);
+
+    const response = await harness.request('bytes=0-3');
+
+    expect(response.status).toBe(404);
+    expect(calls).toEqual(['https://node.test/direct.mp4']);
+  });
+
+  it('fails after bounded alternate exhaustion', async () => {
+    const calls: string[] = [];
+    const harness = createHarness(async (url) => {
+      calls.push(url);
+      throw new TypeError('unreachable');
+    });
+    harness.configure();
+    harness.addSource('https://alternate.test/direct.mp4');
+    releases.push(harness.release);
+
+    await expect(harness.request('bytes=0-3')).rejects.toThrow('unreachable');
+    expect(calls).toEqual(['https://node.test/direct.mp4', 'https://alternate.test/direct.mp4']);
+  });
+
+  it('cancels active demand without starting an alternate request', async () => {
+    const calls: string[] = [];
+    let upstreamSignal: AbortSignal | undefined;
+    const harness = createHarness(async (url, options = {}) => {
+      calls.push(url);
+      upstreamSignal = options.signal;
+      return new Response(new ReadableStream<Uint8Array>({
+        pull() { return new Promise<void>(() => undefined); },
+      }), {
+        status: 206,
+        headers: { 'content-type': 'video/mp4', 'content-range': 'bytes 0-3/67108864' },
+      });
+    });
+    harness.configure();
+    harness.addSource('https://alternate.test/direct.mp4');
+    releases.push(harness.release);
+
+    const response = await harness.request('bytes=0-3');
+    await response.body!.cancel();
+
+    expect(upstreamSignal?.aborted).toBe(true);
+    expect(calls).toEqual(['https://node.test/direct.mp4']);
   });
 
   it('aborts speculative read-ahead immediately when new viewer demand arrives', async () => {

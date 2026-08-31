@@ -214,6 +214,21 @@ export function directPlayReadAheadUrl(source: PlaybackSource): string {
   return buildDirectPlayReadAheadProxyUrl(sourceKey, window.location.origin, source);
 }
 
+/** Add an already-negotiated equivalent URL to the active worker source set. */
+export function addDirectPlayReadAheadAlternative(activeSource: PlaybackSource, alternative: PlaybackSource): boolean {
+  if (!eligible(alternative) || !serviceWorkerAvailable()) return false;
+  const sourceKey = keyBySource.get(activeSource.url);
+  const activeController = navigator.serviceWorker.controller;
+  if (!sourceKey || !activeController) return false;
+  activeController.postMessage({
+    type: 'macha-direct-read-ahead-add-source',
+    sourceKey,
+    sourceUrl: alternative.url,
+  });
+  log.info('alternate-added', { sourceKey, sourceUrl: alternative.url });
+  return true;
+}
+
 export function setDirectPlayReadAheadMode(sourceUrl: string | undefined, mode: DirectPlayReadAheadMode): void {
   if (!sourceUrl) return;
   const sourceKey = keyBySource.get(sourceUrl);

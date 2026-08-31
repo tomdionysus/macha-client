@@ -6,6 +6,7 @@ import { AppLogo } from './components/AppLogo';
 import { MusicNav } from './components/MusicNav';
 import { machaLogoUrl as logoUrl } from './uiAssets';
 import { useTvNavigation } from './hooks/useTvNavigation';
+import { useEndpointHealthMonitor } from './cluster/useEndpointHealthMonitor';
 import { samsungBackTarget } from './platform/samsungBackNavigation';
 import type { Platform } from './platform/Platform';
 import type { PlaybackResolver } from './playback/PlaybackResolver';
@@ -18,9 +19,9 @@ import { VolumeStore } from './state/volume';
 import {
   getApiToken,
   getClientId,
-  getServerUrl,
+  getBootstrapEndpoints,
   setApiToken as persistApiToken,
-  setServerUrl as persistServerUrl,
+  setBootstrapEndpoints as persistBootstrapEndpoints,
 } from './state/client';
 import { HomeScreen } from './screens/HomeScreen';
 import { LibraryScreen } from './screens/LibraryScreen';
@@ -214,7 +215,8 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
   const navigate = useNavigate();
   const location = useLocation();
 
-  const [serverUrl, setServerUrl] = useState(() => getServerUrl());
+  const [bootstrapEndpoints, setBootstrapEndpoints] = useState(() => getBootstrapEndpoints());
+  const serverUrl = bootstrapEndpoints[0] ?? '';
   const [apiToken, setApiToken] = useState(() => getApiToken());
   const [connectionNotice, setConnectionNotice] = useState<string>();
   const clientId = useMemo(() => getClientId(), []);
@@ -232,7 +234,9 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
     clusterStatusApi,
     acquisitionApi,
     managementAvailable,
-  } = useMachaServices({ serverUrl, apiToken, demo, apiOverride, playbackOverride });
+    endpointRegistry,
+  } = useMachaServices({ serverUrl, bootstrapEndpoints, apiToken, demo, apiOverride, playbackOverride });
+  useEndpointHealthMonitor(endpointRegistry, apiToken, !demo && !apiOverride);
   const metadataEditingAvailable = managementAvailable;
   const [unmatchedCount, setUnmatchedCount] = useState(0);
 
@@ -278,13 +282,16 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
 
   useEffect(() => {
     const onServerUnreachable = (event: Event) => {
+      // One bootstrap endpoint failing is not cluster failure. Node-aware APIs
+      // exhaust alternatives before surfacing their final error in-place.
+      if (bootstrapEndpoints.length > 1) return;
       const detail = (event as CustomEvent<{ message?: string }>).detail;
       setConnectionNotice(detail?.message ?? SERVER_UNREACHABLE_MESSAGE);
       if (location.pathname !== routes.settings) navigate(routes.settings, { replace: true });
     };
     window.addEventListener(SERVER_UNREACHABLE_EVENT, onServerUnreachable);
     return () => window.removeEventListener(SERVER_UNREACHABLE_EVENT, onServerUnreachable);
-  }, [location.pathname, navigate]);
+  }, [bootstrapEndpoints.length, location.pathname, navigate]);
 
   const open = useCallback((item: MediaSummary) => navigate(pathForMedia(item)), [navigate]);
   const openPlayer = useCallback((item: MediaSummary) => playback.startPlayback(item), [playback.startPlayback]);
@@ -299,16 +306,17 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
     onQueueChange: playback.setQueueState,
   });
 
-  const saveServer = useCallback((url: string, token: string) => {
+  const saveServer = useCallback((urls: readonly string[], token: string) => {
     setConnectionNotice(undefined);
-    const normalizedUrl = url.trim().replace(/\/+$/, '');
+    const normalizedEndpoints = [...new Set(urls.map((url) => url.trim().replace(/\/+$/, '')))]
+      .filter((url, index) => url || index === 0);
     const normalizedToken = token.trim();
     // A resolver/server boundary cannot change underneath an owned lease.
     // Close the old session first, then make the new server authoritative.
     void playbackRuntime.stop().finally(() => {
-      persistServerUrl(url);
+      persistBootstrapEndpoints(normalizedEndpoints);
       persistApiToken(token);
-      setServerUrl(normalizedUrl);
+      setBootstrapEndpoints(normalizedEndpoints);
       setApiToken(normalizedToken);
       navigate(routes.home, { replace: true });
     });
@@ -375,11 +383,11 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
           <Route path="/items/:itemId/edit" element={metadataEditingAvailable ? <MetadataEditorRoute api={catalogueApi} /> : <Navigate to={routes.home} replace />} />
           <Route path={routes.search} element={<SearchScreen api={api} onOpen={open} />} />
           <Route path={routes.ingest} element={<IngestScreen api={acquisitionApi} />} />
-          <Route path={routes.status} element={<StatusScreen api={clusterStatusApi} manageApi={managementAvailable ? manageApi : undefined} />} />
+          <Route path={routes.status} element={<StatusScreen api={clusterStatusApi} endpointRegistry={endpointRegistry} manageApi={managementAvailable ? manageApi : undefined} />} />
           <Route path="/status/nodes/:nodeId" element={<NodeStatusScreen api={clusterStatusApi} />} />
-          <Route path={routes.manage} element={managementAvailable ? <ManageScreen api={manageApi} catalogueApi={catalogueApi} section="unmatched" settings={<SettingsScreen api={api} serverApi={serverApi} serverUrl={serverUrl} apiToken={apiToken} connectionNotice={connectionNotice} onSave={saveServer} />} managementAvailable={managementAvailable} onUnmatchedCountChange={setUnmatchedCount} /> : <Navigate to={routes.settings} replace />} />
-          <Route path={routes.manageFiles} element={managementAvailable ? <ManageScreen api={manageApi} catalogueApi={catalogueApi} section="files" settings={<SettingsScreen api={api} serverApi={serverApi} serverUrl={serverUrl} apiToken={apiToken} connectionNotice={connectionNotice} onSave={saveServer} />} managementAvailable={managementAvailable} onUnmatchedCountChange={setUnmatchedCount} /> : <Navigate to={routes.settings} replace />} />
-          <Route path={routes.settings} element={<ManageScreen api={manageApi} catalogueApi={catalogueApi} section="settings" settings={<SettingsScreen api={api} serverApi={serverApi} serverUrl={serverUrl} apiToken={apiToken} connectionNotice={connectionNotice} onSave={saveServer} />} managementAvailable={managementAvailable} />} />
+          <Route path={routes.manage} element={managementAvailable ? <ManageScreen api={manageApi} catalogueApi={catalogueApi} section="unmatched" settings={<SettingsScreen api={api} serverApi={serverApi} bootstrapEndpoints={bootstrapEndpoints} apiToken={apiToken} connectionNotice={connectionNotice} onSave={saveServer} />} managementAvailable={managementAvailable} onUnmatchedCountChange={setUnmatchedCount} /> : <Navigate to={routes.settings} replace />} />
+          <Route path={routes.manageFiles} element={managementAvailable ? <ManageScreen api={manageApi} catalogueApi={catalogueApi} section="files" settings={<SettingsScreen api={api} serverApi={serverApi} bootstrapEndpoints={bootstrapEndpoints} apiToken={apiToken} connectionNotice={connectionNotice} onSave={saveServer} />} managementAvailable={managementAvailable} onUnmatchedCountChange={setUnmatchedCount} /> : <Navigate to={routes.settings} replace />} />
+          <Route path={routes.settings} element={<ManageScreen api={manageApi} catalogueApi={catalogueApi} section="settings" settings={<SettingsScreen api={api} serverApi={serverApi} bootstrapEndpoints={bootstrapEndpoints} apiToken={apiToken} connectionNotice={connectionNotice} onSave={saveServer} />} managementAvailable={managementAvailable} />} />
           <Route path="/settings" element={<Navigate to={routes.settings} replace />} />
           <Route path={routes.sponsor} element={<SponsorScreen />} />
           <Route path="*" element={<Navigate to={routes.home} replace />} />

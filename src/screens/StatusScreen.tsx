@@ -1,4 +1,4 @@
-import { useCallback, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import type {
   ClusterNodeStatus,
@@ -12,6 +12,7 @@ import type { ManageApi } from '../api/ManageApi';
 import { routes } from '../routing';
 import { usePollingTask } from '../hooks/usePollingTask';
 import { errorMessage } from '../utils/errors';
+import { EndpointRegistry, type EndpointCandidate } from '../cluster/EndpointRegistry';
 
 function formatBytes(value: number): string {
   if (!Number.isFinite(value) || value <= 0) return '0 B';
@@ -61,6 +62,58 @@ function UsageBar({ used, capacity }: { used: number; capacity: number }) {
 
 function ClusterMetric({ label, value, detail }: { label: string; value: string; detail?: string }) {
   return <article className="cluster-metric"><span>{label}</span><strong>{value}</strong>{detail && <small>{detail}</small>}</article>;
+}
+
+export function clientEndpointHealth(candidate: EndpointCandidate, now = Date.now()): { className: string; label: string } {
+  const { health } = candidate;
+  if (health.consecutiveFailures > 0) {
+    return (health.retryAt ?? 0) > now
+      ? { className: 'cooling', label: 'Cooling down' }
+      : { className: 'degraded', label: 'Retry eligible' };
+  }
+  return health.lastSuccessAt
+    ? { className: 'available', label: 'Available' }
+    : { className: 'untried', label: 'Not tried' };
+}
+
+function timestamp(value?: number): string {
+  return value ? new Date(value).toLocaleString() : '—';
+}
+
+function ClientApiEndpoints({ registry }: { registry: EndpointRegistry }) {
+  const [endpoints, setEndpoints] = useState(() => registry.snapshot());
+
+  useEffect(() => {
+    setEndpoints(registry.snapshot());
+    return registry.subscribe(() => setEndpoints(registry.snapshot()));
+  }, [registry]);
+
+  return <>
+    <div className="cluster-nodes-heading client-endpoints-heading">
+      <h2>Client API endpoints</h2>
+      <span>Local API checks and request evidence · {endpoints.length} known</span>
+    </div>
+    {endpoints.length === 0
+      ? <div className="manage-empty">No client API endpoints are configured.</div>
+      : <div className="client-endpoint-grid">{endpoints.map((candidate) => {
+        const state = clientEndpointHealth(candidate);
+        const { endpoint, health } = candidate;
+        const cooldownMs = Math.max(0, (health.retryAt ?? 0) - Date.now());
+        return <article className="node-detail-card client-endpoint-card" key={endpoint.id}>
+          <div className="cluster-node-heading">
+            <div><strong>{endpoint.nodeId ?? 'Unidentified node'}</strong><code>{endpoint.baseUrl || 'same origin'}</code></div>
+            <span className={`cluster-state-pill ${state.className}`}>{state.label}</span>
+          </div>
+          <dl>
+            <DetailItem label="Source">{endpoint.source}</DetailItem>
+            <DetailItem label="Failures">{health.consecutiveFailures}</DetailItem>
+            <DetailItem label="Last success">{timestamp(health.lastSuccessAt)}</DetailItem>
+            <DetailItem label="Last failure">{timestamp(health.lastFailureAt)}</DetailItem>
+            {cooldownMs > 0 && <DetailItem label="Retry in">{formatDuration(cooldownMs)}</DetailItem>}
+          </dl>
+        </article>;
+      })}</div>}
+  </>;
 }
 
 function endpointLabel(endpoint?: { host: string; port: number }): string {
@@ -155,7 +208,7 @@ function NodeCard({ node, canManage, resetting, onReset }: { node: ClusterNodeSt
   );
 }
 
-export function StatusScreen({ api, manageApi }: { api: ClusterStatusApi; manageApi?: ManageApi }) {
+export function StatusScreen({ api, endpointRegistry, manageApi }: { api: ClusterStatusApi; endpointRegistry: EndpointRegistry; manageApi?: ManageApi }) {
   const [snapshot, setSnapshot] = useState<ClusterStatusSnapshot>();
   const [error, setError] = useState<string>();
   const [checking, setChecking] = useState(false);
@@ -214,7 +267,7 @@ export function StatusScreen({ api, manageApi }: { api: ClusterStatusApi; manage
   }, [manageApi, refresh]);
 
   if (!snapshot && !error) return <div className="status-screen">Loading cluster status…</div>;
-  if (!snapshot) return <div className="status-screen error-status"><h1>Status unavailable</h1><p>{error}</p></div>;
+  if (!snapshot) return <section className="cluster-status-screen error-status"><h1>Server status unavailable</h1><p>{error}</p><ClientApiEndpoints registry={endpointRegistry} /></section>;
 
   const cluster = snapshot.cluster;
   const reachable = check?.results.filter((result) => result.reachable).length;
@@ -265,6 +318,8 @@ export function StatusScreen({ api, manageApi }: { api: ClusterStatusApi; manage
           <UsageBar used={cluster.cache_known.used_bytes} capacity={cluster.cache_known.capacity_bytes} />
         </article>}
       </div>
+
+      <ClientApiEndpoints registry={endpointRegistry} />
 
       {managementMessage && <p className="cluster-check-result reachable">{managementMessage}</p>}
 

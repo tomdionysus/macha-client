@@ -10,10 +10,10 @@ import { clientVersion } from '../version';
 interface Props {
   api: MediaApi;
   serverApi: ServerApi;
-  serverUrl: string;
+  bootstrapEndpoints: readonly string[];
   apiToken: string;
   connectionNotice?: string;
-  onSave: (url: string, token: string) => void;
+  onSave: (urls: readonly string[], token: string) => void;
 }
 
 function booleanField(status: ServerStatus | undefined, name: string): boolean | undefined {
@@ -34,8 +34,8 @@ function formatLastSync(unixMs: number): string {
   return new Date(unixMs).toLocaleString();
 }
 
-export function SettingsScreen({ api, serverApi, serverUrl, apiToken, connectionNotice, onSave }: Props) {
-  const [url, setUrl] = useState(serverUrl);
+export function SettingsScreen({ api, serverApi, bootstrapEndpoints, apiToken, connectionNotice, onSave }: Props) {
+  const [urls, setUrls] = useState(bootstrapEndpoints.join('\n'));
   const [token, setToken] = useState(apiToken);
   const server = useAsync(() => serverApi.status(), [serverApi]);
   const catalogue = useAsync(() => api.status(), [api]);
@@ -119,14 +119,15 @@ export function SettingsScreen({ api, serverApi, serverUrl, apiToken, connection
         {connectionNotice && (server.error || !server.value?.playbackAvailable) && (
           <p className="settings-status-error" role="alert">{connectionNotice}</p>
         )}
-        <label htmlFor="server-url">Macha API</label>
+        <label htmlFor="server-url">Macha bootstrap API endpoints</label>
         <div className="settings-line">
-          <input
+          <textarea
             id="server-url"
             data-tv-focusable="true"
-            value={url}
-            onChange={(event: ChangeEvent<HTMLInputElement>) => setUrl(event.target.value)}
-            placeholder="same origin"
+            value={urls}
+            rows={Math.max(2, bootstrapEndpoints.length)}
+            onChange={(event: ChangeEvent<HTMLTextAreaElement>) => setUrls(event.target.value)}
+            placeholder="One endpoint per line; blank means same origin"
             spellCheck={false}
           />
         </div>
@@ -140,9 +141,9 @@ export function SettingsScreen({ api, serverApi, serverUrl, apiToken, connection
             onChange={(event: ChangeEvent<HTMLInputElement>) => setToken(event.target.value)}
             spellCheck={false}
           />
-          <button data-tv-focusable="true" onClick={() => onSave(url, token)}>Save</button>
+          <button data-tv-focusable="true" onClick={() => onSave(urls.split(/[\n,]/), token)}>Save</button>
         </div>
-        <p>No account or cloud service. An empty API URL means same-origin <code>/api/v1/…</code>.</p>
+        <p>Enter one bootstrap endpoint per line. The client learns other node APIs from the cluster when that contract is available; an empty first endpoint means same-origin <code>/api/v1/…</code>.</p>
       </div>
     </section>
   );

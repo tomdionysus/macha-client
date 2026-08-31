@@ -1,5 +1,5 @@
 import { createClientLogger } from '../diagnostics/ClientLog';
-import type { Player } from '../platform/Platform';
+import { isEndpointRetryablePlaybackFailure, type Player } from '../platform/Platform';
 import type { MediaSummary, PlaybackCapabilities, PlaybackEvent } from '../types';
 import type {
   PlaybackPreferencesUpdate,
@@ -103,6 +103,30 @@ function preservedSeekPreferences(session: PlaybackSession): PlaybackPreferences
   };
 }
 
+function completePreferences(session: PlaybackSession): PlaybackPreferencesUpdate {
+  return {
+    mode: session.preferences.mode,
+    maxHeight: session.preferences.maxHeight,
+    maxBitrate: session.preferences.maxBitrate,
+    audioStream: session.preferences.audioStream,
+    subtitleStream: session.preferences.subtitleStream,
+    audioLanguage: session.preferences.audioLanguage,
+    subtitleLanguage: session.preferences.subtitleLanguage,
+  };
+}
+
+export function equivalentDirectSources(primary: PlaybackSession, alternate: PlaybackSession): boolean {
+  const primaryMime = (primary.source.mimeType ?? primary.mimeType).split(';', 1)[0]?.trim().toLowerCase();
+  const alternateMime = (alternate.source.mimeType ?? alternate.mimeType).split(';', 1)[0]?.trim().toLowerCase();
+  return primary.mode === 'direct'
+    && alternate.mode === 'direct'
+    && primary.mediaId === alternate.mediaId
+    && !primary.mediaId.startsWith('path:')
+    && Boolean(primary.source.sizeBytes && primary.source.sizeBytes > 0)
+    && primary.source.sizeBytes === alternate.source.sizeBytes
+    && primaryMime === alternateMime;
+}
+
 /**
  * PlaybackCoordinator is the sole owner of playback intent and source-generation
  * transitions. Transport commands are always local and immediate when the active
@@ -124,6 +148,9 @@ export class PlaybackCoordinator {
   private sourceActivationRevision = 0;
   private positionRevision = 0;
   private seekIntentActive = false;
+  private failoverPromise?: Promise<void>;
+  private readonly alternateSessions = new Map<string, PlaybackSession>();
+  private readonly alternatePreparations = new Set<Promise<void>>();
   private streamOffsetMs = 0;
   /** Latest server-side session state; may be ahead of the source currently visible. */
   private serverSession?: PlaybackSession;
@@ -237,6 +264,7 @@ export class PlaybackCoordinator {
     this.closePromise = (async () => {
       await this.startPromise?.catch(() => undefined);
       await this.mutationLoop?.catch(() => undefined);
+      await Promise.all([...this.alternatePreparations].map((preparation) => preparation.catch(() => undefined)));
       const session = this.serverSession ?? this.snapshot.session ?? ownedAtClose;
       if (session) {
         try {
@@ -245,6 +273,13 @@ export class PlaybackCoordinator {
           this.log.warn('session-close-failed', { sessionId: session.sessionId, error });
         }
       }
+      for (const alternate of this.alternateSessions.values()) {
+        if (alternate.sessionId === session?.sessionId) continue;
+        await this.options.resolver.stop(alternate.sessionId, this.closeOptions).catch((error) => {
+          this.log.warn('alternate-session-close-failed', { sessionId: alternate.sessionId, error });
+        });
+      }
+      this.alternateSessions.clear();
       this.listeners.clear();
     })();
     return this.closePromise;
@@ -458,6 +493,7 @@ export class PlaybackCoordinator {
   private activateSession(session: PlaybackSession, desiredAbsoluteMs: number, preparedAbsoluteMs: number): void {
     if (this.disposed) return;
     const activationRevision = ++this.sourceActivationRevision;
+    this.releaseObsoleteAlternates(session.sessionId);
     const localPositionMs = this.activationPosition(session, desiredAbsoluteMs, preparedAbsoluteMs);
 
     if (localPositionMs === undefined) {
@@ -525,6 +561,57 @@ export class PlaybackCoordinator {
       if (this.disposed || activationRevision !== this.sourceActivationRevision) return;
       this.fail(error);
     });
+    this.prepareDirectAlternate(session, activationRevision);
+  }
+
+  private prepareDirectAlternate(session: PlaybackSession, activationRevision: number): void {
+    const prepare = this.options.resolver.prepareAlternate?.bind(this.options.resolver);
+    const register = this.options.player.addDirectSourceAlternative?.bind(this.options.player);
+    if (session.mode !== 'direct' || !prepare || !register) return;
+
+    let preparation!: Promise<void>;
+    preparation = (async () => {
+      try {
+        const capabilities = await this.options.capabilities();
+        const alternate = await prepare(
+          session,
+          this.options.media,
+          capabilities,
+          this.snapshot.intent.positionMs,
+          completePreferences(session),
+        );
+        if (!alternate) return;
+        if (this.disposed || activationRevision !== this.sourceActivationRevision || this.snapshot.session?.sessionId !== session.sessionId) {
+          await this.options.resolver.stop(alternate.sessionId, this.closeOptions).catch(() => undefined);
+          return;
+        }
+        if (!equivalentDirectSources(session, alternate) || !register(session.source, alternate.source)) {
+          await this.options.resolver.stop(alternate.sessionId).catch(() => undefined);
+          return;
+        }
+        this.alternateSessions.set(alternate.sessionId, alternate);
+        this.log.info('direct-alternate-ready', {
+          primarySessionId: session.sessionId,
+          alternateSessionId: alternate.sessionId,
+          endpoint: alternate.endpoint,
+        });
+      } catch (error) {
+        this.log.warn('direct-alternate-preparation-failed', { sessionId: session.sessionId, error });
+      } finally {
+        this.alternatePreparations.delete(preparation);
+      }
+    })();
+    this.alternatePreparations.add(preparation);
+  }
+
+  private releaseObsoleteAlternates(nextSessionId: string): void {
+    for (const [sessionId] of this.alternateSessions) {
+      if (sessionId === nextSessionId) continue;
+      this.alternateSessions.delete(sessionId);
+      void this.options.resolver.stop(sessionId).catch((error) => {
+        this.log.warn('obsolete-alternate-close-failed', { sessionId, error });
+      });
+    }
   }
 
   private setSession(session: PlaybackSession): void {
@@ -563,6 +650,78 @@ export class PlaybackCoordinator {
   private fail(error: unknown): void {
     if (this.disposed || this.snapshot.fatalError) return;
     const fatalError = error instanceof Error ? error : new Error(String(error));
+    const failedSession = this.snapshot.session ?? this.serverSession;
+    if (failedSession && this.options.resolver.failover && isEndpointRetryablePlaybackFailure(fatalError) && !this.failoverPromise) {
+      this.failoverPromise = this.recoverFromSourceFailure(failedSession, fatalError).finally(() => {
+        this.failoverPromise = undefined;
+      });
+      return;
+    }
+    this.failTerminal(fatalError);
+  }
+
+  private async recoverFromSourceFailure(failedSession: PlaybackSession, error: Error): Promise<void> {
+    const requestedPositionMs = this.snapshot.intent.positionMs;
+    const requestedPositionRevision = this.positionRevision;
+    this.log.warn('source-failover-start', {
+      sessionId: failedSession.sessionId,
+      endpoint: failedSession.endpoint,
+      requestedPositionMs,
+      error,
+    });
+    this.patchSnapshot({ preparingSource: true, notice: undefined });
+    try {
+      const capabilities = await this.options.capabilities();
+      if (this.disposed) return;
+      const next = await this.options.resolver.failover!(
+        failedSession,
+        this.options.media,
+        capabilities,
+        requestedPositionMs,
+        {
+          mode: failedSession.preferences.mode,
+          maxHeight: failedSession.preferences.maxHeight,
+          maxBitrate: failedSession.preferences.maxBitrate,
+          audioStream: failedSession.preferences.audioStream,
+          subtitleStream: failedSession.preferences.subtitleStream,
+          audioLanguage: failedSession.preferences.audioLanguage,
+          subtitleLanguage: failedSession.preferences.subtitleLanguage,
+        },
+      );
+      if (this.disposed) {
+        await this.options.resolver.stop(next.sessionId).catch(() => undefined);
+        return;
+      }
+      this.serverSession = next;
+      const currentDesired = this.snapshot.intent.positionMs;
+      const userMovedDuringRequest = requestedPositionRevision !== this.positionRevision;
+      if (userMovedDuringRequest && this.activationPosition(next, currentDesired, requestedPositionMs) === undefined) {
+        this.queueMutation({
+          reason: 'seek',
+          update: { seekMs: currentDesired, preferences: preservedSeekPreferences(next) },
+        });
+      } else {
+        this.activateSession(next, currentDesired, requestedPositionMs);
+      }
+      void this.options.resolver.stop(failedSession.sessionId).catch((stopError) => {
+        this.log.warn('failed-generation-stop-failed', { sessionId: failedSession.sessionId, error: stopError });
+      });
+      this.log.info('source-failover-ready', {
+        oldSessionId: failedSession.sessionId,
+        newSessionId: next.sessionId,
+        endpoint: next.endpoint,
+        positionMs: currentDesired,
+      });
+      this.patchSnapshot({ preparingSource: false, notice: undefined });
+    } catch (failoverError) {
+      if (this.disposed) return;
+      this.log.error('source-failover-exhausted', { failedSessionId: failedSession.sessionId, error: failoverError });
+      this.failTerminal(failoverError instanceof Error ? failoverError : error);
+    }
+  }
+
+  private failTerminal(fatalError: Error): void {
+    if (this.disposed || this.snapshot.fatalError) return;
     this.log.error('fatal', fatalError);
     this.patchSnapshot({ fatalError, notice: undefined, starting: false, preparingSource: false });
   }

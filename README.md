@@ -138,7 +138,7 @@ Artwork is fetched through the API rather than placed directly in `<img src>`. T
 
 Grid/rail artwork uses a monotonic viewport-demand policy. A single application-wide proximity registry observes scroll/resize geometry with a 1000 px preload margin. Once a card enters that region, its artwork request is irrevocably started and is allowed to finish even if the card subsequently scrolls away or unmounts. There is no client-side artwork request queue, priority system, or scroll-driven network cancellation; the browser owns HTTP scheduling and `MachaMediaApi` coalesces duplicate unsignalled requests and retains completed Blobs for later mounts. Detail/backdrop hooks remain independently cancellable because they are presentation-specific rather than shared scrolling demand.
 
-The client reserves an optional full date field for season/episode presentation, but the current Macha catalogue API exposes only `year`. See [`TODO.md`](TODO.md) for the provider/server work required to populate TMDB dates later.
+The client reserves an optional full date field for season/episode presentation, but the current Macha catalogue API exposes only `year`. See the [active roadmap](TODO/ACTIVE.md) for the provider/server work required to populate TMDB dates later.
 
 See [`docs/server-api.md`](docs/server-api.md).
 

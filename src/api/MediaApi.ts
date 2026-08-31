@@ -1,4 +1,4 @@
-import type { CatalogueStatus } from './CatalogueApi';
+import type { CatalogueMediaProfile, CatalogueStatus } from './CatalogueApi';
 import type { ArtworkRef, LibraryHome, MediaDetails, MediaSummary } from '../types';
 
 /** UI-facing catalogue facade. It contains no playback or per-client state. */
@@ -14,4 +14,5 @@ export interface MediaApi {
   search(query: string): Promise<MediaSummary[]>;
   artwork(ref: ArtworkRef, signal?: AbortSignal): Promise<Blob>;
   invalidateArtwork?(ref: ArtworkRef): void;
+  mediaProfile?(mediaId: string): Promise<CatalogueMediaProfile | undefined>;
 }

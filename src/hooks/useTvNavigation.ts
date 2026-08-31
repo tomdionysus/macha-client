@@ -5,24 +5,20 @@ const SELECTOR = '[data-tv-focusable="true"]:not([disabled])';
 const SELECTED_ATTRIBUTE = 'data-tv-selected';
 const DEFAULT_FOCUS_ATTRIBUTE = 'data-tv-default-focus';
 
-type Direction = 'left' | 'right' | 'up' | 'down';
-
-function scoreCandidate(current: DOMRect, candidate: DOMRect, direction: Direction): number | null {
-  const cx = current.left + current.width / 2;
-  const cy = current.top + current.height / 2;
-  const tx = candidate.left + candidate.width / 2;
-  const ty = candidate.top + candidate.height / 2;
-  const dx = tx - cx;
-  const dy = ty - cy;
-
-  if (direction === 'left' && dx >= -1) return null;
-  if (direction === 'right' && dx <= 1) return null;
-  if (direction === 'up' && dy >= -1) return null;
-  if (direction === 'down' && dy <= 1) return null;
-
-  const primary = direction === 'left' || direction === 'right' ? Math.abs(dx) : Math.abs(dy);
-  const secondary = direction === 'left' || direction === 'right' ? Math.abs(dy) : Math.abs(dx);
-  return primary + secondary * 2.5;
+/** Editors own caret movement, selection controls and Enter while focused. */
+export function isTextEditingElement(value: unknown): boolean {
+  if (!value || typeof value !== 'object') return false;
+  const element = value as {
+    tagName?: unknown;
+    isContentEditable?: unknown;
+    getAttribute?: (name: string) => string | null;
+  };
+  const tagName = typeof element.tagName === 'string' ? element.tagName.toUpperCase() : '';
+  return tagName === 'INPUT'
+    || tagName === 'TEXTAREA'
+    || tagName === 'SELECT'
+    || element.isContentEditable === true
+    || element.getAttribute?.('role') === 'textbox';
 }
 
 function samsungVisible(element: HTMLElement): boolean {
@@ -116,6 +112,11 @@ function useSamsungNavigation(onBack?: () => boolean): () => void {
   };
 
   const onCommand = (command: SamsungDpadCommand): boolean => {
+    // The IME/editor must see its own arrows and activation key. Treating an
+    // editor that lacks data-tv-focusable as "no current element" was the root
+    // cause of focus jumps and displaced caret input in management forms.
+    if (command !== 'back' && isTextEditingElement(document.activeElement)) return false;
+
     const elements = samsungElements();
     if (elements.length === 0) return false;
 
@@ -175,63 +176,14 @@ function useSamsungNavigation(onBack?: () => boolean): () => void {
   };
 }
 
-function useWebNavigation(): () => void {
-  const focusFirst = () => {
-    if (document.activeElement === document.body || document.activeElement === null) {
-      (document.querySelector(SELECTOR) as HTMLElement | null)?.focus();
-    }
-  };
-
-  const onKeyDown = (event: KeyboardEvent) => {
-    const keyToDirection: Partial<Record<string, Direction>> = {
-      ArrowLeft: 'left',
-      ArrowRight: 'right',
-      ArrowUp: 'up',
-      ArrowDown: 'down',
-    };
-    const direction = keyToDirection[event.key];
-    if (!direction) return;
-
-    const elements = Array.from(document.querySelectorAll<HTMLElement>(SELECTOR));
-    if (elements.length === 0) return;
-    const current = document.activeElement instanceof HTMLElement && elements.includes(document.activeElement)
-      ? document.activeElement
-      : elements[0];
-
-    const active = document.activeElement;
-    if (active instanceof HTMLInputElement && active.type === 'range' && (direction === 'left' || direction === 'right')) {
-      return;
-    }
-
-    const currentRect = current.getBoundingClientRect();
-    const next = elements
-      .filter((element) => element !== current)
-      .map((element) => ({ element, score: scoreCandidate(currentRect, element.getBoundingClientRect(), direction) }))
-      .filter((entry): entry is { element: HTMLElement; score: number } => entry.score !== null)
-      .sort((a, b) => a.score - b.score)[0]?.element;
-
-    if (next) {
-      event.preventDefault();
-      next.focus();
-      next.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
-    }
-  };
-
-  window.addEventListener('keydown', onKeyDown);
-  window.addEventListener('load', focusFirst, { once: true });
-  void Promise.resolve().then(focusFirst);
-  return () => window.removeEventListener('keydown', onKeyDown);
-}
-
 export function requestTvDefaultFocus(): void {
   if (import.meta.env.MODE !== 'samsung') return;
   window.setTimeout(() => window.dispatchEvent(new Event('macha:tv-focus-default')), 0);
 }
 
 export function useTvNavigation(onBack?: () => boolean): void {
-  useEffect(() => (
-    import.meta.env.MODE === 'samsung'
-      ? useSamsungNavigation(onBack)
-      : useWebNavigation()
-  ), [onBack]);
+  useEffect(() => {
+    if (import.meta.env.MODE !== 'samsung') return undefined;
+    return useSamsungNavigation(onBack);
+  }, [onBack]);
 }

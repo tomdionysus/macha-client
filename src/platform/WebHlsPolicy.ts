@@ -14,7 +14,8 @@ export function webHlsBufferConfig(positionMs: number): Record<string, number | 
 
 export type ManagedHlsErrorAction =
   | { action: 'nonfatal' }
-  | { action: 'restart-network' }
+  | { action: 'restart-network'; attempt: number }
+  | { action: 'fail-network'; attempts: number; details: string }
   | { action: 'recover-media'; recovery: ManagedHlsMediaRecoveryDecision }
   | { action: 'fail-media'; recovery: ManagedHlsMediaRecoveryDecision; details: string }
   | { action: 'fail-terminal'; details: string };
@@ -25,7 +26,15 @@ export function managedHlsErrorAction(
   positionMs: number,
 ): ManagedHlsErrorAction {
   if (!data.fatal) return { action: 'nonfatal' };
-  if (data.type === Hls.ErrorTypes.NETWORK_ERROR) return { action: 'restart-network' };
+  if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+    const decision = recovery.fatalNetworkError();
+    if (decision.action === 'restart') return { action: 'restart-network', attempt: decision.attempt };
+    return {
+      action: 'fail-network',
+      attempts: decision.attempts,
+      details: typeof data.details === 'string' ? data.details : 'networkError',
+    };
+  }
   if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
     const decision = recovery.fatalMediaError(positionMs);
     if (decision.action === 'recover') return { action: 'recover-media', recovery: decision };

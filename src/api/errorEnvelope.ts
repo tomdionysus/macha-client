@@ -56,7 +56,11 @@ export function parseErrorEnvelope(body: unknown, fallback: string): ParsedError
   if (!envelope) return { message: describe(body) ?? fallback };
 
   const structuredError = asRecord(envelope.error);
-  const code = nonEmptyString(envelope.code) ?? nonEmptyString(structuredError?.code);
+  const code = nonEmptyString(envelope.code)
+    ?? nonEmptyString(structuredError?.code)
+    // Current Macha JSON uses `{ error: "machine_code", message: "..." }`.
+    // Keep an error-only string as the legacy human message shape.
+    ?? (nonEmptyString(envelope.message) ? nonEmptyString(envelope.error) : undefined);
 
   const message = describe(envelope.message)
     ?? describe(envelope.error)

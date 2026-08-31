@@ -26,6 +26,7 @@ function catalogueItem(id: string, kind: CatalogueKind, partial: Partial<Catalog
 }
 
 class FakeCatalogue implements CatalogueApi {
+  mediaProfile(): Promise<undefined> { return Promise.resolve(undefined); }
   status(): Promise<CatalogueStatus> { throw new Error('not used'); }
   update(item: CatalogueItem): Promise<CatalogueItem> { return Promise.resolve(item); }
   clearMetadata(): Promise<void> { return Promise.resolve(); }

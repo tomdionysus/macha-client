@@ -2,6 +2,10 @@ export type ManagedHlsMediaRecoveryDecision =
   | { action: 'recover'; attempt: number }
   | { action: 'fail'; reason: 'no-progress-after-recovery' | 'recovery-budget-exhausted'; attempts: number };
 
+export type ManagedHlsNetworkRecoveryDecision =
+  | { action: 'restart'; attempt: number }
+  | { action: 'fail'; attempts: number };
+
 /**
  * Per-source-generation recovery budget for fatal hls.js media errors.
  *
@@ -12,13 +16,23 @@ export type ManagedHlsMediaRecoveryDecision =
  */
 export class ManagedHlsMediaRecoveryBudget {
   private attempts = 0;
+  private networkRestarts = 0;
   private progressSinceRecoveryMs = 0;
   private lastObservedPositionMs?: number;
 
   constructor(
     private readonly maxRecoveries = 2,
     private readonly requiredProgressMs = 2_000,
+    private readonly maxNetworkRestarts = 1,
   ) {}
+
+  fatalNetworkError(): ManagedHlsNetworkRecoveryDecision {
+    if (this.networkRestarts >= this.maxNetworkRestarts) {
+      return { action: 'fail', attempts: this.networkRestarts };
+    }
+    this.networkRestarts += 1;
+    return { action: 'restart', attempt: this.networkRestarts };
+  }
 
   observePlaybackPosition(positionMs: number, progressing: boolean): void {
     if (!Number.isFinite(positionMs)) return;

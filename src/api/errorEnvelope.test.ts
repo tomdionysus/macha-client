@@ -13,6 +13,13 @@ describe('parseErrorEnvelope', () => {
     });
   });
 
+  it('extracts the current Macha top-level error code when a message accompanies it', () => {
+    expect(parseErrorEnvelope({ error: 'profile_not_available', message: 'Media profile is not available yet' }, 'fallback')).toEqual({
+      message: 'Media profile is not available yet',
+      code: 'profile_not_available',
+    });
+  });
+
   it('prefers a top-level message while retaining a nested error code', () => {
     expect(parseErrorEnvelope({ message: 'Playback negotiation failed', error: { code: 'unsupported_codec' } }, 'fallback')).toEqual({
       message: 'Playback negotiation failed',

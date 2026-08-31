@@ -48,6 +48,32 @@ export interface CatalogueStatus {
   error: string | null;
 }
 
+export interface CatalogueMediaStreamProfile {
+  index: number;
+  type: 'video' | 'audio' | 'subtitle' | 'other';
+  codec: string;
+  profile: string;
+  language: string;
+  width: number;
+  height: number;
+  channels: number;
+  sample_rate: number;
+  bit_depth: number;
+  default: boolean;
+  forced: boolean;
+  bitrate: number;
+  attached_picture: boolean;
+}
+
+export interface CatalogueMediaProfile {
+  schema_version: number;
+  media_id: string;
+  format: string;
+  duration_ms: number;
+  bitrate: number;
+  streams: CatalogueMediaStreamProfile[];
+}
+
 export interface CatalogueApi {
   status(): Promise<CatalogueStatus>;
   list(kind?: CatalogueKind, parent?: string): Promise<CatalogueItem[]>;
@@ -57,4 +83,6 @@ export interface CatalogueApi {
   search(query: string, limit?: number): Promise<CatalogueItem[]>;
   putArtwork(itemId: string, role: string, mimeType: string, data: Blob): Promise<CatalogueArtwork>;
   artwork(id: string, signal?: AbortSignal): Promise<Blob>;
+  /** Immutable technical facts; absence is temporary while catalogue hydration catches up. */
+  mediaProfile(mediaId: string): Promise<CatalogueMediaProfile | undefined>;
 }

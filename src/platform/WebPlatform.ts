@@ -1,11 +1,18 @@
 import Hls from 'hls.js';
 import { createClientLogger } from '../diagnostics/ClientLog';
-import type { Platform, PlaybackFailureListener, PlaybackListener, Player } from './Platform';
+import {
+  PlaybackSourceError,
+  type Platform,
+  type PlaybackFailureListener,
+  type PlaybackListener,
+  type Player,
+} from './Platform';
 import type { PlaybackCapabilities, PlaybackEvent, PlaybackSource, PlaybackTimeRange } from '../types';
 import { ManagedHlsMediaRecoveryBudget } from './ManagedHlsRecovery';
 import { detectWebMediaCodecCapabilities } from './WebMediaCapabilities';
 import { WebMediaTimeline } from './WebMediaTimeline';
 import {
+  addDirectPlayReadAheadAlternative,
   directPlayReadAheadUrl,
   releaseDirectPlayReadAhead,
   setDirectPlayReadAheadMode,
@@ -55,6 +62,15 @@ function nativeHlsSupported(video: HTMLVideoElement): boolean {
 
 export function shouldUseManagedHls(forceNativeHls: boolean | undefined, managedSupported: boolean): boolean {
   return forceNativeHls !== true && managedSupported;
+}
+
+export function webMediaElementFailure(error: Pick<MediaError, 'code' | 'message'> | null): PlaybackSourceError {
+  const code = error?.code;
+  const detail = error?.message ? `: ${error.message}` : '';
+  if (code === 2) return new PlaybackSourceError(`Web media network failure${detail}`, 'stream', error);
+  if (code === 3) return new PlaybackSourceError(`Web media decode failure${detail}`, 'media', error);
+  if (code === 4) return new PlaybackSourceError(`Web media source is unsupported${detail}`, 'unsupported', error);
+  return new PlaybackSourceError(`Web media playback failure${detail}`, 'unknown', error);
 }
 
 /** Web transport policy for source-local seeks that need no session mutation. */
@@ -207,6 +223,13 @@ class WebPlayer implements Player {
       video.addEventListener('canplay', publish);
       video.addEventListener('emptied', publish);
       video.addEventListener('ended', publish);
+      video.addEventListener('error', () => {
+        // Teardown deliberately clears activeSource before removing src; do not
+        // turn those media-element events into a generation failure.
+        if (!this.activeSource || video !== this.video) return;
+        const failure = webMediaElementFailure(video!.error);
+        this.failSourceGeneration(this.sourceGeneration, failure, videoState(video!));
+      });
       const resumeWhenReady = () => {
         if (!this.wantsPlayback || !video!.paused) return;
         this.requestPlay(video!, 'media-ready');
@@ -315,6 +338,10 @@ class WebPlayer implements Player {
     if (!video) throw new Error('Player has no active media element');
     this.log.info('subtitle-source-update', { url: subtitleUrl ?? 'off' });
     await this.applySubtitle(video, subtitleUrl);
+  }
+
+  addDirectSourceAlternative(activeSource: PlaybackSource, alternative: PlaybackSource): boolean {
+    return addDirectPlayReadAheadAlternative(activeSource, alternative);
   }
 
   private clearSubtitleTracks(video: HTMLVideoElement): number {
@@ -764,8 +791,19 @@ class WebPlayer implements Player {
       }
       this.log.error('hls-error-fatal', payload);
       if (action.action === 'restart-network') {
-        this.log.warn('hls-recovery-network-start-load', payload);
+        this.log.warn('hls-recovery-network-start-load', { ...payload, attempt: action.attempt });
         if (this.wantsPlayback) hls.startLoad(video.currentTime);
+        return;
+      }
+      if (action.action === 'fail-network') {
+        this.failSourceGeneration(
+          sourceGeneration,
+          new PlaybackSourceError(
+            `Web HLS playback failed after bounded network recovery (${action.details}).`,
+            'stream',
+          ),
+          { ...payload, attempts: action.attempts },
+        );
         return;
       }
       if (action.action === 'recover-media') {
@@ -776,14 +814,20 @@ class WebPlayer implements Player {
       if (action.action === 'fail-media') {
         this.failSourceGeneration(
           sourceGeneration,
-          new Error(`Web HLS playback failed: the browser media pipeline repeatedly rejected the stream (${action.details}).`),
+          new PlaybackSourceError(
+            `Web HLS playback failed: the browser media pipeline repeatedly rejected the stream (${action.details}).`,
+            'media',
+          ),
           { ...payload, recovery: action.recovery },
         );
         return;
       }
       this.failSourceGeneration(
         sourceGeneration,
-        new Error(`Web HLS playback failed with an unrecoverable player error (${action.details}).`),
+        new PlaybackSourceError(
+          `Web HLS playback failed with an unrecoverable player error (${action.details}).`,
+          'unknown',
+        ),
         payload,
       );
     });
