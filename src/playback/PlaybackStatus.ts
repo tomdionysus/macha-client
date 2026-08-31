@@ -82,9 +82,35 @@ function copyModeLabel(session: PlaybackSession): string {
 }
 
 export interface PlaybackStatusDescription {
+  endpoint?: string;
   video?: string;
   audio?: string;
   subtitle?: string;
+}
+
+function safeOrigin(value: string | undefined, base?: string): string | undefined {
+  if (!value) return undefined;
+  try {
+    const url = new URL(value, base || 'http://same-origin.invalid');
+    return url.origin === 'http://same-origin.invalid' ? 'same-origin' : url.origin;
+  } catch {
+    return undefined;
+  }
+}
+
+function endpointDescription(session: PlaybackSession, activeStreamOrigin?: string): string | undefined {
+  if (!session.endpoint) return undefined;
+  const apiOrigin = safeOrigin(session.endpoint?.baseUrl);
+  const streamOrigin = safeOrigin(activeStreamOrigin) ?? safeOrigin(session.source.url, session.endpoint?.baseUrl);
+  const endpointId = session.endpoint?.id;
+  const endpointIdOrigin = safeOrigin(endpointId);
+  const node = endpointId && endpointIdOrigin !== apiOrigin ? endpointId : undefined;
+  if (!node && apiOrigin && apiOrigin === streamOrigin) return `NODE/STREAM ${apiOrigin}`;
+  const parts: string[] = [];
+  if (node) parts.push(`NODE ${node}`);
+  if (apiOrigin) parts.push(`API ${apiOrigin}`);
+  if (streamOrigin) parts.push(`STREAM ${streamOrigin}`);
+  return parts.join(' · ') || undefined;
 }
 
 /**
@@ -94,7 +120,7 @@ export interface PlaybackStatusDescription {
  * resolved session mode; per-stream transform fields describe mixed cases such
  * as copied video with transcoded audio.
  */
-export function describePlaybackSession(session?: PlaybackSession): PlaybackStatusDescription | undefined {
+export function describePlaybackSession(session?: PlaybackSession, activeStreamOrigin?: string): PlaybackStatusDescription | undefined {
   if (!session) return undefined;
 
   const video = selectedStream(session, 'video', session.selected.videoStream);
@@ -102,7 +128,7 @@ export function describePlaybackSession(session?: PlaybackSession): PlaybackStat
   const subtitle = session.selected.subtitleStream >= 0
     ? selectedStream(session, 'subtitle', session.selected.subtitleStream)
     : undefined;
-  const result: PlaybackStatusDescription = {};
+  const result: PlaybackStatusDescription = { endpoint: endpointDescription(session, activeStreamOrigin) };
 
   if (video && session.transform.video !== 'omit') {
     const source = sourceVideoParts(session, video);

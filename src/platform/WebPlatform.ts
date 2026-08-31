@@ -13,6 +13,7 @@ import { detectWebMediaCodecCapabilities } from './WebMediaCapabilities';
 import { WebMediaTimeline } from './WebMediaTimeline';
 import {
   addDirectPlayReadAheadAlternative,
+  directPlayReadAheadMetrics,
   directPlayReadAheadUrl,
   releaseDirectPlayReadAhead,
   setDirectPlayReadAheadMode,
@@ -54,6 +55,78 @@ function cloneWebVttCue(cue: TextTrackCue): VTTCue | undefined {
 
 function isHls(source: PlaybackSource): boolean {
   return source.mimeType === 'application/vnd.apple.mpegurl' || /\.m3u8(?:$|[?#])/i.test(source.url);
+}
+
+function firstPlaylistUri(lines: readonly string[]): string | undefined {
+  return lines.map((line) => line.trim()).find((line) => Boolean(line) && !line.startsWith('#'));
+}
+
+export function webHlsPreflightTargets(manifest: string, manifestUrl: string): {
+  variantUrl?: string;
+  mediaUrls: string[];
+} {
+  const lines = manifest.split(/\r?\n/);
+  if (lines.some((line) => line.trim().startsWith('#EXT-X-STREAM-INF'))) {
+    const variant = firstPlaylistUri(lines);
+    return { variantUrl: variant ? new URL(variant, manifestUrl).toString() : undefined, mediaUrls: [] };
+  }
+  const map = lines
+    .map((line) => /^#EXT-X-MAP:.*\bURI="([^"]+)"/i.exec(line.trim())?.[1])
+    .find(Boolean);
+  const segment = firstPlaylistUri(lines);
+  const mediaUrls = [map, segment]
+    .filter((value): value is string => Boolean(value))
+    .map((value) => new URL(value, manifestUrl).toString())
+    .filter((value, index, all) => all.indexOf(value) === index);
+  return { mediaUrls };
+}
+
+async function readFirstResponseBytes(response: Response): Promise<boolean> {
+  if (!response.ok || !response.body) return false;
+  const reader = response.body.getReader();
+  try {
+    const first = await reader.read();
+    return !first.done && Boolean(first.value?.byteLength);
+  } finally {
+    await reader.cancel().catch(() => undefined);
+  }
+}
+
+/** Validate a playlist and its initial fMP4 data without attaching a decoder. */
+export async function preflightWebHlsSource(
+  source: PlaybackSource,
+  fetchImpl: typeof fetch = fetch,
+  timeoutMs = 5_000,
+): Promise<boolean> {
+  if (!isHls(source)) return false;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    let manifestUrl = source.url;
+    for (let depth = 0; depth < 2; depth += 1) {
+      const response = await fetchImpl(manifestUrl, { method: 'GET', cache: 'no-store', signal: controller.signal });
+      if (!response.ok) return false;
+      const targets = webHlsPreflightTargets(await response.text(), manifestUrl);
+      if (targets.variantUrl) {
+        manifestUrl = targets.variantUrl;
+        continue;
+      }
+      if (targets.mediaUrls.length === 0) return false;
+      for (const url of targets.mediaUrls) {
+        const media = await fetchImpl(url, {
+          method: 'GET',
+          headers: { Range: 'bytes=0-65535' },
+          cache: 'no-store',
+          signal: controller.signal,
+        });
+        if (!await readFirstResponseBytes(media)) return false;
+      }
+      return true;
+    }
+    return false;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 function nativeHlsSupported(video: HTMLVideoElement): boolean {
@@ -342,6 +415,10 @@ class WebPlayer implements Player {
 
   addDirectSourceAlternative(activeSource: PlaybackSource, alternative: PlaybackSource): boolean {
     return addDirectPlayReadAheadAlternative(activeSource, alternative);
+  }
+
+  preflightSource(source: PlaybackSource): Promise<boolean> {
+    return preflightWebHlsSource(source);
   }
 
   private clearSubtitleTracks(video: HTMLVideoElement): number {
@@ -874,6 +951,7 @@ class WebPlayer implements Player {
         && (video.seeking || video.readyState < HTMLMediaElement.HAVE_FUTURE_DATA),
       bufferedRangesMs: normalized.bufferedRangesMs,
       forwardBufferMs,
+      streamOrigin: directPlayReadAheadMetrics(this.directReadAheadSourceUrl)?.sourceOrigin || undefined,
     };
     if (webPlaybackEventsEqual(this.lastPublishedEvent, event)) return;
     this.lastPublishedEvent = event;
@@ -890,6 +968,7 @@ export function webPlaybackEventsEqual(previous: PlaybackEvent | undefined, next
     || previous.seeking !== next.seeking
     || previous.buffering !== next.buffering
     || previous.forwardBufferMs !== next.forwardBufferMs) return false;
+  if (previous.streamOrigin !== next.streamOrigin) return false;
 
   const previousRanges = previous.bufferedRangesMs ?? [];
   const nextRanges = next.bufferedRangesMs ?? [];

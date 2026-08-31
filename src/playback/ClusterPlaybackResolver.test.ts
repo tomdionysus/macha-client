@@ -91,6 +91,28 @@ describe('ClusterPlaybackResolver', () => {
     expect(body.preferences.mode).toBe('direct');
   });
 
+  it('promotes a prepared transformed generation without creating a duplicate lease', async () => {
+    const transformed = (id: string) => ({
+      ...wireSession(id),
+      mode: 'remux',
+      preferences: { ...wireSession(id).preferences, mode: 'remux' },
+      stream: { url: `/api/v1/playback/stream/${id}/index.m3u8`, mime_type: 'application/vnd.apple.mpegurl', subtitle_url: null },
+    });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify(transformed('session-a')), { status: 201, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(transformed('session-b')), { status: 201, headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+    const resolver = new ClusterPlaybackResolver(new EndpointRegistry(bootstrapEndpoints(['http://a', 'http://b'])));
+    const primary = await resolver.resolve(media, capabilities, 0, { mode: 'remux' });
+    const standby = await resolver.prepareAlternate(primary, media, capabilities, 0, { mode: 'remux' });
+
+    const promoted = await resolver.failover(primary, media, capabilities, 5_000, { mode: 'remux' }, standby);
+
+    expect(promoted.sessionId).toBe(standby?.sessionId);
+    expect(promoted.endpoint?.id).toBe('http://b');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it('keeps identical node-local session IDs distinct across endpoints', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify(wireSession('same-id')), { status: 201, headers: { 'Content-Type': 'application/json' } }))

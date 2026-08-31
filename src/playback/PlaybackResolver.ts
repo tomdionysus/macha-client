@@ -143,6 +143,7 @@ export interface PlaybackResolver {
     capabilities: PlaybackCapabilities,
     seekMs: number,
     preferences: PlaybackPreferencesUpdate,
+    preparedAlternate?: PlaybackSession,
   ): Promise<PlaybackSession>;
   /** Prepare one bounded standby generation without delaying active playback. */
   prepareAlternate?(

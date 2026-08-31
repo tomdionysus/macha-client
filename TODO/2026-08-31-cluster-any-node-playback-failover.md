@@ -149,7 +149,7 @@ server endpoint, while unsafe mutations retain explicit failure semantics.
   clusters, while preserving immutable-ID cache semantics.
 - [x] Make the playback resolver node-aware. Every resolve/update/stop must route
   to the node that owns that disposable generation.
-- [ ] Show the active node and stream/API endpoint in the in-player status near
+- [x] Show the active node and stream/API endpoint in the in-player status near
   codec/source details. Use generation provenance, keep credentials/query secrets
   out of display and diagnostics, and update it when failover changes generation.
 - [x] On node or stream failure, snapshot the latest client-observed position and
@@ -193,19 +193,19 @@ position discontinuity or viewer-visible stall.
 
 - [ ] Treat HLS playlists and segments as node-local generations. Do not assume
   independently created sessions have interchangeable segment URLs or boundaries.
-- [ ] When failure evidence arrives while buffered media remains, continue the
+- [x] When failure evidence arrives while buffered media remains, continue the
   active player and prepare an alternate generation at the current client-owned
   logical position.
 - [ ] On platforms with sufficient decoder resources, load the alternate into a
   hidden/muted standby player, wait for decoded/buffered readiness, align its
   logical timeline, then switch presentation/audio atomically and dispose the old
   player generation.
-- [ ] Where dual decoding is unavailable, preflight the alternate manifest and
+- [x] Where dual decoding is unavailable, preflight the alternate manifest and
   first media data, retain the old frame/buffer as long as possible, then perform
   the smallest single-player source replacement supported by the platform.
-- [ ] Preserve subtitle selection and rebuild the node-local subtitle manifest
+- [x] Preserve subtitle selection and rebuild the node-local subtitle manifest
   with the replacement generation.
-- [ ] Keep optional proactive standby bounded by platform resources, server
+- [x] Keep optional proactive standby bounded by platform resources, server
   capacity and policy. Never double transcode indefinitely merely to claim
   redundancy.
 

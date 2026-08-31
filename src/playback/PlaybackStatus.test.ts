@@ -38,6 +38,34 @@ function session(overrides: Partial<PlaybackSession> = {}): PlaybackSession {
 }
 
 describe('describePlaybackSession', () => {
+  it('shows credential-safe active node and stream provenance', () => {
+    const described = describePlaybackSession(session({
+      endpoint: { id: 'node-corvus', baseUrl: 'https://user:secret@node.test:7438/api?token=hidden' },
+      source: { ...session().source, url: 'https://node.test:7438/api/v1/playback/stream/s1?capability=secret' },
+    }));
+
+    expect(described?.endpoint).toBe('NODE node-corvus · API https://node.test:7438 · STREAM https://node.test:7438');
+    expect(described?.endpoint).not.toContain('secret');
+  });
+
+  it('collapses provisional URL identity when API and stream share an origin', () => {
+    const described = describePlaybackSession(session({
+      endpoint: { id: 'http://node.test:7438', baseUrl: 'http://node.test:7438' },
+      source: { ...session().source, url: 'http://node.test:7438/direct' },
+    }));
+
+    expect(described?.endpoint).toBe('NODE/STREAM http://node.test:7438');
+  });
+
+  it('shows the worker-selected stream origin after transparent Direct failover', () => {
+    const described = describePlaybackSession(session({
+      endpoint: { id: 'http://node-a.test:7438', baseUrl: 'http://node-a.test:7438' },
+      source: { ...session().source, url: 'http://node-a.test:7438/direct' },
+    }), 'http://node-b.test:7438');
+
+    expect(described?.endpoint).toBe('API http://node-a.test:7438 · STREAM http://node-b.test:7438');
+  });
+
   it('reports the server-resolved remux mode when both streams are copied', () => {
     expect(describePlaybackSession(session())).toEqual({
       video: 'REMUX · HEVC · 1920×1080 · 7.5 Mb/s',

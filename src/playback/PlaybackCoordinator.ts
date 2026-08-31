@@ -561,19 +561,21 @@ export class PlaybackCoordinator {
       if (this.disposed || activationRevision !== this.sourceActivationRevision) return;
       this.fail(error);
     });
-    this.prepareDirectAlternate(session, activationRevision);
+    this.prepareAlternate(session, activationRevision);
   }
 
-  private prepareDirectAlternate(session: PlaybackSession, activationRevision: number): void {
+  private prepareAlternate(session: PlaybackSession, activationRevision: number): void {
     const prepare = this.options.resolver.prepareAlternate?.bind(this.options.resolver);
     const register = this.options.player.addDirectSourceAlternative?.bind(this.options.player);
-    if (session.mode !== 'direct' || !prepare || !register) return;
+    const preflight = this.options.player.preflightSource?.bind(this.options.player);
+    if (!prepare || (session.mode === 'direct' ? !register : !preflight)) return;
 
     let preparation!: Promise<void>;
     preparation = (async () => {
+      let alternate: PlaybackSession | undefined;
       try {
         const capabilities = await this.options.capabilities();
-        const alternate = await prepare(
+        alternate = await prepare(
           session,
           this.options.media,
           capabilities,
@@ -585,18 +587,26 @@ export class PlaybackCoordinator {
           await this.options.resolver.stop(alternate.sessionId, this.closeOptions).catch(() => undefined);
           return;
         }
-        if (!equivalentDirectSources(session, alternate) || !register(session.source, alternate.source)) {
+        if (session.mode === 'direct') {
+          if (!equivalentDirectSources(session, alternate) || !register!(session.source, alternate.source)) {
+            await this.options.resolver.stop(alternate.sessionId).catch(() => undefined);
+            return;
+          }
+        } else if (alternate.mediaId !== session.mediaId || alternate.mode !== session.mode || !await preflight!(alternate.source)) {
           await this.options.resolver.stop(alternate.sessionId).catch(() => undefined);
           return;
         }
         this.alternateSessions.set(alternate.sessionId, alternate);
-        this.log.info('direct-alternate-ready', {
+        this.log.info('alternate-ready', {
           primarySessionId: session.sessionId,
           alternateSessionId: alternate.sessionId,
           endpoint: alternate.endpoint,
         });
       } catch (error) {
-        this.log.warn('direct-alternate-preparation-failed', { sessionId: session.sessionId, error });
+        if (alternate && !this.alternateSessions.has(alternate.sessionId)) {
+          await this.options.resolver.stop(alternate.sessionId).catch(() => undefined);
+        }
+        this.log.warn('alternate-preparation-failed', { sessionId: session.sessionId, error });
       } finally {
         this.alternatePreparations.delete(preparation);
       }
@@ -671,6 +681,16 @@ export class PlaybackCoordinator {
     });
     this.patchSnapshot({ preparingSource: true, notice: undefined });
     try {
+      if (failedSession.mode !== 'direct') {
+        await Promise.all([...this.alternatePreparations].map((preparation) => preparation.catch(() => undefined)));
+      }
+      const preparedAlternate = failedSession.mode === 'direct'
+        ? undefined
+        : [...this.alternateSessions.values()].find((alternate) => (
+          alternate.mediaId === failedSession.mediaId
+          && alternate.mode === failedSession.mode
+          && alternate.endpoint?.id !== failedSession.endpoint?.id
+        ));
       const capabilities = await this.options.capabilities();
       if (this.disposed) return;
       const next = await this.options.resolver.failover!(
@@ -687,12 +707,14 @@ export class PlaybackCoordinator {
           audioLanguage: failedSession.preferences.audioLanguage,
           subtitleLanguage: failedSession.preferences.subtitleLanguage,
         },
+        preparedAlternate,
       );
       if (this.disposed) {
         await this.options.resolver.stop(next.sessionId).catch(() => undefined);
         return;
       }
       this.serverSession = next;
+      this.alternateSessions.delete(next.sessionId);
       const currentDesired = this.snapshot.intent.positionMs;
       const userMovedDuringRequest = requestedPositionRevision !== this.positionRevision;
       if (userMovedDuringRequest && this.activationPosition(next, currentDesired, requestedPositionMs) === undefined) {

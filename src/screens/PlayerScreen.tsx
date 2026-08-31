@@ -546,7 +546,7 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
     </span>
   );
   const audio = media.kind === 'track';
-  const streamStatus = describePlaybackSession(session);
+  const streamStatus = describePlaybackSession(session, event.streamOrigin);
   const mediaSubtitle = media.kind === 'episode'
     ? `${media.playbackContext?.series.title ?? ''} ${media.subtitle ?? ''}`.trim()
     : media.subtitle;
@@ -615,6 +615,7 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
               <small>Preparing new stream…</small>
             ) : (
               <>
+                {streamStatus?.endpoint && <small>{streamStatus.endpoint}</small>}
                 {streamStatus?.video && <small>{streamStatus.video}</small>}
                 {streamStatus?.audio && <small>{streamStatus.audio}</small>}
                 {streamStatus?.subtitle && <small>{streamStatus.subtitle}</small>}

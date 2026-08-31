@@ -144,4 +144,6 @@ export interface PlaybackEvent {
   bufferedRangesMs?: PlaybackTimeRange[];
   /** Contiguous buffered runway ahead of the current media position. */
   forwardBufferMs?: number;
+  /** Query/credential-free origin currently serving media bytes. */
+  streamOrigin?: string;
 }

@@ -4,6 +4,8 @@ import type { PlaybackSource } from '../types';
 export type DirectPlayReadAheadMode = 'bootstrap' | 'playing' | 'seeking' | 'paused';
 
 export interface DirectPlayReadAheadMetrics {
+  /** Query/credential-free origin currently preferred by the worker. */
+  sourceOrigin: string;
   fetchedBytes: number;
   servedBytes: number;
   cacheHitBytes: number;
@@ -87,6 +89,7 @@ function validMetrics(value: unknown): value is DirectPlayReadAheadMetrics {
     candidate.generation,
   ];
   return numbers.every((number) => typeof number === 'number' && Number.isFinite(number) && number >= 0)
+    && typeof candidate.sourceOrigin === 'string'
     && (candidate.mode === 'bootstrap' || candidate.mode === 'playing' || candidate.mode === 'seeking' || candidate.mode === 'paused');
 }
 

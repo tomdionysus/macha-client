@@ -50,6 +50,8 @@ export interface Player {
   setSubtitle?(subtitleUrl?: string): Promise<void> | void;
   /** Add an equivalent Direct Play byte source without replacing active media. */
   addDirectSourceAlternative?(activeSource: PlaybackSource, alternative: PlaybackSource): boolean;
+  /** Validate a transformed source without replacing the active presentation. */
+  preflightSource?(source: PlaybackSource): Promise<boolean>;
   /** Release all source-side resources and cancel active acquisition. */
   stop(): void;
   subscribe(listener: PlaybackListener): () => void;

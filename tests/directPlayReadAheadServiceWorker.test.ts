@@ -407,6 +407,32 @@ describe('Direct Play read-ahead Service Worker', () => {
     expect(calls).toContain('bytes=100-103');
   });
 
+  it('uses a failed precache TCP request to promote and fill from an alternate node', async () => {
+    const calls: Array<{ url: string; range: string }> = [];
+    const harness = createHarness(async (url, options = {}) => {
+      const range = new Headers(options.headers).get('range') ?? '';
+      calls.push({ url, range });
+      if (range === 'bytes=0-3') return rangeResponse(0, 4, 16);
+      if (url.includes('node.test')) throw new TypeError('primary TCP stream failed');
+      if (range === 'bytes=4-15') return rangeResponse(4, 12, 16);
+      throw new Error(`Unexpected precache ${url} ${range}`);
+    });
+    harness.configure(16);
+    harness.addSource('https://alternate.test/direct.mp4');
+    harness.setMode('playing');
+    releases.push(harness.release);
+
+    await (await harness.request('bytes=0-3', 16)).arrayBuffer();
+    await wait(180);
+
+    expect(calls).toEqual([
+      { url: 'https://node.test/direct.mp4', range: 'bytes=0-3' },
+      { url: 'https://node.test/direct.mp4', range: 'bytes=4-15' },
+      { url: 'https://alternate.test/direct.mp4', range: 'bytes=4-15' },
+    ]);
+    expect(harness.metrics.some((message) => message.metrics?.sourceOrigin === 'https://alternate.test')).toBe(true);
+  });
+
   it('serves an open-ended seek from resident read-ahead immediately, then continues with exact demand', async () => {
     const total = 16 * 1024 * 1024;
     const secondRange = `bytes=8388612-${total - 1}`;

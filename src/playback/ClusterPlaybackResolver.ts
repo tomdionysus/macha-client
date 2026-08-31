@@ -44,10 +44,20 @@ export class ClusterPlaybackResolver implements PlaybackResolver {
     capabilities: PlaybackCapabilities,
     seekMs: number,
     preferences: PlaybackPreferencesUpdate,
+    preparedAlternate?: PlaybackSession,
   ): Promise<PlaybackSession> {
     if (failedSession.endpoint) {
       this.failedGenerationEndpoints.add(failedSession.endpoint.id);
       this.registry.recordFailure(failedSession.endpoint.id);
+    }
+    if (preparedAlternate) {
+      const owned = this.sessions.get(preparedAlternate.sessionId);
+      if (owned
+        && owned.endpoint.id !== failedSession.endpoint?.id
+        && preparedAlternate.mediaId === failedSession.mediaId) {
+        this.registry.recordSuccess(owned.endpoint.id);
+        return preparedAlternate;
+      }
     }
     return this.create(media, capabilities, seekMs, preferences, this.failedGenerationEndpoints, true);
   }
@@ -59,7 +69,7 @@ export class ClusterPlaybackResolver implements PlaybackResolver {
     seekMs: number,
     preferences: PlaybackPreferencesUpdate,
   ): Promise<PlaybackSession | undefined> {
-    if (activeSession.mode !== 'direct' || !activeSession.endpoint) return undefined;
+    if (!activeSession.endpoint) return undefined;
     const excluded = new Set(this.failedGenerationEndpoints);
     excluded.add(activeSession.endpoint.id);
     try {
@@ -67,11 +77,11 @@ export class ClusterPlaybackResolver implements PlaybackResolver {
         media,
         capabilities,
         seekMs,
-        { ...preferences, mode: 'direct' },
+        { ...preferences, mode: activeSession.mode === 'direct' ? 'direct' : preferences.mode },
         excluded,
         false,
       );
-      if (alternate.mode === 'direct') return alternate;
+      if (alternate.mode === activeSession.mode) return alternate;
       await this.stop(alternate.sessionId).catch(() => undefined);
       return undefined;
     } catch {

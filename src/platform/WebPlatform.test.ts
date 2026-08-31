@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   hlsEventSummary,
   shouldUseManagedHls,
@@ -6,6 +6,8 @@ import {
   webLocalSeekCoverage,
   webPlaybackEventsEqual,
   webMediaElementFailure,
+  preflightWebHlsSource,
+  webHlsPreflightTargets,
 } from './WebPlatform';
 import { ManagedHlsMediaRecoveryBudget } from './ManagedHlsRecovery';
 
@@ -18,6 +20,70 @@ describe('Web HLS engine policy', () => {
   it('preserves the explicit native-HLS path for constrained/legacy targets', () => {
     expect(shouldUseManagedHls(true, true)).toBe(false);
     expect(shouldUseManagedHls(true, false)).toBe(false);
+  });
+});
+
+describe('Web HLS standby preflight', () => {
+  it('resolves an fMP4 initialization map and first segment against the generation manifest', () => {
+    expect(webHlsPreflightTargets([
+      '#EXTM3U',
+      '#EXT-X-MAP:URI="init.mp4"',
+      '#EXTINF:4.0,',
+      'segment-0.m4s?cap=one',
+    ].join('\n'), 'https://node-b.test/session/index.m3u8')).toEqual({
+      mediaUrls: [
+        'https://node-b.test/session/init.mp4',
+        'https://node-b.test/session/segment-0.m4s?cap=one',
+      ],
+    });
+  });
+
+  it('validates the alternate manifest and initial media bytes without attaching it', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response('#EXTM3U\n#EXT-X-MAP:URI="init.mp4"\n#EXTINF:4,\nfirst.m4s', { status: 200 }))
+      .mockResolvedValueOnce(new Response(new Uint8Array([1, 2]), { status: 206 }))
+      .mockResolvedValueOnce(new Response(new Uint8Array([3, 4]), { status: 206 }));
+    const source = {
+      mediaId: 'macha:one', url: 'https://node-b.test/generation/index.m3u8',
+      mimeType: 'application/vnd.apple.mpegurl', mode: 'remux' as const,
+    };
+
+    await expect(preflightWebHlsSource(source, fetchMock)).resolves.toBe(true);
+    expect(fetchMock.mock.calls.map(([url, init]) => ({ url, range: new Headers(init?.headers).get('range') }))).toEqual([
+      { url: source.url, range: null },
+      { url: 'https://node-b.test/generation/init.mp4', range: 'bytes=0-65535' },
+      { url: 'https://node-b.test/generation/first.m4s', range: 'bytes=0-65535' },
+    ]);
+  });
+
+  it('bounds a stalled standby preflight TCP request', async () => {
+    let observedSignal: AbortSignal | undefined;
+    const fetchMock = vi.fn((_url: string | URL | Request, init?: RequestInit) => {
+      observedSignal = init?.signal ?? undefined;
+      return new Promise<Response>((_resolve, reject) => {
+        observedSignal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')), { once: true });
+      });
+    });
+    const source = {
+      mediaId: 'macha:one', url: 'https://node-b.test/generation/index.m3u8',
+      mimeType: 'application/vnd.apple.mpegurl', mode: 'remux' as const,
+    };
+
+    await expect(preflightWebHlsSource(source, fetchMock, 1)).rejects.toMatchObject({ name: 'AbortError' });
+    expect(observedSignal?.aborted).toBe(true);
+  });
+
+  it('rejects a standby whose initial media data is unavailable', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response('#EXTM3U\n#EXT-X-MAP:URI="init.mp4"\n#EXTINF:4,\nfirst.m4s', { status: 200 }))
+      .mockResolvedValueOnce(new Response('unavailable', { status: 503 }));
+    const source = {
+      mediaId: 'macha:one', url: 'https://node-b.test/generation/index.m3u8',
+      mimeType: 'application/vnd.apple.mpegurl', mode: 'remux' as const,
+    };
+
+    await expect(preflightWebHlsSource(source, fetchMock)).resolves.toBe(false);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });
 

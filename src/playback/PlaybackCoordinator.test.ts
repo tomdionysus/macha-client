@@ -22,6 +22,7 @@ class FakePlayer implements Player {
   stopCalls = 0;
   subtitleCalls: Array<string | undefined> = [];
   directAlternatives: Array<{ active: PlaybackSource; alternate: PlaybackSource }> = [];
+  preflightCalls: PlaybackSource[] = [];
   playResult: Promise<boolean> = Promise.resolve(true);
   localSeekRanges: PlaybackTimeRange[] = [];
 
@@ -45,6 +46,10 @@ class FakePlayer implements Player {
   addDirectSourceAlternative(active: PlaybackSource, alternate: PlaybackSource): boolean {
     this.directAlternatives.push({ active, alternate });
     return true;
+  }
+  preflightSource(source: PlaybackSource): Promise<boolean> {
+    this.preflightCalls.push(source);
+    return Promise.resolve(true);
   }
   stop(): void { this.stopCalls += 1; }
   subscribe(listener: PlaybackListener): () => void {
@@ -473,10 +478,64 @@ describe('PlaybackCoordinator player failures', () => {
       expect.objectContaining({ platform: 'web' }),
       42_000,
       expect.objectContaining({ mode: 'remux', maxHeight: 720, subtitleLanguage: 'eng' }),
+      undefined,
     );
     expect(api.stop).toHaveBeenCalledWith('s1');
     expect(coordinator.getSnapshot().fatalError).toBeUndefined();
     expect(coordinator.getSnapshot().session?.endpoint?.id).toBe('node-b');
+  });
+
+  it('promotes a preflighted transformed generation without negotiating another session', async () => {
+    const player = new FakePlayer();
+    const initial = session({
+      mode: 'remux', endpoint: { id: 'node-a', baseUrl: 'http://a' },
+      source: { ...session().source, mode: 'remux', url: 'http://a/primary.m3u8' },
+    });
+    const alternate = session({
+      sessionId: 'standby', mode: 'remux', endpoint: { id: 'node-b', baseUrl: 'http://b' },
+      source: { ...session().source, mode: 'remux', url: 'http://b/standby.m3u8' },
+    });
+    const api = resolver(initial) as ReturnType<typeof resolver> & {
+      prepareAlternate: ReturnType<typeof vi.fn>;
+      failover: ReturnType<typeof vi.fn>;
+    };
+    api.prepareAlternate = vi.fn(async () => alternate);
+    api.failover = vi.fn(async (_failed, _media, _capabilities, _seek, _preferences, prepared) => prepared);
+    const coordinator = new PlaybackCoordinator({ media: media(), player, resolver: api, capabilities: async () => capabilities(), initialPositionMs: 0 });
+    await coordinator.start();
+    await vi.waitFor(() => expect(player.preflightCalls).toEqual([alternate.source]));
+
+    player.fail(new PlaybackSourceError('primary HLS network exhausted', 'stream'));
+
+    await vi.waitFor(() => expect(player.playCalls.at(-1)?.source.url).toBe('http://b/standby.m3u8'));
+    expect(api.failover).toHaveBeenCalledWith(
+      initial,
+      expect.objectContaining({ id: media().id }),
+      expect.any(Object),
+      0,
+      expect.any(Object),
+      alternate,
+    );
+  });
+
+  it('closes a transformed standby lease when its stream preflight fails', async () => {
+    const player = new FakePlayer();
+    player.preflightSource = vi.fn(async () => { throw new TypeError('standby TCP failed'); });
+    const initial = session({
+      mode: 'remux', endpoint: { id: 'node-a', baseUrl: 'http://a' },
+      source: { ...session().source, mode: 'remux', url: 'http://a/primary.m3u8' },
+    });
+    const alternate = session({
+      sessionId: 'standby', mode: 'remux', endpoint: { id: 'node-b', baseUrl: 'http://b' },
+      source: { ...session().source, mode: 'remux', url: 'http://b/standby.m3u8' },
+    });
+    const api = resolver(initial) as ReturnType<typeof resolver> & { prepareAlternate: ReturnType<typeof vi.fn> };
+    api.prepareAlternate = vi.fn(async () => alternate);
+    const coordinator = new PlaybackCoordinator({ media: media(), player, resolver: api, capabilities: async () => capabilities(), initialPositionMs: 0 });
+
+    await coordinator.start();
+    await vi.waitFor(() => expect(api.stop).toHaveBeenCalledWith('standby'));
+    await coordinator.close();
   });
 
   it('enters terminal failure only after alternate generation recreation is exhausted', async () => {

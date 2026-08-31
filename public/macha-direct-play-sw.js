@@ -45,6 +45,7 @@ function sourceCredentials(sourceUrl) {
 
 function newMetrics() {
   return {
+    sourceOrigin: '',
     fetchedBytes: 0,
     servedBytes: 0,
     cacheHitBytes: 0,
@@ -112,7 +113,14 @@ function configuredSourceUrls(config) {
 
 function preferSource(config, cache, sourceUrl) {
   config.sourceUrl = sourceUrl;
-  if (cache) cache.sourceUrl = sourceUrl;
+  if (cache) {
+    cache.sourceUrl = sourceUrl;
+    try {
+      cache.metrics.sourceOrigin = new URL(sourceUrl).origin;
+    } catch {
+      cache.metrics.sourceOrigin = '';
+    }
+  }
 }
 
 function clearPrefetchTimer(cache) {
@@ -439,35 +447,46 @@ async function pumpPrefetch(cache) {
   activeFetchStarted(cache);
   const startedAt = now();
   try {
-    const response = await fetch(cache.sourceUrl, {
-      method: 'GET',
-      headers: {
-        Accept: cache.mimeType || '*/*',
-        Range: `bytes=${fetchStart}-${fetchEnd}`,
-      },
-      credentials: sourceCredentials(cache.sourceUrl),
-      cache: 'no-store',
-      signal: controller.signal,
-    });
-    if (response.status !== 206) {
-      disableReadAhead(cache);
-      return;
+    const config = sourceConfigs.get(cache.sourceKey);
+    if (!config) return;
+    let selected;
+    let lastError;
+    for (const sourceUrl of configuredSourceUrls(config)) {
+      try {
+        const response = await fetch(sourceUrl, {
+          method: 'GET',
+          headers: {
+            Accept: cache.mimeType || '*/*',
+            Range: `bytes=${fetchStart}-${fetchEnd}`,
+          },
+          credentials: sourceCredentials(sourceUrl),
+          cache: 'no-store',
+          signal: controller.signal,
+        });
+        const contentRange = parseContentRange(response.headers.get('content-range'));
+        if (response.status !== 206 || !contentRange || contentRange.start !== fetchStart
+            || (contentRange.total && contentRange.total !== cache.totalSize)) {
+          lastError = new Error(`Direct Play precache source did not return exact range at ${fetchStart}`);
+          if (response.body) void response.body.cancel().catch(() => undefined);
+          continue;
+        }
+        const buffer = await response.arrayBuffer();
+        if (buffer.byteLength === 0) {
+          lastError = new Error('Direct Play precache source returned no bytes');
+          continue;
+        }
+        selected = { sourceUrl, buffer, contentType: response.headers.get('content-type') };
+        preferSource(config, cache, sourceUrl);
+        break;
+      } catch (error) {
+        if (error && error.name === 'AbortError') throw error;
+        lastError = error;
+      }
     }
-    const contentRange = parseContentRange(response.headers.get('content-range'));
-    if (!contentRange || contentRange.start !== fetchStart) {
-      disableReadAhead(cache);
-      return;
-    }
-    if (contentRange.total && contentRange.total !== cache.totalSize) {
-      cache.totalSize = contentRange.total;
-      const config = sourceConfigs.get(cache.sourceKey);
-      if (config) config.totalSize = contentRange.total;
-    }
-    const contentType = response.headers.get('content-type');
-    if (contentType) cache.mimeType = contentType;
-    const buffer = await response.arrayBuffer();
+    if (!selected) throw lastError || new Error('No Direct Play precache source remains');
+    if (selected.contentType) cache.mimeType = selected.contentType;
+    const buffer = selected.buffer;
     if (controller.signal.aborted || cache.released || cache.mode !== 'playing') return;
-    if (buffer.byteLength === 0) return;
     const elapsedMs = Math.max(1, now() - startedAt);
     cache.metrics.fetchedBytes += buffer.byteLength;
     cache.metrics.prefetchBytes += buffer.byteLength;
@@ -477,8 +496,8 @@ async function pumpPrefetch(cache) {
     void postMetrics(cache, false);
   } catch (error) {
     if (!(error && error.name === 'AbortError')) {
-      // Speculation is never allowed to become a playback failure. A failed
-      // speculative fetch is simply abandoned; later demand goes direct.
+      // Every configured source has failed. Speculation still cannot become a
+      // viewer failure; active demand will independently retry the bounded set.
       void postMetrics(cache, true);
     }
   } finally {
