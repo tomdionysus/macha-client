@@ -105,9 +105,28 @@ export class MachaPlaybackError extends Error {
     message: string,
     public readonly status?: number,
     public readonly code?: string,
+    public readonly retryAfterMs?: number,
   ) {
     super(message);
   }
+}
+
+function retryAfterMs(value: string | null): number {
+  if (!value) return 1_000;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.max(100, Math.round(seconds * 1_000));
+  const date = Date.parse(value);
+  return Number.isFinite(date) ? Math.max(100, date - Date.now()) : 1_000;
+}
+
+export function newPlaybackIdempotencyKey(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+  if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
+    const bytes = new Uint8Array(16);
+    crypto.getRandomValues(bytes);
+    return [...bytes].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+  }
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 }
 
 function mapStream(stream: WireStream): PlaybackStreamInfo {
@@ -159,6 +178,8 @@ export class MachaPlaybackResolver implements PlaybackResolver {
     capabilities: PlaybackCapabilities,
     seekMs?: number,
     preferences?: PlaybackPreferencesUpdate,
+    signal?: AbortSignal,
+    idempotencyKey = newPlaybackIdempotencyKey(),
   ): Promise<PlaybackSession> {
     this.log.info('session-create', {
       mediaId: media.id,
@@ -192,10 +213,17 @@ export class MachaPlaybackResolver implements PlaybackResolver {
       }),
     };
     if (seekMs !== undefined) body.seek_ms = Math.max(0, Math.round(seekMs));
-    const session = this.mapSession(await this.request<WireSession>('/api/v1/playback/sessions', {
+    // Session admission deliberately has no profile preflight: immutable
+    // profiles are advisory metadata and must not enter the viewer's critical
+    // path. A non-conforming server response is surfaced immediately so the
+    // cluster resolver can recover on another endpoint rather than polling it.
+    const wire = await this.request<WireSession>('/api/v1/playback/sessions', {
       method: 'POST',
+      headers: { 'Idempotency-Key': idempotencyKey },
       body: JSON.stringify(body),
-    }));
+      signal,
+    });
+    const session = this.mapSession(wire);
     this.log.info('session-created', this.sessionSummary(session));
     return session;
   }
@@ -374,7 +402,19 @@ export class MachaPlaybackResolver implements PlaybackResolver {
       });
       if (!response.ok) await this.throwResponseError(response, { requestId, method, path, elapsedMs });
       if (response.status === 204) return undefined as T;
-      return await response.json() as T;
+      const body = await response.json() as unknown;
+      if (response.status === 202) {
+        const parsed = parseErrorEnvelope(body, 'Playback profile is pending.');
+        if (parsed.code === 'profile_pending') {
+          throw new MachaPlaybackError(
+            `Macha playback request pending: ${parsed.message}`,
+            response.status,
+            parsed.code,
+            retryAfterMs(response.headers.get('retry-after')),
+          );
+        }
+      }
+      return body as T;
     } catch (error) {
       if (!(error instanceof MachaPlaybackError)) {
         this.log.error('http-failed', {
@@ -415,6 +455,11 @@ export class MachaPlaybackResolver implements PlaybackResolver {
       statusText: response.statusText,
       body,
     });
-    throw new MachaPlaybackError(`Macha playback request failed: ${parsed.message}`, response.status, parsed.code);
+    throw new MachaPlaybackError(
+      `Macha playback request failed: ${parsed.message}`,
+      response.status,
+      parsed.code,
+      retryAfterMs(response.headers.get('retry-after')),
+    );
   }
 }

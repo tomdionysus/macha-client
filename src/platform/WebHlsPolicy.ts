@@ -20,6 +20,11 @@ export type ManagedHlsErrorAction =
   | { action: 'fail-media'; recovery: ManagedHlsMediaRecoveryDecision; details: string }
   | { action: 'fail-terminal'; details: string };
 
+/** Any HLS network error is early node-health evidence, even before it is fatal. */
+export function isHlsNetworkDegradation(data: { type?: unknown }): boolean {
+  return data.type === Hls.ErrorTypes.NETWORK_ERROR;
+}
+
 export function managedHlsErrorAction(
   data: { fatal?: boolean; type?: unknown; details?: unknown },
   recovery: ManagedHlsMediaRecoveryBudget,

@@ -14,5 +14,5 @@ export interface MediaApi {
   search(query: string): Promise<MediaSummary[]>;
   artwork(ref: ArtworkRef, signal?: AbortSignal): Promise<Blob>;
   invalidateArtwork?(ref: ArtworkRef): void;
-  mediaProfile?(mediaId: string): Promise<CatalogueMediaProfile | undefined>;
+  mediaProfile?(mediaId: string, signal?: AbortSignal): Promise<CatalogueMediaProfile | undefined>;
 }

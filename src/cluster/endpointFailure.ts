@@ -26,6 +26,8 @@ export function retryableEndpointFailure(error: unknown): boolean {
   // Browser Fetch reports connection refusal, DNS failure and CORS transport
   // failure as TypeError. API/schema errors use the typed HTTP errors below.
   if (error instanceof TypeError) return true;
+  if (error && typeof error === 'object' && (error as { name?: unknown }).name === 'AbortError') return true;
+  if (error && typeof error === 'object' && (error as { code?: unknown }).code === 'profile_pending') return true;
   const status = errorStatus(error);
   return status === 429 || status === 502 || status === 503 || status === 504;
 }

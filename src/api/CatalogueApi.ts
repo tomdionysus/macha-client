@@ -84,5 +84,5 @@ export interface CatalogueApi {
   putArtwork(itemId: string, role: string, mimeType: string, data: Blob): Promise<CatalogueArtwork>;
   artwork(id: string, signal?: AbortSignal): Promise<Blob>;
   /** Immutable technical facts; absence is temporary while catalogue hydration catches up. */
-  mediaProfile(mediaId: string): Promise<CatalogueMediaProfile | undefined>;
+  mediaProfile(mediaId: string, signal?: AbortSignal): Promise<CatalogueMediaProfile | undefined>;
 }

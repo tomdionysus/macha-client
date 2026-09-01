@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { Platform, Player, PlaybackFailureListener, PlaybackListener } from '../platform/Platform';
-import type { MediaSummary, PlaybackCapabilities, PlaybackEvent, PlaybackSource, PlaybackTimeRange } from '../types';
+import type { MediaSummary, MediaTechnicalProfile, PlaybackCapabilities, PlaybackEvent, PlaybackSource, PlaybackTimeRange } from '../types';
 import type { PlaybackPreferencesUpdate, PlaybackResolver, PlaybackSession, PlaybackStopOptions, PlaybackUpdate } from './PlaybackResolver';
 import { PlaybackRuntime } from './PlaybackRuntime';
 
@@ -70,12 +70,14 @@ class FakePlayer implements Player {
   pauseCalls = 0;
   resumeCalls = 0;
   playCalls: PlaybackSource[] = [];
+  prepareCalls: MediaTechnicalProfile[] = [];
   playResult: Promise<boolean> = Promise.resolve(true);
 
   attach(): void { this.attachCalls += 1; }
   detachHost(): void { this.detachHostCalls += 1; }
   detach(): void { this.detachCalls += 1; this.stop(); }
   play(source: PlaybackSource): Promise<boolean> { this.playCalls.push(source); return this.playResult; }
+  prepare(profile: MediaTechnicalProfile): void { this.prepareCalls.push(profile); }
   pause(): void { this.pauseCalls += 1; }
   resume(): void { this.resumeCalls += 1; }
   seek(): void {}
@@ -120,6 +122,48 @@ function host(): HTMLElement {
 }
 
 describe('PlaybackRuntime ownership state machine', () => {
+  it('prepares from catalogue facts and reuses one capability probe for session fallback', async () => {
+    const player = new FakePlayer();
+    const platform = new FakePlatform(player);
+    const api = resolver();
+    const runtime = new PlaybackRuntime(platform, api);
+    const profile: MediaTechnicalProfile = {
+      mediaId: 'macha:A',
+      format: 'mov,mp4',
+      durationMs: 600_000,
+      bitrate: 1_000_000,
+      streams: [],
+    };
+
+    runtime.prepare(profile);
+    await vi.waitFor(() => expect(platform.capabilities).toHaveBeenCalledTimes(1));
+    expect(player.prepareCalls).toEqual([profile]);
+
+    runtime.attach(host());
+    await runtime.play({ media: movie('A'), startPositionMs: 0, returnTo: '/movies/A' });
+
+    expect(platform.capabilities).toHaveBeenCalledTimes(1);
+    expect(player.prepareCalls).toHaveLength(2);
+    expect(player.prepareCalls[1]).toMatchObject({
+      mediaId: 'file:A',
+      sizeBytes: 10_000_000,
+      negotiated: { mode: 'direct', mimeType: 'video/mp4', format: 'mp4' },
+    });
+    await runtime.stop();
+  });
+
+  it('prepares from the session response when no catalogue profile arrived', async () => {
+    const player = new FakePlayer();
+    const runtime = new PlaybackRuntime(new FakePlatform(player), resolver());
+    runtime.attach(host());
+
+    await runtime.play({ media: movie('A'), startPositionMs: 0, returnTo: '/movies/A' });
+
+    expect(player.prepareCalls).toHaveLength(1);
+    expect(player.prepareCalls[0]).toMatchObject({ mediaId: 'file:A', negotiated: { mode: 'direct' } });
+    await runtime.stop();
+  });
+
   it('does not acquire a replacement session until the previous lease is closed', async () => {
     const player = new FakePlayer();
     const api = resolver();

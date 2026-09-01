@@ -21,9 +21,16 @@ checkpoints, and verification records. This file is only the current index.
   state, authoritative playback node, ownership transfer or fencing token. Any
   node may concurrently create a disposable local playback generation for it.
 - [ ] Treat seamless handoff as the primary correctness/performance objective:
-  retain usable playback while preparing an alternate, never expose transient
-  node failure as terminal player failure, and exhaust bounded alternate-node
-  recovery before asking the viewer to intervene.
+  keep exactly one session during healthy playback; on concrete stream failure
+  evidence, retain usable buffered playback while opening a 30-second alternate
+  recovery window. Promote a working replacement permanently, then retry old
+  session cleanup with exponential backoff. Never expose transient node failure
+  as terminal player failure before bounded alternate-node recovery is exhausted.
+- [ ] Measure request latency per healthy API endpoint. If the current
+  authoritative endpoint is consistently slow while another known healthy node
+  is materially faster, consider a hysteresis-based pre-emptive authority swap.
+  Do not flap on individual slow requests or let background probes interrupt
+  healthy in-flight work.
 
 ## Catalogue dates
 

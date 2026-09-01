@@ -6,25 +6,56 @@ import type {
   CatalogueMediaProfile,
   CatalogueStatus,
 } from './CatalogueApi';
-import { MachaCatalogueApi } from './MachaCatalogueApi';
+import { MachaApiError, MachaCatalogueApi } from './MachaCatalogueApi';
 import type { EndpointRegistry, MachaEndpoint } from '../cluster/EndpointRegistry';
-import { endpointFailure, retryableEndpointFailure } from '../cluster/endpointFailure';
+import { ClusterEndpointRouter } from '../cluster/endpointRouting';
 
 type EndpointOperation<T> = (api: MachaCatalogueApi, endpoint: MachaEndpoint) => Promise<T>;
+
+interface MediaProfileRequest {
+  controller: AbortController;
+  consumers: Set<symbol>;
+  promise: Promise<CatalogueMediaProfile | undefined>;
+  abandonedOrder?: number;
+}
+
+/** Preserve a small corpus-building tail without allowing advisory work to occupy every browser connection. */
+export const MAX_ABANDONED_MEDIA_PROFILE_REQUESTS = 2;
+
+function abortReason(signal: AbortSignal): unknown {
+  return signal.reason ?? new DOMException('Aborted', 'AbortError');
+}
 
 /** Safe catalogue reads fail over; mutations deliberately execute once. */
 export class ClusterCatalogueApi implements CatalogueApi {
   private readonly apis = new Map<string, MachaCatalogueApi>();
   private readonly mediaProfiles = new Map<string, CatalogueMediaProfile>();
-  private readonly mediaProfileRequests = new Map<string, Promise<CatalogueMediaProfile | undefined>>();
+  private readonly mediaProfileRequests = new Map<string, MediaProfileRequest>();
+  private mediaProfileAbandonmentSequence = 0;
 
   constructor(
-    private readonly registry: EndpointRegistry,
+    routerOrRegistry: ClusterEndpointRouter | EndpointRegistry,
     private readonly bearerToken?: string,
-  ) {}
+  ) {
+    this.router = routerOrRegistry instanceof ClusterEndpointRouter
+      ? routerOrRegistry
+      : new ClusterEndpointRouter(routerOrRegistry);
+  }
+
+  private readonly router: ClusterEndpointRouter;
 
   status(): Promise<CatalogueStatus> {
-    return this.read((api) => api.status());
+    return this.read(async (api) => {
+      const status = await api.status();
+      if (!status.ready) {
+        throw new MachaApiError(
+          status.error || 'Macha catalogue is not ready.',
+          503,
+          'catalogue_unavailable',
+        );
+      }
+      return status;
+    });
   }
 
   list(kind?: CatalogueKind, parent?: string): Promise<CatalogueItem[]> {
@@ -35,22 +66,17 @@ export class ClusterCatalogueApi implements CatalogueApi {
     return this.read((api) => api.get(id));
   }
 
-  mediaProfile(mediaId: string): Promise<CatalogueMediaProfile | undefined> {
+  mediaProfile(mediaId: string, signal?: AbortSignal): Promise<CatalogueMediaProfile | undefined> {
     if (!mediaId.startsWith('macha:')) return Promise.resolve(undefined);
+    if (signal?.aborted) return Promise.reject(abortReason(signal));
     const cached = this.mediaProfiles.get(mediaId);
     if (cached) return Promise.resolve(cached);
-    const existing = this.mediaProfileRequests.get(mediaId);
-    if (existing) return existing;
-    const request = this.readMediaProfile(mediaId).then((profile) => {
-      if (profile) this.mediaProfiles.set(mediaId, profile);
-      this.mediaProfileRequests.delete(mediaId);
-      return profile;
-    }, (error) => {
-      this.mediaProfileRequests.delete(mediaId);
-      throw error;
-    });
-    this.mediaProfileRequests.set(mediaId, request);
-    return request;
+    let request = this.mediaProfileRequests.get(mediaId);
+    if (!request) request = this.startMediaProfileRequest(mediaId);
+    const consumer = Symbol(mediaId);
+    request.consumers.add(consumer);
+    request.abandonedOrder = undefined;
+    return this.consumeMediaProfile(mediaId, request, consumer, signal);
   }
 
   search(query: string, limit?: number): Promise<CatalogueItem[]> {
@@ -74,56 +100,85 @@ export class ClusterCatalogueApi implements CatalogueApi {
   }
 
   private async read<T>(operation: EndpointOperation<T>, signal?: AbortSignal): Promise<T> {
-    let lastError: unknown;
-    for (const { endpoint } of this.registry.candidates()) {
-      if (signal?.aborted) throw signal.reason;
-      try {
-        const value = await operation(this.api(endpoint), endpoint);
-        this.registry.recordSuccess(endpoint.id);
-        return value;
-      } catch (error) {
-        if (signal?.aborted) throw error;
-        if (!retryableEndpointFailure(error)) throw error;
-        this.registry.recordFailure(endpoint.id);
-        lastError = endpointFailure(endpoint.id, endpoint.baseUrl, error);
-      }
-    }
-    throw lastError ?? new Error('No Macha bootstrap API endpoint is configured.');
+    return this.router.request((endpoint) => {
+      if (signal?.aborted) return Promise.reject(signal.reason);
+      return operation(this.api(endpoint), endpoint);
+    });
   }
 
-  private async readMediaProfile(mediaId: string): Promise<CatalogueMediaProfile | undefined> {
-    let lastError: unknown;
-    for (const { endpoint } of this.registry.candidates()) {
-      try {
-        const profile = await this.api(endpoint).mediaProfile(mediaId);
-        if (profile) {
-          this.registry.recordSuccess(endpoint.id);
-          return profile;
-        }
-        // A temporary negative still proves reachability, but must not become a
-        // sticky routing preference or a cached negative.
-        this.registry.recordProbeSuccess(endpoint.id);
-      } catch (error) {
-        if (!retryableEndpointFailure(error)) throw error;
-        this.registry.recordFailure(endpoint.id);
-        lastError = endpointFailure(endpoint.id, endpoint.baseUrl, error);
+  private async readMediaProfile(mediaId: string, signal: AbortSignal): Promise<CatalogueMediaProfile | undefined> {
+    // A temporary negative proves reachability but does not steal API
+    // authority; another node may already have the immutable profile.
+    return this.router.find((endpoint) => this.api(endpoint).mediaProfile(mediaId, signal), signal);
+  }
+
+  private startMediaProfileRequest(mediaId: string): MediaProfileRequest {
+    const controller = new AbortController();
+    const request = {} as MediaProfileRequest;
+    request.controller = controller;
+    request.consumers = new Set();
+    request.promise = this.readMediaProfile(mediaId, controller.signal).then((profile) => {
+      if (profile) this.mediaProfiles.set(mediaId, profile);
+      if (this.mediaProfileRequests.get(mediaId) === request) this.mediaProfileRequests.delete(mediaId);
+      return profile;
+    }, (error) => {
+      if (this.mediaProfileRequests.get(mediaId) === request) this.mediaProfileRequests.delete(mediaId);
+      throw error;
+    });
+    // An intentionally abandoned request may later be evicted and aborted with
+    // no remaining consumer promise. Keep that expected rejection observed.
+    void request.promise.catch(() => undefined);
+    this.mediaProfileRequests.set(mediaId, request);
+    return request;
+  }
+
+  private consumeMediaProfile(
+    mediaId: string,
+    request: MediaProfileRequest,
+    consumer: symbol,
+    signal?: AbortSignal,
+  ): Promise<CatalogueMediaProfile | undefined> {
+    return new Promise((resolve, reject) => {
+      let active = true;
+      const finish = () => {
+        if (!active) return false;
+        active = false;
+        signal?.removeEventListener('abort', onAbort);
+        request.consumers.delete(consumer);
+        return true;
+      };
+      const onAbort = () => {
+        if (!finish()) return;
+        this.abandonMediaProfile(mediaId, request);
+        reject(signal ? abortReason(signal) : new DOMException('Aborted', 'AbortError'));
+      };
+      signal?.addEventListener('abort', onAbort, { once: true });
+      request.promise.then((profile) => {
+        if (!finish()) return;
+        resolve(profile);
+      }, (error) => {
+        if (!finish()) return;
+        reject(error);
+      });
+    });
+  }
+
+  private abandonMediaProfile(mediaId: string, request: MediaProfileRequest): void {
+    if (request.consumers.size > 0 || this.mediaProfileRequests.get(mediaId) !== request) return;
+    request.abandonedOrder = ++this.mediaProfileAbandonmentSequence;
+    const abandoned = [...this.mediaProfileRequests.entries()]
+      .filter((entry): entry is [string, MediaProfileRequest] => entry[1].consumers.size === 0 && entry[1].abandonedOrder !== undefined)
+      .sort((left, right) => left[1].abandonedOrder! - right[1].abandonedOrder!);
+    for (const [abandonedMediaId, abandonedRequest] of abandoned.slice(0, -MAX_ABANDONED_MEDIA_PROFILE_REQUESTS)) {
+      if (this.mediaProfileRequests.get(abandonedMediaId) === abandonedRequest) {
+        this.mediaProfileRequests.delete(abandonedMediaId);
+        abandonedRequest.controller.abort(new DOMException('Profile preparation tail exceeded', 'AbortError'));
       }
     }
-    if (lastError) throw lastError;
-    return undefined;
   }
 
   private async write<T>(operation: EndpointOperation<T>): Promise<T> {
-    const endpoint = this.registry.candidates()[0]?.endpoint;
-    if (!endpoint) throw new Error('No Macha bootstrap API endpoint is configured.');
-    try {
-      const value = await operation(this.api(endpoint), endpoint);
-      this.registry.recordSuccess(endpoint.id);
-      return value;
-    } catch (error) {
-      if (retryableEndpointFailure(error)) this.registry.recordFailure(endpoint.id);
-      throw error;
-    }
+    return this.router.mutation((endpoint) => operation(this.api(endpoint), endpoint));
   }
 
   private api(endpoint: MachaEndpoint): MachaCatalogueApi {

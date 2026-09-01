@@ -14,6 +14,20 @@ interface ItemEnvelope {
   items: CatalogueItem[];
 }
 
+function mediaProfilePending(value: unknown): boolean {
+  if (value === undefined || value === null) return true;
+  if (typeof value !== 'object') return false;
+  const candidate = value as { status?: unknown; error?: unknown; code?: unknown; available?: unknown };
+  const marker = [candidate.status, candidate.error, candidate.code]
+    .find((entry): entry is string => typeof entry === 'string')
+    ?.trim().toLowerCase().replace(/[ -]+/g, '_');
+  return marker === 'profile_not_available'
+    || marker === 'profile_pending'
+    || marker === 'not_available_yet'
+    || marker === 'profile_not_available_yet'
+    || candidate.available === false;
+}
+
 export class MachaApiError extends Error {
   constructor(
     message: string,
@@ -49,15 +63,19 @@ export class MachaCatalogueApi implements CatalogueApi {
     return this.getJson(`/api/v1/catalogue/items/${encodeURIComponent(id)}`);
   }
 
-  async mediaProfile(mediaId: string): Promise<CatalogueMediaProfile | undefined> {
+  async mediaProfile(mediaId: string, signal?: AbortSignal): Promise<CatalogueMediaProfile | undefined> {
     // Mutable path identities are deliberately ineligible for profile caching.
     if (!mediaId.startsWith('macha:')) return undefined;
     try {
-      const profile = await this.getJson<CatalogueMediaProfile>(`/api/v1/catalogue/media/${encodeURIComponent(mediaId)}/profile`);
+      const profile = await this.request<CatalogueMediaProfile | undefined | Record<string, unknown>>(
+        `/api/v1/catalogue/media/${encodeURIComponent(mediaId)}/profile`,
+        { method: 'GET', signal },
+      );
+      if (profile === undefined || mediaProfilePending(profile)) return undefined;
       if (profile.schema_version !== 1 || profile.media_id !== mediaId || !Array.isArray(profile.streams)) {
         throw new MachaApiError('Macha catalogue returned an invalid immutable media profile.', 502, 'invalid_media_profile');
       }
-      return profile;
+      return profile as unknown as CatalogueMediaProfile;
     } catch (error) {
       // `profile_not_available` is the new contract. A generic 404 is also a
       // temporary absence while older nodes without this route remain in a
@@ -123,7 +141,14 @@ export class MachaCatalogueApi implements CatalogueApi {
     const response = await this.fetch(path, 'application/json', init);
     if (!response.ok) await this.throwResponseError(response);
     if (response.status === 204) return undefined as T;
-    return await response.json() as T;
+    try {
+      return await response.json() as T;
+    } catch (error) {
+      // `202 Accepted` with Retry-After may intentionally have no body while
+      // the immutable profile is being generated.
+      if (response.status === 202) return undefined as T;
+      throw error;
+    }
   }
 
   private async fetch(path: string, accept: string, init: RequestInit = { method: 'GET' }): Promise<Response> {

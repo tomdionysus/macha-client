@@ -17,6 +17,7 @@ interface Props {
   onPlayFromStart: (item: MediaSummary) => void;
   progress?: PlaybackProgress;
   onEdit?: () => void;
+  onMediaProfile?: (profile: CatalogueMediaProfile) => void;
 }
 
 function canPlayDirectly(details: MediaDetails): boolean {
@@ -52,11 +53,11 @@ export function mediaProfileSummary(profile: CatalogueMediaProfile): string {
   return parts.join(' · ');
 }
 
-export function DetailScreen({ api, itemId, onBack, onPlay, onPlayFromStart, progress, onEdit }: Props) {
+export function DetailScreen({ api, itemId, onBack, onPlay, onPlayFromStart, progress, onEdit, onMediaProfile }: Props) {
   const details = useAsync(() => api.details(itemId), [api, itemId]);
   const immutableMediaId = details.value?.mediaIds.find((mediaId) => mediaId.startsWith('macha:'));
   const profile = useAsync(
-    () => immutableMediaId && api.mediaProfile ? api.mediaProfile(immutableMediaId) : Promise.resolve(undefined),
+    (signal) => immutableMediaId && api.mediaProfile ? api.mediaProfile(immutableMediaId, signal) : Promise.resolve(undefined),
     [api, immutableMediaId],
   );
   const backdrop = useArtworkUrl(api, details.value?.artwork?.backdrop ?? details.value?.artwork?.poster ?? details.value?.artwork?.thumbnail);
@@ -64,6 +65,9 @@ export function DetailScreen({ api, itemId, onBack, onPlay, onPlayFromStart, pro
   useEffect(() => {
     if (details.value && (details.value.kind === 'movie' || details.value.kind === 'episode' || details.value.kind === 'track')) requestTvDefaultFocus();
   }, [details.value]);
+  useEffect(() => {
+    if (profile.value) onMediaProfile?.(profile.value);
+  }, [onMediaProfile, profile.value]);
   if (details.loading) return <Loading />;
   if (details.error) return <ErrorMessage error={details.error} />;
   if (!details.value) return null;

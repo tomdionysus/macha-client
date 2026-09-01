@@ -112,6 +112,41 @@ export interface PlaybackCapabilities {
   hdr: string[];
 }
 
+export interface MediaTechnicalStream {
+  index: number;
+  type: 'video' | 'audio' | 'subtitle' | 'other';
+  codec: string;
+  profile: string;
+  language: string;
+  width?: number;
+  height?: number;
+  channels?: number;
+  sampleRate?: number;
+  bitDepth?: number;
+  bitrate?: number;
+  default: boolean;
+  forced: boolean;
+}
+
+/**
+ * Source facts used for opportunistic local player preparation. They may come
+ * from an immutable catalogue profile or from the authoritative session
+ * response; consumers must never wait for the catalogue form.
+ */
+export interface MediaTechnicalProfile {
+  mediaId: string;
+  format: string;
+  durationMs: number;
+  bitrate: number;
+  sizeBytes?: number;
+  streams: MediaTechnicalStream[];
+  negotiated?: {
+    mode: PlaybackMode;
+    mimeType: string;
+    format?: string;
+  };
+}
+
 export type PlaybackMode = 'direct' | 'remux' | 'transcode';
 
 export interface PlaybackSource {

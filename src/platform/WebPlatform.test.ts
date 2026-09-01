@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   hlsEventSummary,
   shouldUseManagedHls,
@@ -8,8 +8,45 @@ import {
   webMediaElementFailure,
   preflightWebHlsSource,
   webHlsPreflightTargets,
+  WebPlatform,
 } from './WebPlatform';
 import { ManagedHlsMediaRecoveryBudget } from './ManagedHlsRecovery';
+
+afterEach(() => vi.unstubAllGlobals());
+
+describe('Web player preparation', () => {
+  it('constructs and configures one reusable media element before a presentation host exists', () => {
+    const addEventListener = vi.fn();
+    const video = {
+      addEventListener,
+      removeEventListener: vi.fn(),
+      removeAttribute: vi.fn(),
+      setAttribute: vi.fn(),
+      canPlayType: vi.fn(() => 'probably'),
+      parentNode: null,
+      paused: true,
+      volume: 1,
+    } as unknown as HTMLVideoElement;
+    const createElement = vi.fn(() => video);
+    vi.stubGlobal('document', { createElement });
+    const player = new WebPlatform().createPlayer();
+    const profile = {
+      mediaId: 'macha:immutable', format: 'mov,mp4', durationMs: 60_000, bitrate: 2_000_000, streams: [],
+    };
+
+    player.prepare?.(profile);
+    player.prepare?.({ ...profile, negotiated: { mode: 'direct', mimeType: 'video/mp4', format: 'mp4' } });
+
+    expect(createElement).toHaveBeenCalledTimes(1);
+    expect(video.preload).toBe('auto');
+    expect(video.crossOrigin).toBe('anonymous');
+    expect(addEventListener).toHaveBeenCalledWith('loadedmetadata', expect.any(Function));
+
+    const host = { firstChild: null, appendChild: vi.fn() } as unknown as HTMLElement;
+    player.attach(host);
+    expect(host.appendChild).toHaveBeenCalledWith(video);
+  });
+});
 
 describe('Web HLS engine policy', () => {
   it('prefers hls.js/MSE on modern Web even when native HLS also exists', () => {

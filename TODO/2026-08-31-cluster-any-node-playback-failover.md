@@ -29,7 +29,8 @@ The client exclusively owns:
 - current position and play/pause intent;
 - mode, quality, audio and subtitle preferences;
 - playback queue, playlists, Continue Watching and navigation context; and
-- failover policy and the current set of disposable node-local generations.
+- failover policy and the current disposable node-local generation, plus at most
+  one evidence-triggered replacement during a bounded 30-second recovery window.
 
 The future cluster session contains only replicated ephemeral existence and,
 when authorization is introduced, identity/permissions and expiry. It contains
@@ -138,11 +139,25 @@ server endpoint, while unsafe mutations retain explicit failure semantics.
 - [x] Consume `GET /api/v1/catalogue/media/{media_id}/profile` while presenting
   playback details or constructing playback capabilities/options. Cache profiles
   only by immutable `macha:` media ID; never probe media client-side or key
-  profile data by mutable path. Treat `404 profile_not_available` as temporary
-  and retain existing session creation as the non-blocking fallback.
-  Server support is implemented as of 2026-08-31 but is not yet deployed to the
-  live nodes; client implementation and tests must use the contract without
-  treating live `404` responses as a deployment regression.
+  profile data by mutable path. Treat `202 profile_pending` and
+  `404 profile_not_available` as temporary, never cache the negative, and
+  begin ordinary playback-session negotiation independently and immediately.
+  Optional profile publication must never become a viewer-path admission
+  dependency: session creation proceeds through normal media-engine planning and
+  must not return `425 profile_pending`; `202 profile_pending` belongs to the
+  optional profile GET. As mixed-version protection only, a node
+  that violates that contract is bypassed in favour of another suitable endpoint
+  with the same logical idempotency key; the client never polls profile state in
+  the viewer path.
+- [x] Normalize catalogue and session media facts into one local technical
+  profile. Use an early immutable profile to construct and wire the reusable
+  media element and begin the cached platform-capability probe before Play;
+  complete the same preparation from every authoritative session response so
+  missing or pending catalogue profiles retain identical correctness.
+- [x] Make detail profile consumers cancellable while allowing two abandoned
+  immutable-profile requests to finish as a bounded corpus-building tail. Abort
+  the oldest overflow request, retain successful immutable results in cache, and
+  never record deliberate cancellation as endpoint failure.
 - [ ] Once the minimum supported node capability guarantees immutable media
   profiles, rationalise the compatibility path: remove redundant fallback-derived
   option logic and temporary-negative handling that no longer serves mixed-version
@@ -178,9 +193,10 @@ B at the correct logical position, with no route/UI failure or state loss.
   alternate source without changing `video.src`. Preserve partial-response and
   cancellation semantics and keep speculative read-ahead subordinate to viewer
   demand.
-- [x] Prepare at least one alternate Direct Play session/source early enough that
-  failover does not wait for session negotiation after the active byte request
-  has failed. Bound additional sessions and close/expire unused ones.
+- [x] Keep healthy Direct Play at exactly one session. A failed speculative
+  TCP/range read opens a 30-second recovery window and only then prepares one
+  byte-compatible alternate while cached/buffered playback continues. Close the
+  alternate if the primary recovers; permanently promote it if it is needed.
 - [x] Add service-worker regressions for failure before headers, after partial
   bytes, overlapping ranges, stale generations, cancellation and alternate
   exhaustion.
@@ -205,9 +221,10 @@ position discontinuity or viewer-visible stall.
   the smallest single-player source replacement supported by the platform.
 - [x] Preserve subtitle selection and rebuild the node-local subtitle manifest
   with the replacement generation.
-- [x] Keep optional proactive standby bounded by platform resources, server
-  capacity and policy. Never double transcode indefinitely merely to claim
-  redundancy.
+- [x] Never create a proactive standby during healthy playback. Permit one
+  evidence-triggered alternate for 30 seconds, then close it if unused. Once a
+  replacement is streaming, retain it and close the superseded session with
+  exponentially backed-off best-effort attempts.
 
 Exit criterion: controlled loss of node A during HLS playback switches to node B
 without visible failure UI or state loss. UAT records any freeze/audio gap and
@@ -215,6 +232,12 @@ may claim viewer-transparent handoff only when none is observable/measurable
 under the defined test.
 
 ## Phase 6: current-server demonstration and UAT
+
+- [ ] Record rolling API latency independently from reachability. Consider
+  pre-emptively moving client API authority when another healthy node remains
+  materially faster across a bounded sample window. Define hysteresis,
+  cool-down and minimum improvement thresholds before implementing this so
+  authority cannot flap between nodes.
 
 Use two current Macha nodes supplied explicitly to the client. No server changes
 are permitted for this gate.

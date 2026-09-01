@@ -13,6 +13,13 @@ import type {
   UnmatchedFile,
 } from './ManageApi';
 
+export class MachaManageApiError extends Error {
+  constructor(message: string, public readonly status?: number, public readonly code?: string) {
+    super(message);
+    this.name = 'MachaManageApiError';
+  }
+}
+
 export class MachaManageApi implements ManageApi {
   private readonly baseUrl: string;
 
@@ -112,7 +119,7 @@ export class MachaManageApi implements ManageApi {
       const { body, wasJson } = await readResponseBody(response);
       if (isGatewayConnectionFailure(response, wasJson)) throw serverUnreachable();
       const parsed = parseErrorEnvelope(body, `${response.status} ${response.statusText}`);
-      throw new Error(`Macha management request failed: ${parsed.message}`);
+      throw new MachaManageApiError(`Macha management request failed: ${parsed.message}`, response.status, parsed.code);
     }
     if (response.status === 204) return undefined as T;
     return await response.json() as T;

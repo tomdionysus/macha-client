@@ -1,5 +1,5 @@
 import packageInfo from './package.json';
-import { loadEnv, type Plugin } from 'vite';
+import type { Plugin } from 'vite';
 import legacy from '@vitejs/plugin-legacy';
 import { defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
@@ -257,7 +257,7 @@ function samsungManifest(version: string): Plugin {
     <tizen:privilege
         name="http://tizen.org/privilege/internet"/>
 
-    <access origin="http://10.44.1.50:7438" subdomains="false"/>
+    <access origin="*" subdomains="true"/>
 </widget>
 `,
       });
@@ -266,8 +266,6 @@ function samsungManifest(version: string): Plugin {
 }
 
 export default defineConfig(({ mode }) => {
-  const env = loadEnv(mode, '.', '');
-  const target = env.MACHA_API_TARGET;
   const samsung = mode === 'samsung';
 
   return {
@@ -284,14 +282,6 @@ export default defineConfig(({ mode }) => {
         samsungManifest(packageInfo.version),
       ] : []),
     ],
-    server: target ? {
-      proxy: {
-        '/api': {
-          target,
-          changeOrigin: true,
-        },
-      },
-    } : undefined,
     test: {
       environment: 'node',
       setupFiles: './src/test/setup.ts',

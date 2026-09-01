@@ -3,11 +3,12 @@ import { createClientLogger } from '../diagnostics/ClientLog';
 import {
   PlaybackSourceError,
   type Platform,
+  type PlaybackDegradationListener,
   type PlaybackFailureListener,
   type PlaybackListener,
   type Player,
 } from './Platform';
-import type { PlaybackCapabilities, PlaybackEvent, PlaybackSource, PlaybackTimeRange } from '../types';
+import type { MediaTechnicalProfile, PlaybackCapabilities, PlaybackEvent, PlaybackSource, PlaybackTimeRange } from '../types';
 import { ManagedHlsMediaRecoveryBudget } from './ManagedHlsRecovery';
 import { detectWebMediaCodecCapabilities } from './WebMediaCapabilities';
 import { WebMediaTimeline } from './WebMediaTimeline';
@@ -17,9 +18,10 @@ import {
   directPlayReadAheadUrl,
   releaseDirectPlayReadAhead,
   setDirectPlayReadAheadMode,
+  subscribeDirectPlayReadAheadFailure,
 } from '../playback/directPlayReadAhead';
 import { hlsEventSummary, videoState, WebMediaDiagnostics } from './WebMediaDiagnostics';
-import { managedHlsErrorAction, webHlsBufferConfig } from './WebHlsPolicy';
+import { isHlsNetworkDegradation, managedHlsErrorAction, webHlsBufferConfig } from './WebHlsPolicy';
 import {
   isLegacyWebVtt,
   subtitleSegmentAt,
@@ -184,6 +186,7 @@ class WebPlayer implements Player {
   private hls?: Hls;
   private listeners = new Set<PlaybackListener>();
   private failureListeners = new Set<PlaybackFailureListener>();
+  private degradationListeners = new Set<PlaybackDegradationListener>();
   private readonly playerId = ++webPlayerSequence;
   private readonly log = createClientLogger('playback.web', { playerId: this.playerId });
   private readonly diagnostics = new WebMediaDiagnostics(this.log);
@@ -198,6 +201,8 @@ class WebPlayer implements Player {
   private activeSource?: PlaybackSource;
   private sourceGeneration = 0;
   private failedSourceGeneration?: number;
+  private degradedSourceGeneration?: number;
+  private unsubscribeDirectDegradation?: () => void;
   private hlsMediaRecovery?: ManagedHlsMediaRecoveryBudget;
   private mediaTimeline?: WebMediaTimeline;
   private lastPublishedEvent?: PlaybackEvent;
@@ -225,11 +230,86 @@ class WebPlayer implements Player {
     this.host = undefined;
   }
 
+  prepare(profile: MediaTechnicalProfile): void {
+    const video = this.ensureMediaElement();
+    const negotiatedMime = profile.negotiated?.mimeType;
+    this.log.debug('media-prepared', {
+      mediaId: profile.mediaId,
+      format: profile.format,
+      durationMs: profile.durationMs,
+      bitrate: profile.bitrate,
+      negotiatedMode: profile.negotiated?.mode,
+      negotiatedMime,
+      supported: negotiatedMime ? supportedMime(video, negotiatedMime) : undefined,
+    });
+  }
+
+  private ensureMediaElement(): HTMLVideoElement {
+    if (this.video) return this.video;
+    const video = document.createElement('video');
+    video.className = 'native-video';
+    video.autoplay = true;
+    video.controls = false;
+    video.playsInline = true;
+    video.preload = 'auto';
+    video.crossOrigin = 'anonymous';
+    video.volume = this.volume;
+    if (this.options.legacyMediaElement) {
+      video.muted = false;
+      video.defaultMuted = false;
+      video.removeAttribute('muted');
+      video.setAttribute('autoplay', 'autoplay');
+      video.setAttribute('preload', 'auto');
+    }
+    this.diagnostics.attach(video, () => this.directReadAheadSourceUrl);
+
+    const publish = () => this.publish(video);
+    video.addEventListener('timeupdate', publish);
+    video.addEventListener('progress', publish);
+    video.addEventListener('pause', publish);
+    video.addEventListener('play', publish);
+    video.addEventListener('playing', publish);
+    video.addEventListener('waiting', publish);
+    video.addEventListener('seeking', publish);
+    video.addEventListener('seeked', publish);
+    video.addEventListener('loadedmetadata', publish);
+    video.addEventListener('loadeddata', publish);
+    video.addEventListener('durationchange', publish);
+    video.addEventListener('canplay', publish);
+    video.addEventListener('emptied', publish);
+    video.addEventListener('ended', publish);
+    video.addEventListener('error', () => {
+      // Teardown deliberately clears activeSource before removing src; do not
+      // turn those media-element events into a generation failure.
+      if (!this.activeSource || video !== this.video) return;
+      const failure = webMediaElementFailure(video.error);
+      this.failSourceGeneration(this.sourceGeneration, failure, videoState(video));
+    });
+    const resumeWhenReady = () => {
+      if (!this.wantsPlayback || !video.paused) return;
+      this.requestPlay(video, 'media-ready');
+    };
+    // Source attachment and MSE setup are asynchronous. A play() request made
+    // before the media element has a usable source may be rejected by Chromium;
+    // readiness events retry the same viewer intent.
+    video.addEventListener('loadedmetadata', resumeWhenReady);
+    video.addEventListener('loadeddata', resumeWhenReady);
+    video.addEventListener('canplay', resumeWhenReady);
+    this.video = video;
+    const host = this.host;
+    if (host) {
+      while (host.firstChild) host.removeChild(host.firstChild);
+      host.appendChild(video);
+    }
+    return video;
+  }
+
   async play(source: PlaybackSource, positionMs = 0, startPaused = false): Promise<boolean> {
     if (!this.host) throw new Error('Player must be attached before playback');
     const playRequestGeneration = ++this.playRequestGeneration;
     const sourceGeneration = ++this.sourceGeneration;
     this.failedSourceGeneration = undefined;
+    this.degradedSourceGeneration = undefined;
     this.wantsPlayback = !startPaused;
     // Suppress media-element teardown events from the previous source. The new
     // generation timeline must not observe or learn an origin from old buffer
@@ -248,14 +328,17 @@ class WebPlayer implements Player {
     });
     this.initialSeekCleanup?.();
     this.initialSeekCleanup = undefined;
+    this.unsubscribeDirectDegradation?.();
+    this.unsubscribeDirectDegradation = undefined;
     releaseDirectPlayReadAhead(this.directReadAheadSourceUrl);
     this.directReadAheadSourceUrl = undefined;
     this.hls?.destroy();
     this.hls = undefined;
     this.hlsMediaRecovery = undefined;
 
-    let video = this.video;
-    if (video) {
+    const existingVideo = this.video;
+    const video = this.ensureMediaElement();
+    if (existingVideo) {
       // Keep the media element itself across transformed seek generations.
       // Recreating it forces the browser to rebuild the entire playback DOM
       // and can also drop element-scoped state such as fullscreen/PiP.
@@ -263,66 +346,12 @@ class WebPlayer implements Player {
       video.removeAttribute('src');
       video.load();
       this.log.debug('media-element-reused');
-    } else {
-      video = document.createElement('video');
-      video.className = 'native-video';
-      video.autoplay = true;
-      video.controls = false;
-      video.playsInline = true;
-      video.preload = 'auto';
-      video.crossOrigin = 'anonymous';
-      video.volume = this.volume;
-      if (this.options.legacyMediaElement) {
-        video.muted = false;
-        video.defaultMuted = false;
-        video.removeAttribute('muted');
-        video.setAttribute('autoplay', 'autoplay');
-        video.setAttribute('preload', 'auto');
-      }
-      this.diagnostics.attach(video, () => this.directReadAheadSourceUrl);
-
-      const publish = () => this.publish(video!);
-      video.addEventListener('timeupdate', publish);
-      video.addEventListener('progress', publish);
-      video.addEventListener('pause', publish);
-      video.addEventListener('play', publish);
-      video.addEventListener('playing', publish);
-      video.addEventListener('waiting', publish);
-      video.addEventListener('seeking', publish);
-      video.addEventListener('seeked', publish);
-      video.addEventListener('loadedmetadata', publish);
-      video.addEventListener('loadeddata', publish);
-      video.addEventListener('durationchange', publish);
-      video.addEventListener('canplay', publish);
-      video.addEventListener('emptied', publish);
-      video.addEventListener('ended', publish);
-      video.addEventListener('error', () => {
-        // Teardown deliberately clears activeSource before removing src; do not
-        // turn those media-element events into a generation failure.
-        if (!this.activeSource || video !== this.video) return;
-        const failure = webMediaElementFailure(video!.error);
-        this.failSourceGeneration(this.sourceGeneration, failure, videoState(video!));
-      });
-      const resumeWhenReady = () => {
-        if (!this.wantsPlayback || !video!.paused) return;
-        this.requestPlay(video!, 'media-ready');
-      };
-      // Source attachment and MSE setup are asynchronous. A play() request made
-      // before the media element has a usable source may be rejected by Chromium;
-      // readiness events retry the *same viewer intent* without making readiness
-      // part of application control flow.
-      video.addEventListener('loadedmetadata', resumeWhenReady);
-      video.addEventListener('loadeddata', resumeWhenReady);
-      video.addEventListener('canplay', resumeWhenReady);
-      this.video = video;
-      while (this.host.firstChild) this.host.removeChild(this.host.firstChild);
-      this.host.appendChild(video);
     }
 
     this.activeSource = source;
     this.mediaTimeline = new WebMediaTimeline(source.mode, positionMs);
 
-    const publish = () => this.publish(video!);
+    const publish = () => this.publish(video);
     if (positionMs > 0) {
       const readinessEvents = ['loadedmetadata', 'loadeddata', 'canplay'] as const;
       const cleanupInitialSeek = () => {
@@ -376,6 +405,13 @@ class WebPlayer implements Player {
         : source.url;
       if (directUrl !== source.url) {
         this.directReadAheadSourceUrl = source.url;
+        this.unsubscribeDirectDegradation = subscribeDirectPlayReadAheadFailure(source.url, (error) => {
+          this.degradeSourceGeneration(
+            sourceGeneration,
+            new PlaybackSourceError(error.message, 'stream', error),
+            { sourceUrl: source.url },
+          );
+        });
         setDirectPlayReadAheadMode(this.directReadAheadSourceUrl, 'bootstrap');
       }
       this.log.info('direct-source-selected', {
@@ -779,6 +815,7 @@ class WebPlayer implements Player {
     this.playRequestGeneration += 1;
     this.sourceGeneration += 1;
     this.failedSourceGeneration = undefined;
+    this.degradedSourceGeneration = undefined;
     this.wantsPlayback = false;
     this.activeSource = undefined;
     this.mediaTimeline = undefined;
@@ -789,6 +826,8 @@ class WebPlayer implements Player {
     this.hlsMediaRecovery = undefined;
     this.initialSeekCleanup?.();
     this.initialSeekCleanup = undefined;
+    this.unsubscribeDirectDegradation?.();
+    this.unsubscribeDirectDegradation = undefined;
     releaseDirectPlayReadAhead(this.directReadAheadSourceUrl);
     this.directReadAheadSourceUrl = undefined;
     const video = this.video;
@@ -810,6 +849,18 @@ class WebPlayer implements Player {
   subscribeFailure(listener: PlaybackFailureListener): () => void {
     this.failureListeners.add(listener);
     return () => this.failureListeners.delete(listener);
+  }
+
+  subscribeDegradation(listener: PlaybackDegradationListener): () => void {
+    this.degradationListeners.add(listener);
+    return () => this.degradationListeners.delete(listener);
+  }
+
+  private degradeSourceGeneration(sourceGeneration: number, error: Error, detail?: unknown): void {
+    if (sourceGeneration !== this.sourceGeneration || this.degradedSourceGeneration === sourceGeneration) return;
+    this.degradedSourceGeneration = sourceGeneration;
+    this.log.warn('source-degraded', { error, detail });
+    for (const listener of this.degradationListeners) listener(error);
   }
 
   private failSourceGeneration(sourceGeneration: number, error: Error, detail?: unknown): void {
@@ -858,6 +909,13 @@ class WebPlayer implements Player {
     hls.on(Hls.Events.ERROR, (_event, data) => {
       if (sourceGeneration !== this.sourceGeneration || this.hls !== hls) return;
       const payload = { data: hlsEventSummary(data), state: videoState(video) };
+      if (isHlsNetworkDegradation(data)) {
+        this.degradeSourceGeneration(
+          sourceGeneration,
+          new PlaybackSourceError(`Web HLS network degradation (${data.details}).`, 'stream', data),
+          payload,
+        );
+      }
       // Sample the normalized generation-local clock before the recovery policy
       // decides whether another media-pipeline recovery is permitted.
       if (data.fatal && data.type === Hls.ErrorTypes.MEDIA_ERROR) this.publish(video);

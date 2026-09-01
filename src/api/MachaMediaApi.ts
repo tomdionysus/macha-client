@@ -28,8 +28,8 @@ export class MachaMediaApi implements MediaApi {
     return this.catalogue.status();
   }
 
-  mediaProfile(mediaId: string) {
-    return this.catalogue.mediaProfile(mediaId);
+  mediaProfile(mediaId: string, signal?: AbortSignal) {
+    return this.catalogue.mediaProfile(mediaId, signal);
   }
 
   async home(): Promise<LibraryHome> {

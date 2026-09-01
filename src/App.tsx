@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Navigate, NavLink, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom';
-import type { CatalogueApi } from './api/CatalogueApi';
+import type { CatalogueApi, CatalogueMediaProfile } from './api/CatalogueApi';
 import type { MediaApi } from './api/MediaApi';
 import { AppLogo } from './components/AppLogo';
 import { MusicNav } from './components/MusicNav';
@@ -47,6 +47,7 @@ import { useMediaRouteBack } from './app/useMediaRouteBack';
 import { useMusicController } from './app/useMusicController';
 import { usePlaybackRuntime } from './app/usePlaybackRuntime';
 import { usePlaybackController } from './app/usePlaybackController';
+import { technicalProfileFromCatalogue } from './playback/MediaTechnicalProfile';
 
 interface Props {
   platform: Platform;
@@ -70,13 +71,14 @@ function required(value: string | undefined, name: string): string {
   return value;
 }
 
-function DetailRoute({ api, onPlay, onPlayFromStart, progressById, parameter, onEdit }: {
+function DetailRoute({ api, onPlay, onPlayFromStart, progressById, parameter, onEdit, onMediaProfile }: {
   api: MediaApi;
   onPlay: (item: MediaSummary) => void;
   onPlayFromStart: (item: MediaSummary) => void;
   progressById: Map<string, PlaybackProgress>;
   parameter: 'movieId' | 'episodeId' | 'trackId' | 'itemId';
   onEdit?: (id: string) => void;
+  onMediaProfile?: (profile: CatalogueMediaProfile) => void;
 }) {
   const params = useParams();
   const back = useMediaRouteBack(api);
@@ -90,6 +92,7 @@ function DetailRoute({ api, onPlay, onPlayFromStart, progressById, parameter, on
       onPlayFromStart={onPlayFromStart}
       progress={progressById.get(itemId)}
       onEdit={onEdit ? () => onEdit(itemId) : undefined}
+      onMediaProfile={onMediaProfile}
     />
   );
 }
@@ -241,6 +244,9 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
   const [unmatchedCount, setUnmatchedCount] = useState(0);
 
   const { runtime: playbackRuntime, state: playbackRuntimeState } = usePlaybackRuntime(platform, playbackResolver);
+  const preparePlaybackProfile = useCallback((profile: CatalogueMediaProfile) => {
+    playbackRuntime.prepare(technicalProfileFromCatalogue(profile));
+  }, [playbackRuntime]);
   const playback = usePlaybackController({
     api,
     platform,
@@ -365,11 +371,11 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
         <Routes>
           <Route path={routes.home} element={<HomeScreen api={api} continueWatching={playback.continueWatching} onOpen={open} onResume={openPlayer} onRemoveFromContinueWatching={playback.removeFromContinueWatching} />} />
           <Route path={routes.movies} element={<LibraryScreen api={api} kind="movies" onOpen={open} />} />
-          <Route path="/movies/:movieId" element={<DetailRoute api={api} onPlay={openPlayer} onPlayFromStart={openPlayerFromStart} progressById={playback.progressById} parameter="movieId" onEdit={metadataEditingAvailable ? openMetadataEditor : undefined} />} />
+          <Route path="/movies/:movieId" element={<DetailRoute api={api} onPlay={openPlayer} onPlayFromStart={openPlayerFromStart} progressById={playback.progressById} parameter="movieId" onEdit={metadataEditingAvailable ? openMetadataEditor : undefined} onMediaProfile={preparePlaybackProfile} />} />
           <Route path={routes.series} element={<LibraryScreen api={api} kind="shows" onOpen={open} />} />
           <Route path="/series/:seriesId" element={<SeriesRoute api={api} onOpenSeason={open} onEdit={metadataEditingAvailable ? openMetadataEditor : undefined} />} />
           <Route path="/series/:seriesId/seasons/:seasonId" element={<SeasonRoute api={api} progress={playback.progressById} onPlayEpisode={playback.openSeasonEpisode} onEdit={metadataEditingAvailable ? openMetadataEditor : undefined} />} />
-          <Route path="/episodes/:episodeId" element={<DetailRoute api={api} onPlay={openPlayer} onPlayFromStart={openPlayerFromStart} progressById={playback.progressById} parameter="episodeId" onEdit={metadataEditingAvailable ? openMetadataEditor : undefined} />} />
+          <Route path="/episodes/:episodeId" element={<DetailRoute api={api} onPlay={openPlayer} onPlayFromStart={openPlayerFromStart} progressById={playback.progressById} parameter="episodeId" onEdit={metadataEditingAvailable ? openMetadataEditor : undefined} onMediaProfile={preparePlaybackProfile} />} />
           <Route path={routes.music} element={<Navigate to={routes.musicArtists} replace />} />
           <Route path={routes.musicArtists} element={<MusicScreen api={api} section="artists" onOpen={open} onPlayNow={music.playNow} onAddToPlaylist={music.addToPlaylist} onPlayNext={music.playNext} onPlayLater={music.playLater} onShuffle={music.shuffle} />} />
           <Route path={routes.musicAlbums} element={<MusicScreen api={api} section="albums" onOpen={open} onPlayNow={music.playNow} onAddToPlaylist={music.addToPlaylist} onPlayNext={music.playNext} onPlayLater={music.playLater} onShuffle={music.shuffle} />} />
@@ -377,9 +383,9 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
           <Route path={routes.musicPlaylist} element={<MusicPlaylistScreen api={api} entries={music.playlistEntries} onPlay={(index) => music.playPlaylist(false, index)} onShuffle={() => music.playPlaylist(true)} onRemove={music.removePlaylistEntry} onMove={music.movePlaylistEntry} onClear={music.clearPlaylist} />} />
           <Route path="/music/artists/:artistId" element={<ArtistRoute api={api} onOpenAlbum={open} onAddToPlaylist={music.addToPlaylist} onPlayNext={music.playNext} onPlayLater={music.playLater} onShuffle={music.shuffle} onEdit={metadataEditingAvailable ? openMetadataEditor : undefined} />} />
           <Route path="/music/albums/:albumId" element={<AlbumRoute api={api} onPlay={playback.openAlbumTrack} onPlayAll={music.playAlbumAll} onOpenTrack={open} onAddToPlaylist={music.addToPlaylist} onPlayNext={music.playNext} onPlayLater={music.playLater} onShuffle={music.shuffle} onEdit={metadataEditingAvailable ? openMetadataEditor : undefined} />} />
-          <Route path="/music/tracks/:trackId" element={<DetailRoute api={api} onPlay={openPlayer} onPlayFromStart={openPlayerFromStart} progressById={playback.progressById} parameter="trackId" onEdit={metadataEditingAvailable ? openMetadataEditor : undefined} />} />
+          <Route path="/music/tracks/:trackId" element={<DetailRoute api={api} onPlay={openPlayer} onPlayFromStart={openPlayerFromStart} progressById={playback.progressById} parameter="trackId" onEdit={metadataEditingAvailable ? openMetadataEditor : undefined} onMediaProfile={preparePlaybackProfile} />} />
           <Route path="/play/:itemId" element={<div className="player-route-placeholder" aria-hidden="true" />} />
-          <Route path="/items/:itemId" element={<DetailRoute api={api} onPlay={openPlayer} onPlayFromStart={openPlayerFromStart} progressById={playback.progressById} parameter="itemId" onEdit={metadataEditingAvailable ? openMetadataEditor : undefined} />} />
+          <Route path="/items/:itemId" element={<DetailRoute api={api} onPlay={openPlayer} onPlayFromStart={openPlayerFromStart} progressById={playback.progressById} parameter="itemId" onEdit={metadataEditingAvailable ? openMetadataEditor : undefined} onMediaProfile={preparePlaybackProfile} />} />
           <Route path="/items/:itemId/edit" element={metadataEditingAvailable ? <MetadataEditorRoute api={catalogueApi} /> : <Navigate to={routes.home} replace />} />
           <Route path={routes.search} element={<SearchScreen api={api} onOpen={open} />} />
           <Route path={routes.ingest} element={<IngestScreen api={acquisitionApi} />} />

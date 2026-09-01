@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { PlaybackSourceError, type Player, type PlaybackFailureListener, type PlaybackListener } from '../platform/Platform';
+import { PlaybackSourceError, type Player, type PlaybackDegradationListener, type PlaybackFailureListener, type PlaybackListener } from '../platform/Platform';
 import type { MediaSummary, PlaybackCapabilities, PlaybackEvent, PlaybackSource, PlaybackTimeRange } from '../types';
 import type { PlaybackResolver, PlaybackSession, PlaybackUpdate } from './PlaybackResolver';
 import { equivalentDirectSources, generationLocalPosition, PlaybackCoordinator, mergePlaybackUpdate } from './PlaybackCoordinator';
@@ -14,6 +14,7 @@ function deferred<T>() {
 class FakePlayer implements Player {
   listener?: PlaybackListener;
   failureListener?: PlaybackFailureListener;
+  degradationListener?: PlaybackDegradationListener;
   playCalls: Array<{ source: PlaybackSource; positionMs: number; startPaused: boolean }> = [];
   seekCalls: number[] = [];
   pauseCalls = 0;
@@ -60,8 +61,13 @@ class FakePlayer implements Player {
     this.failureListener = listener;
     return () => { if (this.failureListener === listener) this.failureListener = undefined; };
   }
+  subscribeDegradation(listener: PlaybackDegradationListener): () => void {
+    this.degradationListener = listener;
+    return () => { if (this.degradationListener === listener) this.degradationListener = undefined; };
+  }
   emit(event: PlaybackEvent): void { this.listener?.(event); }
   fail(error: Error): void { this.failureListener?.(error); }
+  degrade(error: Error): void { this.degradationListener?.(error); }
 }
 
 function media(): MediaSummary {
@@ -381,7 +387,7 @@ describe('generationLocalPosition', () => {
   });
 });
 
-describe('Direct Play standby preparation', () => {
+describe('Evidence-triggered Direct Play recovery preparation', () => {
   it('accepts only byte-compatible immutable Direct Play sources', () => {
     const primary = session({ sessionId: 'a', mediaId: 'macha:one' });
     const matching = session({ sessionId: 'b', mediaId: 'macha:one', source: { ...primary.source, url: 'http://b/direct' } });
@@ -391,7 +397,7 @@ describe('Direct Play standby preparation', () => {
     expect(equivalentDirectSources(primary, { ...matching, source: { ...matching.source, sizeBytes: 99 } })).toBe(false);
   });
 
-  it('does not delay first playback while preparing and owns alternate teardown', async () => {
+  it('creates no standby until degradation evidence and owns the temporary alternate teardown', async () => {
     const player = new FakePlayer();
     const primary = session({ sessionId: 'primary', mediaId: 'macha:one' });
     const alternate = session({
@@ -408,15 +414,44 @@ describe('Direct Play standby preparation', () => {
 
     await coordinator.start();
     expect(player.playCalls).toHaveLength(1);
-    expect(player.directAlternatives).toHaveLength(0);
+    expect(api.prepareAlternate).not.toHaveBeenCalled();
+
+    player.degrade(new PlaybackSourceError('read-ahead TCP failed', 'stream'));
+    await vi.waitFor(() => expect(api.prepareAlternate).toHaveBeenCalledTimes(1));
 
     pending.resolve(alternate);
-    await vi.waitFor(() => expect(player.directAlternatives).toHaveLength(1));
+    await vi.waitFor(() => expect(api.prepareAlternate).toHaveBeenCalledTimes(1));
+    expect(player.directAlternatives).toHaveLength(0);
     expect(player.playCalls).toHaveLength(1);
 
     await coordinator.close();
     expect(api.stop).toHaveBeenCalledWith('primary', {});
     expect(api.stop).toHaveBeenCalledWith('alternate', {});
+  });
+
+  it('expires an evidence-triggered alternate after thirty seconds when the primary continues', async () => {
+    vi.useFakeTimers();
+    try {
+      const player = new FakePlayer();
+      const primary = session({ sessionId: 'primary', mediaId: 'macha:one' });
+      const alternate = session({ sessionId: 'alternate', mediaId: 'macha:one', source: { ...primary.source, url: 'http://b/direct' } });
+      primary.source.mediaId = 'macha:one';
+      const api = resolver(primary) as ReturnType<typeof resolver> & { prepareAlternate: ReturnType<typeof vi.fn> };
+      api.prepareAlternate = vi.fn(async () => alternate);
+      const coordinator = new PlaybackCoordinator({ media: media(), player, resolver: api, capabilities: async () => capabilities(), initialPositionMs: 0 });
+      await coordinator.start();
+
+      player.degrade(new PlaybackSourceError('read-ahead TCP failed', 'stream'));
+      await flush();
+      await flush();
+      expect(api.stop).not.toHaveBeenCalledWith('alternate');
+
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(api.stop).toHaveBeenCalledWith('alternate');
+      await coordinator.close();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
@@ -472,6 +507,14 @@ describe('PlaybackCoordinator player failures', () => {
     player.fail(new Error('node A stream failed'));
 
     await vi.waitFor(() => expect(player.playCalls.at(-1)?.source.url).toBe('http://b/replacement.m3u8'));
+    player.emit({
+      positionMs: 0,
+      durationMs: 600_000,
+      paused: false,
+      ended: false,
+      bufferedRangesMs: [{ startMs: 0, endMs: 10_000 }],
+    });
+    await vi.waitFor(() => expect(api.stop).toHaveBeenCalledWith('s1'));
     expect(api.failover).toHaveBeenCalledWith(
       initial,
       expect.objectContaining({ id: 'tmdb:movie:1' }),
@@ -480,9 +523,44 @@ describe('PlaybackCoordinator player failures', () => {
       expect.objectContaining({ mode: 'remux', maxHeight: 720, subtitleLanguage: 'eng' }),
       undefined,
     );
-    expect(api.stop).toHaveBeenCalledWith('s1');
     expect(coordinator.getSnapshot().fatalError).toBeUndefined();
     expect(coordinator.getSnapshot().session?.endpoint?.id).toBe('node-b');
+  });
+
+  it('backs off cleanup of the old session only after the replacement is streaming', async () => {
+    vi.useFakeTimers();
+    try {
+      const player = new FakePlayer();
+      const initial = session({ endpoint: { id: 'node-a', baseUrl: 'http://a' } });
+      const replacement = session({
+        sessionId: 's2', endpoint: { id: 'node-b', baseUrl: 'http://b' },
+        source: { ...initial.source, url: 'http://b/replacement.mp4' },
+      });
+      const api = resolver(initial) as ReturnType<typeof resolver> & { failover: ReturnType<typeof vi.fn> };
+      api.failover = vi.fn(async () => replacement);
+      api.stop
+        .mockRejectedValueOnce(new TypeError('old node unreachable'))
+        .mockRejectedValueOnce(new TypeError('old node still unreachable'))
+        .mockResolvedValue(undefined);
+      const coordinator = new PlaybackCoordinator({ media: media(), player, resolver: api, capabilities: async () => capabilities(), initialPositionMs: 0 });
+      await coordinator.start();
+
+      player.fail(new PlaybackSourceError('primary stream failed', 'stream'));
+      await flush();
+      await flush();
+      expect(api.stop).not.toHaveBeenCalled();
+      player.emit({ positionMs: 0, durationMs: 600_000, paused: false, ended: false, bufferedRangesMs: [{ startMs: 0, endMs: 5_000 }] });
+      await flush();
+      expect(api.stop).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(api.stop).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(api.stop).toHaveBeenCalledTimes(3);
+      await coordinator.close();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('promotes a preflighted transformed generation without negotiating another session', async () => {
@@ -503,8 +581,45 @@ describe('PlaybackCoordinator player failures', () => {
     api.failover = vi.fn(async (_failed, _media, _capabilities, _seek, _preferences, prepared) => prepared);
     const coordinator = new PlaybackCoordinator({ media: media(), player, resolver: api, capabilities: async () => capabilities(), initialPositionMs: 0 });
     await coordinator.start();
+    expect(api.prepareAlternate).not.toHaveBeenCalled();
+    player.degrade(new PlaybackSourceError('primary HLS network degraded', 'stream'));
     await vi.waitFor(() => expect(player.preflightCalls).toEqual([alternate.source]));
 
+    player.fail(new PlaybackSourceError('primary HLS network exhausted', 'stream'));
+
+    await vi.waitFor(() => expect(player.playCalls.at(-1)?.source.url).toBe('http://b/standby.m3u8'));
+    expect(api.failover).toHaveBeenCalledWith(
+      initial,
+      expect.objectContaining({ id: media().id }),
+      expect.any(Object),
+      0,
+      expect.any(Object),
+      alternate,
+    );
+  });
+
+  it('prepares and promotes transformed standby when an existing player has no preflight hook', async () => {
+    const player = new FakePlayer();
+    (player as Player).preflightSource = undefined;
+    const initial = session({
+      mode: 'remux', endpoint: { id: 'node-a', baseUrl: 'http://a' },
+      source: { ...session().source, mode: 'remux', url: 'http://a/primary.m3u8' },
+    });
+    const alternate = session({
+      sessionId: 'standby', mode: 'remux', endpoint: { id: 'node-b', baseUrl: 'http://b' },
+      source: { ...session().source, mode: 'remux', url: 'http://b/standby.m3u8' },
+    });
+    const api = resolver(initial) as ReturnType<typeof resolver> & {
+      prepareAlternate: ReturnType<typeof vi.fn>;
+      failover: ReturnType<typeof vi.fn>;
+    };
+    api.prepareAlternate = vi.fn(async () => alternate);
+    api.failover = vi.fn(async (_failed, _media, _capabilities, _seek, _preferences, prepared) => prepared);
+    const coordinator = new PlaybackCoordinator({ media: media(), player, resolver: api, capabilities: async () => capabilities(), initialPositionMs: 0 });
+
+    await coordinator.start();
+    player.degrade(new PlaybackSourceError('primary HLS network degraded', 'stream'));
+    await vi.waitFor(() => expect(api.prepareAlternate).toHaveBeenCalledTimes(1));
     player.fail(new PlaybackSourceError('primary HLS network exhausted', 'stream'));
 
     await vi.waitFor(() => expect(player.playCalls.at(-1)?.source.url).toBe('http://b/standby.m3u8'));
@@ -534,6 +649,7 @@ describe('PlaybackCoordinator player failures', () => {
     const coordinator = new PlaybackCoordinator({ media: media(), player, resolver: api, capabilities: async () => capabilities(), initialPositionMs: 0 });
 
     await coordinator.start();
+    player.degrade(new PlaybackSourceError('primary HLS network degraded', 'stream'));
     await vi.waitFor(() => expect(api.stop).toHaveBeenCalledWith('standby'));
     await coordinator.close();
   });

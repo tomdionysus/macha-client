@@ -433,6 +433,26 @@ describe('Direct Play read-ahead Service Worker', () => {
     expect(harness.metrics.some((message) => message.metrics?.sourceOrigin === 'https://alternate.test')).toBe(true);
   });
 
+  it('reports a failed speculative range as non-terminal node degradation evidence', async () => {
+    const harness = createHarness(async (_url, options = {}) => {
+      const range = new Headers(options.headers).get('range') ?? '';
+      if (range === 'bytes=0-3') return rangeResponse(0, 4, 16);
+      throw new TypeError('primary TCP stream failed');
+    });
+    harness.configure(16);
+    harness.setMode('playing');
+    releases.push(harness.release);
+
+    await (await harness.request('bytes=0-3', 16)).arrayBuffer();
+    await wait(180);
+
+    expect(harness.metrics).toContainEqual(expect.objectContaining({
+      type: 'macha-direct-read-ahead-source-failed',
+      sourceKey: 'source-key',
+      sourceUrl: 'https://node.test/direct.mp4',
+    }));
+  });
+
   it('serves an open-ended seek from resident read-ahead immediately, then continues with exact demand', async () => {
     const total = 16 * 1024 * 1024;
     const secondRange = `bytes=8388612-${total - 1}`;

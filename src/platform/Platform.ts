@@ -1,7 +1,8 @@
-import type { PlaybackCapabilities, PlaybackEvent, PlaybackSource, PlaybackTimeRange } from '../types';
+import type { MediaTechnicalProfile, PlaybackCapabilities, PlaybackEvent, PlaybackSource, PlaybackTimeRange } from '../types';
 
 export type PlaybackListener = (event: PlaybackEvent) => void;
 export type PlaybackFailureListener = (error: Error) => void;
+export type PlaybackDegradationListener = (error: Error) => void;
 
 export type PlaybackFailureKind = 'stream' | 'media' | 'unsupported' | 'unknown';
 
@@ -33,6 +34,8 @@ export interface Player {
   detach(): void;
   /** Attach a source at a source-generation-local position and request playback. Resolves once dispatched, never when buffering completes. */
   play(source: PlaybackSource, positionMs?: number, startPaused?: boolean): Promise<boolean>;
+  /** Non-blocking, idempotent local setup from advisory or session-derived technical facts. */
+  prepare?(profile: MediaTechnicalProfile): void;
   /** Pause transport and suspend avoidable/speculative source acquisition. */
   pause(): void;
   /** Resume source acquisition as necessary and continue the active generation. */
@@ -57,6 +60,8 @@ export interface Player {
   subscribe(listener: PlaybackListener): () => void;
   /** Subscribe to terminal source/player failures that require generation teardown. */
   subscribeFailure?(listener: PlaybackFailureListener): () => void;
+  /** Early network evidence while the current buffered source may still play. */
+  subscribeDegradation?(listener: PlaybackDegradationListener): () => void;
 }
 
 export interface Platform {

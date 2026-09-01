@@ -6,13 +6,14 @@ export interface AsyncState<T> {
   loading: boolean;
 }
 
-export function useAsync<T>(factory: () => Promise<T>, dependencies: readonly unknown[]): AsyncState<T> {
+export function useAsync<T>(factory: (signal: AbortSignal) => Promise<T>, dependencies: readonly unknown[]): AsyncState<T> {
   const [state, setState] = useState<AsyncState<T>>({ loading: true });
 
   useEffect(() => {
     let active = true;
+    const controller = new AbortController();
     setState({ loading: true });
-    factory()
+    factory(controller.signal)
       .then((value) => active && setState({ value, loading: false }))
       .catch((error: unknown) => {
         if (!active) return;
@@ -20,6 +21,7 @@ export function useAsync<T>(factory: () => Promise<T>, dependencies: readonly un
       });
     return () => {
       active = false;
+      controller.abort(new DOMException('Async consumer was replaced', 'AbortError'));
     };
     // Factory is intentionally controlled by the caller's explicit dependency list.
     // eslint-disable-next-line react-hooks/exhaustive-deps

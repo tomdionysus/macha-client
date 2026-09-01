@@ -1,9 +1,15 @@
 import Hls from 'hls.js';
 import { describe, expect, it } from 'vitest';
 import { ManagedHlsMediaRecoveryBudget } from './ManagedHlsRecovery';
-import { managedHlsErrorAction } from './WebHlsPolicy';
+import { isHlsNetworkDegradation, managedHlsErrorAction } from './WebHlsPolicy';
 
 describe('managed HLS error policy', () => {
+  it('treats even nonfatal network errors as early failover evidence', () => {
+    expect(isHlsNetworkDegradation({ type: Hls.ErrorTypes.NETWORK_ERROR })).toBe(true);
+    expect(isHlsNetworkDegradation({ type: Hls.ErrorTypes.MEDIA_ERROR })).toBe(false);
+    expect(isHlsNetworkDegradation({})).toBe(false);
+  });
+
   it('bounds fatal network restart before exposing source failure for node failover', () => {
     const recovery = new ManagedHlsMediaRecoveryBudget();
     expect(managedHlsErrorAction({ fatal: false }, recovery, 0)).toEqual({ action: 'nonfatal' });

@@ -1,5 +1,5 @@
 import type { EndpointRegistry, MachaEndpoint } from '../cluster/EndpointRegistry';
-import { endpointFailure, retryableEndpointFailure } from '../cluster/endpointFailure';
+import { ClusterEndpointRouter } from '../cluster/endpointRouting';
 import {
   MachaClusterStatusApi,
   type ClusterNodeStatus,
@@ -12,7 +12,12 @@ import {
 export class ClusterStatusRouter implements ClusterStatusApi {
   private readonly apis = new Map<string, MachaClusterStatusApi>();
 
-  constructor(private readonly registry: EndpointRegistry, private readonly bearerToken?: string) {}
+  private readonly router: ClusterEndpointRouter;
+  constructor(routerOrRegistry: ClusterEndpointRouter | EndpointRegistry, private readonly bearerToken?: string) {
+    this.router = routerOrRegistry instanceof ClusterEndpointRouter
+      ? routerOrRegistry
+      : new ClusterEndpointRouter(routerOrRegistry);
+  }
 
   status(): Promise<ClusterStatusSnapshot> {
     return this.read((api) => api.status());
@@ -27,32 +32,11 @@ export class ClusterStatusRouter implements ClusterStatusApi {
   }
 
   private async read<T>(operation: (api: MachaClusterStatusApi) => Promise<T>): Promise<T> {
-    let lastError: unknown;
-    for (const { endpoint } of this.registry.candidates()) {
-      try {
-        const value = await operation(this.api(endpoint));
-        this.registry.recordSuccess(endpoint.id);
-        return value;
-      } catch (error) {
-        if (!retryableEndpointFailure(error)) throw error;
-        this.registry.recordFailure(endpoint.id);
-        lastError = endpointFailure(endpoint.id, endpoint.baseUrl, error);
-      }
-    }
-    throw lastError ?? new Error('No Macha API endpoint is configured.');
+    return this.router.request((endpoint) => operation(this.api(endpoint)));
   }
 
   private async write<T>(operation: (api: MachaClusterStatusApi) => Promise<T>): Promise<T> {
-    const endpoint = this.registry.candidates()[0]?.endpoint;
-    if (!endpoint) throw new Error('No Macha API endpoint is configured.');
-    try {
-      const value = await operation(this.api(endpoint));
-      this.registry.recordSuccess(endpoint.id);
-      return value;
-    } catch (error) {
-      if (retryableEndpointFailure(error)) this.registry.recordFailure(endpoint.id);
-      throw endpointFailure(endpoint.id, endpoint.baseUrl, error);
-    }
+    return this.router.mutation((endpoint) => operation(this.api(endpoint)));
   }
 
   private api(endpoint: MachaEndpoint): MachaClusterStatusApi {

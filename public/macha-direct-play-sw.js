@@ -91,6 +91,8 @@ function getSourceCache(sourceKey, sourceUrl, totalSize, mimeType) {
       lastServedOffset: 0,
       lastDemandAt: now(),
       pendingDemandWaits: 0,
+      sourceFailureNotified: false,
+      prefetchFailureCount: 0,
       generation: config ? config.generation || 0 : 0,
       mode: config ? config.mode || 'bootstrap' : 'bootstrap',
       released: false,
@@ -388,6 +390,19 @@ async function postMetrics(cache, force) {
   for (const client of clients) client.postMessage(payload);
 }
 
+async function postSourceFailure(cache, sourceUrl, error) {
+  if (cache.released || cache.sourceFailureNotified) return;
+  cache.sourceFailureNotified = true;
+  const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+  const payload = {
+    type: 'macha-direct-read-ahead-source-failed',
+    sourceKey: cache.sourceKey,
+    sourceUrl,
+    message: error && error.message ? error.message : 'Direct Play read-ahead source failed',
+  };
+  for (const client of clients) client.postMessage(payload);
+}
+
 function disableReadAhead(cache) {
   const config = sourceConfigs.get(cache.sourceKey);
   if (config) config.rangeUnsupported = true;
@@ -446,6 +461,7 @@ async function pumpPrefetch(cache) {
   cache.metrics.prefetchFetches += 1;
   activeFetchStarted(cache);
   const startedAt = now();
+  let retryDelayMs = 0;
   try {
     const config = sourceConfigs.get(cache.sourceKey);
     if (!config) return;
@@ -477,6 +493,8 @@ async function pumpPrefetch(cache) {
         }
         selected = { sourceUrl, buffer, contentType: response.headers.get('content-type') };
         preferSource(config, cache, sourceUrl);
+        cache.sourceFailureNotified = false;
+        cache.prefetchFailureCount = 0;
         break;
       } catch (error) {
         if (error && error.name === 'AbortError') throw error;
@@ -499,6 +517,9 @@ async function pumpPrefetch(cache) {
       // Every configured source has failed. Speculation still cannot become a
       // viewer failure; active demand will independently retry the bounded set.
       void postMetrics(cache, true);
+      void postSourceFailure(cache, cache.sourceUrl, error);
+      cache.prefetchFailureCount += 1;
+      retryDelayMs = Math.min(30_000, 1_000 * (2 ** Math.min(cache.prefetchFailureCount - 1, 5)));
     }
   } finally {
     if (cache.prefetchController === controller) {
@@ -509,7 +530,15 @@ async function pumpPrefetch(cache) {
   }
 
   if (!cache.released && cache.mode === 'playing' && now() - cache.lastDemandAt >= PREFETCH_QUIET_MS) {
-    void pumpPrefetch(cache);
+    if (retryDelayMs > 0) {
+      clearPrefetchTimer(cache);
+      cache.prefetchTimer = setTimeout(() => {
+        cache.prefetchTimer = undefined;
+        void pumpPrefetch(cache);
+      }, retryDelayMs);
+    } else {
+      void pumpPrefetch(cache);
+    }
   }
 }
 

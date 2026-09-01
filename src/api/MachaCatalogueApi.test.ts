@@ -66,6 +66,17 @@ describe('MachaCatalogueApi', () => {
     ]);
   });
 
+  it('accepts successful not-available-yet profile responses as temporary absence', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ error: 'profile_pending', message: 'not available yet' }, { status: 202, headers: { 'Retry-After': '1' } }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const api = new MachaCatalogueApi('http://node.test');
+
+    await expect(api.mediaProfile('macha:pending-202')).resolves.toBeUndefined();
+    await expect(api.mediaProfile('macha:pending-204')).resolves.toBeUndefined();
+  });
+
   it('rejects a profile whose immutable identity does not match the request', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
       schema_version: 1, media_id: 'macha:other', format: 'mp4', duration_ms: 1, bitrate: 1, streams: [],

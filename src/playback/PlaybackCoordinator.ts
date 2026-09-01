@@ -8,6 +8,7 @@ import type {
   PlaybackStopOptions,
   PlaybackUpdate,
 } from './PlaybackResolver';
+import { technicalProfileFromSession } from './MediaTechnicalProfile';
 
 export interface PlaybackIntent {
   positionMs: number;
@@ -34,6 +35,7 @@ export interface PlaybackCoordinatorOptions {
 }
 
 type Listener = (snapshot: PlaybackCoordinatorSnapshot) => void;
+const ALTERNATE_RECOVERY_WINDOW_MS = 30_000;
 
 interface PendingMutation {
   update: PlaybackUpdate;
@@ -138,6 +140,7 @@ export class PlaybackCoordinator {
   private readonly listeners = new Set<Listener>();
   private readonly unsubscribePlayer: () => void;
   private readonly unsubscribePlayerFailure?: () => void;
+  private readonly unsubscribePlayerDegradation?: () => void;
   private disposed = false;
   private startPromise?: Promise<void>;
   private closePromise?: Promise<void>;
@@ -151,6 +154,8 @@ export class PlaybackCoordinator {
   private failoverPromise?: Promise<void>;
   private readonly alternateSessions = new Map<string, PlaybackSession>();
   private readonly alternatePreparations = new Set<Promise<void>>();
+  private readonly alternateExpiryTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private supersededCleanup?: { oldSessionId: string; newSessionId: string; attempt: number; timer?: ReturnType<typeof setTimeout> };
   private streamOffsetMs = 0;
   /** Latest server-side session state; may be ahead of the source currently visible. */
   private serverSession?: PlaybackSession;
@@ -173,6 +178,7 @@ export class PlaybackCoordinator {
     };
     this.unsubscribePlayer = options.player.subscribe((event) => this.onPlayerEvent(event));
     this.unsubscribePlayerFailure = options.player.subscribeFailure?.((error) => this.fail(error));
+    this.unsubscribePlayerDegradation = options.player.subscribeDegradation?.((error) => this.degrade(error));
   }
 
   subscribe(listener: Listener): () => void {
@@ -256,6 +262,8 @@ export class PlaybackCoordinator {
     this.pendingMutation = undefined;
     this.unsubscribePlayer();
     this.unsubscribePlayerFailure?.();
+    this.unsubscribePlayerDegradation?.();
+    if (this.supersededCleanup?.timer !== undefined) clearTimeout(this.supersededCleanup.timer);
     // Coordinator teardown ends source acquisition immediately, but deliberately
     // leaves DOM-host ownership to PlaybackRuntime/PlayerHost.
     this.options.player.stop();
@@ -280,6 +288,8 @@ export class PlaybackCoordinator {
         });
       }
       this.alternateSessions.clear();
+      for (const timer of this.alternateExpiryTimers.values()) clearTimeout(timer);
+      this.alternateExpiryTimers.clear();
       this.listeners.clear();
     })();
     return this.closePromise;
@@ -492,6 +502,10 @@ export class PlaybackCoordinator {
 
   private activateSession(session: PlaybackSession, desiredAbsoluteMs: number, preparedAbsoluteMs: number): void {
     if (this.disposed) return;
+    // Catalogue profiling may already have prepared the reusable player. The
+    // session supplies the same facts authoritatively and completes that setup
+    // without introducing another awaited step in source activation.
+    this.options.player.prepare?.(technicalProfileFromSession(session));
     const activationRevision = ++this.sourceActivationRevision;
     this.releaseObsoleteAlternates(session.sessionId);
     const localPositionMs = this.activationPosition(session, desiredAbsoluteMs, preparedAbsoluteMs);
@@ -561,14 +575,38 @@ export class PlaybackCoordinator {
       if (this.disposed || activationRevision !== this.sourceActivationRevision) return;
       this.fail(error);
     });
-    this.prepareAlternate(session, activationRevision);
+  }
+
+  private degrade(error: Error): void {
+    if (this.disposed || !isEndpointRetryablePlaybackFailure(error)) return;
+    const session = this.snapshot.session ?? this.serverSession;
+    if (!session || this.alternatePreparations.size > 0 || this.alternateSessions.size > 0) return;
+    this.log.warn('source-degradation-evidence', {
+      sessionId: session.sessionId,
+      endpoint: session.endpoint,
+      error,
+    });
+    this.prepareAlternate(session, this.sourceActivationRevision);
   }
 
   private prepareAlternate(session: PlaybackSession, activationRevision: number): void {
     const prepare = this.options.resolver.prepareAlternate?.bind(this.options.resolver);
-    const register = this.options.player.addDirectSourceAlternative?.bind(this.options.player);
     const preflight = this.options.player.preflightSource?.bind(this.options.player);
-    if (!prepare || (session.mode === 'direct' ? !register : !preflight)) return;
+    if (!prepare) {
+      this.log.info('alternate-preparation-unavailable', { sessionId: session.sessionId });
+      return;
+    }
+
+    // A transport preflight hook improves the quality of a warm standby, but
+    // must never gate creation of that standby. Application-scoped Player
+    // instances can legitimately predate a hot module update, and third-party
+    // platform players need not implement either optional hook. In both cases
+    // the prepared generation remains immediately promotable by player.play().
+    this.log.info('alternate-preparation-start', {
+      sessionId: session.sessionId,
+      mode: session.mode,
+      transportPreflight: session.mode !== 'direct' && Boolean(preflight),
+    });
 
     let preparation!: Promise<void>;
     preparation = (async () => {
@@ -588,15 +626,26 @@ export class PlaybackCoordinator {
           return;
         }
         if (session.mode === 'direct') {
-          if (!equivalentDirectSources(session, alternate) || !register!(session.source, alternate.source)) {
+          if (!equivalentDirectSources(session, alternate)) {
             await this.options.resolver.stop(alternate.sessionId).catch(() => undefined);
             return;
           }
-        } else if (alternate.mediaId !== session.mediaId || alternate.mode !== session.mode || !await preflight!(alternate.source)) {
+        } else if (alternate.mediaId !== session.mediaId
+          || alternate.mode !== session.mode
+          || (preflight ? !await preflight(alternate.source) : false)) {
           await this.options.resolver.stop(alternate.sessionId).catch(() => undefined);
           return;
         }
         this.alternateSessions.set(alternate.sessionId, alternate);
+        const expiry = setTimeout(() => {
+          this.alternateExpiryTimers.delete(alternate!.sessionId);
+          if (!this.alternateSessions.delete(alternate!.sessionId)) return;
+          this.log.info('alternate-recovery-window-expired', { sessionId: alternate!.sessionId });
+          void this.options.resolver.stop(alternate!.sessionId).catch((error) => {
+            this.log.warn('expired-alternate-close-failed', { sessionId: alternate!.sessionId, error });
+          });
+        }, ALTERNATE_RECOVERY_WINDOW_MS);
+        this.alternateExpiryTimers.set(alternate.sessionId, expiry);
         this.log.info('alternate-ready', {
           primarySessionId: session.sessionId,
           alternateSessionId: alternate.sessionId,
@@ -618,6 +667,9 @@ export class PlaybackCoordinator {
     for (const [sessionId] of this.alternateSessions) {
       if (sessionId === nextSessionId) continue;
       this.alternateSessions.delete(sessionId);
+      const timer = this.alternateExpiryTimers.get(sessionId);
+      if (timer !== undefined) clearTimeout(timer);
+      this.alternateExpiryTimers.delete(sessionId);
       void this.options.resolver.stop(sessionId).catch((error) => {
         this.log.warn('obsolete-alternate-close-failed', { sessionId, error });
       });
@@ -641,6 +693,15 @@ export class PlaybackCoordinator {
         endMs: range.endMs + (session?.mode === 'direct' ? 0 : this.streamOffsetMs),
       })),
     };
+
+    const cleanup = this.supersededCleanup;
+    if (cleanup
+      && session?.sessionId === cleanup.newSessionId
+      && !next.paused
+      && !next.seeking
+      && (next.bufferedRangesMs ?? []).some((range) => range.endMs > next.positionMs)) {
+      this.beginSupersededCleanup(cleanup);
+    }
 
     const target = this.snapshot.intent.positionMs;
     if (this.seekIntentActive && !next.seeking && Math.abs(absolutePositionMs - target) <= 1_500) {
@@ -670,6 +731,30 @@ export class PlaybackCoordinator {
     this.failTerminal(fatalError);
   }
 
+  private beginSupersededCleanup(cleanup: NonNullable<PlaybackCoordinator['supersededCleanup']>): void {
+    if (this.supersededCleanup !== cleanup || cleanup.timer !== undefined) return;
+    const attempt = () => {
+      if (this.disposed || this.supersededCleanup !== cleanup) return;
+      cleanup.timer = undefined;
+      void this.options.resolver.stop(cleanup.oldSessionId).then(() => {
+        if (this.supersededCleanup === cleanup) this.supersededCleanup = undefined;
+        this.log.info('superseded-session-closed', { sessionId: cleanup.oldSessionId, attempts: cleanup.attempt + 1 });
+      }).catch((error) => {
+        if (this.disposed || this.supersededCleanup !== cleanup) return;
+        cleanup.attempt += 1;
+        const delayMs = Math.min(30_000, 1_000 * (2 ** Math.min(cleanup.attempt - 1, 5)));
+        this.log.warn('superseded-session-close-retry', {
+          sessionId: cleanup.oldSessionId,
+          attempt: cleanup.attempt + 1,
+          delayMs,
+          error,
+        });
+        cleanup.timer = setTimeout(attempt, delayMs);
+      });
+    };
+    attempt();
+  }
+
   private async recoverFromSourceFailure(failedSession: PlaybackSession, error: Error): Promise<void> {
     const requestedPositionMs = this.snapshot.intent.positionMs;
     const requestedPositionRevision = this.positionRevision;
@@ -681,12 +766,8 @@ export class PlaybackCoordinator {
     });
     this.patchSnapshot({ preparingSource: true, notice: undefined });
     try {
-      if (failedSession.mode !== 'direct') {
-        await Promise.all([...this.alternatePreparations].map((preparation) => preparation.catch(() => undefined)));
-      }
-      const preparedAlternate = failedSession.mode === 'direct'
-        ? undefined
-        : [...this.alternateSessions.values()].find((alternate) => (
+      await Promise.all([...this.alternatePreparations].map((preparation) => preparation.catch(() => undefined)));
+      const preparedAlternate = [...this.alternateSessions.values()].find((alternate) => (
           alternate.mediaId === failedSession.mediaId
           && alternate.mode === failedSession.mode
           && alternate.endpoint?.id !== failedSession.endpoint?.id
@@ -715,6 +796,9 @@ export class PlaybackCoordinator {
       }
       this.serverSession = next;
       this.alternateSessions.delete(next.sessionId);
+      const alternateExpiry = this.alternateExpiryTimers.get(next.sessionId);
+      if (alternateExpiry !== undefined) clearTimeout(alternateExpiry);
+      this.alternateExpiryTimers.delete(next.sessionId);
       const currentDesired = this.snapshot.intent.positionMs;
       const userMovedDuringRequest = requestedPositionRevision !== this.positionRevision;
       if (userMovedDuringRequest && this.activationPosition(next, currentDesired, requestedPositionMs) === undefined) {
@@ -725,9 +809,11 @@ export class PlaybackCoordinator {
       } else {
         this.activateSession(next, currentDesired, requestedPositionMs);
       }
-      void this.options.resolver.stop(failedSession.sessionId).catch((stopError) => {
-        this.log.warn('failed-generation-stop-failed', { sessionId: failedSession.sessionId, error: stopError });
-      });
+      this.supersededCleanup = {
+        oldSessionId: failedSession.sessionId,
+        newSessionId: next.sessionId,
+        attempt: 0,
+      };
       this.log.info('source-failover-ready', {
         oldSessionId: failedSession.sessionId,
         newSessionId: next.sessionId,

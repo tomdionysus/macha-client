@@ -57,14 +57,26 @@ Supported catalogue kinds are `movie`, `show`, `season`, `episode`, `artist`, `a
 
 ## Immutable media profiles
 
-Server support for `GET /api/v1/catalogue/media/{media_id}/profile` is implemented
-but was not yet deployed to the live nodes on 2026-08-31. The client requests it
+Server support for `GET /api/v1/catalogue/media/{media_id}/profile` is deployed
+on the tested 0.22 nodes as of 2026-09-01. The client requests it
 only for immutable `macha:` identities. A positive schema-v1 response is checked
 against the requested identity, coalesced, and cached by that identity; mutable
-paths are never profile keys. `404 profile_not_available` and generic route 404s
+paths are never profile keys. `202 profile_pending`, `404 profile_not_available` and generic route 404s
 from older nodes are temporary negatives and are not cached. Detail screens add
 the resulting duration, dimensions, codecs, and bitrate asynchronously, so
 profile rollout cannot delay or disable existing playback-session negotiation.
+
+Immutable profile state is not a playback-admission dependency. The client never
+performs a profile preflight: it begins ordinary session negotiation regardless
+of whether an independent profile GET returns `200`, `202 profile_pending`, a
+temporary `404`, or remains in flight. Profile completion may update detail UI
+later. Session creation must proceed through the server's normal media-engine
+planning fallback and must not return `425 profile_pending`; asynchronous
+profile-pending responses belong only to the optional profile GET (currently
+`202 Accepted`). As mixed-version protection, the cluster client
+treats such a non-conforming session response as an endpoint failure and may
+continue on another node with the same logical `Idempotency-Key`; it never polls
+the bad response in the viewer path.
 
 ## Hierarchy
 

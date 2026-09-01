@@ -1,6 +1,6 @@
 import { createClientLogger } from '../diagnostics/ClientLog';
 import type { Platform, Player } from '../platform/Platform';
-import type { MediaSummary } from '../types';
+import type { MediaSummary, MediaTechnicalProfile, PlaybackCapabilities } from '../types';
 import {
   PlaybackCoordinator,
   type PlaybackCoordinatorSnapshot,
@@ -65,6 +65,7 @@ export class PlaybackRuntime {
   private teardownBarrier: Promise<void> = Promise.resolve();
   private disposed = false;
   private failureCleanupGeneration?: number;
+  private capabilitiesPromise?: Promise<PlaybackCapabilities>;
 
   constructor(
     private readonly platform: Platform,
@@ -133,6 +134,18 @@ export class PlaybackRuntime {
     this.player.detachHost?.();
   }
 
+  /** Begin reusable local work from an advisory immutable profile. */
+  prepare(profile: MediaTechnicalProfile): void {
+    if (this.disposed) return;
+    this.player.prepare?.(profile);
+    // Capability detection is independent of the selected media. Starting it
+    // here removes it from the Play critical path; all later generations share
+    // this result.
+    void this.capabilities().catch((error) => {
+      this.log.warn('capability-preparation-failed', { error });
+    });
+  }
+
   play(request: PlaybackRuntimeRequest, initialPreferences?: PlaybackPreferencesUpdate): Promise<void> {
     if (this.disposed) return Promise.resolve();
     const generation = ++this.generation;
@@ -170,7 +183,7 @@ export class PlaybackRuntime {
         media: request.media,
         player: this.player,
         resolver: this.resolver,
-        capabilities: () => this.platform.capabilities(),
+        capabilities: () => this.capabilities(),
         initialPositionMs: Math.max(0, request.startPositionMs),
         initialPreferences: initialPreferences ? { ...initialPreferences } : undefined,
       });
@@ -330,6 +343,18 @@ export class PlaybackRuntime {
       this.log.error('transition-failed', error);
     });
     return run;
+  }
+
+  private capabilities(): Promise<PlaybackCapabilities> {
+    if (!this.capabilitiesPromise) {
+      const pending = this.platform.capabilities();
+      const cached = pending.catch((error) => {
+        if (this.capabilitiesPromise === cached) this.capabilitiesPromise = undefined;
+        throw error;
+      });
+      this.capabilitiesPromise = cached;
+    }
+    return this.capabilitiesPromise;
   }
 
   private isCurrent(generation: number): boolean {

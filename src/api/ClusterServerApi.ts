@@ -1,34 +1,26 @@
 import type { EndpointRegistry, MachaEndpoint } from '../cluster/EndpointRegistry';
-import { endpointFailure, retryableEndpointFailure } from '../cluster/endpointFailure';
 import { MachaServerApi, type ServerApi, type ServerStatus } from './MachaServerApi';
+import { ClusterEndpointRouter } from '../cluster/endpointRouting';
 
 /** Read-only playback capability status across all suitable API endpoints. */
 export class ClusterServerApi implements ServerApi {
   private readonly apis = new Map<string, MachaServerApi>();
+  private readonly router: ClusterEndpointRouter;
 
-  constructor(private readonly registry: EndpointRegistry, private readonly bearerToken?: string) {}
+  constructor(routerOrRegistry: ClusterEndpointRouter | EndpointRegistry, private readonly bearerToken?: string) {
+    this.router = routerOrRegistry instanceof ClusterEndpointRouter
+      ? routerOrRegistry
+      : new ClusterEndpointRouter(routerOrRegistry);
+  }
 
   async status(): Promise<ServerStatus> {
-    let lastError: unknown;
-    let lastUnavailable: ServerStatus | undefined;
-    for (const { endpoint } of this.registry.candidates()) {
-      try {
-        const status = await this.api(endpoint).status();
-        if (!status.playbackAvailable && [429, 502, 503, 504].includes(status.httpStatus)) {
-          this.registry.recordFailure(endpoint.id);
-          lastUnavailable = status;
-          continue;
-        }
-        this.registry.recordSuccess(endpoint.id);
-        return status;
-      } catch (error) {
-        if (!retryableEndpointFailure(error)) throw error;
-        this.registry.recordFailure(endpoint.id);
-        lastError = endpointFailure(endpoint.id, endpoint.baseUrl, error);
+    return this.router.request(async (endpoint) => {
+      const status = await this.api(endpoint).status();
+      if (!status.playbackAvailable && [429, 502, 503, 504].includes(status.httpStatus)) {
+        throw new TypeError(`Macha playback API returned ${status.httpStatus}`);
       }
-    }
-    if (lastUnavailable) return lastUnavailable;
-    throw lastError ?? new Error('No Macha API endpoint is configured.');
+      return status;
+    });
   }
 
   private api(endpoint: MachaEndpoint): MachaServerApi {

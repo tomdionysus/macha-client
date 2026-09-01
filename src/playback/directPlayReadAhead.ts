@@ -33,12 +33,20 @@ interface ReadAheadMetricsMessage {
   metrics: DirectPlayReadAheadMetrics;
 }
 
+interface ReadAheadFailureMessage {
+  type: 'macha-direct-read-ahead-source-failed';
+  sourceKey: string;
+  sourceUrl?: string;
+  message?: string;
+}
+
 const log = createClientLogger('playback.readahead');
 const WORKER_FILE = 'macha-direct-play-sw.js';
 const PROXY_PATH = '__macha_direct_cache__';
 const metricsBySource = new Map<string, DirectPlayReadAheadMetrics>();
 const keyBySource = new Map<string, string>();
 const sourceByKey = new Map<string, string>();
+const failureListenersBySource = new Map<string, Set<(error: Error) => void>>();
 let registrationPromise: Promise<ServiceWorkerRegistration | undefined> | undefined;
 let messageListenerInstalled = false;
 
@@ -97,7 +105,16 @@ function installMessageListener(): void {
   if (messageListenerInstalled || !serviceWorkerAvailable()) return;
   messageListenerInstalled = true;
   navigator.serviceWorker.addEventListener('message', (event: MessageEvent<unknown>) => {
-    const message = event.data as Partial<ReadAheadMetricsMessage> | undefined;
+    const message = event.data as Partial<ReadAheadMetricsMessage | ReadAheadFailureMessage> | undefined;
+    if (message?.type === 'macha-direct-read-ahead-source-failed' && typeof message.sourceKey === 'string') {
+      const failure = message as Partial<ReadAheadFailureMessage>;
+      const sourceUrl = sourceByKey.get(message.sourceKey);
+      if (!sourceUrl) return;
+      const error = new Error(failure.message || `Direct Play read-ahead failed for ${failure.sourceUrl || sourceUrl}`);
+      log.warn('source-degraded', { sourceUrl, failedSourceUrl: failure.sourceUrl, error });
+      for (const listener of failureListenersBySource.get(sourceUrl) ?? []) listener(error);
+      return;
+    }
     if (message?.type !== 'macha-direct-read-ahead-metrics'
         || typeof message.sourceKey !== 'string'
         || !validMetrics(message.metrics)) return;
@@ -106,6 +123,20 @@ function installMessageListener(): void {
     metricsBySource.set(sourceUrl, message.metrics);
     log.debug('metrics', { sourceUrl, ...message.metrics });
   });
+}
+
+export function subscribeDirectPlayReadAheadFailure(sourceUrl: string, listener: (error: Error) => void): () => void {
+  installMessageListener();
+  let listeners = failureListenersBySource.get(sourceUrl);
+  if (!listeners) {
+    listeners = new Set();
+    failureListenersBySource.set(sourceUrl, listeners);
+  }
+  listeners.add(listener);
+  return () => {
+    listeners?.delete(listener);
+    if (listeners?.size === 0) failureListenersBySource.delete(sourceUrl);
+  };
 }
 
 
@@ -246,6 +277,7 @@ export function setDirectPlayReadAheadMode(sourceUrl: string | undefined, mode: 
 export function releaseDirectPlayReadAhead(sourceUrl: string | undefined): void {
   if (!sourceUrl) return;
   metricsBySource.delete(sourceUrl);
+  failureListenersBySource.delete(sourceUrl);
   const sourceKey = keyBySource.get(sourceUrl);
   if (!sourceKey) return;
   keyBySource.delete(sourceUrl);

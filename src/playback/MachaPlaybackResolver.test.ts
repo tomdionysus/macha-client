@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { MachaCatalogueApi } from '../api/MachaCatalogueApi';
 import { MachaPlaybackResolver } from './MachaPlaybackResolver';
 import type { MediaSummary, PlaybackCapabilities } from '../types';
 
@@ -111,6 +112,67 @@ describe('MachaPlaybackResolver', () => {
     expect(session.options.modes).toEqual(['direct', 'remux', 'transcode']);
     expect(session.options.qualityHeights).toEqual([720, 480, 360]);
     expect(session.options.audioStreams[0]).toEqual(expect.objectContaining({ index: 1, language: 'eng', channels: 2, bitrate: 192_000 }));
+  });
+
+  it('treats a non-conforming session profile_pending response as an endpoint failure without polling', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(new Response(
+      JSON.stringify({ error: 'profile_pending', message: 'media profile is not available yet' }),
+      { status: 425, headers: { 'Content-Type': 'application/json', 'Retry-After': '1' } },
+    ));
+    vi.stubGlobal('fetch', fetchMock);
+    const api = new MachaPlaybackResolver('http://node.test');
+
+    await expect(api.resolve(media, capabilities)).rejects.toMatchObject({
+      status: 425,
+      code: 'profile_pending',
+      retryAfterMs: 1_000,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('starts normal session negotiation while an advisory profile request is still pending', async () => {
+    let profileRequested = false;
+    const fetchMock = vi.fn().mockImplementation((url: string) => {
+      if (url.includes('/catalogue/media/')) {
+        profileRequested = true;
+        return new Promise<Response>(() => undefined);
+      }
+      if (url.endsWith('/playback/sessions')) return Promise.resolve(jsonResponse(sessionResponse(), 201));
+      return Promise.reject(new Error(`Unexpected request: ${url}`));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const catalogue = new MachaCatalogueApi('http://node.test');
+    const playback = new MachaPlaybackResolver('http://node.test');
+
+    void catalogue.mediaProfile('macha:immutable');
+    expect(profileRequested).toBe(true);
+    await expect(playback.resolve(media, capabilities)).resolves.toMatchObject({ sessionId: 'session-1' });
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      'http://node.test/api/v1/catalogue/media/macha%3Aimmutable/profile',
+      'http://node.test/api/v1/playback/sessions',
+    ]);
+  });
+
+  it.each([
+    ['pending', new Response(JSON.stringify({ error: 'profile_pending', message: 'not available yet' }), {
+      status: 202,
+      headers: { 'Content-Type': 'application/json', 'Retry-After': '1' },
+    })],
+    ['missing', new Response(JSON.stringify({ error: 'profile_not_available', message: 'not available yet' }), {
+      status: 404,
+      headers: { 'Content-Type': 'application/json' },
+    })],
+  ])('keeps an advisory %s profile out of the playback outcome', async (_state, profileResponse) => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(profileResponse)
+      .mockResolvedValueOnce(jsonResponse(sessionResponse(), 201));
+    vi.stubGlobal('fetch', fetchMock);
+    const catalogue = new MachaCatalogueApi('http://node.test');
+    const playback = new MachaPlaybackResolver('http://node.test');
+
+    await expect(catalogue.mediaProfile('macha:immutable')).resolves.toBeUndefined();
+    await expect(playback.resolve(media, capabilities)).resolves.toMatchObject({ sessionId: 'session-1' });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
 

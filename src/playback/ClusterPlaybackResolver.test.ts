@@ -37,8 +37,31 @@ describe('ClusterPlaybackResolver', () => {
       'http://a/api/v1/playback/sessions',
       'http://b/api/v1/playback/sessions',
     ]);
+    const attemptHeaders = fetchMock.mock.calls.map(([, init]) => new Headers((init as RequestInit).headers));
+    expect(attemptHeaders[0]?.get('Idempotency-Key')).toBeTruthy();
+    expect(attemptHeaders[1]?.get('Idempotency-Key')).toBe(attemptHeaders[0]?.get('Idempotency-Key'));
     const secondBody = JSON.parse(String((fetchMock.mock.calls[1]?.[1] as RequestInit).body));
     expect(secondBody).toEqual(expect.objectContaining({ seek_ms: 12_000, preferences: expect.objectContaining({ audio_language: 'eng' }) }));
+  });
+
+  it('recovers on another node when a non-conforming server gates session admission on profile_pending', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify({ error: 'profile_pending', message: 'media profile is not available yet' }),
+        { status: 425, headers: { 'Content-Type': 'application/json', 'Retry-After': '5' } },
+      ))
+      .mockResolvedValueOnce(new Response(JSON.stringify(wireSession('session-b')), { status: 201, headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+    const resolver = new ClusterPlaybackResolver(new EndpointRegistry(bootstrapEndpoints(['http://a', 'http://b'])));
+
+    await expect(resolver.resolve(media, capabilities)).resolves.toMatchObject({
+      endpoint: { id: 'http://b' },
+      sessionId: expect.stringContaining('session-b'),
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const headers = fetchMock.mock.calls.map(([, init]) => new Headers((init as RequestInit).headers));
+    expect(headers[0]?.get('Idempotency-Key')).toBeTruthy();
+    expect(headers[1]?.get('Idempotency-Key')).toBe(headers[0]?.get('Idempotency-Key'));
   });
 
   it('routes updates and teardown to the generation endpoint', async () => {
@@ -89,6 +112,31 @@ describe('ClusterPlaybackResolver', () => {
     expect(registry.candidates()[0]?.endpoint.id).toBe('http://a');
     const body = JSON.parse(String((fetchMock.mock.calls[1]?.[1] as RequestInit).body));
     expect(body.preferences.mode).toBe('direct');
+  });
+
+  it('abandons a hung standby POST and attempts the next known endpoint', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify(wireSession('session-a')), { status: 201, headers: { 'Content-Type': 'application/json' } }))
+      .mockImplementationOnce((_url: string, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(init.signal?.reason), { once: true });
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(wireSession('session-c')), { status: 201, headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+    const resolver = new ClusterPlaybackResolver(
+      new EndpointRegistry(bootstrapEndpoints(['http://a', 'http://b', 'http://c'])),
+      undefined,
+      5,
+    );
+    const primary = await resolver.resolve(media, capabilities);
+
+    const alternate = await resolver.prepareAlternate(primary, media, capabilities, 0, { mode: 'direct' });
+
+    expect(alternate?.endpoint?.id).toBe('http://c');
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      'http://a/api/v1/playback/sessions',
+      'http://b/api/v1/playback/sessions',
+      'http://c/api/v1/playback/sessions',
+    ]);
   });
 
   it('promotes a prepared transformed generation without creating a duplicate lease', async () => {
