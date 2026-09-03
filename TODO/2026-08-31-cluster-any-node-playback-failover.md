@@ -121,7 +121,7 @@ active read endpoint.
 
 - [x] Route safe catalogue/status/artwork reads through the endpoint registry
   with bounded alternate retry and request coalescing.
-- [ ] Preserve content-addressed artwork cache usefulness across endpoint changes.
+- [x] Preserve content-addressed artwork cache usefulness across endpoint changes.
 - [ ] Do not silently replay management, ingest or other mutating requests until
   the server provides an idempotency contract. Report their originating endpoint
   and failure accurately.
@@ -232,6 +232,17 @@ may claim viewer-transparent handoff only when none is observable/measurable
 under the defined test.
 
 ## Phase 6: current-server demonstration and UAT
+
+- [x] Treat every node-local server `5xx`, including media-open `500`, as a
+  retryable endpoint result for safe reads and idempotent playback admission.
+  Exhaust the remaining known nodes with one stable request body and
+  idempotency key; unsafe mutations remain single-attempt.
+- [ ] Server/data availability: during the 2026-09-01 node-50 shutdown UAT,
+  node 51 received the alternate session POST but returned `open media:
+  Input/output error` because the requested extent was unavailable. Ensure at
+  least one surviving node can read every extent required for advertised media,
+  or session failover cannot produce an alternate stream regardless of client
+  routing.
 
 - [ ] Record rolling API latency independently from reachability. Consider
   pre-emptively moving client API authority when another healthy node remains

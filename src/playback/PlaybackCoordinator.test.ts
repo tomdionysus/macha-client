@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { PlaybackSourceError, type Player, type PlaybackDegradationListener, type PlaybackFailureListener, type PlaybackListener } from '../platform/Platform';
 import type { MediaSummary, PlaybackCapabilities, PlaybackEvent, PlaybackSource, PlaybackTimeRange } from '../types';
 import type { PlaybackResolver, PlaybackSession, PlaybackUpdate } from './PlaybackResolver';
-import { equivalentDirectSources, generationLocalPosition, PlaybackCoordinator, mergePlaybackUpdate } from './PlaybackCoordinator';
+import { equivalentDirectSources, generationLocalPosition, isPrematurePlaybackEnd, PlaybackCoordinator, mergePlaybackUpdate } from './PlaybackCoordinator';
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -100,11 +100,11 @@ function session(overrides: Partial<PlaybackSession> = {}): PlaybackSession {
   };
 }
 
-function resolver(initial: PlaybackSession, updateImpl?: (update: PlaybackUpdate) => Promise<PlaybackSession>): PlaybackResolver & { resolve: ReturnType<typeof vi.fn>; update: ReturnType<typeof vi.fn>; stop: ReturnType<typeof vi.fn> } {
+function resolver(initial: PlaybackSession, updateImpl?: (update: PlaybackUpdate, signal?: AbortSignal) => Promise<PlaybackSession>): PlaybackResolver & { resolve: ReturnType<typeof vi.fn>; update: ReturnType<typeof vi.fn>; stop: ReturnType<typeof vi.fn> } {
   return {
     available: true,
     resolve: vi.fn(async () => initial),
-    update: vi.fn(async (_sessionId: string, update: PlaybackUpdate) => updateImpl ? updateImpl(update) : initial),
+    update: vi.fn(async (_sessionId: string, update: PlaybackUpdate, signal?: AbortSignal) => updateImpl ? updateImpl(update, signal) : initial),
     stop: vi.fn(async () => undefined),
   } as any;
 }
@@ -115,6 +115,106 @@ async function flush(): Promise<void> {
 }
 
 describe('PlaybackCoordinator transport invariants', () => {
+  it('debounces uncached seek transitions until 300ms after the last input', async () => {
+    vi.useFakeTimers();
+    try {
+      const player = new FakePlayer();
+      const initial = session({ mode: 'transcode', seekMs: 0 });
+      const api = resolver(initial, async (update) => session({
+        mode: 'transcode',
+        seekMs: update.seekMs ?? 0,
+        source: { ...initial.source, url: `/generation-${update.seekMs ?? 0}.m3u8` },
+      }));
+      const coordinator = new PlaybackCoordinator({ media: media(), player, resolver: api, capabilities: async () => capabilities(), initialPositionMs: 0 });
+      await coordinator.start();
+
+      coordinator.seek(10_000);
+      await vi.advanceTimersByTimeAsync(100);
+      coordinator.seek(20_000);
+      await vi.advanceTimersByTimeAsync(100);
+      coordinator.seek(30_000);
+      await vi.advanceTimersByTimeAsync(299);
+
+      expect(api.update).not.toHaveBeenCalled();
+      expect(coordinator.getSnapshot().intent.positionMs).toBe(30_000);
+      await vi.advanceTimersByTimeAsync(1);
+      await flush();
+      expect(api.update).toHaveBeenCalledTimes(1);
+      expect(api.update).toHaveBeenCalledWith('s1', expect.objectContaining({ seekMs: 30_000 }), expect.any(AbortSignal));
+      await coordinator.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('cancels an obsolete in-flight seek and dispatches only the latest intent after debounce', async () => {
+    vi.useFakeTimers();
+    try {
+      const player = new FakePlayer();
+      const initial = session({ mode: 'transcode', seekMs: 0 });
+      const observedSignals: AbortSignal[] = [];
+      let call = 0;
+      const api = resolver(initial, async (update, signal) => {
+        call += 1;
+        if (signal) observedSignals.push(signal);
+        if (call === 1) {
+          // Model a legacy TV fetch implementation which ignores AbortSignal:
+          // the coordinator must still abandon this wait locally.
+          return new Promise<PlaybackSession>(() => undefined);
+        }
+        return session({
+          mode: 'transcode',
+          seekMs: update.seekMs ?? 0,
+          source: { ...initial.source, url: `/generation-${update.seekMs ?? 0}.m3u8` },
+        });
+      });
+      const coordinator = new PlaybackCoordinator({ media: media(), player, resolver: api, capabilities: async () => capabilities(), initialPositionMs: 0 });
+      await coordinator.start();
+
+      coordinator.seek(100_000);
+      await vi.advanceTimersByTimeAsync(300);
+      expect(api.update).toHaveBeenCalledTimes(1);
+      expect(observedSignals[0]?.aborted).toBe(false);
+
+      coordinator.seek(200_000);
+      expect(observedSignals[0]?.aborted).toBe(true);
+      await vi.advanceTimersByTimeAsync(299);
+      expect(api.update).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1);
+      await flush();
+
+      expect(api.update).toHaveBeenCalledTimes(2);
+      expect(api.update.mock.calls[1]?.[1]).toEqual(expect.objectContaining({ seekMs: 200_000 }));
+      expect(coordinator.getSnapshot().notice).toBeUndefined();
+      await coordinator.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('cancels an unsent generation request when the final seek returns to cached coverage', async () => {
+    vi.useFakeTimers();
+    try {
+      const player = new FakePlayer();
+      player.localSeekRanges = [{ startMs: 0, endMs: 60_000 }];
+      const initial = session({ mode: 'transcode', seekMs: 0 });
+      const api = resolver(initial);
+      const coordinator = new PlaybackCoordinator({ media: media(), player, resolver: api, capabilities: async () => capabilities(), initialPositionMs: 0 });
+      await coordinator.start();
+
+      coordinator.seek(120_000);
+      await vi.advanceTimersByTimeAsync(100);
+      coordinator.seek(30_000);
+      await vi.advanceTimersByTimeAsync(300);
+
+      expect(api.update).not.toHaveBeenCalled();
+      expect(player.seekCalls).toEqual([30_000]);
+      await coordinator.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('seeks Direct Play locally without synchronising transport state to the server', async () => {
     const player = new FakePlayer();
     const api = resolver(session());
@@ -155,7 +255,7 @@ describe('PlaybackCoordinator transport invariants', () => {
 
     expect(player.seekCalls).toEqual([]);
     await vi.waitFor(() => {
-      expect(api.update).toHaveBeenCalledWith('s1', expect.objectContaining({ seekMs: 240_000 }));
+      expect(api.update).toHaveBeenCalledWith('s1', expect.objectContaining({ seekMs: 240_000 }), expect.any(AbortSignal));
     });
   });
 
@@ -169,9 +269,9 @@ describe('PlaybackCoordinator transport invariants', () => {
     const initialPlays = player.playCalls.length;
 
     coordinator.seek(10_000);
+    await vi.waitFor(() => expect(api.update).toHaveBeenCalledTimes(1));
     expect(player.pauseCalls).toBe(0);
     expect(player.playCalls).toHaveLength(initialPlays);
-    expect(api.update).toHaveBeenCalledTimes(1);
 
     update.resolve(session({ mode: 'transcode', seekMs: 8_000, source: { ...initial.source, url: '/generation-8000.m3u8' } }));
     await vi.waitFor(() => {
@@ -212,6 +312,7 @@ describe('PlaybackCoordinator transport invariants', () => {
     await coordinator.start();
 
     coordinator.seek(10_000);
+    await vi.waitFor(() => expect(api.update).toHaveBeenCalledTimes(1));
     coordinator.setPaused(true);
     coordinator.setPaused(false);
     expect(player.pauseCalls).toBe(1);
@@ -339,6 +440,32 @@ describe('PlaybackCoordinator startup intent', () => {
 });
 
 describe('PlaybackCoordinator coalescence', () => {
+  it('activates one returned representation after ordinary playback progress and commits its pending pill state', async () => {
+    const player = new FakePlayer();
+    const initial = session({ mode: 'direct' });
+    const pending = deferred<PlaybackSession>();
+    const api = resolver(initial, async () => pending.promise);
+    const coordinator = new PlaybackCoordinator({ media: media(), player, resolver: api, capabilities: async () => capabilities(), initialPositionMs: 0 });
+    await coordinator.start();
+    player.emit({ positionMs: 0, durationMs: 600_000, paused: false, ended: false });
+    player.emit({ positionMs: 100_000, durationMs: 600_000, paused: false, ended: false });
+
+    coordinator.update({ preferences: { mode: 'transcode' } });
+    expect(coordinator.getSnapshot().pendingPreferences?.mode).toBe('transcode');
+    player.emit({ positionMs: 103_000, durationMs: 600_000, paused: false, ended: false });
+    pending.resolve(session({
+      mode: 'transcode',
+      seekMs: 100_000,
+      preferences: { ...initial.preferences, mode: 'transcode' },
+    }));
+
+    await vi.waitFor(() => expect(player.playCalls.at(-1)?.positionMs).toBe(3_000));
+    await vi.waitFor(() => expect(coordinator.getSnapshot().preparingSource).toBe(false));
+    expect(api.update).toHaveBeenCalledTimes(1);
+    expect(coordinator.getSnapshot().session?.preferences.mode).toBe('transcode');
+    expect(coordinator.getSnapshot().pendingPreferences).toBeUndefined();
+  });
+
   it('coalesces pending representation updates around the latest intent', async () => {
     const player = new FakePlayer();
     player.localSeekRanges = [{ startMs: 0, endMs: 60_000 }];
@@ -457,6 +584,52 @@ describe('Evidence-triggered Direct Play recovery preparation', () => {
 
 
 describe('PlaybackCoordinator player failures', () => {
+  it('treats an ended event far short of authoritative duration as failover evidence', async () => {
+    const player = new FakePlayer();
+    const initial = session({ endpoint: { id: 'node-a', baseUrl: 'http://a' } });
+    const replacement = session({
+      sessionId: 's2', endpoint: { id: 'node-b', baseUrl: 'http://b' },
+      source: { ...initial.source, url: 'http://b/replacement.mp4' },
+    });
+    const api = resolver(initial) as ReturnType<typeof resolver> & { failover: ReturnType<typeof vi.fn> };
+    api.failover = vi.fn(async () => replacement);
+    const admissionContext = { viewerSessionId: 'viewer-stable' };
+    const coordinator = new PlaybackCoordinator({ media: media(), player, resolver: api, capabilities: async () => capabilities(), initialPositionMs: 0, admissionContext });
+    await coordinator.start();
+
+    player.emit({ positionMs: 0, durationMs: 600_000, paused: false, ended: false });
+    player.emit({ positionMs: 240_000, durationMs: 600_000, paused: false, ended: false });
+    player.emit({ positionMs: 240_000, durationMs: 240_000, paused: true, ended: true });
+
+    expect(coordinator.getSnapshot().event.ended).toBe(false);
+    expect(coordinator.getSnapshot().event.buffering).toBe(true);
+    await vi.waitFor(() => expect(api.failover).toHaveBeenCalledWith(
+      initial,
+      expect.any(Object),
+      expect.any(Object),
+      240_000,
+      expect.any(Object),
+      undefined,
+      admissionContext,
+    ));
+    await vi.waitFor(() => expect(player.playCalls.at(-1)?.source.url).toBe('http://b/replacement.mp4'));
+    expect(coordinator.getSnapshot().fatalError).toBeUndefined();
+  });
+
+  it('retains a genuine ended event within the completion tolerance', async () => {
+    const player = new FakePlayer();
+    const api = resolver(session()) as ReturnType<typeof resolver> & { failover: ReturnType<typeof vi.fn> };
+    api.failover = vi.fn();
+    const coordinator = new PlaybackCoordinator({ media: media(), player, resolver: api, capabilities: async () => capabilities(), initialPositionMs: 0 });
+    await coordinator.start();
+
+    player.emit({ positionMs: 598_000, durationMs: 598_000, paused: true, ended: true });
+
+    expect(isPrematurePlaybackEnd(598_000, 600_000)).toBe(false);
+    expect(coordinator.getSnapshot().event.ended).toBe(true);
+    expect(api.failover).not.toHaveBeenCalled();
+  });
+
   it('does not condemn a healthy endpoint when the player proves a decoder failure', async () => {
     const player = new FakePlayer();
     const api = resolver(session({ endpoint: { id: 'node-a', baseUrl: 'http://a' } })) as ReturnType<typeof resolver> & { failover: ReturnType<typeof vi.fn> };
@@ -499,7 +672,8 @@ describe('PlaybackCoordinator player failures', () => {
     });
     const api = resolver(initial) as ReturnType<typeof resolver> & { failover: ReturnType<typeof vi.fn> };
     api.failover = vi.fn(async () => replacement);
-    const coordinator = new PlaybackCoordinator({ media: media(), player, resolver: api, capabilities: async () => capabilities(), initialPositionMs: 0 });
+    const failoverContext = { viewerSessionId: 'viewer-failover' };
+    const coordinator = new PlaybackCoordinator({ media: media(), player, resolver: api, capabilities: async () => capabilities(), initialPositionMs: 0, admissionContext: failoverContext });
     await coordinator.start();
     player.emit({ positionMs: 0, durationMs: 600_000, paused: false, ended: false });
     player.emit({ positionMs: 42_000, durationMs: 600_000, paused: false, ended: false });
@@ -522,6 +696,7 @@ describe('PlaybackCoordinator player failures', () => {
       42_000,
       expect.objectContaining({ mode: 'remux', maxHeight: 720, subtitleLanguage: 'eng' }),
       undefined,
+      failoverContext,
     );
     expect(coordinator.getSnapshot().fatalError).toBeUndefined();
     expect(coordinator.getSnapshot().session?.endpoint?.id).toBe('node-b');
@@ -595,6 +770,7 @@ describe('PlaybackCoordinator player failures', () => {
       0,
       expect.any(Object),
       alternate,
+      undefined,
     );
   });
 
@@ -630,6 +806,7 @@ describe('PlaybackCoordinator player failures', () => {
       0,
       expect.any(Object),
       alternate,
+      undefined,
     );
   });
 

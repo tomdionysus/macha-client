@@ -25,6 +25,8 @@ const samsungCssVariables: Record<string, string> = {
   'accent-focus-wash': '#39000b24',
   'accent-glow': '#62001428',
   'glass-blur': 'blur(10px) saturate(118%)',
+  'navigation-surface': 'linear-gradient(#0e0e0ff7, #0e0e0fdf)',
+  'navigation-blur': 'blur(12px)',
 };
 
 const samsungLegacyLayout = `
@@ -99,6 +101,8 @@ h2 { font-size: 24px; }
 .settings-status-card { flex: 1 1 0; margin-right: 16px; }
 .settings-status-card dl { display: block; }
 .settings-status-card dl > div { display: flex; justify-content: space-between; }
+.async-icon-button { display: flex; align-items: center; justify-content: center; padding: 0; }
+.async-icon-button svg { display: block; margin: 0; }
 
 .ingest-header { display: flex; align-items: flex-end; justify-content: space-between; }
 .ingest-header > div:first-child { flex: 1 1 auto; }
@@ -148,7 +152,7 @@ h2 { font-size: 24px; }
 /* Chromium 47: avoid expensive compositor effects and animation on the TV UI. */
 *, *::before, *::after { transition: none !important; animation: none !important; }
 .app-watermark, .player-backdrop { display: none !important; }
-.topbar, .section-subnav, .media-card, .continue-card, .primary-button, .track-row,
+.topbar, .section-nav-slot, .section-subnav, .media-card, .continue-card, .primary-button, .track-row,
 .player-presentation-mini, .settings-status-card, .ingest-submit-card, .overflow-menu-popover {
   -webkit-backdrop-filter: none !important;
   backdrop-filter: none !important;
@@ -267,9 +271,10 @@ function samsungManifest(version: string): Plugin {
 
 export default defineConfig(({ mode }) => {
   const samsung = mode === 'samsung';
+  const android = mode === 'android';
 
   return {
-    base: samsung ? './' : undefined,
+    base: samsung || android ? './' : undefined,
     plugins: [
       react(),
       ...(samsung ? [
@@ -286,5 +291,9 @@ export default defineConfig(({ mode }) => {
       environment: 'node',
       setupFiles: './src/test/setup.ts',
     },
+    build: android ? {
+      outDir: 'platforms/android/app/build/generated/web',
+      emptyOutDir: true,
+    } : undefined,
   };
 });

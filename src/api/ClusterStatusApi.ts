@@ -3,7 +3,7 @@ import { authenticatedRequestHeaders, normalizeBaseUrl, readResponseBody } from 
 import { isGatewayConnectionFailure, serverUnreachable } from './serverConnection';
 
 export type TelemetryFreshness = 'live' | 'stale' | 'last_known' | 'unavailable';
-export type NodeState = 'online' | 'offline';
+export type NodeState = 'online' | 'offline' | 'retired';
 export type ClusterHealth = 'healthy' | 'recovering' | 'degraded' | 'critical';
 export type MetadataAvailability = 'unavailable' | 'read-only' | 'writable';
 

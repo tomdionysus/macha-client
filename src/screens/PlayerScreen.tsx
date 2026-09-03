@@ -14,6 +14,7 @@ import { describePlaybackSession } from '../playback/PlaybackStatus';
 import { bufferedTimelineSegments } from '../playback/BufferedTimeline';
 import type { MediaSummary, PlaybackEvent, PlaybackProgress } from '../types';
 import { PlayerOptions } from './player/PlayerOptions';
+import { samsungMediaCommand } from '../platform/SamsungMediaKeys';
 
 interface Props {
   api: MediaApi;
@@ -139,6 +140,16 @@ export function samsungSeekDeltaForKey(key: string, keyCode: number, controlsVis
   if (key === 'ArrowLeft' || key === 'Left' || keyCode === 37) return -10_000;
   if (key === 'ArrowRight' || key === 'Right' || keyCode === 39) return 10_000;
   return undefined;
+}
+
+export function samsungSliderSeekDeltaForKey(key: string, keyCode: number): number | undefined {
+  if (key === 'ArrowLeft' || key === 'Left' || keyCode === 37) return -10_000;
+  if (key === 'ArrowRight' || key === 'Right' || keyCode === 39) return 10_000;
+  return undefined;
+}
+
+export function boundedPlayerSeekTarget(positionMs: number, deltaMs: number, durationMs: number): number {
+  return Math.max(0, Math.min(Math.max(0, durationMs), positionMs + deltaMs));
 }
 
 export function playerBufferedTimelineEnabled(samsungControls: boolean): boolean {
@@ -425,6 +436,7 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
 
   useEffect(() => {
     const onKeyDown = (keyEvent: KeyboardEvent) => {
+      const mediaCommand = samsungMediaCommand(keyEvent.key, samsungControls ? keyEvent.keyCode : 0);
       const samsungBack = samsungControls && (
         keyEvent.keyCode === 10009
         || keyEvent.key === 'Escape'
@@ -441,6 +453,10 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
       if (presentation === 'full' && samsungBack) {
         keyEvent.preventDefault();
         keyEvent.stopPropagation();
+        if (scrubValueRef.current !== undefined && keyEvent.target instanceof HTMLInputElement && keyEvent.target.classList.contains('player-scrubber')) {
+          setScrubPosition(undefined);
+          return;
+        }
         onMinimize();
         return;
       }
@@ -476,22 +492,27 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
         else onMinimize();
         return;
       }
-      if (keyEvent.key === 'MediaPlayPause' || (presentation === 'full' && keyEvent.key === ' ')) {
+      if (mediaCommand || (presentation === 'full' && keyEvent.key === ' ')) {
         keyEvent.preventDefault();
         keyEvent.stopPropagation();
-        setPaused(!playback.intent.paused);
-        return;
-      }
-      if (keyEvent.key === 'MediaPlay') {
-        keyEvent.preventDefault();
-        keyEvent.stopPropagation();
-        setPaused(false);
-        return;
-      }
-      if (keyEvent.key === 'MediaPause') {
-        keyEvent.preventDefault();
-        keyEvent.stopPropagation();
-        setPaused(true);
+        if (keyEvent.repeat && mediaCommand !== 'rewind' && mediaCommand !== 'fast-forward') return;
+        switch (mediaCommand) {
+          case 'play': setPaused(false); break;
+          case 'pause': setPaused(true); break;
+          case 'previous':
+            if (canPrevious) onPrevious();
+            else setLocalNotice('Already at the first item.');
+            break;
+          case 'next':
+            if (canNext) onNext();
+            else setLocalNotice('Already at the last item.');
+            break;
+          case 'stop': onStop(); break;
+          case 'rewind': seekBy(-10_000); break;
+          case 'fast-forward': seekBy(10_000); break;
+          case 'toggle':
+          default: setPaused(!playback.intent.paused); break;
+        }
         return;
       }
       if (presentation === 'full' && webControls && !keyEvent.altKey && !keyEvent.ctrlKey && !keyEvent.metaKey) {
@@ -504,23 +525,11 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
           return;
         }
       }
-      if (keyEvent.key === 'MediaRewind') {
-        keyEvent.preventDefault();
-        keyEvent.stopPropagation();
-        seekBy(-10_000);
-        return;
-      }
-      if (keyEvent.key === 'MediaFastForward') {
-        keyEvent.preventDefault();
-        keyEvent.stopPropagation();
-        seekBy(10_000);
-        return;
-      }
       if (presentation === 'full' && !interactionControlled) showControls();
     };
     window.addEventListener('keydown', onKeyDown, true);
     return () => window.removeEventListener('keydown', onKeyDown, true);
-  }, [armControlsHide, controlsVisible, focusSamsungControls, interactionControlled, onMinimize, optionsVisible, playback.intent.paused, presentation, samsungControls, seekBy, setPaused, showControls, webControls]);
+  }, [armControlsHide, canNext, canPrevious, controlsVisible, focusSamsungControls, interactionControlled, onMinimize, onNext, onPrevious, onStop, optionsVisible, playback.intent.paused, presentation, samsungControls, seekBy, setPaused, setScrubPosition, showControls, webControls]);
 
   const session = playback.session;
   const event = playback.event;
@@ -626,7 +635,7 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
 
         {optionsVisible && (
           session ? (
-            <PlayerOptions session={session} onApply={reconfigure} />
+            <PlayerOptions session={session} pendingPreferences={playback.pendingPreferences} onApply={reconfigure} />
           ) : (
             <div className="player-options player-options-loading" aria-live="polite">
               Playback options are loading. Transport controls remain available.
@@ -636,45 +645,51 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
 
         <div className="player-scrubber-row">
           <span>{formatTime(displayedProgress)}</span>
-          {samsungControls ? (
-            <div
-              className="player-scrubber-shell player-scrubber-display"
-              role="progressbar"
+          <div className="player-scrubber-shell">
+            {scrubberVisual}
+            <input
+              className="player-scrubber"
+              type="range"
+              min={0}
+              max={Math.max(1, duration)}
+              step={1_000}
+              value={displayedProgress}
               aria-label="Playback position"
-              aria-valuemin={0}
-              aria-valuemax={Math.max(1, duration)}
-              aria-valuenow={Math.max(0, Math.min(duration, displayedProgress))}
-            >
-              {scrubberVisual}
-            </div>
-          ) : (
-            <div className="player-scrubber-shell">
-              {scrubberVisual}
-              <input
-                className="player-scrubber"
-                type="range"
-                min={0}
-                max={Math.max(1, duration)}
-                step={1_000}
-                value={displayedProgress}
-                aria-label="Playback position"
-                data-tv-focusable="true"
-                onChange={(changeEvent: ChangeEvent<HTMLInputElement>) => setScrubPosition(Number(changeEvent.target.value))}
-                onPointerUp={() => {
-                  const position = scrubValueRef.current;
-                  if (position !== undefined) seek(position);
-                }}
-                onKeyUp={(keyEvent: ReactKeyboardEvent<HTMLInputElement>) => {
-                  const position = scrubValueRef.current;
-                  if (position !== undefined && ['Home', 'End'].includes(keyEvent.key)) seek(position);
-                }}
-                onBlur={() => {
-                  const position = scrubValueRef.current;
-                  if (position !== undefined) seek(position);
-                }}
-              />
-            </div>
-          )}
+              aria-valuetext={`${formatTime(displayedProgress)} of ${formatTime(duration)}`}
+              data-tv-focusable="true"
+              onChange={(changeEvent: ChangeEvent<HTMLInputElement>) => setScrubPosition(Number(changeEvent.target.value))}
+              onPointerUp={() => {
+                const position = scrubValueRef.current;
+                if (position !== undefined) seek(position);
+              }}
+              onKeyDown={(keyEvent: ReactKeyboardEvent<HTMLInputElement>) => {
+                if (!samsungControls) return;
+                const delta = samsungSliderSeekDeltaForKey(keyEvent.key, keyEvent.keyCode);
+                if (delta === undefined) return;
+                keyEvent.preventDefault();
+                keyEvent.stopPropagation();
+                const current = scrubValueRef.current ?? Math.min(duration, playback.intent.positionMs);
+                setScrubPosition(boundedPlayerSeekTarget(current, delta, duration));
+                armControlsHide();
+              }}
+              onKeyUp={(keyEvent: ReactKeyboardEvent<HTMLInputElement>) => {
+                const samsungDelta = samsungControls
+                  ? samsungSliderSeekDeltaForKey(keyEvent.key, keyEvent.keyCode)
+                  : undefined;
+                const commit = samsungDelta !== undefined || ['Home', 'End'].includes(keyEvent.key);
+                if (samsungDelta !== undefined) {
+                  keyEvent.preventDefault();
+                  keyEvent.stopPropagation();
+                }
+                const position = scrubValueRef.current;
+                if (position !== undefined && commit) seek(position);
+              }}
+              onBlur={() => {
+                const position = scrubValueRef.current;
+                if (position !== undefined) seek(position);
+              }}
+            />
+          </div>
           <span>{formatTime(duration)}</span>
         </div>
 

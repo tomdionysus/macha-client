@@ -4,9 +4,10 @@ import { AlphabetIndex } from '../components/AlphabetIndex';
 import { MediaCard, type MediaCardAction } from '../components/MediaCard';
 import { ErrorMessage, Loading } from '../components/Status';
 import { useAlphabetIndex } from '../hooks/useAlphabetIndex';
-import { useAsync } from '../hooks/useAsync';
+import { useRefreshableAsync } from '../hooks/useRefreshableAsync';
 import { sortMediaByIndexedTitle } from '../titleIndex';
 import type { MediaSummary } from '../types';
+import { MediaPageTitle } from '../components/MediaPageTitle';
 
 export type MusicSection = 'artists' | 'albums' | 'tracks';
 
@@ -28,7 +29,7 @@ function titleFor(section: MusicSection): string {
 }
 
 export function MusicScreen({ api, section, onOpen, onPlayNow, onAddToPlaylist, onPlayNext, onPlayLater, onShuffle }: Props) {
-  const result = useAsync(() => {
+  const result = useRefreshableAsync(() => {
     if (section === 'artists') return api.artists();
     if (section === 'albums') return api.albums();
     return api.tracks();
@@ -36,8 +37,10 @@ export function MusicScreen({ api, section, onOpen, onPlayNow, onAddToPlaylist, 
   const items = useMemo(() => sortMediaByIndexedTitle(result.value ?? []), [result.value]);
   const alphabet = useAlphabetIndex(items);
 
-  if (result.loading) return <Loading />;
-  if (result.error) return <ErrorMessage error={result.error} />;
+  if (!result.value) return <section className="catalogue-indexed music-browser">
+    <MediaPageTitle refreshing={result.refreshing} onRefresh={result.refresh}>Music</MediaPageTitle>
+    {result.loading ? <Loading /> : result.error ? <ErrorMessage error={result.error} /> : null}
+  </section>;
 
   const actions: MediaCardAction[] = section === 'artists' ? [] : [
     { label: section === 'albums' ? 'Add album to playlist' : 'Add track to playlist', onSelect: onAddToPlaylist },
@@ -49,7 +52,8 @@ export function MusicScreen({ api, section, onOpen, onPlayNow, onAddToPlaylist, 
 
   return (
     <section className="catalogue-indexed music-browser">
-      <h1>Music</h1>
+      <MediaPageTitle refreshing={result.refreshing} onRefresh={result.refresh}>Music</MediaPageTitle>
+      {result.error && <p className="manage-error media-refresh-error">Refresh failed: {result.error.message}</p>}
       <h2 className="music-browser-heading">{titleFor(section)}</h2>
       <div className="media-grid">
         {items.map((item) => (

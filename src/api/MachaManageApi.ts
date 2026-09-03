@@ -28,7 +28,7 @@ export class MachaManageApi implements ManageApi {
   }
 
   async unmatched(): Promise<UnmatchedFile[]> {
-    const response = await this.request<{ items: UnmatchedFile[] }>('/api/v1/manage/unmatched', { method: 'GET' });
+    const response = await this.request<{ items: UnmatchedFile[] }>('/api/v1/manage/unmatched', { method: 'GET', cache: 'no-store' });
     return response.items;
   }
 
@@ -67,7 +67,7 @@ export class MachaManageApi implements ManageApi {
 
   browse(path: string): Promise<MachaDfsDirectory> {
     const qs = queryString([['path', path]]);
-    return this.request(`/api/v1/manage/filesystem?${qs}`, { method: 'GET' });
+    return this.request(`/api/v1/manage/filesystem?${qs}`, { method: 'GET', cache: 'no-store' });
   }
 
   async mkdir(path: string): Promise<void> {

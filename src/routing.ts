@@ -32,10 +32,14 @@ export const routes = {
   search: '/search',
   ingest: '/ingest',
   status: '/status',
+  statusClient: '/status/client',
+  statusConnectivity: '/status/connectivity',
+  statusNodes: '/status/nodes',
   statusNode: (id: string) => `/status/nodes/${segment(id)}`,
   manage: '/manage',
   manageFiles: '/manage/files',
   settings: '/manage/settings',
+  connection: '/manage/settings/connection',
   sponsor: '/sponsor',
 } as const;
 

@@ -5,39 +5,49 @@ const SELECTOR = '[data-tv-focusable="true"]:not([disabled])';
 const SELECTED_ATTRIBUTE = 'data-tv-selected';
 const DEFAULT_FOCUS_ATTRIBUTE = 'data-tv-default-focus';
 
+function isRangeInput(value: unknown): boolean {
+  if (!value || typeof value !== 'object') return false;
+  const element = value as { tagName?: unknown; type?: unknown };
+  return typeof element.tagName === 'string'
+    && element.tagName.toUpperCase() === 'INPUT'
+    && element.type === 'range';
+}
+
+export function tvRangeOwnsDirection(value: unknown, direction: SamsungDpadDirection): boolean {
+  return isRangeInput(value) && (direction === 'left' || direction === 'right');
+}
+
 /** Editors own caret movement, selection controls and Enter while focused. */
 export function isTextEditingElement(value: unknown): boolean {
   if (!value || typeof value !== 'object') return false;
   const element = value as {
     tagName?: unknown;
+    type?: unknown;
     isContentEditable?: unknown;
     getAttribute?: (name: string) => string | null;
   };
   const tagName = typeof element.tagName === 'string' ? element.tagName.toUpperCase() : '';
-  return tagName === 'INPUT'
+  return (tagName === 'INPUT' && !isRangeInput(element))
     || tagName === 'TEXTAREA'
     || tagName === 'SELECT'
     || element.isContentEditable === true
     || element.getAttribute?.('role') === 'textbox';
 }
 
-function samsungVisible(element: HTMLElement): boolean {
-  // Avoid getComputedStyle walks on every remote press: they are expensive on
-  // Chromium 47. Geometry filters display:none/zero-size controls; the player
-  // chrome is the one intentional opacity-hidden focus container.
+function tvVisible(element: HTMLElement): boolean {
   const chrome = element.closest('.player-chrome');
   if (chrome && !chrome.classList.contains('visible')) return false;
   const rect = element.getBoundingClientRect();
   return rect.width > 0 && rect.height > 0;
 }
 
-function samsungElements(): HTMLElement[] {
+function tvElements(): HTMLElement[] {
   const fullPlayer = document.querySelector<HTMLElement>('.player-presentation-full');
   const scope = fullPlayer?.querySelector<HTMLElement>('.player-chrome.visible') ?? document;
-  return Array.from(scope.querySelectorAll<HTMLElement>(SELECTOR)).filter(samsungVisible);
+  return Array.from(scope.querySelectorAll<HTMLElement>(SELECTOR)).filter(tvVisible);
 }
 
-function markSamsungSelected(element: HTMLElement | undefined, elements: HTMLElement[]): void {
+function markTvSelected(element: HTMLElement | undefined, elements: HTMLElement[]): void {
   for (const candidate of elements) candidate.removeAttribute(SELECTED_ATTRIBUTE);
   if (!element) return;
   element.setAttribute(SELECTED_ATTRIBUTE, 'true');
@@ -52,7 +62,7 @@ function rectGap(start: number, size: number, otherStart: number, otherSize: num
   return 0;
 }
 
-function scoreSamsungCandidate(current: DOMRect, candidate: DOMRect, direction: SamsungDpadDirection): number | null {
+function scoreTvCandidate(current: DOMRect, candidate: DOMRect, direction: SamsungDpadDirection): number | null {
   const cx = current.left + current.width / 2;
   const cy = current.top + current.height / 2;
   const tx = candidate.left + candidate.width / 2;
@@ -72,13 +82,10 @@ function scoreSamsungCandidate(current: DOMRect, candidate: DOMRect, direction: 
     ? rectGap(current.top, current.height, candidate.top, candidate.height)
     : rectGap(current.left, current.width, candidate.left, candidate.width);
 
-  // Prefer staying in the current visual row/column. Crossing a lane is
-  // deliberately expensive so a remote press does not jump diagonally across
-  // unrelated controls merely because their centres are slightly closer.
   return primary + secondary * 0.2 + laneGap * 6;
 }
 
-function samsungSequentialCandidate(elements: HTMLElement[], current: HTMLElement, direction: SamsungDpadDirection): HTMLElement | undefined {
+function sequentialCandidate(elements: HTMLElement[], current: HTMLElement, direction: SamsungDpadDirection): HTMLElement | undefined {
   const index = elements.indexOf(current);
   if (index < 0) return elements[0];
   const delta = direction === 'left' || direction === 'up' ? -1 : 1;
@@ -86,38 +93,35 @@ function samsungSequentialCandidate(elements: HTMLElement[], current: HTMLElemen
   return next >= 0 && next < elements.length ? elements[next] : undefined;
 }
 
-function useSamsungNavigation(onBack?: () => boolean): () => void {
+function useSpatialTvNavigation(onBack?: () => boolean): () => void {
   const focusFirst = () => {
-    const elements = samsungElements();
+    const elements = tvElements();
     if (elements.length === 0) return;
     const active = document.activeElement instanceof HTMLElement && elements.indexOf(document.activeElement) >= 0
       ? document.activeElement
       : undefined;
     const selected = elements.find((element) => element.getAttribute(SELECTED_ATTRIBUTE) === 'true');
     const preferred = elements.find((element) => element.getAttribute(DEFAULT_FOCUS_ATTRIBUTE) === 'true');
-    markSamsungSelected(active ?? selected ?? preferred ?? elements[0], elements);
+    markTvSelected(active ?? selected ?? preferred ?? elements[0], elements);
   };
 
   const focusDefault = () => {
-    const elements = samsungElements();
+    const elements = tvElements();
     if (elements.length === 0) return;
     const preferred = elements.find((element) => element.getAttribute(DEFAULT_FOCUS_ATTRIBUTE) === 'true') ?? elements[0];
-    markSamsungSelected(preferred, elements);
+    markTvSelected(preferred, elements);
   };
 
   const onFocusIn = (event: FocusEvent) => {
     const target = event.target;
-    if (!(target instanceof HTMLElement) || !target.matches(SELECTOR) || !samsungVisible(target)) return;
-    markSamsungSelected(target, samsungElements());
+    if (!(target instanceof HTMLElement) || !target.matches(SELECTOR) || !tvVisible(target)) return;
+    markTvSelected(target, tvElements());
   };
 
   const onCommand = (command: SamsungDpadCommand): boolean => {
-    // The IME/editor must see its own arrows and activation key. Treating an
-    // editor that lacks data-tv-focusable as "no current element" was the root
-    // cause of focus jumps and displaced caret input in management forms.
     if (command !== 'back' && isTextEditingElement(document.activeElement)) return false;
 
-    const elements = samsungElements();
+    const elements = tvElements();
     if (elements.length === 0) return false;
 
     const active = document.activeElement instanceof HTMLElement && elements.indexOf(document.activeElement) >= 0
@@ -130,12 +134,12 @@ function useSamsungNavigation(onBack?: () => boolean): () => void {
     if (command === 'back') return onBack?.() ?? false;
 
     if (command === 'activate') {
-      markSamsungSelected(current, elements);
+      markTvSelected(current, elements);
       current.click();
       return true;
     }
 
-    if (current instanceof HTMLInputElement && current.type === 'range' && (command === 'left' || command === 'right')) {
+    if (tvRangeOwnsDirection(current, command)) {
       return false;
     }
 
@@ -145,16 +149,15 @@ function useSamsungNavigation(onBack?: () => boolean): () => void {
     if (geometryValid) {
       next = elements
         .filter((element) => element !== current)
-        .map((element) => ({ element, score: scoreSamsungCandidate(currentRect, element.getBoundingClientRect(), command) }))
+        .map((element) => ({ element, score: scoreTvCandidate(currentRect, element.getBoundingClientRect(), command) }))
         .filter((entry): entry is { element: HTMLElement; score: number } => entry.score !== null)
         .sort((a, b) => a.score - b.score)[0]?.element;
     } else {
-      // Only use DOM order when Chromium has not produced usable geometry yet.
-      next = samsungSequentialCandidate(elements, current, command);
+      next = sequentialCandidate(elements, current, command);
     }
     if (!next) return false;
 
-    markSamsungSelected(next, elements);
+    markTvSelected(next, elements);
     next.scrollIntoView(false);
     return true;
   };
@@ -176,14 +179,18 @@ function useSamsungNavigation(onBack?: () => boolean): () => void {
   };
 }
 
+function tvMode(): boolean {
+  return import.meta.env.MODE === 'samsung' || import.meta.env.MODE === 'android';
+}
+
 export function requestTvDefaultFocus(): void {
-  if (import.meta.env.MODE !== 'samsung') return;
+  if (!tvMode()) return;
   window.setTimeout(() => window.dispatchEvent(new Event('macha:tv-focus-default')), 0);
 }
 
 export function useTvNavigation(onBack?: () => boolean): void {
   useEffect(() => {
-    if (import.meta.env.MODE !== 'samsung') return undefined;
-    return useSamsungNavigation(onBack);
+    if (!tvMode()) return undefined;
+    return useSpatialTvNavigation(onBack);
   }, [onBack]);
 }

@@ -2,7 +2,7 @@ import { useEffect, useState, type ChangeEvent } from 'react';
 import type { MediaApi } from '../api/MediaApi';
 import type { MediaSummary } from '../types';
 import { MediaCard } from '../components/MediaCard';
-import { ErrorMessage } from '../components/Status';
+import { MediaPageTitle } from '../components/MediaPageTitle';
 
 interface Props {
   api: MediaApi;
@@ -13,31 +13,36 @@ export function SearchScreen({ api, onOpen }: Props) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<MediaSummary[]>([]);
   const [error, setError] = useState<string>();
+  const [refreshToken, setRefreshToken] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
     const normalized = query.trim();
     if (normalized.length < 2) {
       setResults([]);
       setError(undefined);
+      setRefreshing(false);
       return;
     }
     let active = true;
+    setRefreshing(true);
+    setError(undefined);
     const timer = window.setTimeout(() => {
       void api.search(normalized)
         .then((value) => { if (active) setResults(value); })
-        .catch((reason: unknown) => { if (active) setError(String(reason)); });
+        .catch((reason: unknown) => { if (active) setError(String(reason)); })
+        .finally(() => { if (active) setRefreshing(false); });
     }, 180);
     return () => {
       active = false;
       window.clearTimeout(timer);
     };
-  }, [api, query]);
-
-  if (error) return <ErrorMessage error={new Error(error)} />;
+  }, [api, query, refreshToken]);
 
   return (
     <section>
-      <h1>Search</h1>
+      <MediaPageTitle refreshing={refreshing} onRefresh={() => setRefreshToken((value) => value + 1)}>Search</MediaPageTitle>
+      {error && <p className="manage-error media-refresh-error">Refresh failed: {error}</p>}
       <input
         className="search-input"
         data-tv-focusable="true"

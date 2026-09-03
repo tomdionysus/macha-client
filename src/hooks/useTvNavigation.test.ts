@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { isTextEditingElement } from './useTvNavigation';
+import { isTextEditingElement, tvRangeOwnsDirection } from './useTvNavigation';
 
-function element(tagName: string, options: { contentEditable?: boolean; role?: string } = {}) {
+function element(tagName: string, options: { contentEditable?: boolean; role?: string; type?: string } = {}) {
   return {
     tagName,
+    type: options.type,
     isContentEditable: options.contentEditable ?? false,
     getAttribute: (name: string) => name === 'role' ? options.role ?? null : null,
   };
@@ -22,5 +23,14 @@ describe('TV navigation editor policy', () => {
     expect(isTextEditingElement(element('button'))).toBe(false);
     expect(isTextEditingElement(element('a'))).toBe(false);
     expect(isTextEditingElement(undefined)).toBe(false);
+    expect(isTextEditingElement(element('input', { type: 'range' }))).toBe(false);
+  });
+
+  it('leaves range Left/Right to seeking but routes Up/Down through focus navigation', () => {
+    const range = element('input', { type: 'range' });
+    expect(tvRangeOwnsDirection(range, 'left')).toBe(true);
+    expect(tvRangeOwnsDirection(range, 'right')).toBe(true);
+    expect(tvRangeOwnsDirection(range, 'up')).toBe(false);
+    expect(tvRangeOwnsDirection(range, 'down')).toBe(false);
   });
 });

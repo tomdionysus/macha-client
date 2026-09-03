@@ -2,9 +2,10 @@ import type { MediaApi } from '../api/MediaApi';
 import { EpisodeRail } from '../components/EpisodeRail';
 import { ErrorMessage, Loading } from '../components/Status';
 import { useArtworkUrl } from '../hooks/useArtworkUrl';
-import { useAsync } from '../hooks/useAsync';
+import { useRefreshableAsync } from '../hooks/useRefreshableAsync';
 import type { Episode, PlaybackProgress, SeasonDetails, ShowDetails } from '../types';
 import { EditButton } from '../components/EditButton';
+import { MediaPageTitle } from '../components/MediaPageTitle';
 
 interface Props {
   api: MediaApi;
@@ -17,7 +18,7 @@ interface Props {
 }
 
 export function SeasonScreen({ api, seriesId, seasonId, onBack, progress, onPlayEpisode, onEdit }: Props) {
-  const result = useAsync(async () => {
+  const result = useRefreshableAsync(async () => {
     const [seriesResult, seasonResult] = await Promise.all([api.details(seriesId), api.details(seasonId)]);
     if (seriesResult.kind !== 'show' || !('seasons' in seriesResult)) throw new Error('Parent catalogue item is not a series.');
     if (seasonResult.kind !== 'season' || !('episodes' in seasonResult)) throw new Error('Catalogue item is not a season.');
@@ -35,8 +36,11 @@ export function SeasonScreen({ api, seriesId, seasonId, onBack, progress, onPlay
     ?? series?.artwork?.poster;
   const backdrop = useArtworkUrl(api, artwork);
 
-  if (result.loading) return <Loading />;
-  if (result.error) return <ErrorMessage error={result.error} />;
+  if (!result.value) return <section className="detail season-detail"><div className="detail-content season-content">
+    <button className="back-button" data-tv-focusable="true" onClick={onBack} type="button">← Back</button>
+    <MediaPageTitle refreshing={result.refreshing} onRefresh={result.refresh}>Season</MediaPageTitle>
+    {result.loading ? <Loading /> : result.error ? <ErrorMessage error={result.error} /> : null}
+  </div></section>;
   if (!season || !series) return null;
 
   return (
@@ -45,7 +49,8 @@ export function SeasonScreen({ api, seriesId, seasonId, onBack, progress, onPlay
       <div className="detail-content season-content">
         <button className="back-button" data-tv-focusable="true" onClick={onBack} type="button">← Back</button>
         {onEdit && <EditButton onClick={onEdit} />}
-        <h1>{series.title}</h1>
+        <MediaPageTitle refreshing={result.refreshing} onRefresh={result.refresh}>{series.title}</MediaPageTitle>
+        {result.error && <p className="manage-error media-refresh-error">Refresh failed: {result.error.message}</p>}
         <p className="eyebrow">{season.title || `Season ${season.seasonNumber}`}</p>
         {season.synopsis && <p className="synopsis">{season.synopsis}</p>}
         <section className="episode-section">

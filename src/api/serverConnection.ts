@@ -1,10 +1,15 @@
 export const SERVER_UNREACHABLE_EVENT = 'macha:server-unreachable';
+export const SERVER_REACHABLE_EVENT = 'macha:server-reachable';
 
 export const SERVER_UNREACHABLE_MESSAGE =
-  'The Macha server cannot be reached. Check that the server is running and that the API address below is correct.';
+  'All configured API endpoints are unreachable.';
+export const ENDPOINT_UNREACHABLE_MESSAGE =
+  'The Macha server cannot be reached. Check that the server is running and that the API address is correct.';
+
+let clusterUnreachableReported = false;
 
 export class MachaConnectionError extends Error {
-  constructor(message = SERVER_UNREACHABLE_MESSAGE) {
+  constructor(message = ENDPOINT_UNREACHABLE_MESSAGE) {
     super(message);
     this.name = 'MachaConnectionError';
   }
@@ -16,11 +21,24 @@ export function isGatewayConnectionFailure(response: Response, bodyWasJson: bool
 }
 
 export function serverUnreachable(): MachaConnectionError {
-  const error = new MachaConnectionError();
+  return new MachaConnectionError();
+}
+
+/** Publish one application-level transition per cluster outage, not one event per failed request. */
+export function reportClusterUnreachable(): void {
+  if (clusterUnreachableReported) return;
+  clusterUnreachableReported = true;
   if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
     window.dispatchEvent(new CustomEvent(SERVER_UNREACHABLE_EVENT, {
-      detail: { message: error.message },
+      detail: { message: SERVER_UNREACHABLE_MESSAGE },
     }));
   }
-  return error;
+}
+
+export function reportClusterReachable(): void {
+  const recovered = clusterUnreachableReported;
+  clusterUnreachableReported = false;
+  if (recovered && typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+    window.dispatchEvent(new CustomEvent(SERVER_REACHABLE_EVENT));
+  }
 }

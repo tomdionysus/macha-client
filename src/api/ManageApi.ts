@@ -93,11 +93,15 @@ export interface IdentityAssociationReset {
   reset_at_unix_ms: number;
   reset_by_node_id: string;
   reason: string | null;
+  audit_state?: string;
+  metadata_persisted?: boolean;
 }
 
 export interface IdentityAssociationResetResult {
   reset: IdentityAssociationReset;
-  metadata_generation: number;
+  metadata_generation?: number;
+  audit_state?: string;
+  metadata_persisted?: boolean;
 }
 
 export interface IdentityAssociationResetRequest {

@@ -13,6 +13,31 @@ import type {
   SeasonSummary,
   ShowDetails,
 } from '../types';
+import { ArtworkRequestScheduler } from './ArtworkRequestScheduler';
+import { createClientLogger } from '../diagnostics/ClientLog';
+
+function abortReason(signal: AbortSignal): unknown {
+  return signal.reason ?? new DOMException('Artwork consumer cancelled.', 'AbortError');
+}
+
+function consumeArtwork(promise: Promise<Blob>, signal?: AbortSignal): Promise<Blob> {
+  if (!signal) return promise;
+  if (signal.aborted) return Promise.reject(abortReason(signal));
+  return new Promise((resolve, reject) => {
+    const onAbort = () => {
+      signal.removeEventListener('abort', onAbort);
+      reject(abortReason(signal));
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
+    promise.then((blob) => {
+      signal.removeEventListener('abort', onAbort);
+      resolve(blob);
+    }, (error) => {
+      signal.removeEventListener('abort', onAbort);
+      reject(error);
+    });
+  });
+}
 
 function optionalNumber(value: number | null): number | undefined {
   return value ?? undefined;
@@ -21,6 +46,8 @@ function optionalNumber(value: number | null): number | undefined {
 export class MachaMediaApi implements MediaApi {
   private readonly artworkCache = new Map<string, Blob>();
   private readonly artworkRequests = new Map<string, Promise<Blob>>();
+  private readonly artworkScheduler = new ArtworkRequestScheduler(4);
+  private readonly log = createClientLogger('artwork.api');
 
   constructor(private readonly catalogue: CatalogueApi) {}
 
@@ -119,34 +146,29 @@ export class MachaMediaApi implements MediaApi {
   }
 
   artwork(ref: ArtworkRef, signal?: AbortSignal): Promise<Blob> {
+    if (signal?.aborted) return Promise.reject(abortReason(signal));
     const cached = this.artworkCache.get(ref.id);
     if (cached) return Promise.resolve(cached);
 
-    // Signal-bearing requests are reserved for explicitly cancellable consumers
-    // such as detail/backdrop hooks. Viewport artwork deliberately calls this
-    // without a signal: once an image is demanded it is allowed to finish, and
-    // these shared requests coalesce here and populate the Blob cache for any
-    // card that is mounted later.
-    if (signal) {
-      return this.catalogue.artwork(ref.id, signal).then((blob) => {
-        this.artworkCache.set(ref.id, blob);
-        return blob;
-      });
-    }
-
     let pending = this.artworkRequests.get(ref.id);
     if (!pending) {
-      pending = this.catalogue.artwork(ref.id).then((blob) => {
+      const priority = signal ? 'foreground' : 'background';
+      this.log.debug('request-queued', { artworkId: ref.id, priority });
+      pending = this.artworkScheduler.schedule(() => this.catalogue.artwork(ref.id), priority).then((blob) => {
         this.artworkCache.set(ref.id, blob);
         this.artworkRequests.delete(ref.id);
+        this.log.debug('request-complete', { artworkId: ref.id, sizeBytes: blob.size });
         return blob;
       }, (error) => {
         this.artworkRequests.delete(ref.id);
+        this.log.warn('request-failed', { artworkId: ref.id, error });
         throw error;
       });
       this.artworkRequests.set(ref.id, pending);
     }
-    return pending;
+    // Consumer cancellation only abandons that view. Bounded shared work is
+    // allowed to complete and populate the cache for subsequent screens.
+    return consumeArtwork(pending, signal);
   }
 
   invalidateArtwork(ref: ArtworkRef): void {

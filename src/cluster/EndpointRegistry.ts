@@ -31,8 +31,7 @@ export interface EndpointAdvertisement {
 const FAILURE_COOLDOWN_MS = [500, 2_000, 10_000, 30_000] as const;
 
 export function endpointId(baseUrl: string): string {
-  const normalized = normalizeBaseUrl(baseUrl);
-  return normalized || 'same-origin';
+  return normalizeBaseUrl(baseUrl);
 }
 
 export function bootstrapEndpoints(urls: readonly string[], source: EndpointSource = 'bootstrap'): MachaEndpoint[] {
@@ -40,6 +39,7 @@ export function bootstrapEndpoints(urls: readonly string[], source: EndpointSour
   const endpoints: MachaEndpoint[] = [];
   for (const value of urls) {
     const baseUrl = normalizeBaseUrl(value);
+    if (!baseUrl) continue;
     if (unique.has(baseUrl)) continue;
     unique.add(baseUrl);
     endpoints.push({ id: endpointId(baseUrl), baseUrl, source });
@@ -84,6 +84,7 @@ export class EndpointRegistry {
     for (const advertisement of advertisements) {
       for (const value of advertisement.apiBaseUrls) {
         const baseUrl = normalizeBaseUrl(value);
+        if (!baseUrl) continue;
         if (!advertisedByUrl.has(baseUrl)) advertisedByUrl.set(baseUrl, advertisement.nodeId);
       }
     }
@@ -177,6 +178,7 @@ export class EndpointRegistry {
     const result: MachaEndpoint[] = [];
     for (const endpoint of endpoints) {
       const baseUrl = normalizeBaseUrl(endpoint.baseUrl);
+      if (!baseUrl) continue;
       // One node may advertise several independently reachable API bases.
       // nodeId groups candidates but must never collapse endpoint identity.
       const id = endpoint.id || endpointId(baseUrl);

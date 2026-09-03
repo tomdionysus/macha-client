@@ -427,8 +427,12 @@ function demandWaitFinished(cache) {
   cache.pendingDemandWaits = Math.max(0, cache.pendingDemandWaits - 1);
 }
 
+function readAheadEnabled(cache) {
+  return cache.mode === 'playing' || cache.mode === 'paused';
+}
+
 function schedulePrefetch(cache) {
-  if (cache.released || cache.mode !== 'playing' || cache.pendingDemandWaits > 0) return;
+  if (cache.released || !readAheadEnabled(cache) || cache.pendingDemandWaits > 0) return;
   clearPrefetchTimer(cache);
   const quietFor = now() - cache.lastDemandAt;
   const delay = Math.max(0, PREFETCH_QUIET_MS - quietFor);
@@ -439,7 +443,7 @@ function schedulePrefetch(cache) {
 }
 
 async function pumpPrefetch(cache) {
-  if (cache.released || cache.mode !== 'playing' || cache.prefetchController || cache.pendingDemandWaits > 0) return;
+  if (cache.released || !readAheadEnabled(cache) || cache.prefetchController || cache.pendingDemandWaits > 0) return;
   const quietFor = now() - cache.lastDemandAt;
   if (quietFor < PREFETCH_QUIET_MS) {
     schedulePrefetch(cache);
@@ -504,7 +508,7 @@ async function pumpPrefetch(cache) {
     if (!selected) throw lastError || new Error('No Direct Play precache source remains');
     if (selected.contentType) cache.mimeType = selected.contentType;
     const buffer = selected.buffer;
-    if (controller.signal.aborted || cache.released || cache.mode !== 'playing') return;
+    if (controller.signal.aborted || cache.released || !readAheadEnabled(cache)) return;
     const elapsedMs = Math.max(1, now() - startedAt);
     cache.metrics.fetchedBytes += buffer.byteLength;
     cache.metrics.prefetchBytes += buffer.byteLength;
@@ -529,7 +533,7 @@ async function pumpPrefetch(cache) {
     activeFetchFinished(cache);
   }
 
-  if (!cache.released && cache.mode === 'playing' && now() - cache.lastDemandAt >= PREFETCH_QUIET_MS) {
+  if (!cache.released && readAheadEnabled(cache) && now() - cache.lastDemandAt >= PREFETCH_QUIET_MS) {
     if (retryDelayMs > 0) {
       clearPrefetchTimer(cache);
       cache.prefetchTimer = setTimeout(() => {
@@ -554,7 +558,9 @@ function setMode(sourceKey, mode) {
   cache.generation = config.generation;
   cache.metrics.generation = cache.generation;
   cache.metrics.mode = mode;
-  if (mode === 'playing') schedulePrefetch(cache);
+  // Pause freezes presentation only. Preserve an in-flight range and continue
+  // filling the bounded read-ahead cache for the expected resume.
+  if (mode === 'playing' || mode === 'paused') schedulePrefetch(cache);
   else abortPrefetch(cache, false);
   updateAheadBytes(cache);
   void postMetrics(cache, true);

@@ -123,13 +123,10 @@ including any LAN/WAN or address-family alternatives and their validity period.
 
 ## Browser deployment
 
-Macha does not currently serve the web application itself. Same-origin proxying remains a convenient deployment:
-
-```text
-browser -> web server /api/* -> Macha catalogue API :7438
-```
-
-Vite development supports this with `MACHA_API_TARGET`.
+Macha does not currently serve the web application itself. The client talks to
+explicitly configured Macha HTTP(S) API bases using the server's CORS support.
+Blank or same-origin endpoint entries are invalid: the Web/Vite origin serves
+only the client and is never probed as a Macha API.
 
 Because the client now uses browser-history routes, a production static server must also return the application `index.html` for paths such as `/movies/<id>` and `/series/<id>/seasons/<id>`. This is a static-hosting concern, not a new catalogue endpoint.
 
@@ -155,6 +152,16 @@ DELETE /api/v1/playback/sessions/{id}
 ```
 
 Session creation sends the catalogue `item_id`, the latest resume/start position as `seek_ms`, and the platform capability profile: direct containers/codecs and fragmented-MP4 HLS support, plus optional decoder resolution limits when a platform can report real limits. The returned keyframe-aligned `seek_ms` is accepted as the immutable transformed generation origin; the client does not create a second startup generation merely to force exact alignment. The Web client deliberately does not use screen dimensions as decoder limits. The server response is authoritative and separates `preferences` (what the user selected), top-level `mode` (what negotiation resolved), `source` (original container and elementary-stream metadata), `output` (copy/transcode result for selected video/audio), `selection`, `stream`, and server-generated `options`.
+
+Every playback-session `POST` carries `Macha-Viewer-Session`, an opaque identity
+created once by the application-scoped persistent `PlaybackRuntime`. The value
+is retained across source reloads, seeks, retries, representation changes,
+standby preparation and node failover. It identifies one logical viewer and its
+single transcode entitlement; it is not an account, authorization credential or
+progress identity. Each distinct admission operation creates a fresh
+`Idempotency-Key`, while retries of that same operation across endpoints retain
+the key and exact request body. `PATCH` and `DELETE` continue to address the
+returned playback session ID.
 
 The client does not derive quality availability locally. `quality_heights`, `audio_streams`, `subtitle_streams` and `media_ids` drive those controls. `options.modes` drives Remux and Transcode availability, while Direct is always exposed next to Auto as an explicit user override and is sent to the server when selected even if capability negotiation omitted it from `options.modes`. Source and copied elementary-stream bitrates are displayed when supplied; transcoded output is displayed from the actual output description, and an unknown CRF video bitrate is left unknown rather than inferred.
 

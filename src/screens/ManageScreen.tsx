@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
-import { NavLink } from 'react-router-dom';
+import { ConfirmModal, Modal } from '../components/Modal';
+import { FileIcon, FolderIcon, OpenIcon, RefreshIcon, UpIcon } from '../components/ManageIcons';
+import { AsyncIconButton } from '../components/AsyncIconButton';
 import type { CatalogueApi } from '../api/CatalogueApi';
-import { routes } from '../routing';
 import type {
   MachaDfsDirectory,
   MachaDfsEntry,
@@ -21,7 +22,6 @@ interface Props {
   catalogueApi: CatalogueApi;
   section: ManageSection;
   settings: ReactNode;
-  managementAvailable: boolean;
   onUnmatchedCountChange?: (count: number) => void;
 }
 
@@ -45,6 +45,35 @@ function fileName(path: string): string {
 function joinPath(parent: string, name: string): string {
   if (parent === '/') return `/${name}`;
   return `${parent.replace(/\/+$/, '')}/${name}`;
+}
+
+export function pathBreadcrumbs(path: string): Array<{ label: string; path: string }> {
+  const names = path.split('/').filter(Boolean);
+  return [
+    { label: 'MachaDFS', path: '/' },
+    ...names.map((label, index) => ({ label, path: `/${names.slice(0, index + 1).join('/')}` })),
+  ];
+}
+
+export async function runBulkOperation(ids: string[], operation: (id: string) => Promise<void>): Promise<number> {
+  const results = await Promise.allSettled(ids.map(operation));
+  return results.filter((result) => result.status === 'rejected').length;
+}
+
+export const UNMATCHED_PAGE_SIZE = 20;
+
+export function pageSlice<T>(items: T[], page: number, pageSize = UNMATCHED_PAGE_SIZE): {
+  items: T[];
+  page: number;
+  pageCount: number;
+} {
+  const pageCount = Math.max(1, Math.ceil(items.length / pageSize));
+  const boundedPage = Math.min(Math.max(0, page), pageCount - 1);
+  return {
+    items: items.slice(boundedPage * pageSize, (boundedPage + 1) * pageSize),
+    page: boundedPage,
+    pageCount,
+  };
 }
 
 function candidateSummary(candidate: MediaProbeCandidate): string {
@@ -190,11 +219,12 @@ function ManualMetadataForm({ detail, api, catalogueApi, onResolved }: {
   );
 }
 
-function UnmatchedReview({ item, api, catalogueApi, onResolved }: {
+function UnmatchedReview({ item, api, catalogueApi, onResolved, onDeleteRequest }: {
   item: UnmatchedFile;
   api: ManageApi;
   catalogueApi: CatalogueApi;
   onResolved: () => void;
+  onDeleteRequest: () => void;
 }) {
   const [detail, setDetail] = useState<UnmatchedDetail>();
   const [matches, setMatches] = useState<ManageCatalogueMatch[]>([]);
@@ -276,9 +306,7 @@ function UnmatchedReview({ item, api, catalogueApi, onResolved }: {
       <div className="manage-actions">
         <button className="secondary-button" type="button" disabled={busy} onClick={() => void resolve(() => api.retry(item.id))} data-tv-focusable="true">Retry match</button>
         <button className="secondary-button" type="button" disabled={busy} onClick={() => setManualOpen((value) => !value)} data-tv-focusable="true">{manualOpen ? 'Hide manual metadata' : 'Enter manually'}</button>
-        <button className="secondary-button manage-danger" type="button" disabled={busy} onClick={() => {
-          if (window.confirm(`Delete ${item.path} from MachaDFS? This removes the media file.`)) void resolve(() => api.deleteUnmatched(item.id));
-        }} data-tv-focusable="true">Delete media file</button>
+        <button className="secondary-button manage-danger" type="button" disabled={busy} onClick={onDeleteRequest} data-tv-focusable="true">Delete media file</button>
       </div>
 
       {manualOpen && detail && <ManualMetadataForm detail={detail} api={api} catalogueApi={catalogueApi} onResolved={onResolved} />}
@@ -292,9 +320,14 @@ function UnmatchedManager({ api, catalogueApi, onCountChange }: {
   onCountChange?: (count: number) => void;
 }) {
   const [items, setItems] = useState<UnmatchedFile[]>([]);
-  const [selected, setSelected] = useState<string>();
+  const [reviewing, setReviewing] = useState<string>();
+  const [checked, setChecked] = useState<Set<string>>(() => new Set());
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
+  const [deleteIds, setDeleteIds] = useState<string[]>([]);
+  const [page, setPage] = useState(0);
 
   const reload = useCallback(async () => {
     setError(undefined);
@@ -302,7 +335,9 @@ function UnmatchedManager({ api, catalogueApi, onCountChange }: {
       const next = await api.unmatched();
       setItems(next);
       onCountChange?.(next.length);
-      setSelected((current) => current && next.some((item) => item.id === current) ? current : undefined);
+      setReviewing((current) => current && next.some((item) => item.id === current) ? current : undefined);
+      setChecked((current) => new Set([...current].filter((id) => next.some((item) => item.id === id))));
+      setPage((current) => pageSlice(next, current).page);
     } catch (cause) {
       setError(errorMessage(cause));
     } finally {
@@ -312,34 +347,117 @@ function UnmatchedManager({ api, catalogueApi, onCountChange }: {
 
   useEffect(() => { void reload(); }, [reload]);
 
+  const refresh = useCallback(async () => {
+    setRefreshing(true);
+    await reload();
+    setRefreshing(false);
+  }, [reload]);
+
+  const retryChecked = useCallback(async () => {
+    const ids = [...checked];
+    if (ids.length === 0) return;
+    setBusy(true);
+    setError(undefined);
+    const failed = await runBulkOperation(ids, (id) => api.retry(id));
+    await reload();
+    if (failed) setError(`${failed} of ${ids.length} files could not be queued for matching.`);
+    setBusy(false);
+  }, [api, checked, reload]);
+
+  const deleteChecked = useCallback(async () => {
+    const ids = deleteIds;
+    if (ids.length === 0) return;
+    setBusy(true);
+    setError(undefined);
+    const failed = await runBulkOperation(ids, (id) => api.deleteUnmatched(id));
+    setDeleteIds([]);
+    await reload();
+    if (failed) setError(`${failed} of ${ids.length} files could not be deleted.`);
+    setBusy(false);
+  }, [api, deleteIds, reload]);
+
   if (loading) return <p>Loading unmatched files…</p>;
+
+  const paged = pageSlice(items, page);
+  const allSelected = items.length > 0 && checked.size === items.length;
+  const someSelected = checked.size > 0 && !allSelected;
 
   return (
     <section className="manage-panel">
       <div className="manage-panel-heading">
         <div><h2>Unmatched files</h2><p>Only files whose catalogue matching completed without a match appear here.</p></div>
-        <button className="secondary-button" type="button" onClick={() => void reload()} data-tv-focusable="true">Refresh</button>
+        <AsyncIconButton label="Refresh unmatched files" busy={refreshing} disabled={busy} onClick={() => void refresh()} icon={<RefreshIcon />} />
       </div>
       {error && <p className="manage-error">{error}</p>}
+      {items.length > 0 && <div className="manage-list-controls">
+        <label className="manage-select-all">
+          <input
+            type="checkbox"
+            checked={allSelected}
+            ref={(element) => { if (element) element.indeterminate = someSelected; }}
+            onChange={(event) => setChecked(event.target.checked ? new Set(items.map((item) => item.id)) : new Set())}
+            disabled={busy}
+          />
+          <span>Select all</span>
+        </label>
+        <span>{items.length} unmatched {items.length === 1 ? 'file' : 'files'}</span>
+      </div>}
+      {checked.size > 0 && (
+        <div className="manage-bulk-actions" aria-label="Selected unmatched file actions">
+          <span>{checked.size} selected</span>
+          <button className="secondary-button" type="button" disabled={busy} onClick={() => void retryChecked()} data-tv-focusable="true">Retry matching</button>
+          <button className="secondary-button manage-danger" type="button" disabled={busy} onClick={() => setDeleteIds([...checked])} data-tv-focusable="true">Delete files</button>
+          <button className="secondary-button" type="button" disabled={busy} onClick={() => setChecked(new Set())} data-tv-focusable="true">Clear</button>
+        </div>
+      )}
       {items.length === 0 ? <div className="manage-empty">No files need matching.</div> : (
         <div className="manage-unmatched-list">
-          {items.map((item) => (
-            <article key={item.id} className={`manage-unmatched-item${selected === item.id ? ' selected' : ''}`}>
+          {paged.items.map((item) => (
+            <article key={item.id} className={`manage-unmatched-item${reviewing === item.id ? ' selected' : ''}`}>
               <div className="manage-unmatched-summary">
+                <label className="manage-unmatched-check">
+                  <input
+                    type="checkbox"
+                    checked={checked.has(item.id)}
+                    onChange={(event) => setChecked((current) => {
+                      const next = new Set(current);
+                      if (event.target.checked) next.add(item.id); else next.delete(item.id);
+                      return next;
+                    })}
+                    aria-label={`Select ${fileName(item.path)}`}
+                    disabled={busy}
+                  />
+                </label>
                 <div className="manage-file-main">
                   <strong>{fileName(item.path)}</strong>
                   <code>{item.path}</code>
                   <span>{formatBytes(item.size)} · {item.provider ?? 'catalogue'} · {item.result}</span>
                 </div>
-                <button className="secondary-button" type="button" onClick={() => setSelected(selected === item.id ? undefined : item.id)} data-tv-focusable="true">
-                  {selected === item.id ? 'Close' : 'Review'}
+                <button className="secondary-button manage-review-button" type="button" onClick={() => setReviewing(reviewing === item.id ? undefined : item.id)} data-tv-focusable="true">
+                  {reviewing === item.id ? 'Close' : 'Review'}
                 </button>
               </div>
-              {selected === item.id && <UnmatchedReview item={item} api={api} catalogueApi={catalogueApi} onResolved={() => void reload()} />}
+              {reviewing === item.id && <UnmatchedReview item={item} api={api} catalogueApi={catalogueApi} onResolved={() => void reload()} onDeleteRequest={() => setDeleteIds([item.id])} />}
             </article>
           ))}
         </div>
       )}
+      {items.length > UNMATCHED_PAGE_SIZE && <nav className="manage-pagination" aria-label="Unmatched files pages">
+        <button className="secondary-button" type="button" disabled={paged.page === 0 || busy} onClick={() => { setReviewing(undefined); setPage(paged.page - 1); }} data-tv-focusable="true">Previous</button>
+        <span>Page {paged.page + 1} of {paged.pageCount}</span>
+        <button className="secondary-button" type="button" disabled={paged.page + 1 >= paged.pageCount || busy} onClick={() => { setReviewing(undefined); setPage(paged.page + 1); }} data-tv-focusable="true">Next</button>
+      </nav>}
+      <ConfirmModal
+        open={deleteIds.length > 0}
+        title={deleteIds.length === 1 ? 'Delete media file?' : `Delete ${deleteIds.length} media files?`}
+        confirmLabel={deleteIds.length === 1 ? 'Delete file' : 'Delete files'}
+        destructive
+        busy={busy}
+        onCancel={() => setDeleteIds([])}
+        onConfirm={() => void deleteChecked()}
+      >
+        <p>This permanently removes {deleteIds.length === 1 ? 'the selected file' : 'the selected files'} from MachaDFS.</p>
+      </ConfirmModal>
     </section>
   );
 }
@@ -349,6 +467,8 @@ function FileManager({ api }: { api: ManageApi }) {
   const [selected, setSelected] = useState<MachaDfsEntry>();
   const [destination, setDestination] = useState('');
   const [folderName, setFolderName] = useState('');
+  const [createFolderOpen, setCreateFolderOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
@@ -369,14 +489,16 @@ function FileManager({ api }: { api: ManageApi }) {
 
   useEffect(() => { void browse('/'); }, [browse]);
 
-  const mutate = useCallback(async (action: () => Promise<void>, refreshPath: string) => {
+  const mutate = useCallback(async (action: () => Promise<void>, refreshPath: string): Promise<boolean> => {
     setBusy(true);
     setError(undefined);
     try {
       await action();
       await browse(refreshPath);
+      return true;
     } catch (cause) {
       setError(errorMessage(cause));
+      return false;
     } finally {
       setBusy(false);
     }
@@ -388,21 +510,24 @@ function FileManager({ api }: { api: ManageApi }) {
     <section className="manage-panel">
       <div className="manage-panel-heading">
         <div><h2>MachaDFS</h2><p>Browse and modify the Macha Distributed File System namespace. Rename and move operations change namespace metadata; media extents remain in place.</p></div>
-        <button className="secondary-button" type="button" onClick={() => directory && void browse(directory.path)} data-tv-focusable="true">Refresh</button>
+        <AsyncIconButton label="Refresh folder" busy={loading} disabled={busy || !directory} onClick={() => directory && void browse(directory.path)} icon={<RefreshIcon />} />
       </div>
       {error && <p className="manage-error">{error}</p>}
       {directory && (
         <>
           <div className="manage-pathbar">
-            <code>{directory.path}</code>
-            {directory.parent && <button className="secondary-button" type="button" onClick={() => void browse(directory.parent!)} disabled={busy} data-tv-focusable="true">Up</button>}
-          </div>
-          <div className="manage-new-folder">
-            <input placeholder="New folder name" value={folderName} onChange={(event) => setFolderName(event.target.value)} disabled={busy} />
-            <button className="secondary-button" type="button" disabled={busy || !folderName.trim()} onClick={() => {
-              const path = joinPath(directory.path, folderName.trim());
-              void mutate(() => api.mkdir(path), directory.path).then(() => setFolderName(''));
-            }} data-tv-focusable="true">Create folder</button>
+            <nav className="manage-breadcrumbs" aria-label="MachaDFS path">
+              {pathBreadcrumbs(directory.path).map((segment, index, segments) => <span key={segment.path}>
+                {index > 0 && <span className="manage-path-separator" aria-hidden="true">/</span>}
+                {index === segments.length - 1
+                  ? <span aria-current="page">{segment.label}</span>
+                  : <a href={`?path=${encodeURIComponent(segment.path)}`} onClick={(event) => { event.preventDefault(); void browse(segment.path); }}>{segment.label}</a>}
+              </span>)}
+            </nav>
+            <div className="manage-path-actions">
+              {directory.parent && <button className="secondary-button manage-icon-button" type="button" onClick={() => void browse(directory.parent!)} disabled={busy} aria-label="Up one folder" title="Up" data-tv-focusable="true"><UpIcon /></button>}
+              <button className="secondary-button" type="button" onClick={() => setCreateFolderOpen(true)} disabled={busy} data-tv-focusable="true">Create folder</button>
+            </div>
           </div>
           <div className="manage-fs-list" role="list">
             {directory.entries.map((entry) => (
@@ -411,10 +536,10 @@ function FileManager({ api }: { api: ManageApi }) {
                   setSelected(entry);
                   setDestination(entry.path);
                 }} data-tv-focusable="true">
-                  <span className="manage-fs-icon" aria-hidden="true">{entry.type === 'directory' ? '▸' : '•'}</span>
+                  <span className="manage-fs-icon" aria-hidden="true">{entry.type === 'directory' ? <FolderIcon /> : <FileIcon />}</span>
                   <span><strong>{entry.name}</strong><small>{entry.type === 'directory' ? 'Folder' : `${formatBytes(entry.size)}${entry.catalogue_item_ids.length ? ' · catalogued' : ''}`}</small></span>
                 </button>
-                {entry.type === 'directory' && <button className="secondary-button" type="button" onClick={() => void browse(entry.path)} data-tv-focusable="true">Open</button>}
+                {entry.type === 'directory' && <button className="secondary-button manage-icon-button" type="button" onClick={() => void browse(entry.path)} aria-label={`Open ${entry.name}`} title="Open" data-tv-focusable="true"><OpenIcon /></button>}
               </div>
             ))}
             {directory.entries.length === 0 && <div className="manage-empty">This folder is empty.</div>}
@@ -427,28 +552,61 @@ function FileManager({ api }: { api: ManageApi }) {
               </label>
               <div className="manage-actions">
                 <button className="primary-button" type="button" disabled={busy || !destination.trim() || destination === selected.path} onClick={() => void mutate(() => api.rename(selected.path, destination.trim()), directory.path)} data-tv-focusable="true">Move / rename</button>
-                <button className="secondary-button manage-danger" type="button" disabled={busy} onClick={() => {
-                  const noun = selected.type === 'directory' ? 'empty folder' : 'file';
-                  if (window.confirm(`Delete ${noun} ${selected.path} from MachaDFS?`)) void mutate(() => api.deletePath(selected.path), directory.path);
-                }} data-tv-focusable="true">Delete</button>
+                <button className="secondary-button manage-danger" type="button" disabled={busy} onClick={() => setDeleteOpen(true)} data-tv-focusable="true">Delete</button>
               </div>
             </div>
           )}
+          <Modal
+            open={createFolderOpen}
+            title="Create folder"
+            onClose={busy ? () => undefined : () => { setCreateFolderOpen(false); setFolderName(''); }}
+            actions={<>
+              <button className="secondary-button" type="button" disabled={busy} onClick={() => { setCreateFolderOpen(false); setFolderName(''); }} data-tv-focusable="true">Cancel</button>
+              <button className="primary-button" type="button" disabled={busy || !folderName.trim()} onClick={() => {
+                const path = joinPath(directory.path, folderName.trim());
+                void mutate(() => api.mkdir(path), directory.path).then((created) => {
+                  if (created) { setCreateFolderOpen(false); setFolderName(''); }
+                });
+              }} data-tv-focusable="true">{busy ? 'Creating…' : 'Create'}</button>
+            </>}
+          >
+            <label className="modal-field">Folder name
+              <input value={folderName} onChange={(event) => setFolderName(event.target.value)} disabled={busy} onKeyDown={(event) => {
+                if (event.key === 'Enter' && folderName.trim() && !busy) {
+                  const path = joinPath(directory.path, folderName.trim());
+                  void mutate(() => api.mkdir(path), directory.path).then((created) => {
+                    if (created) { setCreateFolderOpen(false); setFolderName(''); }
+                  });
+                }
+              }} />
+            </label>
+          </Modal>
+          <ConfirmModal
+            open={deleteOpen && Boolean(selected)}
+            title={`Delete ${selected?.type === 'directory' ? 'folder' : 'file'}?`}
+            confirmLabel={selected?.type === 'directory' ? 'Delete folder' : 'Delete file'}
+            destructive
+            busy={busy}
+            onCancel={() => setDeleteOpen(false)}
+            onConfirm={() => {
+              if (!selected) return;
+              void mutate(() => api.deletePath(selected.path), directory.path).then((deleted) => {
+                if (deleted) setDeleteOpen(false);
+              });
+            }}
+          >
+            <p><code>{selected?.path}</code> will be removed from MachaDFS. A non-empty folder may be rejected by the server.</p>
+          </ConfirmModal>
         </>
       )}
     </section>
   );
 }
 
-export function ManageScreen({ api, catalogueApi, section, settings, managementAvailable, onUnmatchedCountChange }: Props) {
+export function ManageScreen({ api, catalogueApi, section, settings, onUnmatchedCountChange }: Props) {
   return (
     <div className="manage-screen">
       <h1>Manage</h1>
-      <div className="manage-tabs" role="tablist" aria-label="Management sections">
-        {managementAvailable && <NavLink to={routes.manage} end role="tab" aria-selected={section === 'unmatched'} data-tv-focusable="true" className={section === 'unmatched' ? 'active' : undefined}>Unmatched</NavLink>}
-        {managementAvailable && <NavLink to={routes.manageFiles} role="tab" aria-selected={section === 'files'} data-tv-focusable="true" className={section === 'files' ? 'active' : undefined}>Files</NavLink>}
-        <NavLink to={routes.settings} role="tab" aria-selected={section === 'settings'} data-tv-focusable="true" className={section === 'settings' ? 'active' : undefined}>Settings</NavLink>
-      </div>
       {section === 'settings'
         ? settings
         : section === 'files'

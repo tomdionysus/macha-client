@@ -1,7 +1,8 @@
 import { createClientLogger } from '../diagnostics/ClientLog';
-import { isEndpointRetryablePlaybackFailure, type Player } from '../platform/Platform';
+import { isEndpointRetryablePlaybackFailure, PlaybackSourceError, type Player } from '../platform/Platform';
 import type { MediaSummary, PlaybackCapabilities, PlaybackEvent } from '../types';
 import type {
+  PlaybackAdmissionContext,
   PlaybackPreferencesUpdate,
   PlaybackResolver,
   PlaybackSession,
@@ -21,6 +22,7 @@ export interface PlaybackCoordinatorSnapshot {
   session?: PlaybackSession;
   starting: boolean;
   preparingSource: boolean;
+  pendingPreferences?: PlaybackPreferencesUpdate;
   fatalError?: Error;
   notice?: string;
 }
@@ -32,20 +34,48 @@ export interface PlaybackCoordinatorOptions {
   capabilities: () => Promise<PlaybackCapabilities>;
   initialPositionMs: number;
   initialPreferences?: PlaybackPreferencesUpdate;
+  admissionContext?: PlaybackAdmissionContext;
 }
 
 type Listener = (snapshot: PlaybackCoordinatorSnapshot) => void;
 const ALTERNATE_RECOVERY_WINDOW_MS = 30_000;
+const PLAYBACK_END_TOLERANCE_MS = 5_000;
+const UNCACHED_SEEK_DEBOUNCE_MS = 300;
 
 interface PendingMutation {
   update: PlaybackUpdate;
   reason: 'seek' | 'representation' | 'subtitle';
 }
 
+function awaitUnlessAborted<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) return Promise.reject(signal.reason);
+  return new Promise<T>((resolve, reject) => {
+    const aborted = () => {
+      signal.removeEventListener('abort', aborted);
+      reject(signal.reason);
+    };
+    signal.addEventListener('abort', aborted, { once: true });
+    promise.then(
+      (value) => {
+        signal.removeEventListener('abort', aborted);
+        resolve(value);
+      },
+      (error) => {
+        signal.removeEventListener('abort', aborted);
+        reject(error);
+      },
+    );
+  });
+}
+
 function clampPosition(positionMs: number, durationMs: number | undefined): number {
   const finite = Number.isFinite(positionMs) ? positionMs : 0;
   if (!durationMs || durationMs <= 0) return Math.max(0, finite);
   return Math.max(0, Math.min(durationMs, finite));
+}
+
+export function isPrematurePlaybackEnd(positionMs: number, durationMs: number): boolean {
+  return durationMs > 0 && positionMs + PLAYBACK_END_TOLERANCE_MS < durationMs;
 }
 
 export function generationLocalPosition(
@@ -147,6 +177,10 @@ export class PlaybackCoordinator {
   private closeOptions: PlaybackStopOptions = {};
   private mutationLoop?: Promise<void>;
   private pendingMutation?: PendingMutation;
+  private debouncedSeekMutation?: PendingMutation;
+  private seekDebounceTimer?: ReturnType<typeof setTimeout>;
+  private activeMutation?: { reason: PendingMutation['reason']; controller: AbortController };
+  private lastSeekTransitionAt = 0;
   private mutationRevision = 0;
   private sourceActivationRevision = 0;
   private positionRevision = 0;
@@ -192,6 +226,9 @@ export class PlaybackCoordinator {
       ...this.snapshot,
       intent: { ...this.snapshot.intent },
       event: { ...this.snapshot.event },
+      pendingPreferences: this.snapshot.pendingPreferences
+        ? { ...this.snapshot.pendingPreferences }
+        : undefined,
     };
   }
 
@@ -213,6 +250,7 @@ export class PlaybackCoordinator {
         capabilities,
         requestedPositionMs,
         this.options.initialPreferences,
+        this.options.admissionContext,
       );
       if (this.disposed) {
         await this.options.resolver.stop(session.sessionId, this.closeOptions).catch(() => undefined);
@@ -230,7 +268,7 @@ export class PlaybackCoordinator {
       const currentDesired = this.snapshot.intent.positionMs;
       const userMovedDuringResolve = requestedPositionRevision !== this.positionRevision;
       if (userMovedDuringResolve && this.activationPosition(session, currentDesired, requestedPositionMs) === undefined) {
-        this.queueMutation({
+        this.scheduleSeekMutation({
           reason: 'seek',
           update: {
             seekMs: currentDesired,
@@ -260,6 +298,10 @@ export class PlaybackCoordinator {
     this.mutationRevision += 1;
     this.sourceActivationRevision += 1;
     this.pendingMutation = undefined;
+    this.debouncedSeekMutation = undefined;
+    this.activeMutation?.controller.abort(new DOMException('Playback coordinator closed', 'AbortError'));
+    if (this.seekDebounceTimer !== undefined) clearTimeout(this.seekDebounceTimer);
+    this.seekDebounceTimer = undefined;
     this.unsubscribePlayer();
     this.unsubscribePlayerFailure?.();
     this.unsubscribePlayerDegradation?.();
@@ -315,6 +357,7 @@ export class PlaybackCoordinator {
     if (this.disposed) return false;
     const durationMs = this.snapshot.session?.durationMs || this.snapshot.event.durationMs || this.options.media.durationMs;
     const bounded = clampPosition(positionMs, durationMs);
+    this.lastSeekTransitionAt = Date.now();
     this.positionRevision += 1;
     this.seekIntentActive = true;
     const intent = { ...this.snapshot.intent, positionMs: bounded };
@@ -336,6 +379,8 @@ export class PlaybackCoordinator {
 
     const localPositionMs = this.activeLocalPosition(session, bounded);
     if (localPositionMs !== undefined) {
+      this.cancelInFlightSeek();
+      this.cancelDebouncedSeek();
       this.log.info('seek-local', {
         sessionId: session.sessionId,
         mode: session.mode,
@@ -353,7 +398,8 @@ export class PlaybackCoordinator {
       generationStartMs: session.seekMs,
       localCoverage: this.options.player.localSeekCoverage(),
     });
-    this.queueMutation({
+    this.cancelInFlightSeek();
+    this.scheduleSeekMutation({
       reason: 'seek',
       update: {
         seekMs: bounded,
@@ -382,9 +428,12 @@ export class PlaybackCoordinator {
     preparedAbsoluteMs: number,
   ): number | undefined {
     const localPositionMs = generationLocalPosition(session, desiredAbsoluteMs);
-    if (session.mode === 'direct') return localPositionMs;
-    if (Math.round(preparedAbsoluteMs) !== Math.round(desiredAbsoluteMs)) return undefined;
-    return localPositionMs ?? 0;
+    if (localPositionMs !== undefined) return localPositionMs;
+    // A transformed server may align the exact requested point to a later
+    // keyframe. Accept that explicit result at its local origin. If playback
+    // merely advanced while the request was in flight, localPositionMs above
+    // catches the new source up without negotiating another generation.
+    return Math.round(preparedAbsoluteMs) === Math.round(desiredAbsoluteMs) ? 0 : undefined;
   }
 
   update(update: PlaybackUpdate): void {
@@ -415,14 +464,55 @@ export class PlaybackCoordinator {
           update: mergePlaybackUpdate(existing.update, next.update),
         }
       : next;
-    this.patchSnapshot({ preparingSource: true, notice: next.reason === 'subtitle' ? 'Loading subtitles…' : undefined });
+    this.patchSnapshot({
+      preparingSource: true,
+      pendingPreferences: mergePreferences(this.snapshot.pendingPreferences, next.update.preferences),
+      notice: next.reason === 'subtitle' ? 'Loading subtitles…' : undefined,
+    });
     this.mutationRevision += 1;
     if (!this.mutationLoop) {
       this.mutationLoop = this.drainMutations().finally(() => {
         this.mutationLoop = undefined;
-        if (!this.disposed) this.patchSnapshot({ preparingSource: false });
+        if (!this.disposed && this.seekDebounceTimer === undefined && !this.debouncedSeekMutation) {
+          this.patchSnapshot({ preparingSource: false, pendingPreferences: undefined });
+        }
       });
     }
+  }
+
+  private scheduleSeekMutation(next: PendingMutation): void {
+    this.debouncedSeekMutation = this.debouncedSeekMutation
+      ? {
+          reason: 'seek',
+          update: mergePlaybackUpdate(this.debouncedSeekMutation.update, next.update),
+        }
+      : next;
+    if (this.seekDebounceTimer !== undefined) clearTimeout(this.seekDebounceTimer);
+    this.patchSnapshot({ preparingSource: true, notice: undefined });
+    const elapsedMs = Date.now() - this.lastSeekTransitionAt;
+    const delayMs = Math.max(0, UNCACHED_SEEK_DEBOUNCE_MS - elapsedMs);
+    this.seekDebounceTimer = setTimeout(() => {
+      this.seekDebounceTimer = undefined;
+      const pending = this.debouncedSeekMutation;
+      this.debouncedSeekMutation = undefined;
+      if (!pending || this.disposed) return;
+      this.queueMutation(pending);
+    }, delayMs);
+  }
+
+  private cancelDebouncedSeek(): void {
+    if (this.seekDebounceTimer !== undefined) clearTimeout(this.seekDebounceTimer);
+    this.seekDebounceTimer = undefined;
+    this.debouncedSeekMutation = undefined;
+    if (!this.mutationLoop && !this.pendingMutation) {
+      this.patchSnapshot({ preparingSource: false });
+    }
+  }
+
+  private cancelInFlightSeek(): void {
+    const active = this.activeMutation;
+    if (active?.reason !== 'seek' || active.controller.signal.aborted) return;
+    active.controller.abort(new DOMException('Seek superseded by newer viewer intent', 'AbortError'));
   }
 
   private async drainMutations(): Promise<void> {
@@ -442,9 +532,17 @@ export class PlaybackCoordinator {
       const requestedPositionMs = update.seekMs ?? this.snapshot.intent.positionMs;
       const requestedPositionRevision = this.positionRevision;
       const startedAt = performance.now();
+      const controller = new AbortController();
+      this.activeMutation = { reason: pending.reason, controller };
 
       try {
-        const next = await this.options.resolver.update(current.sessionId, update);
+        // AbortSignal cancels modern fetch implementations. The local race also
+        // makes cancellation non-blocking on older TV engines whose fetch may
+        // accept a signal but fail to terminate the underlying request.
+        const next = await awaitUnlessAborted(
+          this.options.resolver.update(current.sessionId, update, controller.signal),
+          controller.signal,
+        );
         if (this.disposed) return;
         this.serverSession = next;
         this.log.info('generation-update-ready', {
@@ -465,15 +563,15 @@ export class PlaybackCoordinator {
         const currentDesired = this.snapshot.intent.positionMs;
         const userMovedDuringRequest = requestedPositionRevision !== this.positionRevision;
         if (userMovedDuringRequest && this.activationPosition(next, currentDesired, requestedPositionMs) === undefined) {
-          this.pendingMutation = {
+          this.scheduleSeekMutation({
             reason: 'seek',
             update: {
               seekMs: currentDesired,
               preferences: preservedSeekPreferences(next),
             },
-          };
+          });
           this.mutationRevision += 1;
-          continue;
+          return;
         }
 
         if (pending.reason === 'subtitle' && sourceIdentity(current) === sourceIdentity(next) && this.options.player.setSubtitle) {
@@ -489,6 +587,14 @@ export class PlaybackCoordinator {
         if (!this.disposed) this.patchSnapshot({ notice: undefined });
       } catch (error) {
         if (this.disposed) return;
+        if (controller.signal.aborted) {
+          this.log.debug('generation-update-superseded', {
+            sessionId: current.sessionId,
+            reason: pending.reason,
+            update,
+          });
+          continue;
+        }
         this.log.error('generation-update-failed', {
           sessionId: current.sessionId,
           reason: pending.reason,
@@ -496,6 +602,8 @@ export class PlaybackCoordinator {
           error,
         });
         this.patchSnapshot({ notice: error instanceof Error ? error.message : String(error) });
+      } finally {
+        if (this.activeMutation?.controller === controller) this.activeMutation = undefined;
       }
     }
   }
@@ -513,7 +621,7 @@ export class PlaybackCoordinator {
     if (localPositionMs === undefined) {
       // The user moved behind the generation while it was being prepared. This
       // is genuine source-generation work, not a transport wait.
-      this.queueMutation({
+      this.scheduleSeekMutation({
         reason: 'seek',
         update: {
           seekMs: desiredAbsoluteMs,
@@ -619,6 +727,7 @@ export class PlaybackCoordinator {
           capabilities,
           this.snapshot.intent.positionMs,
           completePreferences(session),
+          this.options.admissionContext,
         );
         if (!alternate) return;
         if (this.disposed || activationRevision !== this.sourceActivationRevision || this.snapshot.session?.sessionId !== session.sessionId) {
@@ -693,6 +802,31 @@ export class PlaybackCoordinator {
         endMs: range.endMs + (session?.mode === 'direct' ? 0 : this.streamOffsetMs),
       })),
     };
+
+    // HTML media stacks may emit `ended` when a truncated TCP/HLS generation
+    // runs out, even though the item itself is nowhere near complete. Treating
+    // that observation as normal completion closes the player and navigates
+    // away before cluster recovery has a chance to run.
+    if (absolute.ended && isPrematurePlaybackEnd(absolute.positionMs, absolute.durationMs)) {
+      const interrupted: PlaybackEvent = {
+        ...absolute,
+        paused: this.snapshot.intent.paused,
+        ended: false,
+        buffering: !this.snapshot.intent.paused,
+      };
+      const intent = this.seekIntentActive
+        ? this.snapshot.intent
+        : { ...this.snapshot.intent, positionMs: absolutePositionMs };
+      this.patchSnapshot({ event: interrupted, intent });
+      this.log.warn('premature-source-end', {
+        sessionId: session?.sessionId,
+        positionMs: absolute.positionMs,
+        durationMs: absolute.durationMs,
+        remainingMs: absolute.durationMs - absolute.positionMs,
+      });
+      this.fail(new PlaybackSourceError('Playback source ended before the media was complete', 'stream'));
+      return;
+    }
 
     const cleanup = this.supersededCleanup;
     if (cleanup
@@ -789,6 +923,7 @@ export class PlaybackCoordinator {
           subtitleLanguage: failedSession.preferences.subtitleLanguage,
         },
         preparedAlternate,
+        this.options.admissionContext,
       );
       if (this.disposed) {
         await this.options.resolver.stop(next.sessionId).catch(() => undefined);

@@ -21,6 +21,10 @@ describe('routes', () => {
     expect(routes.musicPlaylist).toBe('/music/playlist');
     expect(routes.ingest).toBe('/ingest');
     expect(routes.status).toBe('/status');
+    expect(routes.statusClient).toBe('/status/client');
+    expect(routes.statusConnectivity).toBe('/status/connectivity');
+    expect(routes.statusNodes).toBe('/status/nodes');
+    expect(routes.connection).toBe('/manage/settings/connection');
     expect(routes.statusNode('node:one')).toBe('/status/nodes/node%3Aone');
     expect(routes.manage).toBe('/manage');
     expect(routes.manageFiles).toBe('/manage/files');

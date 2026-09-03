@@ -2,9 +2,10 @@ import type { MediaApi } from '../api/MediaApi';
 import { OverflowMenu, type OverflowMenuAction } from '../components/OverflowMenu';
 import { ErrorMessage, Loading } from '../components/Status';
 import { useArtworkUrl } from '../hooks/useArtworkUrl';
-import { useAsync } from '../hooks/useAsync';
+import { useRefreshableAsync } from '../hooks/useRefreshableAsync';
 import type { AlbumDetails, MediaSummary } from '../types';
 import { EditButton } from '../components/EditButton';
+import { MediaPageTitle } from '../components/MediaPageTitle';
 
 interface Props {
   api: MediaApi;
@@ -21,14 +22,17 @@ interface Props {
 }
 
 export function AlbumScreen({ api, albumId, onBack, onPlayTrack, onPlayAll, onOpenTrack, onAddToPlaylist, onPlayNext, onPlayLater, onShuffle, onEdit }: Props) {
-  const details = useAsync(() => api.details(albumId), [api, albumId]);
+  const details = useRefreshableAsync(() => api.details(albumId), [api, albumId]);
   const album = details.value?.kind === 'album' && 'tracks' in details.value
     ? details.value as AlbumDetails
     : undefined;
   const cover = useArtworkUrl(api, album?.artwork?.poster ?? album?.artwork?.thumbnail);
 
-  if (details.loading) return <Loading />;
-  if (details.error) return <ErrorMessage error={details.error} />;
+  if (!details.value) return <section className="album-page">
+    <button className="back-button" data-tv-focusable="true" onClick={onBack} type="button">← Music</button>
+    <MediaPageTitle refreshing={details.refreshing} onRefresh={details.refresh}>Album</MediaPageTitle>
+    {details.loading ? <Loading /> : details.error ? <ErrorMessage error={details.error} /> : null}
+  </section>;
   if (!album) return <ErrorMessage error={new Error('Catalogue item is not an album.')} />;
 
   return (
@@ -41,7 +45,8 @@ export function AlbumScreen({ api, albumId, onBack, onPlayTrack, onPlayAll, onOp
         </div>
         <div>
           <p className="eyebrow">Album{album.year ? ` · ${album.year}` : ''}</p>
-          <h1>{album.title}</h1>
+          <MediaPageTitle refreshing={details.refreshing} onRefresh={details.refresh}>{album.title}</MediaPageTitle>
+          {details.error && <p className="manage-error media-refresh-error">Refresh failed: {details.error.message}</p>}
           {album.synopsis && <p className="synopsis">{album.synopsis}</p>}
           <div className="play-actions album-actions">
             <button className="primary-button" type="button" data-tv-focusable="true" disabled={album.tracks.length === 0} onClick={() => onPlayAll(album)}>▶ Play all</button>

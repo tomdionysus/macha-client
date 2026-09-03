@@ -81,6 +81,7 @@ function normalizeUrls(urls: readonly string[]): string[] {
   const result: string[] = [];
   for (const url of urls) {
     const normalized = normalizeUrl(url);
+    if (!normalized) continue;
     if (seen.has(normalized)) continue;
     seen.add(normalized);
     result.push(normalized);
@@ -108,7 +109,9 @@ function readStoredEndpointValue(storage: Storage, key: string): string[] | unde
     if (record.version !== 1 || !Array.isArray(record.urls) || record.urls.some((url) => typeof url !== 'string')) {
       throw new Error('invalid endpoint state');
     }
-    return normalizeUrls(record.urls);
+    const normalized = normalizeUrls(record.urls);
+    if (JSON.stringify(record.urls) !== JSON.stringify(normalized)) writeBootstrapEndpoints(normalized, storage);
+    return normalized;
   } catch {
     storage.removeItem(key);
     return undefined;

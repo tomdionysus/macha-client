@@ -407,6 +407,44 @@ describe('Direct Play read-ahead Service Worker', () => {
     expect(calls).toContain('bytes=100-103');
   });
 
+  it('keeps an in-flight prefetch and fills to the bounded frontier while paused', async () => {
+    const total = 12 * 1024 * 1024;
+    const calls: string[] = [];
+    let finishFirstPrefetch!: (response: Response) => void;
+    let firstPrefetchSignal: AbortSignal | undefined;
+    const harness = createHarness(async (_url, options = {}) => {
+      const range = new Headers(options.headers).get('range') ?? '';
+      calls.push(range);
+      if (range === 'bytes=0-3') return rangeResponse(0, 4, total);
+      if (range === 'bytes=4-8388611') {
+        firstPrefetchSignal = options.signal;
+        return await new Promise<Response>((resolve) => { finishFirstPrefetch = resolve; });
+      }
+      const match = /^bytes=(\d+)-(\d+)$/.exec(range);
+      if (!match) throw new Error(`Unexpected range ${range}`);
+      return rangeResponse(Number(match[1]), Number(match[2]) - Number(match[1]) + 1, total);
+    });
+    harness.configure(total);
+    harness.setMode('playing');
+    releases.push(harness.release);
+
+    await (await harness.request('bytes=0-3', total)).arrayBuffer();
+    await wait(180);
+    expect(calls).toContain('bytes=4-8388611');
+
+    harness.setMode('paused');
+    expect(firstPrefetchSignal?.aborted).toBe(false);
+    finishFirstPrefetch(rangeResponse(4, 8 * 1024 * 1024, total));
+    await wait(50);
+
+    expect(firstPrefetchSignal?.aborted).toBe(false);
+    expect(calls).toContain(`bytes=8388612-${total - 1}`);
+    const prefetchCalls = calls.length;
+    const cached = await harness.request('bytes=4-7', total);
+    expect([...new Uint8Array(await cached.arrayBuffer())]).toEqual([0, 1, 2, 3]);
+    expect(calls).toHaveLength(prefetchCalls);
+  });
+
   it('uses a failed precache TCP request to promote and fill from an alternate node', async () => {
     const calls: Array<{ url: string; range: string }> = [];
     const harness = createHarness(async (url, options = {}) => {

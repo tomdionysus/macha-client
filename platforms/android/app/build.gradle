@@ -1,0 +1,36 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'media.macha.client'
+    compileSdk 36
+
+    defaultConfig {
+        applicationId 'media.macha.client'
+        minSdk 26
+        targetSdk 36
+        versionCode 801
+        versionName '0.8.1'
+    }
+
+    sourceSets {
+        main.assets.srcDirs += [file("$buildDir/generated/web")]
+    }
+
+    buildTypes {
+        release { minifyEnabled false }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+tasks.register('stageDeploymentApk', Copy) {
+    dependsOn 'assembleDebug'
+    from layout.buildDirectory.file('outputs/apk/debug/app-debug.apk')
+    into file('../../../artifacts')
+    rename { 'Macha-Android-TV-0.8.1-debug.apk' }
+}

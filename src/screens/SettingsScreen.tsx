@@ -1,4 +1,3 @@
-import { useState, type ChangeEvent } from 'react';
 import { Link } from 'react-router-dom';
 import type { MediaApi } from '../api/MediaApi';
 import type { ServerApi, ServerStatus } from '../api/MachaServerApi';
@@ -6,6 +5,7 @@ import { machaLogoUrl as logoUrl } from '../uiAssets';
 import { useAsync } from '../hooks/useAsync';
 import { routes } from '../routing';
 import { clientVersion } from '../version';
+import { ConnectionForm } from '../components/ConnectionForm';
 
 interface Props {
   api: MediaApi;
@@ -13,7 +13,7 @@ interface Props {
   bootstrapEndpoints: readonly string[];
   apiToken: string;
   connectionNotice?: string;
-  onSave: (urls: readonly string[], token: string) => void;
+  onSave: (urls: readonly string[], token: string) => Promise<string | undefined>;
 }
 
 function booleanField(status: ServerStatus | undefined, name: string): boolean | undefined {
@@ -35,8 +35,6 @@ function formatLastSync(unixMs: number): string {
 }
 
 export function SettingsScreen({ api, serverApi, bootstrapEndpoints, apiToken, connectionNotice, onSave }: Props) {
-  const [urls, setUrls] = useState(bootstrapEndpoints.join('\n'));
-  const [token, setToken] = useState(apiToken);
   const server = useAsync(() => serverApi.status(), [serverApi]);
   const catalogue = useAsync(() => api.status(), [api]);
 
@@ -116,34 +114,7 @@ export function SettingsScreen({ api, serverApi, bootstrapEndpoints, apiToken, c
 
       <div className="settings-connection">
         <h2>Connection</h2>
-        {connectionNotice && (server.error || !server.value?.playbackAvailable) && (
-          <p className="settings-status-error" role="alert">{connectionNotice}</p>
-        )}
-        <label htmlFor="server-url">Macha bootstrap API endpoints</label>
-        <div className="settings-line">
-          <textarea
-            id="server-url"
-            data-tv-focusable="true"
-            value={urls}
-            rows={Math.max(2, bootstrapEndpoints.length)}
-            onChange={(event: ChangeEvent<HTMLTextAreaElement>) => setUrls(event.target.value)}
-            placeholder="One endpoint per line; blank means same origin"
-            spellCheck={false}
-          />
-        </div>
-        <label htmlFor="api-token">Bearer token <span className="muted">(optional)</span></label>
-        <div className="settings-line">
-          <input
-            id="api-token"
-            data-tv-focusable="true"
-            type="password"
-            value={token}
-            onChange={(event: ChangeEvent<HTMLInputElement>) => setToken(event.target.value)}
-            spellCheck={false}
-          />
-          <button data-tv-focusable="true" onClick={() => onSave(urls.split(/[\n,]/), token)}>Save</button>
-        </div>
-        <p>Enter one bootstrap endpoint per line. The client learns other node APIs from the cluster when that contract is available; an empty first endpoint means same-origin <code>/api/v1/…</code>.</p>
+        <ConnectionForm bootstrapEndpoints={bootstrapEndpoints} apiToken={apiToken} onSave={onSave} notice={connectionNotice} />
       </div>
     </section>
   );

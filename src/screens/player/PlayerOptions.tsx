@@ -13,12 +13,16 @@ function streamLabel(stream: PlaybackStreamInfo, fallback: string): string {
   return parts.join(' · ');
 }
 
-export function PlayerOptions({ session, onApply }: {
+export function PlayerOptions({ session, pendingPreferences, onApply }: {
   session: PlaybackSession;
+  pendingPreferences?: PlaybackPreferencesUpdate;
   onApply: (update: PlaybackUpdate) => void;
 }) {
-  const selectedAudio = session.selected.audioStream;
-  const selectedSubtitle = session.selected.subtitleStream;
+  const effectivePreferences = { ...session.preferences, ...pendingPreferences };
+  const selectedAudio = pendingPreferences?.audioStream ?? session.selected.audioStream;
+  const selectedSubtitle = pendingPreferences?.subtitleStream === null
+    ? -1
+    : pendingPreferences?.subtitleStream ?? session.selected.subtitleStream;
   const mode = (value: PlaybackMode | 'auto') => onApply({ preferences: { mode: value } });
   const preferences = (update: PlaybackPreferencesUpdate) => onApply({ preferences: update });
 
@@ -27,9 +31,9 @@ export function PlayerOptions({ session, onApply }: {
       <div className="player-option-group">
         <span>Mode</span>
         <div>
-          <button type="button" data-tv-focusable="true" className={session.preferences.mode === 'auto' ? 'selected' : undefined} onClick={() => mode('auto')}>Auto</button>
+          <button type="button" data-tv-focusable="true" className={effectivePreferences.mode === 'auto' ? 'selected' : undefined} onClick={() => mode('auto')}>Auto</button>
           {session.options.modes.map((candidate) => (
-            <button type="button" key={candidate} data-tv-focusable="true" className={session.preferences.mode === candidate ? 'selected' : undefined} onClick={() => mode(candidate)}>
+            <button type="button" key={candidate} data-tv-focusable="true" className={effectivePreferences.mode === candidate ? 'selected' : undefined} onClick={() => mode(candidate)}>
               {candidate === 'direct' ? 'Direct' : candidate === 'remux' ? 'Remux' : 'Transcode'}
             </button>
           ))}
@@ -39,8 +43,8 @@ export function PlayerOptions({ session, onApply }: {
       {session.options.canChangeQuality && <div className="player-option-group">
         <span>Quality</span>
         <div>
-          <button type="button" data-tv-focusable="true" className={session.preferences.maxHeight === null && session.preferences.maxBitrate === null ? 'selected' : undefined} onClick={() => preferences({ maxHeight: null, maxBitrate: null })}>Original</button>
-          {session.options.qualityHeights.map((height) => <button type="button" key={height} data-tv-focusable="true" className={session.preferences.maxHeight === height ? 'selected' : undefined} onClick={() => preferences({ maxHeight: height })}>{height}p</button>)}
+          <button type="button" data-tv-focusable="true" className={effectivePreferences.maxHeight === null && effectivePreferences.maxBitrate === null ? 'selected' : undefined} onClick={() => preferences({ maxHeight: null, maxBitrate: null })}>Original</button>
+          {session.options.qualityHeights.map((height) => <button type="button" key={height} data-tv-focusable="true" className={effectivePreferences.maxHeight === height ? 'selected' : undefined} onClick={() => preferences({ maxHeight: height })}>{height}p</button>)}
         </div>
       </div>}
 

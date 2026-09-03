@@ -26,10 +26,24 @@ describe('client server endpoint persistence', () => {
 
   it('normalizes and deduplicates a bootstrap endpoint set', () => {
     const storage = new MemoryStorage();
-    setBootstrapEndpoints(['http://node-a/', ' http://node-b ', 'http://node-a'], storage);
+    setBootstrapEndpoints(['http://node-a/', '', ' http://node-b ', '  ', 'http://node-a'], storage);
 
     expect(getBootstrapEndpoints(storage)).toEqual(['http://node-a', 'http://node-b']);
     expect(getServerUrl(storage)).toBe('http://node-a');
+  });
+
+  it('removes obsolete same-origin entries from persisted endpoint state', () => {
+    const storage = new MemoryStorage();
+    storage.setItem('macha-bootstrap-endpoints-v1', JSON.stringify({
+      version: 1,
+      urls: ['', 'http://node-a', '/', 'http://node-a/'],
+    }));
+
+    expect(getBootstrapEndpoints(storage)).toEqual(['http://node-a']);
+    expect(JSON.parse(storage.getItem('macha-bootstrap-endpoints-v1') ?? '')).toEqual({
+      version: 1,
+      urls: ['http://node-a'],
+    });
   });
 
   it('retains the single-URL compatibility API', () => {

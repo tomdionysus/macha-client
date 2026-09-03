@@ -40,6 +40,42 @@
 .settings-status-error { margin: .9rem 0 0 !important; color: #ffb4b4 !important; font-size: .86rem; }
 .settings-connection { width: 100%; }
 .settings-connection h2 { margin-top: 0; }
+.connection-form { display: grid; gap: .7rem; }
+.connection-form label { display: block; margin: .25rem 0 0; color: var(--text-dim); }
+.connection-form input, .connection-form textarea {
+  width: 100%;
+  min-width: 0;
+  padding: .85rem 1rem;
+  border: 1px solid #3a3a40;
+  border-radius: .65rem;
+  background: #19191c;
+  color: #fff;
+  font: inherit;
+}
+.connection-form textarea { min-height: 6rem; resize: vertical; }
+.connection-form input:focus, .connection-form textarea:focus { outline: 1px solid var(--focus); border-color: var(--focus); }
+.connection-form button { justify-self: start; margin: .35rem 0 0; }
+.connection-form p { margin: 0; }
+
+.connection-gate {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: clamp(1rem, 4vw, 3rem);
+}
+.connection-gate-panel {
+  width: min(42rem, 100%);
+  padding: clamp(1.25rem, 4vw, 2.5rem);
+  border: 1px solid #ffffff12;
+  border-radius: 1rem;
+  background: #141416ed;
+  box-shadow: 0 24px 80px #000b;
+}
+.connection-gate-logo { display: block; width: 5rem; height: 5rem; margin-bottom: 1rem; object-fit: contain; }
+.connection-gate-panel > .eyebrow { margin: 0 0 .35rem; }
+.connection-gate-panel > h1 { margin: 0 0 .7rem; }
+.connection-gate-panel > p { color: var(--text-dim); line-height: 1.55; }
+.connection-gate .connection-form { margin-top: 1.4rem; }
 
 .sponsor-page { width: 100%; }
 .sponsor-back { display: inline-block; margin-top: .4rem; }
@@ -75,4 +111,3 @@
   .sponsor-heading { grid-template-columns: 1fr; }
   .sponsor-logo { width: 100px; }
 }
-

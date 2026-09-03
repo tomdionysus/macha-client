@@ -3,10 +3,16 @@ import { bootstrapEndpoints, EndpointRegistry } from './EndpointRegistry';
 
 describe('EndpointRegistry', () => {
   it('normalizes and deduplicates bootstrap endpoints without losing order', () => {
-    expect(bootstrapEndpoints(['http://node-a/', ' http://node-b ', 'http://node-a'])).toEqual([
+    expect(bootstrapEndpoints(['http://node-a/', '', '/', ' http://node-b ', 'http://node-a'])).toEqual([
       { id: 'http://node-a', baseUrl: 'http://node-a', source: 'bootstrap' },
       { id: 'http://node-b', baseUrl: 'http://node-b', source: 'bootstrap' },
     ]);
+  });
+
+  it('rejects blank same-origin URLs from endpoint advertisements', () => {
+    const registry = new EndpointRegistry(bootstrapEndpoints(['http://seed', '']));
+    registry.applyAdvertisement([{ nodeId: 'node-a', apiBaseUrls: ['', '/', 'http://node-a'] }]);
+    expect(registry.snapshot().map(({ endpoint }) => endpoint.baseUrl)).toEqual(['http://seed', 'http://node-a']);
   });
 
   it('keeps the last successful endpoint sticky while it remains healthy', () => {

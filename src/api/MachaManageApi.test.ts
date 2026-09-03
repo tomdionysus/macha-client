@@ -35,6 +35,7 @@ describe('MachaManageApi', () => {
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe('http://node.test/api/v1/manage/unmatched');
     expect(init.method).toBe('GET');
+    expect(init.cache).toBe('no-store');
     expect(new Headers(init.headers).get('Authorization')).toBe('Bearer secret');
   });
 
@@ -78,6 +79,17 @@ describe('MachaManageApi', () => {
     expect(url).toBe('http://node.test/api/v1/manage/filesystem?path=%2FMovies%2FA%20B.mkv');
     expect(init.method).toBe('DELETE');
   });
+
+  it('always refreshes filesystem listings from the server', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ path: '/Movies', parent: '/', entries: [] }));
+    vi.stubGlobal('fetch', fetchMock);
+    const api = new MachaManageApi('http://node.test');
+
+    await api.browse('/Movies');
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(init.cache).toBe('no-store');
+  });
   it('resets a stale identity association by IP without requiring a NodeId', async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
       reset: {
@@ -112,13 +124,35 @@ describe('MachaManageApi', () => {
     vi.stubGlobal('fetch', fetchMock);
     const api = new MachaManageApi('http://node.test');
 
-    await api.resetNodeIdentityAssociation(
+    const result = await api.resetNodeIdentityAssociation(
       '00112233445566778899aabbccddeeff', '10.44.1.50', 57401,
     );
+
+    expect(result.metadata_generation).toBe(43);
 
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe('http://node.test/api/v1/manage/nodes/00112233445566778899aabbccddeeff/identity-association/reset');
     expect(JSON.parse(String(init.body))).toEqual({ host: '10.44.1.50', port: 57401 });
+  });
+
+  it('accepts a queued asynchronous node reset without waiting for metadata audit', async () => {
+    const queued = {
+      reset: {
+        scope: '[10.44.1.50]:57401', host: '10.44.1.50', port: 57401,
+        stale_node_id: '00112233445566778899aabbccddeeff', epoch: 2,
+        reset_at_unix_ms: 1234, reset_by_node_id: 'ffeeddccbbaa99887766554433221100', reason: null,
+      },
+      audit_state: 'queued',
+      metadata_persisted: false,
+    };
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(queued, { status: 202 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const api = new MachaManageApi('http://node.test');
+
+    await expect(api.resetNodeIdentityAssociation(
+      '00112233445566778899aabbccddeeff', '10.44.1.50', 57401,
+    )).resolves.toEqual(queued);
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
 
 });

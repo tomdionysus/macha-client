@@ -64,6 +64,24 @@ describe('ClusterPlaybackResolver', () => {
     expect(headers[1]?.get('Idempotency-Key')).toBe(headers[0]?.get('Idempotency-Key'));
   });
 
+  it('retains one viewer identity while distinct admissions receive distinct idempotency keys', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify(wireSession('session-a')), { status: 201, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(wireSession('session-b')), { status: 201, headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+    const resolver = new ClusterPlaybackResolver(new EndpointRegistry(bootstrapEndpoints(['http://a', 'http://b'])));
+    const context = { viewerSessionId: 'viewer-stable' };
+
+    const primary = await resolver.resolve(media, capabilities, 0, undefined, context);
+    await resolver.failover(primary, media, capabilities, 20_000, { mode: 'auto' }, undefined, context);
+
+    const headers = fetchMock.mock.calls.map(([, init]) => new Headers((init as RequestInit).headers));
+    expect(headers.map((entry) => entry.get('Macha-Viewer-Session'))).toEqual(['viewer-stable', 'viewer-stable']);
+    expect(headers[0]?.get('Idempotency-Key')).toBeTruthy();
+    expect(headers[1]?.get('Idempotency-Key')).toBeTruthy();
+    expect(headers[1]?.get('Idempotency-Key')).not.toBe(headers[0]?.get('Idempotency-Key'));
+  });
+
   it('routes updates and teardown to the generation endpoint', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify(wireSession('session-a')), { status: 201, headers: { 'Content-Type': 'application/json' } }))
@@ -82,6 +100,25 @@ describe('ClusterPlaybackResolver', () => {
     ]);
   });
 
+  it('does not mark the session endpoint unhealthy when the viewer cancels a superseded update', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify(wireSession('session-a')), { status: 201, headers: { 'Content-Type': 'application/json' } }))
+      .mockImplementationOnce((_url: string, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(init.signal?.reason), { once: true });
+      }));
+    vi.stubGlobal('fetch', fetchMock);
+    const registry = new EndpointRegistry(bootstrapEndpoints(['http://a', 'http://b']));
+    const resolver = new ClusterPlaybackResolver(registry);
+    const active = await resolver.resolve(media, capabilities);
+    const controller = new AbortController();
+
+    const update = resolver.update(active.sessionId, { seekMs: 20_000 }, controller.signal);
+    controller.abort(new DOMException('superseded', 'AbortError'));
+
+    await expect(update).rejects.toMatchObject({ name: 'AbortError' });
+    expect(registry.snapshot().find((entry) => entry.endpoint.id === 'http://a')?.health).not.toBe('unreachable');
+  });
+
   it('recreates a failed generation on an untried node and then exhausts candidates', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify(wireSession('session-a')), { status: 201, headers: { 'Content-Type': 'application/json' } }))
@@ -97,6 +134,31 @@ describe('ClusterPlaybackResolver', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it('continues failover after one surviving node cannot open the media', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify(wireSession('session-a')), { status: 201, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: 'media_open_failed', message: 'open media: Input/output error' }), { status: 500, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(wireSession('session-c')), { status: 201, headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+    const resolver = new ClusterPlaybackResolver(new EndpointRegistry(bootstrapEndpoints(['http://a', 'http://b', 'http://c'])));
+    const active = await resolver.resolve(media, capabilities);
+
+    const replacement = await resolver.failover(active, media, capabilities, 21_000, { mode: 'auto' });
+
+    expect(replacement.endpoint?.id).toBe('http://c');
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      'http://a/api/v1/playback/sessions',
+      'http://b/api/v1/playback/sessions',
+      'http://c/api/v1/playback/sessions',
+    ]);
+    const replacementAttempts = fetchMock.mock.calls.slice(1).map(([, init]) => ({
+      key: new Headers((init as RequestInit).headers).get('Idempotency-Key'),
+      body: (init as RequestInit).body,
+    }));
+    expect(replacementAttempts[0]?.key).toBeTruthy();
+    expect(replacementAttempts[1]).toEqual(replacementAttempts[0]);
+  });
+
   it('prepares one Direct standby without displacing the active endpoint', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify(wireSession('session-a')), { status: 201, headers: { 'Content-Type': 'application/json' } }))
@@ -104,22 +166,27 @@ describe('ClusterPlaybackResolver', () => {
     vi.stubGlobal('fetch', fetchMock);
     const registry = new EndpointRegistry(bootstrapEndpoints(['http://a', 'http://b']));
     const resolver = new ClusterPlaybackResolver(registry);
-    const primary = await resolver.resolve(media, capabilities);
+    const context = { viewerSessionId: 'viewer-standby' };
+    const primary = await resolver.resolve(media, capabilities, undefined, undefined, context);
 
-    const alternate = await resolver.prepareAlternate(primary, media, capabilities, 5_000, { mode: 'auto' });
+    const alternate = await resolver.prepareAlternate(primary, media, capabilities, 5_000, { mode: 'auto' }, context);
 
     expect(alternate?.endpoint?.id).toBe('http://b');
     expect(registry.candidates()[0]?.endpoint.id).toBe('http://a');
     const body = JSON.parse(String((fetchMock.mock.calls[1]?.[1] as RequestInit).body));
     expect(body.preferences.mode).toBe('direct');
+    const headers = fetchMock.mock.calls.map(([, init]) => new Headers((init as RequestInit).headers));
+    expect(headers.map((entry) => entry.get('Macha-Viewer-Session'))).toEqual(['viewer-standby', 'viewer-standby']);
+    expect(headers[1]?.get('Idempotency-Key')).not.toBe(headers[0]?.get('Idempotency-Key'));
   });
 
   it('abandons a hung standby POST and attempts the next known endpoint', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify(wireSession('session-a')), { status: 201, headers: { 'Content-Type': 'application/json' } }))
-      .mockImplementationOnce((_url: string, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
-        init?.signal?.addEventListener('abort', () => reject(init.signal?.reason), { once: true });
-      }))
+      .mockImplementationOnce((_url: string, init?: RequestInit) => {
+        expect(init?.signal).toBeUndefined();
+        return new Promise<Response>(() => undefined);
+      })
       .mockResolvedValueOnce(new Response(JSON.stringify(wireSession('session-c')), { status: 201, headers: { 'Content-Type': 'application/json' } }));
     vi.stubGlobal('fetch', fetchMock);
     const resolver = new ClusterPlaybackResolver(

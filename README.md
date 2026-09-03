@@ -74,7 +74,9 @@ npm install
 npm run dev
 ```
 
-`.env.example` configures Vite to proxy same-origin `/api` requests to the Macha node. Macha 0.9.1 also emits CORS headers, so a separately hosted client may talk to the API directly.
+`.env.example` configures the Macha API directly. Macha emits CORS headers, so
+the Vite development server does not proxy API requests. Blank lines in the
+endpoint list are ignored rather than interpreted as the client origin.
 
 For the self-contained UI/playback demo:
 
@@ -136,7 +138,9 @@ Opening a series therefore no longer downloads all of its episode metadata.
 
 Artwork is fetched through the API rather than placed directly in `<img src>`. This is necessary because a Macha API configured with `token_file` requires the Bearer token on artwork requests too.
 
-Grid/rail artwork uses a monotonic viewport-demand policy. A single application-wide proximity registry observes scroll/resize geometry with a 1000 px preload margin. Once a card enters that region, its artwork request is irrevocably started and is allowed to finish even if the card subsequently scrolls away or unmounts. There is no client-side artwork request queue, priority system, or scroll-driven network cancellation; the browser owns HTTP scheduling and `MachaMediaApi` coalesces duplicate unsignalled requests and retains completed Blobs for later mounts. Detail/backdrop hooks remain independently cancellable because they are presentation-specific rather than shared scrolling demand.
+Grid/rail artwork uses a monotonic viewport-demand policy. A single application-wide proximity registry observes scroll/resize geometry with a 1000 px preload margin. Once a card enters that region, its artwork request is irrevocably admitted to a four-transfer shared scheduler and may finish even if the card subsequently scrolls away or unmounts. Duplicate demand is coalesced by immutable artwork ID and completed Blobs remain cached for later mounts. Detail/backdrop demand has queue priority and its view consumer remains independently cancellable without discarding useful bounded background work.
+
+Artwork retrieval has an eight-second per-node deadline and searches alternate nodes for a content-addressed object after a local `404` or retryable failure. Artwork probes update endpoint health without displacing the authoritative API merely because another node held an object. A failed visible card retries with bounded backoff, cools down for one minute after exhaustion, and then rearms only when near the viewport. Browser decode rejection follows the same self-healing policy rather than leaving a permanent blank poster.
 
 The client reserves an optional full date field for season/episode presentation, but the current Macha catalogue API exposes only `year`. See the [active roadmap](TODO/ACTIVE.md) for the provider/server work required to populate TMDB dates later.
 

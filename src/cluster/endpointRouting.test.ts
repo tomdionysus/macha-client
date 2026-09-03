@@ -1,6 +1,12 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { bootstrapEndpoints, EndpointRegistry } from './EndpointRegistry';
 import { ClusterEndpointRouter } from './endpointRouting';
+import { reportClusterReachable } from '../api/serverConnection';
+
+afterEach(() => {
+  reportClusterReachable();
+  vi.unstubAllGlobals();
+});
 
 describe('ClusterEndpointRouter', () => {
   it('makes the first working alternative authoritative without letting probes steal authority', async () => {
@@ -35,6 +41,40 @@ describe('ClusterEndpointRouter', () => {
   it('reports every exhausted endpoint instead of implying only the final node was tried', async () => {
     const router = new ClusterEndpointRouter(new EndpointRegistry(bootstrapEndpoints(['http://a', 'http://b'])));
     await expect(router.request(async () => { throw new TypeError('unavailable'); }))
-      .rejects.toThrow('All Macha API endpoints failed (http://a, http://b)');
+      .rejects.toThrow('All configured API endpoints are unreachable.');
+  });
+
+  it('does not describe reachable nodes returning API errors as unreachable', async () => {
+    const router = new ClusterEndpointRouter(new EndpointRegistry(bootstrapEndpoints(['http://a', 'http://b'])));
+    await expect(router.request(async () => {
+      throw Object.assign(new Error('temporarily unavailable'), { status: 503 });
+    })).rejects.toThrow('All configured Macha API endpoints failed.');
+  });
+
+  it('does not fail over or damage endpoint health when a caller cancels its own request', async () => {
+    const registry = new EndpointRegistry(bootstrapEndpoints(['http://a', 'http://b']));
+    const router = new ClusterEndpointRouter(registry);
+    const operation = vi.fn(async () => {
+      throw new DOMException('consumer left', 'AbortError');
+    });
+
+    await expect(router.request(operation)).rejects.toMatchObject({ name: 'AbortError' });
+
+    expect(operation).toHaveBeenCalledTimes(1);
+    expect(registry.snapshot().map(({ health }) => health.consecutiveFailures)).toEqual([0, 0]);
+  });
+
+  it('does not let an exhausted foreground read declare a cluster-wide outage', async () => {
+    const dispatchEvent = vi.fn();
+    class TestCustomEvent {
+      constructor(public readonly type: string) {}
+    }
+    vi.stubGlobal('window', { dispatchEvent });
+    vi.stubGlobal('CustomEvent', TestCustomEvent);
+    const router = new ClusterEndpointRouter(new EndpointRegistry(bootstrapEndpoints(['http://a', 'http://b'])));
+
+    await expect(router.request(async () => { throw new TypeError('request failed'); })).rejects.toThrow();
+
+    expect(dispatchEvent).not.toHaveBeenCalled();
   });
 });

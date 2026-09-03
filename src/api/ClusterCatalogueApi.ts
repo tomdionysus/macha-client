@@ -8,7 +8,9 @@ import type {
 } from './CatalogueApi';
 import { MachaApiError, MachaCatalogueApi } from './MachaCatalogueApi';
 import type { EndpointRegistry, MachaEndpoint } from '../cluster/EndpointRegistry';
-import { ClusterEndpointRouter } from '../cluster/endpointRouting';
+import { endpointFailure, retryableEndpointFailure, unreachableEndpointFailure } from '../cluster/endpointFailure';
+import { ClusterEndpointRouter, MachaClusterRouteError } from '../cluster/endpointRouting';
+import { reportClusterReachable } from './serverConnection';
 
 type EndpointOperation<T> = (api: MachaCatalogueApi, endpoint: MachaEndpoint) => Promise<T>;
 
@@ -21,6 +23,7 @@ interface MediaProfileRequest {
 
 /** Preserve a small corpus-building tail without allowing advisory work to occupy every browser connection. */
 export const MAX_ABANDONED_MEDIA_PROFILE_REQUESTS = 2;
+export const ARTWORK_ENDPOINT_TIMEOUT_MS = 8_000;
 
 function abortReason(signal: AbortSignal): unknown {
   return signal.reason ?? new DOMException('Aborted', 'AbortError');
@@ -84,7 +87,7 @@ export class ClusterCatalogueApi implements CatalogueApi {
   }
 
   artwork(id: string, signal?: AbortSignal): Promise<Blob> {
-    return this.read((api) => api.artwork(id, signal), signal);
+    return this.readArtwork(id, signal);
   }
 
   update(item: CatalogueItem, expectedRevision?: number): Promise<CatalogueItem> {
@@ -103,6 +106,83 @@ export class ClusterCatalogueApi implements CatalogueApi {
     return this.router.request((endpoint) => {
       if (signal?.aborted) return Promise.reject(signal.reason);
       return operation(this.api(endpoint), endpoint);
+    });
+  }
+
+  private async readArtwork(id: string, signal?: AbortSignal): Promise<Blob> {
+    let lastError: unknown;
+    let lastMissing: MachaApiError | undefined;
+    let allUnreachable = true;
+    const attempted: string[] = [];
+
+    for (const { endpoint } of this.router.registry.candidates()) {
+      attempted.push(endpoint.id);
+      if (signal?.aborted) throw abortReason(signal);
+      try {
+        const artwork = await this.artworkAttempt(endpoint, id, signal);
+        // Artwork placement is deliberately sparse. Serving a content object is
+        // health evidence, but must not steal API authority from normal work.
+        this.router.registry.recordProbeSuccess(endpoint.id);
+        reportClusterReachable();
+        return artwork;
+      } catch (error) {
+        if (signal?.aborted) throw abortReason(signal);
+        if (error instanceof MachaApiError && error.status === 404) {
+          // A reachable node may not hold this content-addressed object yet.
+          // Preserve its health and look for the same immutable object elsewhere.
+          this.router.registry.recordProbeSuccess(endpoint.id);
+          reportClusterReachable();
+          lastMissing = error;
+          allUnreachable = false;
+          continue;
+        }
+        if (!retryableEndpointFailure(error)) throw error;
+        allUnreachable = allUnreachable && unreachableEndpointFailure(error);
+        this.router.registry.recordFailure(endpoint.id);
+        lastError = endpointFailure(endpoint.id, endpoint.baseUrl, error);
+      }
+    }
+
+    if (lastError) {
+      throw new MachaClusterRouteError(attempted, allUnreachable, lastError);
+    }
+    throw lastMissing ?? new MachaApiError(`Artwork ${id} is unavailable on every configured node.`, 404, 'artwork_not_found');
+  }
+
+  private artworkAttempt(endpoint: MachaEndpoint, id: string, consumerSignal?: AbortSignal): Promise<Blob> {
+    const controller = new AbortController();
+    return new Promise<Blob>((resolve, reject) => {
+      let settled = false;
+      const finish = (callback: () => void) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        consumerSignal?.removeEventListener('abort', consumerAborted);
+        callback();
+      };
+      const consumerAborted = () => {
+        const reason = consumerSignal ? abortReason(consumerSignal) : new DOMException('Aborted', 'AbortError');
+        controller.abort(reason);
+        finish(() => reject(reason));
+      };
+      const timeout = setTimeout(() => {
+        const error = new MachaApiError(
+          `Artwork request to ${endpoint.baseUrl} exceeded ${ARTWORK_ENDPOINT_TIMEOUT_MS} ms.`,
+          504,
+          'artwork_timeout',
+        );
+        controller.abort(error);
+        finish(() => reject(error));
+      }, ARTWORK_ENDPOINT_TIMEOUT_MS);
+      consumerSignal?.addEventListener('abort', consumerAborted, { once: true });
+      if (consumerSignal?.aborted) {
+        consumerAborted();
+        return;
+      }
+      void this.api(endpoint).artwork(id, controller.signal).then(
+        (blob) => finish(() => resolve(blob)),
+        (error) => finish(() => reject(error)),
+      );
     });
   }
 

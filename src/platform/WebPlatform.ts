@@ -425,7 +425,7 @@ class WebPlayer implements Player {
     if (sourceGeneration !== this.sourceGeneration || this.failedSourceGeneration === sourceGeneration) return false;
     const playStarted = performance.now();
     if (startPaused) {
-      this.stopManagedHlsLoad();
+      setDirectPlayReadAheadMode(this.directReadAheadSourceUrl, 'paused');
       video.pause();
       this.log.info('source-attached-paused', {
         elapsedMs: Math.round((performance.now() - playStarted) * 10) / 10,
@@ -695,18 +695,13 @@ class WebPlayer implements Player {
     await this.applySegmentedSubtitle(video, subtitleUrl, manifest, generation);
   }
 
-  private stopManagedHlsLoad(): void {
-    this.hls?.stopLoad();
-  }
-
   pause(): void {
     this.playRequestGeneration += 1;
     this.log.info('pause-request', this.video ? videoState(this.video) : undefined);
     this.wantsPlayback = false;
     setDirectPlayReadAheadMode(this.directReadAheadSourceUrl, 'paused');
-    // A paused transport must also quiesce source acquisition. Otherwise hls.js
-    // can keep filling its minute-scale buffer and keep the server session hot.
-    this.stopManagedHlsLoad();
+    // Pause is presentation intent, not source teardown. Managed HLS and the
+    // Direct Play worker continue filling their bounded forward buffers.
     this.video?.pause();
   }
 
@@ -720,7 +715,6 @@ class WebPlayer implements Player {
     }
     this.log.info('resume-request', videoState(video));
     this.wantsPlayback = true;
-    if (this.hls) this.hls.startLoad(video.currentTime);
     this.requestPlay(video, 'resume');
   }
 
@@ -927,7 +921,7 @@ class WebPlayer implements Player {
       this.log.error('hls-error-fatal', payload);
       if (action.action === 'restart-network') {
         this.log.warn('hls-recovery-network-start-load', { ...payload, attempt: action.attempt });
-        if (this.wantsPlayback) hls.startLoad(video.currentTime);
+        hls.startLoad(video.currentTime);
         return;
       }
       if (action.action === 'fail-network') {

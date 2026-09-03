@@ -2,6 +2,7 @@ import { createClientLogger } from '../diagnostics/ClientLog';
 import type { PlaybackCapabilities } from '../types';
 import type { Platform, Player } from './Platform';
 import { WebPlatform } from './WebPlatform';
+import { registerSamsungMediaKeys } from './SamsungMediaKeys';
 
 /**
  * Samsung's 2017 Tizen browser is deliberately treated as an old Web target,
@@ -16,6 +17,10 @@ export class SamsungWebPlatform implements Platform {
     forceNativeHls: true,
   });
   private readonly log = createClientLogger('playback.capabilities.samsung');
+
+  constructor() {
+    if (typeof window !== 'undefined') registerSamsungMediaKeys(window);
+  }
 
   initialVolume(): number {
     // TV volume is owned by the television/remote. Keep the HTML media

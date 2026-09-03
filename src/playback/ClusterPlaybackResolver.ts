@@ -5,6 +5,7 @@ import { ClusterEndpointRouter } from '../cluster/endpointRouting';
 import type { MediaSummary, PlaybackCapabilities } from '../types';
 import { MachaPlaybackResolver, newPlaybackIdempotencyKey } from './MachaPlaybackResolver';
 import type {
+  PlaybackAdmissionContext,
   PlaybackPreferencesUpdate,
   PlaybackResolver,
   PlaybackSession,
@@ -16,6 +17,28 @@ interface OwnedSession {
   endpoint: MachaEndpoint;
   resolver: MachaPlaybackResolver;
   nodeSessionId: string;
+}
+
+function awaitWithEndpointDeadline<T>(request: Promise<T>, timeoutMs: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    let settled = false;
+    const finish = (callback: () => void) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      callback();
+    };
+    const timeout = setTimeout(() => finish(() => reject(Object.assign(
+      new Error(`Playback generation attempt exceeded ${timeoutMs} ms.`),
+      { status: 504, code: 'client_endpoint_deadline' },
+    ))), timeoutMs);
+    // A deadline abandons only the local wait. The HTTP operation remains
+    // independent and observed, avoiding client-generated request cancellation.
+    request.then(
+      (value) => finish(() => resolve(value)),
+      (error) => finish(() => reject(error)),
+    );
+  });
 }
 
 /** Creates disposable playback generations on any suitable bootstrap endpoint. */
@@ -42,9 +65,10 @@ export class ClusterPlaybackResolver implements PlaybackResolver {
     capabilities: PlaybackCapabilities,
     seekMs?: number,
     preferences?: PlaybackPreferencesUpdate,
+    context?: PlaybackAdmissionContext,
   ): Promise<PlaybackSession> {
     this.failedGenerationEndpoints = new Set();
-    return this.create(media, capabilities, seekMs, preferences, new Set(), true);
+    return this.create(media, capabilities, seekMs, preferences, context, new Set(), true);
   }
 
   async failover(
@@ -54,6 +78,7 @@ export class ClusterPlaybackResolver implements PlaybackResolver {
     seekMs: number,
     preferences: PlaybackPreferencesUpdate,
     preparedAlternate?: PlaybackSession,
+    context?: PlaybackAdmissionContext,
   ): Promise<PlaybackSession> {
     if (failedSession.endpoint) {
       this.failedGenerationEndpoints.add(failedSession.endpoint.id);
@@ -68,7 +93,7 @@ export class ClusterPlaybackResolver implements PlaybackResolver {
         return preparedAlternate;
       }
     }
-    return this.create(media, capabilities, seekMs, preferences, this.failedGenerationEndpoints, true, this.generationAttemptTimeoutMs);
+    return this.create(media, capabilities, seekMs, preferences, context, this.failedGenerationEndpoints, true, this.generationAttemptTimeoutMs);
   }
 
   async prepareAlternate(
@@ -77,6 +102,7 @@ export class ClusterPlaybackResolver implements PlaybackResolver {
     capabilities: PlaybackCapabilities,
     seekMs: number,
     preferences: PlaybackPreferencesUpdate,
+    context?: PlaybackAdmissionContext,
   ): Promise<PlaybackSession | undefined> {
     if (!activeSession.endpoint) return undefined;
     const excluded = new Set(this.failedGenerationEndpoints);
@@ -87,6 +113,7 @@ export class ClusterPlaybackResolver implements PlaybackResolver {
         capabilities,
         seekMs,
         { ...preferences, mode: activeSession.mode === 'direct' ? 'direct' : preferences.mode },
+        context,
         excluded,
         false,
         this.generationAttemptTimeoutMs,
@@ -106,6 +133,7 @@ export class ClusterPlaybackResolver implements PlaybackResolver {
     capabilities: PlaybackCapabilities,
     seekMs: number | undefined,
     preferences: PlaybackPreferencesUpdate | undefined,
+    context: PlaybackAdmissionContext | undefined,
     excluded: ReadonlySet<string>,
     preferOnSuccess: boolean,
     attemptTimeoutMs?: number,
@@ -114,10 +142,6 @@ export class ClusterPlaybackResolver implements PlaybackResolver {
     const idempotencyKey = newPlaybackIdempotencyKey();
     for (const { endpoint } of this.registry.candidates(excluded)) {
       const resolver = this.resolver(endpoint);
-      const controller = attemptTimeoutMs ? new AbortController() : undefined;
-      const timeout = controller
-        ? setTimeout(() => controller.abort(new DOMException('Playback generation attempt timed out', 'AbortError')), attemptTimeoutMs)
-        : undefined;
       this.log.info('generation-attempt', {
         endpointId: endpoint.id,
         endpoint: endpoint.baseUrl,
@@ -126,7 +150,10 @@ export class ClusterPlaybackResolver implements PlaybackResolver {
         standby: !preferOnSuccess,
       });
       try {
-        const session = await resolver.resolve(media, capabilities, seekMs, preferences, controller?.signal, idempotencyKey);
+        const request = resolver.resolve(media, capabilities, seekMs, preferences, context, undefined, idempotencyKey);
+        const session = attemptTimeoutMs
+          ? await awaitWithEndpointDeadline(request, attemptTimeoutMs)
+          : await request;
         session.endpoint = { id: endpoint.id, baseUrl: endpoint.baseUrl };
         const nodeSessionId = session.sessionId;
         session.sessionId = `${endpoint.id}::${encodeURIComponent(nodeSessionId)}`;
@@ -145,18 +172,16 @@ export class ClusterPlaybackResolver implements PlaybackResolver {
         });
         this.registry.recordFailure(endpoint.id);
         lastError = endpointFailure(endpoint.id, endpoint.baseUrl, error);
-      } finally {
-        if (timeout !== undefined) clearTimeout(timeout);
       }
     }
     throw lastError ?? new Error('No untried Macha playback endpoint remains.');
   }
 
-  async update(sessionId: string, update: PlaybackUpdate): Promise<PlaybackSession> {
+  async update(sessionId: string, update: PlaybackUpdate, signal?: AbortSignal): Promise<PlaybackSession> {
     const owned = this.sessions.get(sessionId);
     if (!owned) throw new Error(`Playback generation ${sessionId} has no endpoint provenance.`);
     try {
-      const session = await owned.resolver.update(owned.nodeSessionId, update);
+      const session = await owned.resolver.update(owned.nodeSessionId, update, signal);
       const nodeSessionId = session.sessionId;
       session.sessionId = sessionId;
       session.endpoint = { id: owned.endpoint.id, baseUrl: owned.endpoint.baseUrl };
@@ -164,6 +189,8 @@ export class ClusterPlaybackResolver implements PlaybackResolver {
       this.registry.recordSuccess(owned.endpoint.id);
       return session;
     } catch (error) {
+      // Superseded client intent is not evidence that the owning node failed.
+      if (signal?.aborted) throw signal.reason ?? error;
       if (retryableEndpointFailure(error)) this.registry.recordFailure(owned.endpoint.id);
       throw endpointFailure(owned.endpoint.id, owned.endpoint.baseUrl, error);
     }

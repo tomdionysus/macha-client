@@ -3,6 +3,7 @@ import { createClientLogger } from '../diagnostics/ClientLog';
 import { parseErrorEnvelope } from '../api/errorEnvelope';
 import type { MediaSummary, PlaybackCapabilities, PlaybackMode, PlaybackSource } from '../types';
 import type {
+  PlaybackAdmissionContext,
   PlaybackOptions,
   PlaybackPreferencesUpdate,
   PlaybackResolver,
@@ -178,6 +179,7 @@ export class MachaPlaybackResolver implements PlaybackResolver {
     capabilities: PlaybackCapabilities,
     seekMs?: number,
     preferences?: PlaybackPreferencesUpdate,
+    context?: PlaybackAdmissionContext,
     signal?: AbortSignal,
     idempotencyKey = newPlaybackIdempotencyKey(),
   ): Promise<PlaybackSession> {
@@ -219,7 +221,10 @@ export class MachaPlaybackResolver implements PlaybackResolver {
     // cluster resolver can recover on another endpoint rather than polling it.
     const wire = await this.request<WireSession>('/api/v1/playback/sessions', {
       method: 'POST',
-      headers: { 'Idempotency-Key': idempotencyKey },
+      headers: {
+        'Idempotency-Key': idempotencyKey,
+        ...(context?.viewerSessionId ? { 'Macha-Viewer-Session': context.viewerSessionId } : {}),
+      },
       body: JSON.stringify(body),
       signal,
     });
@@ -228,7 +233,7 @@ export class MachaPlaybackResolver implements PlaybackResolver {
     return session;
   }
 
-  async update(sessionId: string, update: PlaybackUpdate): Promise<PlaybackSession> {
+  async update(sessionId: string, update: PlaybackUpdate, signal?: AbortSignal): Promise<PlaybackSession> {
     this.log.info('session-update', { sessionId, update });
     const body: Record<string, unknown> = {};
     const preferences = wirePreferences(update.preferences);
@@ -238,6 +243,7 @@ export class MachaPlaybackResolver implements PlaybackResolver {
     const session = this.mapSession(await this.request<WireSession>(`/api/v1/playback/sessions/${encodeURIComponent(sessionId)}`, {
       method: 'PATCH',
       body: JSON.stringify(body),
+      signal,
     }));
     this.log.info('session-updated', this.sessionSummary(session));
     return session;
@@ -416,7 +422,8 @@ export class MachaPlaybackResolver implements PlaybackResolver {
       }
       return body as T;
     } catch (error) {
-      if (!(error instanceof MachaPlaybackError)) {
+      if (!(error instanceof MachaPlaybackError)
+        && !(error && typeof error === 'object' && (error as { name?: unknown }).name === 'AbortError')) {
         this.log.error('http-failed', {
           requestId,
           method,

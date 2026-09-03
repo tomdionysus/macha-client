@@ -26,10 +26,22 @@ export function retryableEndpointFailure(error: unknown): boolean {
   // Browser Fetch reports connection refusal, DNS failure and CORS transport
   // failure as TypeError. API/schema errors use the typed HTTP errors below.
   if (error instanceof TypeError) return true;
-  if (error && typeof error === 'object' && (error as { name?: unknown }).name === 'AbortError') return true;
+  // Cancellation describes client intent, never endpoint health. Callers that
+  // impose a genuine endpoint deadline must surface a typed timeout instead.
+  if (error && typeof error === 'object' && (error as { name?: unknown }).name === 'AbortError') return false;
   if (error && typeof error === 'object' && (error as { code?: unknown }).code === 'profile_pending') return true;
   const status = errorStatus(error);
-  return status === 429 || status === 502 || status === 503 || status === 504;
+  // A server-side failure can be node-local (for example this node cannot read
+  // a media extent). Safe reads and idempotent playback admission must exhaust
+  // the remaining cluster candidates rather than treating the first 500 as a
+  // cluster-wide terminal result. Mutation routers still execute only once.
+  return status === 429 || (status !== undefined && status >= 500 && status <= 599);
+}
+
+export function unreachableEndpointFailure(error: unknown): boolean {
+  if (error instanceof MachaConnectionError) return true;
+  if (error instanceof MachaEndpointError) return error.kind === 'transport';
+  return error instanceof TypeError;
 }
 
 export function endpointFailure(
@@ -42,7 +54,7 @@ export function endpointFailure(
     ? 'capacity'
     : status === 404
       ? 'session-missing'
-      : status === 502 || status === 503 || status === 504
+      : status !== undefined && status >= 500 && status <= 599
         ? 'unavailable'
         : 'transport';
   const detail = error instanceof Error ? error.message : String(error);

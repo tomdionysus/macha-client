@@ -17,7 +17,7 @@ export class ClusterServerApi implements ServerApi {
     return this.router.request(async (endpoint) => {
       const status = await this.api(endpoint).status();
       if (!status.playbackAvailable && [429, 502, 503, 504].includes(status.httpStatus)) {
-        throw new TypeError(`Macha playback API returned ${status.httpStatus}`);
+        throw Object.assign(new Error(`Macha playback API returned ${status.httpStatus}`), { status: status.httpStatus });
       }
       return status;
     });

@@ -3,6 +3,11 @@ dist/
 .vite/
 .env.local
 .DS_Store
+platforms/android/.gradle/
+platforms/android/app/build/
+platforms/android/build/
+platforms/android/local.properties
+artifacts/*.apk
 
 # TypeScript build metadata; builds are no-emit for source.
 *.tsbuildinfo

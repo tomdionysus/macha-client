@@ -4,13 +4,15 @@ import type { CatalogueApi, CatalogueMediaProfile } from './api/CatalogueApi';
 import type { MediaApi } from './api/MediaApi';
 import { AppLogo } from './components/AppLogo';
 import { MusicNav } from './components/MusicNav';
+import { StatusNav } from './components/StatusNav';
+import { ManageNav } from './components/ManageNav';
 import { machaLogoUrl as logoUrl } from './uiAssets';
 import { useTvNavigation } from './hooks/useTvNavigation';
 import { useEndpointHealthMonitor } from './cluster/useEndpointHealthMonitor';
 import { samsungBackTarget } from './platform/samsungBackNavigation';
 import type { Platform } from './platform/Platform';
 import type { PlaybackResolver } from './playback/PlaybackResolver';
-import { SERVER_UNREACHABLE_EVENT, SERVER_UNREACHABLE_MESSAGE } from './api/serverConnection';
+import { reportClusterReachable, SERVER_REACHABLE_EVENT, SERVER_UNREACHABLE_EVENT, SERVER_UNREACHABLE_MESSAGE } from './api/serverConnection';
 import type { Episode, MediaSummary, PlaybackProgress, SeasonSummary } from './types';
 import { ContinueWatchingStore } from './state/continueWatching';
 import { PlaybackQueueStore } from './state/playbackQueue';
@@ -48,6 +50,8 @@ import { useMusicController } from './app/useMusicController';
 import { usePlaybackRuntime } from './app/usePlaybackRuntime';
 import { usePlaybackController } from './app/usePlaybackController';
 import { technicalProfileFromCatalogue } from './playback/MediaTechnicalProfile';
+import { ConnectionGateScreen } from './screens/ConnectionGateScreen';
+import { checkEndpointConfiguration, initialConnectionGate, normalizeConnectionEndpoints, shouldEnterConnectionGate, type ConnectionGate } from './app/connectionConfiguration';
 
 interface Props {
   platform: Platform;
@@ -217,17 +221,23 @@ function MetadataEditorRoute({ api }: { api: CatalogueApi }) {
 export default function App({ platform, apiOverride, playbackOverride }: Props) {
   const navigate = useNavigate();
   const location = useLocation();
+  const demo = import.meta.env.VITE_DEMO === 'true';
+  const connectionRequired = !demo && !apiOverride;
 
   const [bootstrapEndpoints, setBootstrapEndpoints] = useState(() => getBootstrapEndpoints());
   const serverUrl = bootstrapEndpoints[0] ?? '';
   const [apiToken, setApiToken] = useState(() => getApiToken());
   const [connectionNotice, setConnectionNotice] = useState<string>();
+  const [clusterUnreachable, setClusterUnreachable] = useState(false);
+  const [connectionGate, setConnectionGate] = useState<ConnectionGate | undefined>(() =>
+    initialConnectionGate(connectionRequired, getBootstrapEndpoints()),
+  );
+  const effectiveConnectionGate = connectionRequired ? connectionGate : undefined;
   const clientId = useMemo(() => getClientId(), []);
   const progressStore = useMemo(() => new ContinueWatchingStore(clientId), [clientId]);
   const queueStore = useMemo(() => new PlaybackQueueStore(clientId), [clientId]);
   const playlistStore = useMemo(() => new MusicPlaylistStore(clientId), [clientId]);
   const volumeStore = useMemo(() => new VolumeStore(clientId), [clientId]);
-  const demo = import.meta.env.VITE_DEMO === 'true';
   const {
     catalogueApi,
     manageApi,
@@ -239,7 +249,7 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
     managementAvailable,
     endpointRegistry,
   } = useMachaServices({ serverUrl, bootstrapEndpoints, apiToken, demo, apiOverride, playbackOverride });
-  useEndpointHealthMonitor(endpointRegistry, apiToken, !demo && !apiOverride);
+  useEndpointHealthMonitor(endpointRegistry, apiToken, connectionRequired && bootstrapEndpoints.length > 0 && !effectiveConnectionGate);
   const metadataEditingAvailable = managementAvailable;
   const [unmatchedCount, setUnmatchedCount] = useState(0);
 
@@ -259,7 +269,7 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
   const activePlayback = playback.activePlayback;
 
   useEffect(() => {
-    if (!managementAvailable) {
+    if (!managementAvailable || effectiveConnectionGate) {
       setUnmatchedCount(0);
       return undefined;
     }
@@ -268,10 +278,11 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
       .then((items) => { if (!cancelled) setUnmatchedCount(items.length); })
       .catch(() => { /* Manage itself will surface API errors when opened. */ });
     return () => { cancelled = true; };
-  }, [manageApi, managementAvailable]);
+  }, [effectiveConnectionGate, manageApi, managementAvailable]);
 
   const samsungBack = useCallback(() => {
     if (import.meta.env.MODE !== 'samsung') return false;
+    if (effectiveConnectionGate) return true;
     if (location.pathname === routes.home) {
       playbackRuntime.terminateForPageExit();
       platform.exitApplication?.();
@@ -282,22 +293,37 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
       .then((target) => { if (target) navigate(target); })
       .catch(() => navigate(routes.home));
     return true;
-  }, [activePlayback?.returnTo, api, location.pathname, navigate, platform, playbackRuntime]);
+  }, [activePlayback?.returnTo, api, effectiveConnectionGate, location.pathname, navigate, platform, playbackRuntime]);
 
   useTvNavigation(samsungBack);
 
   useEffect(() => {
     const onServerUnreachable = (event: Event) => {
-      // One bootstrap endpoint failing is not cluster failure. Node-aware APIs
-      // exhaust alternatives before surfacing their final error in-place.
-      if (bootstrapEndpoints.length > 1) return;
+      if (!connectionRequired) return;
       const detail = (event as CustomEvent<{ message?: string }>).detail;
       setConnectionNotice(detail?.message ?? SERVER_UNREACHABLE_MESSAGE);
-      if (location.pathname !== routes.settings) navigate(routes.settings, { replace: true });
+      setClusterUnreachable(true);
     };
+    const onServerReachable = () => setClusterUnreachable(false);
     window.addEventListener(SERVER_UNREACHABLE_EVENT, onServerUnreachable);
-    return () => window.removeEventListener(SERVER_UNREACHABLE_EVENT, onServerUnreachable);
-  }, [bootstrapEndpoints.length, location.pathname, navigate]);
+    window.addEventListener(SERVER_REACHABLE_EVENT, onServerReachable);
+    return () => {
+      window.removeEventListener(SERVER_UNREACHABLE_EVENT, onServerUnreachable);
+      window.removeEventListener(SERVER_REACHABLE_EVENT, onServerReachable);
+    };
+  }, [connectionRequired]);
+
+  useEffect(() => {
+    if (!connectionRequired || !shouldEnterConnectionGate(clusterUnreachable, Boolean(activePlayback))) return;
+    setConnectionGate('unreachable');
+    navigate(routes.connection, { replace: true });
+  }, [activePlayback, clusterUnreachable, connectionRequired, navigate]);
+
+  useEffect(() => {
+    if (effectiveConnectionGate && location.pathname !== routes.connection) {
+      navigate(routes.connection, { replace: true });
+    }
+  }, [effectiveConnectionGate, location.pathname, navigate]);
 
   const open = useCallback((item: MediaSummary) => navigate(pathForMedia(item)), [navigate]);
   const openPlayer = useCallback((item: MediaSummary) => playback.startPlayback(item), [playback.startPlayback]);
@@ -312,20 +338,28 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
     onQueueChange: playback.setQueueState,
   });
 
-  const saveServer = useCallback((urls: readonly string[], token: string) => {
-    setConnectionNotice(undefined);
-    const normalizedEndpoints = [...new Set(urls.map((url) => url.trim().replace(/\/+$/, '')))]
-      .filter((url, index) => url || index === 0);
+  const saveServer = useCallback(async (urls: readonly string[], token: string): Promise<string | undefined> => {
+    const normalizedEndpoints = normalizeConnectionEndpoints(urls);
     const normalizedToken = token.trim();
+    const check = await checkEndpointConfiguration(normalizedEndpoints, normalizedToken);
+    if (check.available.length === 0) {
+      const message = check.message ?? SERVER_UNREACHABLE_MESSAGE;
+      setConnectionNotice(message);
+      return message;
+    }
+    setConnectionNotice(undefined);
     // A resolver/server boundary cannot change underneath an owned lease.
     // Close the old session first, then make the new server authoritative.
-    void playbackRuntime.stop().finally(() => {
-      persistBootstrapEndpoints(normalizedEndpoints);
-      persistApiToken(token);
-      setBootstrapEndpoints(normalizedEndpoints);
-      setApiToken(normalizedToken);
-      navigate(routes.home, { replace: true });
-    });
+    await playbackRuntime.stop();
+    persistBootstrapEndpoints(normalizedEndpoints);
+    persistApiToken(token);
+    reportClusterReachable();
+    setClusterUnreachable(false);
+    setBootstrapEndpoints(normalizedEndpoints);
+    setApiToken(normalizedToken);
+    setConnectionGate(undefined);
+    navigate(routes.home, { replace: true });
+    return undefined;
   }, [navigate, playbackRuntime]);
 
   const openMetadataEditor = useCallback((id: string) => {
@@ -333,7 +367,41 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
   }, [navigate]);
 
   const miniPlayerActive = Boolean(playback.playerVisible && !playback.playerRouteActive);
+  const playerHost = playback.playerVisible && activePlayback ? <PlayerHost
+    api={api}
+    request={activePlayback}
+    platform={platform}
+    runtime={playbackRuntime}
+    presentation={playback.playerRouteActive ? 'full' : 'mini'}
+    onProgress={playback.updateProgress}
+    onPosition={playback.persistPlaybackPosition}
+    onMinimize={playback.minimize}
+    onExpand={playback.expand}
+    onStop={playback.stop}
+    onPrevious={playback.previous}
+    onNext={playback.next}
+    onEnded={playback.handleEnded}
+    canPrevious={playback.canPrevious}
+    canNext={playback.canNext}
+    queuePosition={playback.queueState ? { index: playback.queueState.currentIndex, total: playback.queueState.items.length } : undefined}
+    volume={playback.volume}
+    onVolumeChange={playback.changeVolume}
+  /> : null;
+
+  if (effectiveConnectionGate) return <div className={`app-shell${miniPlayerActive ? ' has-mini-player' : ''}`}>
+    <ConnectionGateScreen
+      welcome={effectiveConnectionGate === 'welcome'}
+      notice={connectionNotice}
+      bootstrapEndpoints={bootstrapEndpoints}
+      apiToken={apiToken}
+      onSave={saveServer}
+    />
+    {playerHost}
+  </div>;
+
   const musicSectionActive = location.pathname === routes.music || location.pathname.startsWith(`${routes.music}/`);
+  const statusSectionActive = location.pathname === routes.status || location.pathname.startsWith(`${routes.status}/`);
+  const manageSectionActive = location.pathname === routes.manage || location.pathname.startsWith(`${routes.manage}/`);
 
   return (
     <div className={`app-shell${miniPlayerActive ? ' has-mini-player' : ''}`}>
@@ -362,9 +430,13 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
         </nav>
         <div className="platform-badge">{import.meta.env.MODE === 'samsung' ? 'SAMSUNG TV' : platform.name.toUpperCase()}</div>
       </header>
-      {!playback.playerRouteActive && musicSectionActive && (
+      {!playback.playerRouteActive && (musicSectionActive || statusSectionActive || manageSectionActive) && (
         <div className="section-nav-slot">
-          <MusicNav />
+          {musicSectionActive
+            ? <MusicNav />
+            : statusSectionActive
+              ? <StatusNav />
+              : <ManageNav managementAvailable={managementAvailable} />}
         </div>
       )}
       <main>
@@ -389,39 +461,22 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
           <Route path="/items/:itemId/edit" element={metadataEditingAvailable ? <MetadataEditorRoute api={catalogueApi} /> : <Navigate to={routes.home} replace />} />
           <Route path={routes.search} element={<SearchScreen api={api} onOpen={open} />} />
           <Route path={routes.ingest} element={<IngestScreen api={acquisitionApi} />} />
-          <Route path={routes.status} element={<StatusScreen api={clusterStatusApi} endpointRegistry={endpointRegistry} manageApi={managementAvailable ? manageApi : undefined} />} />
+          <Route path={routes.status} element={<StatusScreen api={clusterStatusApi} endpointRegistry={endpointRegistry} manageApi={managementAvailable ? manageApi : undefined} section="overview" apiToken={apiToken} />} />
+          <Route path={routes.statusClient} element={<StatusScreen api={clusterStatusApi} endpointRegistry={endpointRegistry} manageApi={managementAvailable ? manageApi : undefined} section="client" apiToken={apiToken} />} />
+          <Route path={routes.statusConnectivity} element={<StatusScreen api={clusterStatusApi} endpointRegistry={endpointRegistry} manageApi={managementAvailable ? manageApi : undefined} section="connectivity" apiToken={apiToken} />} />
+          <Route path={routes.statusNodes} element={<StatusScreen api={clusterStatusApi} endpointRegistry={endpointRegistry} manageApi={managementAvailable ? manageApi : undefined} section="nodes" apiToken={apiToken} />} />
           <Route path="/status/nodes/:nodeId" element={<NodeStatusScreen api={clusterStatusApi} />} />
-          <Route path={routes.manage} element={managementAvailable ? <ManageScreen api={manageApi} catalogueApi={catalogueApi} section="unmatched" settings={<SettingsScreen api={api} serverApi={serverApi} bootstrapEndpoints={bootstrapEndpoints} apiToken={apiToken} connectionNotice={connectionNotice} onSave={saveServer} />} managementAvailable={managementAvailable} onUnmatchedCountChange={setUnmatchedCount} /> : <Navigate to={routes.settings} replace />} />
-          <Route path={routes.manageFiles} element={managementAvailable ? <ManageScreen api={manageApi} catalogueApi={catalogueApi} section="files" settings={<SettingsScreen api={api} serverApi={serverApi} bootstrapEndpoints={bootstrapEndpoints} apiToken={apiToken} connectionNotice={connectionNotice} onSave={saveServer} />} managementAvailable={managementAvailable} onUnmatchedCountChange={setUnmatchedCount} /> : <Navigate to={routes.settings} replace />} />
-          <Route path={routes.settings} element={<ManageScreen api={manageApi} catalogueApi={catalogueApi} section="settings" settings={<SettingsScreen api={api} serverApi={serverApi} bootstrapEndpoints={bootstrapEndpoints} apiToken={apiToken} connectionNotice={connectionNotice} onSave={saveServer} />} managementAvailable={managementAvailable} />} />
+          <Route path={routes.manage} element={managementAvailable ? <ManageScreen api={manageApi} catalogueApi={catalogueApi} section="unmatched" settings={<SettingsScreen api={api} serverApi={serverApi} bootstrapEndpoints={bootstrapEndpoints} apiToken={apiToken} connectionNotice={connectionNotice} onSave={saveServer} />} onUnmatchedCountChange={setUnmatchedCount} /> : <Navigate to={routes.settings} replace />} />
+          <Route path={routes.manageFiles} element={managementAvailable ? <ManageScreen api={manageApi} catalogueApi={catalogueApi} section="files" settings={<SettingsScreen api={api} serverApi={serverApi} bootstrapEndpoints={bootstrapEndpoints} apiToken={apiToken} connectionNotice={connectionNotice} onSave={saveServer} />} onUnmatchedCountChange={setUnmatchedCount} /> : <Navigate to={routes.settings} replace />} />
+          <Route path={routes.settings} element={<ManageScreen api={manageApi} catalogueApi={catalogueApi} section="settings" settings={<SettingsScreen api={api} serverApi={serverApi} bootstrapEndpoints={bootstrapEndpoints} apiToken={apiToken} connectionNotice={connectionNotice} onSave={saveServer} />} />} />
+          <Route path={routes.connection} element={<ManageScreen api={manageApi} catalogueApi={catalogueApi} section="settings" settings={<SettingsScreen api={api} serverApi={serverApi} bootstrapEndpoints={bootstrapEndpoints} apiToken={apiToken} connectionNotice={connectionNotice} onSave={saveServer} />} />} />
           <Route path="/settings" element={<Navigate to={routes.settings} replace />} />
           <Route path={routes.sponsor} element={<SponsorScreen />} />
           <Route path="*" element={<Navigate to={routes.home} replace />} />
         </Routes>
       </main>
 
-      {playback.playerVisible && activePlayback && (
-        <PlayerHost
-          api={api}
-          request={activePlayback}
-          platform={platform}
-          runtime={playbackRuntime}
-          presentation={playback.playerRouteActive ? 'full' : 'mini'}
-          onProgress={playback.updateProgress}
-          onPosition={playback.persistPlaybackPosition}
-          onMinimize={playback.minimize}
-          onExpand={playback.expand}
-          onStop={playback.stop}
-          onPrevious={playback.previous}
-          onNext={playback.next}
-          onEnded={playback.handleEnded}
-          canPrevious={playback.canPrevious}
-          canNext={playback.canNext}
-          queuePosition={playback.queueState ? { index: playback.queueState.currentIndex, total: playback.queueState.items.length } : undefined}
-          volume={playback.volume}
-          onVolumeChange={playback.changeVolume}
-        />
-      )}
+      {playerHost}
     </div>
   );
 }

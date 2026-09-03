@@ -1,14 +1,25 @@
-# Android TV / Google TV host stub
+# Android TV / Google TV
 
-The React application remains the product UI. Android is a thin native shell, not a second application.
+This directory contains the thin Android TV host for the shared Macha React client. It packages the Android-mode Vite output into a full-screen WebView and uses the same API routing, playback negotiation, failover, and deterministic D-pad navigation as the shared client.
 
-The host will:
+## Build
 
-1. load the built React application in a full-screen web surface;
-2. install `window.__MACHA_ANDROID__`;
-3. report display/codec capabilities;
-4. implement `Player` with Media3/ExoPlayer and a native video surface;
-5. forward Back and media remote keys consistently;
-6. package/sign the Android TV application.
+From the repository root:
 
-Catalogue, navigation, search and Continue Watching remain in the shared TypeScript application. No Macha DHT logic belongs in the Android shell.
+```sh
+npm run build-android
+```
+
+The deployment artifact is written to `artifacts/Macha-Android-TV-0.8.1-debug.apk`. It is debug-signed and ready for ADB installation. The application ID is `media.macha.client`.
+
+## Deploy
+
+With network debugging enabled on the television:
+
+```sh
+adb connect TV_ADDRESS:5555
+adb -s TV_ADDRESS:5555 install -r artifacts/Macha-Android-TV-0.8.1-debug.apk
+adb -s TV_ADDRESS:5555 shell am start -n media.macha.client/.MainActivity
+```
+
+The current host deliberately uses WebView's media pipeline. The planned Media3 bridge can replace playback later without duplicating catalogue or navigation logic.

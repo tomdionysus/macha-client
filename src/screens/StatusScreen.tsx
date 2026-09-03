@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import type {
   ClusterNodeStatus,
@@ -8,11 +8,16 @@ import type {
   PublicConnectivityStatus,
 } from '../api/ClusterStatusApi';
 import { startupPhaseLabel, startupReadyCount, startupSubsystems } from '../api/startupStatus';
-import type { ManageApi } from '../api/ManageApi';
+import type { IdentityAssociationResetResult, ManageApi } from '../api/ManageApi';
 import { routes } from '../routing';
 import { usePollingTask } from '../hooks/usePollingTask';
 import { errorMessage } from '../utils/errors';
 import { EndpointRegistry, type EndpointCandidate } from '../cluster/EndpointRegistry';
+import { ConfirmModal } from '../components/Modal';
+import { AsyncIconButton } from '../components/AsyncIconButton';
+import { RefreshIcon } from '../components/ManageIcons';
+import { probeKnownEndpoints } from '../cluster/useEndpointHealthMonitor';
+import { reportClusterReachable, reportClusterUnreachable } from '../api/serverConnection';
 
 function formatBytes(value: number): string {
   if (!Number.isFinite(value) || value <= 0) return '0 B';
@@ -64,6 +69,23 @@ function ClusterMetric({ label, value, detail }: { label: string; value: string;
   return <article className="cluster-metric"><span>{label}</span><strong>{value}</strong>{detail && <small>{detail}</small>}</article>;
 }
 
+export function StatusHeader({ eyebrow, title = 'Status', health, refreshing, onRefresh }: {
+  eyebrow: string;
+  title?: string;
+  health?: { className: string; label: string };
+  refreshing: boolean;
+  onRefresh: () => void;
+}) {
+  return <header className="cluster-status-heading">
+    <div>
+      <p className="eyebrow">{eyebrow}</p>
+      <h1>{title}</h1>
+      {health && <div className={`cluster-health ${health.className}`}><span />{health.label}</div>}
+    </div>
+    <AsyncIconButton label="Refresh status" busy={refreshing} onClick={onRefresh} icon={<RefreshIcon />} />
+  </header>;
+}
+
 export function clientEndpointHealth(candidate: EndpointCandidate, now = Date.now()): { className: string; label: string } {
   const { health } = candidate;
   if (health.consecutiveFailures > 0) {
@@ -74,6 +96,17 @@ export function clientEndpointHealth(candidate: EndpointCandidate, now = Date.no
   return health.lastSuccessAt
     ? { className: 'available', label: 'Available' }
     : { className: 'untried', label: 'Not tried' };
+}
+
+export type StatusSection = 'overview' | 'client' | 'connectivity' | 'nodes';
+
+export function statusSectionVisibility(section: StatusSection) {
+  return {
+    overview: section === 'overview',
+    client: section === 'client',
+    connectivity: section === 'connectivity',
+    nodes: section === 'nodes',
+  };
 }
 
 function timestamp(value?: number): string {
@@ -208,57 +241,104 @@ function NodeCard({ node, canManage, resetting, onReset }: { node: ClusterNodeSt
   );
 }
 
-export function StatusScreen({ api, endpointRegistry, manageApi }: { api: ClusterStatusApi; endpointRegistry: EndpointRegistry; manageApi?: ManageApi }) {
+export function withoutRetiredNodeIdentity(snapshot: ClusterStatusSnapshot, retiredNodeId: string): ClusterStatusSnapshot {
+  return { ...snapshot, nodes: snapshot.nodes.filter((node) => node.id !== retiredNodeId) };
+}
+
+export function identityResetAcceptanceMessage(result: IdentityAssociationResetResult): string {
+  const auditState = result.audit_state ?? result.reset.audit_state;
+  return auditState === 'queued'
+    ? `Identity association reset accepted for ${result.reset.scope}; metadata audit is queued.`
+    : `Identity association reset accepted for ${result.reset.scope} at epoch ${result.reset.epoch}.`;
+}
+
+export async function acceptNodeIdentityAssociationReset(
+  manageApi: ManageApi,
+  node: ClusterNodeStatus,
+  onAccepted: (result: IdentityAssociationResetResult) => void,
+  refreshOnce: () => Promise<void>,
+): Promise<IdentityAssociationResetResult> {
+  const result = await manageApi.resetNodeIdentityAssociation(node.id, node.host, node.port, 'Reset from Status node card');
+  onAccepted(result);
+  await refreshOnce();
+  return result;
+}
+
+export function StatusScreen({ api, endpointRegistry, manageApi, section, apiToken }: {
+  api: ClusterStatusApi;
+  endpointRegistry: EndpointRegistry;
+  manageApi?: ManageApi;
+  section: StatusSection;
+  apiToken?: string;
+}) {
   const [snapshot, setSnapshot] = useState<ClusterStatusSnapshot>();
   const [error, setError] = useState<string>();
-  const [checking, setChecking] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [check, setCheck] = useState<ConnectivityCheck>();
   const [resettingNodeId, setResettingNodeId] = useState<string>();
+  const [resetCandidate, setResetCandidate] = useState<ClusterNodeStatus>();
   const [managementMessage, setManagementMessage] = useState<string>();
+  const retiredNodeIds = useRef(new Set<string>());
+
+  const omitRetiredNodes = useCallback((value: ClusterStatusSnapshot) => {
+    let operational = value;
+    for (const nodeId of retiredNodeIds.current) operational = withoutRetiredNodeIdentity(operational, nodeId);
+    return operational;
+  }, []);
 
   const refresh = useCallback(async () => {
     try {
-      setSnapshot(await api.status());
+      setSnapshot(omitRetiredNodes(await api.status()));
       setError(undefined);
     } catch (cause) {
       setError(errorMessage(cause));
     }
-  }, [api]);
+  }, [api, omitRetiredNodes]);
 
   usePollingTask({
     load: () => api.status(),
-    onValue: (value) => { setSnapshot(value); setError(undefined); },
+    onValue: (value) => { setSnapshot(omitRetiredNodes(value)); setError(undefined); },
     onError: (cause) => setError(errorMessage(cause)),
     intervalMs: 5000,
-    dependencies: [api],
+    dependencies: [api, omitRetiredNodes],
     allowOverlap: true,
+    enabled: section !== 'client',
   });
 
-  const checkConnectivity = useCallback(async () => {
-    setChecking(true);
+  const refreshPage = useCallback(async () => {
+    setRefreshing(true);
     try {
-      setCheck(await api.checkConnectivity());
-      await refresh();
+      if (section === 'client') {
+        const controller = new AbortController();
+        const reachable = await probeKnownEndpoints(endpointRegistry, apiToken, controller.signal);
+        if (endpointRegistry.snapshot().length > 0) {
+          if (reachable > 0) reportClusterReachable(); else reportClusterUnreachable();
+        }
+      } else if (section === 'connectivity') {
+        setCheck(await api.checkConnectivity());
+        await refresh();
+      } else {
+        await refresh();
+      }
     } catch (cause) {
       setError(errorMessage(cause));
     } finally {
-      setChecking(false);
+      setRefreshing(false);
     }
-  }, [api, refresh]);
+  }, [api, apiToken, endpointRegistry, refresh, section]);
 
   const resetIdentityAssociation = useCallback(async (node: ClusterNodeStatus) => {
     if (!manageApi || !node.host || !node.port) return;
-    const endpoint = `${node.host}:${node.port}`;
-    const confirmed = window.confirm(`Reset the cluster-wide identity association ${endpoint} → ${node.id}?\n\nThis removes the stale endpoint-to-NodeId association from membership and RPC routing across the cluster. Old gossip is suppressed, but a freshly authenticated peer may establish a new association. It does not delete node state or MachaDFS data.`);
-    if (!confirmed) return;
-
     setResettingNodeId(node.id);
     setManagementMessage(undefined);
     setError(undefined);
     try {
-      const result = await manageApi.resetNodeIdentityAssociation(node.id, node.host, node.port, 'Reset from Status node card');
-      setManagementMessage(`Identity association reset committed for ${result.reset.scope} at epoch ${result.reset.epoch}.`);
-      await refresh();
+      await acceptNodeIdentityAssociationReset(manageApi, node, (result) => {
+        retiredNodeIds.current.add(node.id);
+        setSnapshot((current) => current ? withoutRetiredNodeIdentity(current, node.id) : current);
+        setManagementMessage(identityResetAcceptanceMessage(result));
+        setResetCandidate(undefined);
+      }, refresh);
     } catch (cause) {
       setError(errorMessage(cause));
     } finally {
@@ -266,25 +346,27 @@ export function StatusScreen({ api, endpointRegistry, manageApi }: { api: Cluste
     }
   }, [manageApi, refresh]);
 
-  if (!snapshot && !error) return <div className="status-screen">Loading cluster status…</div>;
-  if (!snapshot) return <section className="cluster-status-screen error-status"><h1>Server status unavailable</h1><p>{error}</p><ClientApiEndpoints registry={endpointRegistry} /></section>;
+  if (section === 'client') return <section className="cluster-status-screen">
+    <StatusHeader eyebrow="This device" refreshing={refreshing} onRefresh={() => void refreshPage()} />
+    <ClientApiEndpoints registry={endpointRegistry} />
+  </section>;
+  if (!snapshot && !error) return <section className="cluster-status-screen">
+    <StatusHeader eyebrow="Macha cluster" title="Loading status…" refreshing={refreshing} onRefresh={() => void refreshPage()} />
+  </section>;
+  if (!snapshot) return <section className="cluster-status-screen error-status">
+    <StatusHeader eyebrow="Macha cluster" refreshing={refreshing} onRefresh={() => void refreshPage()} />
+    <p>Server status unavailable: {error}</p>
+  </section>;
 
   const cluster = snapshot.cluster;
   const reachable = check?.results.filter((result) => result.reachable).length;
+  const visible = statusSectionVisibility(section);
   return (
     <section className="cluster-status-screen">
-      <header className="cluster-status-heading">
-        <div>
-          <p className="eyebrow">Macha cluster</p>
-          <h1>Status</h1>
-          <div className={`cluster-health ${cluster.health}`}><span />{cluster.health}</div>
-        </div>
-        <button className="secondary-button" type="button" onClick={() => void checkConnectivity()} disabled={checking} data-tv-focusable="true">
-          {checking ? 'Checking…' : 'Check connectivity'}
-        </button>
-      </header>
+      <StatusHeader eyebrow="Macha cluster" health={{ className: cluster.health, label: cluster.health }} refreshing={refreshing} onRefresh={() => void refreshPage()} />
 
       {error && <p className="manage-error">Live refresh failed: {error}. Showing the most recent status.</p>}
+      {visible.overview && <>
       {snapshot.startup && snapshot.startup.phase !== 'ready' && <section className={`cluster-startup-panel ${snapshot.startup.phase}`}>
         <div className="cluster-startup-heading">
           <div><span>Local node startup</span><strong>{startupPhaseLabel(snapshot.startup)}</strong></div>
@@ -298,8 +380,6 @@ export function StatusScreen({ api, endpointRegistry, manageApi }: { api: Cluste
         {snapshot.startup.error && <p className="cluster-startup-error">{snapshot.startup.error}</p>}
       </section>}
       {cluster.conditions.length > 0 && <div className="cluster-conditions">{cluster.conditions.map((condition) => <span key={condition}>{condition}</span>)}</div>}
-      {check && <p className="cluster-check-result">Connectivity: {reachable}/{check.results.length} nodes reachable · checked {new Date(check.checked_at_unix_ms).toLocaleTimeString()}</p>}
-
       <div className="cluster-metric-grid">
         <ClusterMetric label="Nodes" value={`${cluster.nodes_online} / ${cluster.nodes_known}`} detail="online" />
         <ClusterMetric label="Metadata" value={cluster.metadata_availability === 'writable' ? 'Writable' : cluster.metadata_availability === 'read-only' ? 'Read-only' : 'Unavailable'} detail={`${cluster.metadata_voters_online}/${cluster.metadata_voters} voters · ${cluster.metadata_quorum_required} required`} />
@@ -318,15 +398,32 @@ export function StatusScreen({ api, endpointRegistry, manageApi }: { api: Cluste
           <UsageBar used={cluster.cache_known.used_bytes} capacity={cluster.cache_known.capacity_bytes} />
         </article>}
       </div>
+      </>}
 
-      <ClientApiEndpoints registry={endpointRegistry} />
+      {visible.connectivity && <>
+        {check && <p className="cluster-check-result">Connectivity: {reachable}/{check.results.length} nodes reachable · checked {new Date(check.checked_at_unix_ms).toLocaleTimeString()}</p>}
+        {snapshot.connectivity
+          ? <PublicConnectivity connectivity={snapshot.connectivity} />
+          : <div className="manage-empty">Connectivity status is not available from this node.</div>}
+      </>}
 
-      {managementMessage && <p className="cluster-check-result reachable">{managementMessage}</p>}
-
-      {snapshot.connectivity && <PublicConnectivity connectivity={snapshot.connectivity} />}
-
-      <div className="cluster-nodes-heading"><h2>Nodes</h2><span>Metadata generation {cluster.metadata_generation}</span></div>
-      <div className="cluster-node-grid">{snapshot.nodes.map((node) => <NodeCard key={node.id} node={node} canManage={Boolean(manageApi)} resetting={resettingNodeId === node.id} onReset={(target) => void resetIdentityAssociation(target)} />)}</div>
+      {visible.nodes && <>
+        {managementMessage && <p className="cluster-check-result reachable">{managementMessage}</p>}
+        <div className="cluster-nodes-heading"><h2>Nodes</h2><span>Metadata generation {cluster.metadata_generation}</span></div>
+        <div className="cluster-node-grid">{snapshot.nodes.map((node) => <NodeCard key={node.id} node={node} canManage={Boolean(manageApi)} resetting={resettingNodeId === node.id} onReset={setResetCandidate} />)}</div>
+      </>}
+      <ConfirmModal
+        open={Boolean(resetCandidate)}
+        title="Reset identity association?"
+        confirmLabel="Reset association"
+        destructive
+        busy={Boolean(resettingNodeId)}
+        onCancel={() => setResetCandidate(undefined)}
+        onConfirm={() => { if (resetCandidate) void resetIdentityAssociation(resetCandidate); }}
+      >
+        <p>Reset the cluster-wide association <code>{resetCandidate?.host}:{resetCandidate?.port}</code> → <code>{resetCandidate?.id}</code>?</p>
+        <p>This removes the stale association from membership and RPC routing. It does not delete node state or MachaDFS data.</p>
+      </ConfirmModal>
     </section>
   );
 }
@@ -339,7 +436,7 @@ export function NodeStatusScreen({ api }: { api: ClusterStatusApi }) {
   const { nodeId } = useParams<{ nodeId: string }>();
   const [node, setNode] = useState<ClusterNodeStatus>();
   const [error, setError] = useState<string>();
-  const [checking, setChecking] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [check, setCheck] = useState<ConnectivityCheck>();
 
   const refresh = useCallback(async () => {
@@ -352,6 +449,19 @@ export function NodeStatusScreen({ api }: { api: ClusterStatusApi }) {
     }
   }, [api, nodeId]);
 
+  const refreshPage = useCallback(async () => {
+    if (!nodeId) return;
+    setRefreshing(true);
+    try {
+      setCheck(await api.checkConnectivity(nodeId));
+      await refresh();
+    } catch (cause) {
+      setError(errorMessage(cause));
+    } finally {
+      setRefreshing(false);
+    }
+  }, [api, nodeId, refresh]);
+
   usePollingTask({
     load: () => api.node(nodeId!),
     onValue: (value) => { setNode(value); setError(undefined); },
@@ -362,22 +472,15 @@ export function NodeStatusScreen({ api }: { api: ClusterStatusApi }) {
     enabled: Boolean(nodeId),
   });
 
-  if (!node && !error) return <div className="status-screen">Loading node status…</div>;
-  if (!node) return <div className="status-screen error-status"><h1>Node unavailable</h1><p>{error}</p><Link to={routes.status}>← Cluster status</Link></div>;
+  if (!node && !error) return <section className="cluster-status-screen node-status-screen"><StatusHeader eyebrow="Cluster node" title="Loading node status…" refreshing={refreshing} onRefresh={() => void refreshPage()} /></section>;
+  if (!node) return <section className="cluster-status-screen node-status-screen error-status"><StatusHeader eyebrow="Cluster node" title="Node unavailable" refreshing={refreshing} onRefresh={() => void refreshPage()} /><p>{error}</p><Link to={routes.statusNodes}>← Nodes</Link></section>;
 
   const runtime = node.runtime;
   const connectivity = check?.results[0];
   return (
     <section className="cluster-status-screen node-status-screen">
-      <Link className="back-button" to={routes.status} data-tv-focusable="true">← Cluster status</Link>
-      <header className="cluster-status-heading">
-        <div><p className="eyebrow">Cluster node</p><h1>{nodeName(node)}</h1><div className={`cluster-health ${node.state === 'online' ? 'healthy' : 'critical'}`}><span />{node.state}</div></div>
-        <button className="secondary-button" type="button" disabled={checking} onClick={() => {
-          if (!nodeId) return;
-          setChecking(true);
-          void api.checkConnectivity(nodeId).then(setCheck).then(refresh).catch((cause) => setError(errorMessage(cause))).finally(() => setChecking(false));
-        }} data-tv-focusable="true">{checking ? 'Checking…' : 'Check connectivity'}</button>
-      </header>
+      <Link className="back-button" to={routes.statusNodes} data-tv-focusable="true">← Nodes</Link>
+      <StatusHeader eyebrow="Cluster node" title={nodeName(node)} health={{ className: node.state === 'online' ? 'healthy' : node.state === 'retired' ? 'degraded' : 'critical', label: node.state }} refreshing={refreshing} onRefresh={() => void refreshPage()} />
       {error && <p className="manage-error">Live refresh failed: {error}</p>}
       {connectivity && <p className={`cluster-check-result ${connectivity.reachable ? 'reachable' : 'unreachable'}`}>Connectivity: {connectivity.reachable ? 'reachable' : 'unreachable'}{connectivity.error ? ` · ${connectivity.error}` : ''}</p>}
 
@@ -416,6 +519,8 @@ export function NodeStatusScreen({ api }: { api: ClusterStatusApi }) {
             <DetailItem label="Last identity reset">{new Date(node.identity_association_reset.reset_at_unix_ms).toLocaleString()}</DetailItem>
             <DetailItem label="Reset epoch">{node.identity_association_reset.epoch}</DetailItem>
             <DetailItem label="Reset scope">{node.identity_association_reset.scope}</DetailItem>
+            {node.identity_association_reset.audit_state && <DetailItem label="Audit state">{node.identity_association_reset.audit_state}</DetailItem>}
+            {node.identity_association_reset.metadata_persisted != null && <DetailItem label="Metadata persisted">{node.identity_association_reset.metadata_persisted ? 'Yes' : 'Pending'}</DetailItem>}
           </>}
         </dl></article>
       </div>

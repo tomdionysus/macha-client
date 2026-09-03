@@ -3,11 +3,13 @@ import type { CatalogueMediaProfile } from '../api/CatalogueApi';
 import { PlayIcon, RestartIcon } from '../components/PlaybackIcons';
 import type { MediaDetails, MediaSummary, PlaybackProgress } from '../types';
 import { useAsync } from '../hooks/useAsync';
+import { useRefreshableAsync } from '../hooks/useRefreshableAsync';
 import { ErrorMessage, Loading } from '../components/Status';
 import { useArtworkUrl } from '../hooks/useArtworkUrl';
 import { requestTvDefaultFocus } from '../hooks/useTvNavigation';
 import { useEffect } from 'react';
 import { EditButton } from '../components/EditButton';
+import { MediaPageTitle } from '../components/MediaPageTitle';
 
 interface Props {
   api: MediaApi;
@@ -54,7 +56,7 @@ export function mediaProfileSummary(profile: CatalogueMediaProfile): string {
 }
 
 export function DetailScreen({ api, itemId, onBack, onPlay, onPlayFromStart, progress, onEdit, onMediaProfile }: Props) {
-  const details = useAsync(() => api.details(itemId), [api, itemId]);
+  const details = useRefreshableAsync(() => api.details(itemId), [api, itemId]);
   const immutableMediaId = details.value?.mediaIds.find((mediaId) => mediaId.startsWith('macha:'));
   const profile = useAsync(
     (signal) => immutableMediaId && api.mediaProfile ? api.mediaProfile(immutableMediaId, signal) : Promise.resolve(undefined),
@@ -68,9 +70,11 @@ export function DetailScreen({ api, itemId, onBack, onPlay, onPlayFromStart, pro
   useEffect(() => {
     if (profile.value) onMediaProfile?.(profile.value);
   }, [onMediaProfile, profile.value]);
-  if (details.loading) return <Loading />;
-  if (details.error) return <ErrorMessage error={details.error} />;
-  if (!details.value) return null;
+  if (!details.value) return <section className="detail"><div className="detail-content">
+    <button className="back-button" data-tv-focusable="true" onClick={onBack} type="button">← Back</button>
+    <MediaPageTitle refreshing={details.refreshing} onRefresh={details.refresh}>Media</MediaPageTitle>
+    {details.loading ? <Loading /> : details.error ? <ErrorMessage error={details.error} /> : null}
+  </div></section>;
 
   const media = details.value;
   const playable = canPlayDirectly(media) && media.mediaIds.length > 0;
@@ -79,7 +83,7 @@ export function DetailScreen({ api, itemId, onBack, onPlay, onPlayFromStart, pro
   const copy = (
     <div className="detail-copy">
       <p className="eyebrow">{media.kind}{media.year ? ` · ${media.year}` : ''}</p>
-      <h1>{media.title}</h1>
+      <MediaPageTitle refreshing={details.refreshing} onRefresh={details.refresh}>{media.title}</MediaPageTitle>
       {media.subtitle && <p className="subtitle">{media.subtitle}</p>}
       {profile.value && <p className="media-profile-summary">{mediaProfileSummary(profile.value)}</p>}
       {media.synopsis && <p className="synopsis">{media.synopsis}</p>}
@@ -88,7 +92,7 @@ export function DetailScreen({ api, itemId, onBack, onPlay, onPlayFromStart, pro
           <button
             className="media-control-button"
             data-tv-focusable="true"
-            data-tv-default-focus={import.meta.env.MODE === 'samsung' ? 'true' : undefined}
+            data-tv-default-focus={import.meta.env.MODE === 'samsung' || import.meta.env.MODE === 'android' ? 'true' : undefined}
             onClick={() => onPlay(media)}
             type="button"
             aria-label={resumable ? 'Resume playback' : 'Play'}
@@ -119,6 +123,7 @@ export function DetailScreen({ api, itemId, onBack, onPlay, onPlayFromStart, pro
       <div className="detail-content">
         <button className="back-button" data-tv-focusable="true" onClick={onBack} type="button">← Back</button>
         {onEdit && <EditButton onClick={onEdit} />}
+        {details.error && <p className="manage-error media-refresh-error">Refresh failed: {details.error.message}</p>}
         {media.kind === 'movie' ? (
           <div className={`movie-detail-layout ${poster ? 'has-poster' : ''}`}>
             <div className="movie-detail-poster" aria-hidden="true">

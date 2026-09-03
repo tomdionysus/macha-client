@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { bootstrapEndpoints, EndpointRegistry } from '../cluster/EndpointRegistry';
-import { ClusterCatalogueApi, MAX_ABANDONED_MEDIA_PROFILE_REQUESTS } from './ClusterCatalogueApi';
+import { ARTWORK_ENDPOINT_TIMEOUT_MS, ClusterCatalogueApi, MAX_ABANDONED_MEDIA_PROFILE_REQUESTS } from './ClusterCatalogueApi';
 
 function response(value: unknown, status = 200): Response {
   return new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json' } });
@@ -54,6 +54,52 @@ describe('ClusterCatalogueApi', () => {
 
     await expect(api.clearMetadata('movie:one')).rejects.toThrow();
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('finds immutable artwork on another node after a healthy local 404 without changing API authority', async () => {
+    const poster = new Blob(['poster'], { type: 'image/jpeg' });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response({ error: 'artwork_not_found', message: 'not local' }, 404))
+      .mockResolvedValueOnce(new Response(poster, { status: 200, headers: { 'Content-Type': 'image/jpeg' } }));
+    vi.stubGlobal('fetch', fetchMock);
+    const registry = new EndpointRegistry(bootstrapEndpoints(['http://a', 'http://b']));
+    registry.recordSuccess('http://a');
+    const api = new ClusterCatalogueApi(registry);
+
+    await expect(api.artwork('poster-id')).resolves.toEqual(poster);
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      'http://a/api/v1/catalogue/artwork/poster-id',
+      'http://b/api/v1/catalogue/artwork/poster-id',
+    ]);
+    expect(registry.candidates()[0]?.endpoint.id).toBe('http://a');
+    expect(registry.snapshot().find((entry) => entry.endpoint.id === 'http://a')?.health.consecutiveFailures).toBe(0);
+  });
+
+  it('abandons a hung artwork endpoint and continues on another node even when fetch ignores abort', async () => {
+    vi.useFakeTimers();
+    try {
+      const poster = new Blob(['poster'], { type: 'image/jpeg' });
+      let firstSignal: AbortSignal | undefined;
+      const fetchMock = vi.fn()
+        .mockImplementationOnce((_url: string, init?: RequestInit) => {
+          firstSignal = init?.signal ?? undefined;
+          return new Promise<Response>(() => undefined);
+        })
+        .mockResolvedValueOnce(new Response(poster, { status: 200, headers: { 'Content-Type': 'image/jpeg' } }));
+      vi.stubGlobal('fetch', fetchMock);
+      const registry = new EndpointRegistry(bootstrapEndpoints(['http://a', 'http://b']));
+      const api = new ClusterCatalogueApi(registry);
+
+      const request = api.artwork('poster-id');
+      await vi.advanceTimersByTimeAsync(ARTWORK_ENDPOINT_TIMEOUT_MS);
+
+      await expect(request).resolves.toEqual(poster);
+      expect(firstSignal?.aborted).toBe(true);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(registry.snapshot().find((entry) => entry.endpoint.id === 'http://a')?.health.consecutiveFailures).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('falls through temporary profile absence, coalesces requests and caches only the immutable positive', async () => {

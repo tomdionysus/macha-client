@@ -189,6 +189,30 @@ describe('MachaMediaApi', () => {
     expect(requests).toBe(1);
   });
 
+  it('coalesces cancellable and grid consumers while allowing the abandoned request to fill the cache', async () => {
+    const catalogue = new FakeCatalogue();
+    let resolveArtwork!: (blob: Blob) => void;
+    let requests = 0;
+    catalogue.artwork = () => {
+      requests += 1;
+      return new Promise<Blob>((resolve) => { resolveArtwork = resolve; });
+    };
+    const api = new MachaMediaApi(catalogue);
+    const ref = { id: 'poster-priority', mimeType: 'image/jpeg' };
+    const consumer = new AbortController();
+
+    const foreground = api.artwork(ref, consumer.signal);
+    const grid = api.artwork(ref);
+    consumer.abort(new DOMException('left detail', 'AbortError'));
+    await expect(foreground).rejects.toMatchObject({ name: 'AbortError' });
+
+    const blob = new Blob(['poster']);
+    resolveArtwork(blob);
+    await expect(grid).resolves.toBe(blob);
+    await expect(api.artwork(ref)).resolves.toBe(blob);
+    expect(requests).toBe(1);
+  });
+
   it('evicts cached artwork rejected by the browser so it can be fetched again', async () => {
     const catalogue = new FakeCatalogue();
     let requests = 0;

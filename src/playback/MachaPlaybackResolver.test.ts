@@ -114,6 +114,19 @@ describe('MachaPlaybackResolver', () => {
     expect(session.options.audioStreams[0]).toEqual(expect.objectContaining({ index: 1, language: 'eng', channels: 2, bitrate: 192_000 }));
   });
 
+  it('sends the persistent player identity on playback admission', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(sessionResponse(), 201));
+    vi.stubGlobal('fetch', fetchMock);
+    const resolver = new MachaPlaybackResolver('http://node.test');
+
+    await resolver.resolve(media, capabilities, undefined, undefined, { viewerSessionId: 'viewer-stable' });
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const headers = new Headers(init.headers);
+    expect(headers.get('Macha-Viewer-Session')).toBe('viewer-stable');
+    expect(headers.get('Idempotency-Key')).toBeTruthy();
+  });
+
   it('treats a non-conforming session profile_pending response as an endpoint failure without polling', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(new Response(
       JSON.stringify({ error: 'profile_pending', message: 'media profile is not available yet' }),
@@ -267,6 +280,25 @@ describe('MachaPlaybackResolver', () => {
     expect(init.method).toBe('PATCH');
     expect(JSON.parse(String(init.body))).toEqual({ seek_ms: 42_000 });
     expect(session.seekMs).toBe(42_000);
+  });
+
+  it('makes playback PATCH requests cancellable', async () => {
+    let requestSignal: AbortSignal | undefined;
+    const fetchMock = vi.fn().mockImplementation((_url: string, init?: RequestInit) => {
+      requestSignal = init?.signal ?? undefined;
+      return new Promise<Response>((_resolve, reject) => {
+        requestSignal?.addEventListener('abort', () => reject(requestSignal?.reason), { once: true });
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const resolver = new MachaPlaybackResolver('http://node.test', 'secret');
+    const controller = new AbortController();
+
+    const request = resolver.update('session-1', { seekMs: 42_000 }, controller.signal);
+    controller.abort(new DOMException('superseded', 'AbortError'));
+
+    await expect(request).rejects.toMatchObject({ name: 'AbortError' });
+    expect(requestSignal).toBe(controller.signal);
   });
 
   it('sends subtitle-only PATCHes without an implicit seek', async () => {

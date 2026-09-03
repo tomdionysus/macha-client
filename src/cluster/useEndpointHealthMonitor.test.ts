@@ -11,7 +11,7 @@ describe('API endpoint health probes', () => {
     }));
     const fetchImpl = fetchSpy as unknown as typeof fetch;
 
-    await probeKnownEndpoints(registry, 'secret', new AbortController().signal, fetchImpl);
+    await expect(probeKnownEndpoints(registry, 'secret', new AbortController().signal, fetchImpl)).resolves.toBe(2);
 
     expect(fetchSpy.mock.calls.map(([url]) => String(url))).toEqual([
       'http://a/api/v1/catalogue/status',
@@ -25,13 +25,35 @@ describe('API endpoint health probes', () => {
   it('does not publish results after the monitor is cancelled', async () => {
     const registry = new EndpointRegistry(bootstrapEndpoints(['http://a']));
     const controller = new AbortController();
-    const fetchImpl = vi.fn(async () => {
-      controller.abort();
-      return new Response(null, { status: 200 });
+    let finish!: (response: Response) => void;
+    const fetchImpl = vi.fn((_url: string | URL | Request, init?: RequestInit) => {
+      expect(init?.signal).toBeUndefined();
+      return new Promise<Response>((resolve) => { finish = resolve; });
     }) as typeof fetch;
 
-    await probeKnownEndpoints(registry, undefined, controller.signal, fetchImpl);
+    const probe = probeKnownEndpoints(registry, undefined, controller.signal, fetchImpl);
+    controller.abort();
+    finish(new Response(null, { status: 200 }));
+    await probe;
 
     expect(registry.snapshot()[0]?.health).toEqual({ consecutiveFailures: 0 });
+  });
+
+  it('never attaches lifecycle cancellation to status HTTP requests', async () => {
+    const registry = new EndpointRegistry(bootstrapEndpoints(['http://a']));
+    const lifecycle = new AbortController();
+    let finish!: (response: Response) => void;
+    const fetchImpl = vi.fn((_url: string | URL | Request, init?: RequestInit) => {
+      expect(init?.signal).toBeUndefined();
+      return new Promise<Response>((resolve) => { finish = resolve; });
+    }) as typeof fetch;
+
+    const probe = probeKnownEndpoints(registry, undefined, lifecycle.signal, fetchImpl);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(registry.snapshot()[0]?.health).toEqual({ consecutiveFailures: 0 });
+    finish(new Response(null, { status: 200 }));
+
+    await expect(probe).resolves.toBe(1);
+    expect(registry.snapshot()[0]?.health.consecutiveFailures).toBe(0);
   });
 });
