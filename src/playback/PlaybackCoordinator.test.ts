@@ -613,6 +613,32 @@ describe('Evidence-triggered Direct Play recovery preparation', () => {
     expect(api.stop).toHaveBeenCalledWith('alternate-b', {});
   });
 
+  it('does not treat a stream error during an in-flight seek-driven generation replacement as fresh degradation evidence', async () => {
+    // A large seek already outside local coverage replaces this generation via
+    // resolver.update() (a PATCH), which is expected to make the server tear
+    // down the old pipeline. If the old player's stream then errors as a
+    // direct result of that expected teardown, degrade() must not treat it as
+    // independent evidence and spawn a second, fully redundant session
+    // alongside the seek's own already-in-flight replacement.
+    const player = new FakePlayer();
+    const initial = session({ mode: 'transcode', seekMs: 30_000 });
+    const update = deferred<PlaybackSession>();
+    const api = resolver(initial, async () => update.promise) as ReturnType<typeof resolver> & { prepareAlternate: ReturnType<typeof vi.fn> };
+    api.prepareAlternate = vi.fn(async () => undefined);
+    const coordinator = new PlaybackCoordinator({ media: media(), player, resolver: api, capabilities: async () => capabilities(), initialPositionMs: 40_000 });
+    await coordinator.start();
+
+    coordinator.seek(10_000);
+    await vi.waitFor(() => expect(api.update).toHaveBeenCalledTimes(1));
+
+    player.degrade(new PlaybackSourceError('old generation torn down', 'stream'));
+    await flush();
+    expect(api.prepareAlternate).not.toHaveBeenCalled();
+
+    update.resolve(session({ mode: 'transcode', seekMs: 8_000, source: { ...initial.source, url: '/generation-8000.m3u8' } }));
+    await coordinator.close();
+  });
+
   it('does not register a direct-source alternative for a transformed (non-direct) standby', async () => {
     const player = new FakePlayer();
     const primary = session({ sessionId: 'primary', mediaId: 'macha:one', mode: 'remux' });

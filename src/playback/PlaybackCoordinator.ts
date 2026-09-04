@@ -712,6 +712,13 @@ export class PlaybackCoordinator {
     if (this.disposed || !isEndpointRetryablePlaybackFailure(error)) return;
     const session = this.snapshot.session ?? this.serverSession;
     if (!session || this.alternatePreparations.size > 0 || this.alternateSessions.size > 0) return;
+    // A seek already outside local coverage is itself replacing this
+    // generation via resolver.update() — the server tearing down the old
+    // pipeline to honor that PATCH is expected, not independent failure
+    // evidence. Without this, a stream error surfacing from that expected
+    // teardown raced a second, fully redundant session into existence
+    // alongside the seek's own legitimate replacement.
+    if (this.activeMutation?.reason === 'seek') return;
     this.log.warn('source-degradation-evidence', {
       sessionId: session.sessionId,
       endpoint: session.endpoint,

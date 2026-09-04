@@ -113,6 +113,21 @@ without using global browser events or changing the route.
   suitability. Actively check every known API endpoint immediately and every
   ten seconds with bounded, non-overlapping cycles and per-endpoint timeouts;
   combine those results with evidence from real requests.
+  - [ ] Correction, found 2026-09-04: "per-endpoint timeouts" is not actually
+    true today. Neither `useEndpointHealthMonitor`'s probe fetch nor
+    `ClusterEndpointRouter.route()`/`find()` bound how long a single attempt
+    may take — every `AbortSignal` in the fetch layer is caller-supplied for
+    unmount cancellation only, never a timeout. Caught live: a peer session
+    reproducing an unrelated HLS bug observed a `route-attempt` to an
+    already-known-good, previously sub-second endpoint take 19.7s on one
+    attempt, stalling unrelated work that happened to need the same origin
+    (plausibly Chrome's per-origin connection-pool limit queuing behind the
+    slow request, though shared test-node contention from concurrent
+    reproduction work on the same physical node is also plausible and not
+    ruled out). Add a real bounded per-attempt timeout (AbortController) to
+    every fetch in the cluster status/catalogue/routing layer, not just the
+    health-check cycle, so one slow node can never block an unrelated
+    request or hold a `route()`/`find()` call open indefinitely.
 - [x] Prefer a healthy sticky endpoint for ordinary traffic, but race or advance
   to alternates after bounded failure. Avoid retry storms.
 - [x] Make Web CORS and Samsung package origin policy explicit. The initial
@@ -247,6 +262,38 @@ position discontinuity or viewer-visible stall.
   evidence-triggered alternate for 30 seconds, then close it if unused. Once a
   replacement is streaming, retain it and close the superseded session with
   exponentially backed-off best-effort attempts.
+- [x] Found and fixed 2026-09-05, reported by a peer session reproducing real A/V
+  desync/choppiness on restart against a live Pi node: `degrade()`'s
+  evidence-triggered `prepareAlternate()` does not know a seek-driven
+  generation replacement is already in flight, and can create a second,
+  fully redundant server session for the same user action. Sequence: a
+  large seek (e.g. "restart from beginning" on a transcode far into the
+  file) is legitimately outside local coverage, so `drainMutations()` PATCHes
+  the existing session (`resolver.update()`) — server logs confirm this
+  makes the server `stop_pipeline()` the old generation. If the client's
+  hls.js instance is still mid-fetch against that old generation at the
+  moment the server tears it down, the resulting stream error reaches
+  `degrade()`, whose guard checks `alternatePreparations`/`alternateSessions`
+  but never `this.activeMutation` — so it treats this as fresh, independent
+  failure evidence and calls `prepareAlternate()`, creating a *second*,
+  completely separate session via a fresh POST that knows nothing about the
+  PATCH already handling the same seek. Confirmed via real server logs: two
+  independent transcode pipelines, five seconds apart, both requesting
+  position 0, briefly running concurrently on one node — real CPU
+  contention and a plausible source of the reported A/V sync jump (each
+  fresh pipeline restarts audio/video PTS from zero independently). Fix:
+  `degrade()` must not treat an error as fresh evidence while
+  `this.activeMutation?.reason === 'seek'` (or more generally, while a
+  mutation is already resolving a generation replacement) is in flight for
+  the same session. Fixed: `degrade()` now returns early on exactly that
+  condition. Deliberately not applied to `fail()`'s reactive failover path —
+  that guard is asymmetric, since suppressing it during an in-flight seek
+  would silently swallow a genuinely unrelated fatal error with neither
+  recovery nor failure UI, which is worse than the bug being fixed. Left as
+  a separate, not-yet-designed follow-up if it turns out to matter in
+  practice. Regression covered by `PlaybackCoordinator.test.ts` ("does not
+  treat a stream error during an in-flight seek-driven generation
+  replacement as fresh degradation evidence").
 
 Exit criterion: controlled loss of node A during HLS playback switches to node B
 without visible failure UI or state loss. UAT records any freeze/audio gap and
