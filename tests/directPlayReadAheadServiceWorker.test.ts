@@ -261,6 +261,41 @@ describe('Direct Play read-ahead Service Worker', () => {
     ]);
   });
 
+  it('reports mid-stream alternate exhaustion as node degradation evidence', async () => {
+    const harness = createHarness(async (url) => {
+      if (url.includes('node.test')) {
+        let emitted = false;
+        return new Response(new ReadableStream<Uint8Array>({
+          pull(controller) {
+            if (!emitted) {
+              emitted = true;
+              controller.enqueue(new Uint8Array([0, 1]));
+            } else {
+              controller.error(new TypeError('primary body failed'));
+            }
+          },
+        }), {
+          status: 206,
+          headers: { 'content-type': 'video/mp4', 'content-range': 'bytes 0-3/67108864' },
+        });
+      }
+      throw new TypeError('alternate unreachable');
+    });
+    harness.configure();
+    harness.addSource('https://alternate.test/direct.mp4');
+    releases.push(harness.release);
+
+    const response = await harness.request('bytes=0-3');
+    // The initial fetch resolves normally — headers arrive fine — so this
+    // failure can only surface once the body is actually read, exactly as it
+    // would for a real player consuming the stream.
+    await expect(response.arrayBuffer()).rejects.toThrow('alternate unreachable');
+    expect(harness.metrics).toContainEqual(expect.objectContaining({
+      type: 'macha-direct-read-ahead-source-failed',
+      message: 'alternate unreachable',
+    }));
+  });
+
   it('keeps a resident prefix and obtains only the missing suffix from an alternate', async () => {
     const calls: Array<{ url: string; range: string }> = [];
     const harness = createHarness(async (url, options = {}) => {
@@ -328,7 +363,7 @@ describe('Direct Play read-ahead Service Worker', () => {
     expect(calls).toEqual(['https://node.test/direct.mp4']);
   });
 
-  it('fails after bounded alternate exhaustion', async () => {
+  it('fails after bounded alternate exhaustion, reporting it as node degradation evidence', async () => {
     const calls: string[] = [];
     const harness = createHarness(async (url) => {
       calls.push(url);
@@ -340,6 +375,13 @@ describe('Direct Play read-ahead Service Worker', () => {
 
     await expect(harness.request('bytes=0-3')).rejects.toThrow('unreachable');
     expect(calls).toEqual(['https://node.test/direct.mp4', 'https://alternate.test/direct.mp4']);
+    // A demand-path failure is more urgent than a speculative prefetch miss —
+    // it is about to surface as a real player-facing read error — so it must
+    // report source degradation at least as reliably as prefetch already does.
+    expect(harness.metrics).toContainEqual(expect.objectContaining({
+      type: 'macha-direct-read-ahead-source-failed',
+      message: 'unreachable',
+    }));
   });
 
   it('cancels active demand without starting an alternate request', async () => {

@@ -55,6 +55,14 @@ export interface ClusterNodeStatus {
   version: string;
   host: string;
   port: number;
+  // Where other clients should reach this node's HTTP API — distinct from
+  // `host`/`port` above, which is the node's internal RPC bind address and is
+  // not necessarily reachable or even the right protocol for REST calls.
+  // Defaults to the bound API address server-side when no advertised
+  // override is configured (e.g. behind NAT). Older nodes in a mixed-version
+  // cluster may not report this yet.
+  api_host?: string;
+  api_port?: number;
   failure_domain: string;
   metadata_generation: number;
   storage: ByteUsage;

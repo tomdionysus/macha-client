@@ -161,4 +161,13 @@ export interface PlaybackResolver {
     preferences: PlaybackPreferencesUpdate,
     context?: PlaybackAdmissionContext,
   ): Promise<PlaybackSession | undefined>;
+  /**
+   * Record that a specific endpoint has failed without negotiating any new
+   * session. Needed when the transport layer has already moved off an
+   * endpoint silently (see `PlaybackCoordinator`'s direct-source-alternative
+   * promotion) — endpoint health/cooldown tracking must still learn about
+   * the failure, or a later failover can blindly retry a node already known
+   * to be dead.
+   */
+  recordEndpointFailure?(endpointId: string): void;
 }

@@ -117,6 +117,18 @@ without using global browser events or changing the route.
   to alternates after bounded failure. Avoid retry storms.
 - [x] Make Web CORS and Samsung package origin policy explicit. The initial
   Samsung demonstration may include a build-time allow-list of test endpoints.
+- [ ] Persist a limited set of endpoints the client has actually confirmed
+  working (not just the one originally configured bootstrap URL) to
+  localStorage, and seed `EndpointRegistry` from that set on boot. Added
+  2026-09-04: today's fix (`discoverClusterEndpoints()`) keeps the registry's
+  candidate pool in sync with live cluster membership, but only in memory —
+  a page reload reseeds purely from `macha-bootstrap-endpoints-v1`'s original
+  single URL. If the client has since had to fail over away from that node
+  because it became unavailable, a reload with that same node still down has
+  no way back in until it happens to recover. Keep the persisted set small
+  and bounded (last-known-good, not unbounded discovery history) and treat it
+  the same as `bootstrap`/`environment` source endpoints, not `discovered`,
+  so it isn't silently dropped by `applyAdvertisement()`'s replace-on-refresh.
 
 Exit criterion: the client boots and browses through either of two manually
 configured current Macha API endpoints and automatically survives loss of the
@@ -264,18 +276,157 @@ under the defined test.
 Use two current Macha nodes supplied explicitly to the client. No server changes
 are permitted for this gate.
 
-- [ ] Verify both nodes independently expose the same catalogue item/media
+- [x] Verify both nodes independently expose the same catalogue item/media
   identity and can create the requested Direct and transformed sessions.
-- [ ] Exercise failure during session POST, Direct range transfer, HLS manifest,
-  HLS segment transfer, pause, seek and option change.
-- [ ] Test connection refusal, process termination and loss of route to one node;
+- [~] Exercise failure during session POST, Direct range transfer, HLS manifest,
+  HLS segment transfer, pause, seek and option change. Direct range transfer done
+  (see below); the rest are blocked behind fixing the gap the first run found.
+- [x] Test connection refusal, process termination and loss of route to one node;
   do not rely only on synthetic HTTP errors.
 - [ ] Prove the client never navigates away, loses its queue/preferences, creates
   an unbounded retry/session loop or waits for old-node cleanup.
-- [ ] Measure failure detection, alternate selection, source readiness, handoff,
+- [x] Measure failure detection, alternate selection, source readiness, handoff,
   position error, frozen-video duration, audio-gap duration and remaining buffer.
-- [ ] Preserve a dated UAT record and classify Direct and HLS outcomes against the
+- [x] Preserve a dated UAT record and classify Direct and HLS outcomes against the
   three success levels above.
+
+### UAT run 2026-09-04 (Direct Play, real two-node failure)
+
+Real cluster: three live Macha nodes across two failure domains
+(`10.44.1.50`/`10.44.1.51` = "test-lab", `10.34.1.50` = "spain", `replicas: 2`
+placement diverse-by-domain). Test title picked for confirmed cross-node
+readability (*Contact*, already in Continue Watching with prior playback
+history). `10.44.1.50` was the node actively serving a live Direct Play
+session; `macha.service` was stopped via `systemctl` on that host mid-playback
+(a real process kill, not a synthetic HTTP error), then restarted ~9 minutes
+later to close out the run.
+
+**Detection: pass.** `source-degraded` fired within ~1s of the process
+actually stopping (kill completed 21:00:29 wall-clock; client log shows
+`source-degraded` / `alternate-preparation-start` at 21:00:29).
+
+**Buffer resilience: pass, and better than expected.** The read-ahead cache
+(~94 MB resident at time of kill) sustained ~149s of glitch-free playback with
+zero visible impact — no stall, no frozen frame, no audio gap — purely from
+already-fetched data, confirmed via live screenshots showing continuous scene
+progression.
+
+**Failover: fail — this is the real gap.** Once the buffer drained, the client
+never contacted an alternate node. Every network request across the entire
+outage — the health probe, and every `__macha_direct_cache__` range-proxy
+retry — targeted only the dead `10.44.1.50`. Zero requests were made to
+`10.44.1.51` or `10.34.1.50`, both confirmed live and cluster-members for the
+whole outage (Status page: 3/3 online throughout). Playback hard-fails with
+"No untried Macha playback endpoint remains" — misleading, since no other
+endpoint was ever tried. This does not reach even the first success level
+(automatic recovery).
+
+**No self-recovery after the source returns.** With `10.44.1.50` back online
+and healthy, the player stayed on the failure screen indefinitely — it does
+not appear to re-probe on its own. A manual play/retry from the user did
+recover cleanly and resumed at the correct position, so the failure is not
+destructive to the session/queue, just passive.
+
+**Not yet exercised:** HLS failure, and failure specifically during session
+POST / manifest transfer / pause / seek / option-change (Direct range-transfer
+failure is the only boundary exercised this run) — deferred until the
+no-failover gap above has a fix to test against, since Direct Play itself
+doesn't survive the basic case yet.
+
+**Conclusion (superseded below):** the any-node design (make-before-break
+handoff, `EndpointRegistry`, disposable generations) is not actually reachable
+from an active Direct Play session today — whatever endpoint pool the
+playback coordinator consults on source failure does not draw from the same
+live cluster membership the Status page uses. This is the next thing to fix
+before re-running the rest of the Phase 6 UAT.
+
+### Fix and re-verification (2026-09-04, same day)
+
+Four compounding gaps, found and fixed by repeatedly live-killing real nodes
+mid-playback against the same three-node cluster and reacting to what
+actually broke, not by inspection alone:
+
+1. **`EndpointRegistry` never learned cluster membership.** It was seeded
+   once from the single manually-configured bootstrap URL and never updated.
+   Fixed client-side: `discoverClusterEndpoints()` (`useEndpointHealthMonitor.ts`)
+   folds live `/api/v1/status` node membership into the registry every health
+   cycle. This alone was not enough — `nodes[].host`/`port` is each node's
+   internal RPC bind address, not its HTTP API address (confirmed live:
+   `10.44.1.51:7437` vs `:7438` are different services on the same node), and
+   guessing at the right port (from the RPC port, or by reusing another
+   node's known-good port) was explicitly rejected as exactly the kind of
+   inference that breaks the first time a real deployment differs. Server-side
+   fix requested the same day and shipped as v0.23.7: optional advertised
+   API host/port per node (defaulting to the bound address, for NAT), exposed
+   as `api_host`/`api_port` on every entry in `nodes[]`. The client only ever
+   trusts those explicit fields, never `host`/`port`.
+2. **No mechanism existed for the transport layer to fail over without a full
+   reload.** `Player.addDirectSourceAlternative()` — built and unit-tested,
+   letting the read-ahead Service Worker retry a *different* node's URL under
+   the same cache key, invisibly to the `<video>` element — existed but was
+   never called anywhere. Wired into `PlaybackCoordinator.prepareAlternate()`:
+   once a byte-identical Direct Play alternate is ready, its source is
+   registered as a same-key fallback and the coordinator's own session
+   bookkeeping is promoted immediately (`promoteSilentDirectAlternate`),
+   without ever touching the player. A second, distinct field
+   (`activeDirectPlaySource`) tracks what is genuinely loaded in the video
+   element, separately from which session is current for lifecycle purposes,
+   because the two diverge the instant a silent promotion happens and any
+   later fallback registration must still address the source the worker
+   actually configured a key for.
+3. **The early-warning signal only covered half the failure paths.** The
+   Service Worker's `source-degraded` notification fired only from a failed
+   *speculative prefetch*, never from a failed *demand* fetch — so a session
+   with little or no read-ahead buffer (e.g. just after a seek) got zero
+   warning before a demand failure poisoned the video's stream directly
+   (`PIPELINE_ERROR_READ`), with no time for any alternate to be registered.
+   Fixed in `macha-direct-play-sw.js`: every demand-path exhaustion now
+   reports source degradation exactly as a prefetch-path exhaustion already
+   did. Confirmed live: a kill executed at the instant of a fresh seek (zero
+   buffer) now recovers with no stall at all — the earlier warning gives the
+   coordinator time to register the fallback while the browser's own pending
+   request is still in its normal retry window, not yet fatal.
+4. **A silently-abandoned endpoint was invisible to endpoint health
+   tracking.** Silent promotion (fix 2) never told `EndpointRegistry` the old
+   endpoint had failed — only the pre-existing reactive `failover()` path did
+   that. Consequence, caught by deliberately killing a *second*, different
+   node right after the first silent recovery: a later, unrelated reactive
+   failure re-picked the already-dead first node as an apparently-untried,
+   apparently-healthy candidate, cascading through both dead nodes before
+   correctly landing on the one remaining live one. Fixed with a single rule
+   applied consistently rather than two independent copies: `recordEndpointFailure()`
+   on `PlaybackResolver` is now the one place "this endpoint just failed" is
+   recorded, called explicitly by the coordinator for a silent promotion, and
+   called internally by `ClusterPlaybackResolver.failover()` for a reactive
+   one (replacing its own hand-inlined version of the same two lines).
+
+Re-verified live after each fix, and again after the final unification, with
+real `systemctl stop`/`start` against `10.44.1.50`/`10.44.1.51`/`10.34.1.50`:
+single-node kill recovers with zero measured stall (250ms-resolution polling
+across the full outage window, confirmed independently by the user watching
+the screen); a second, different node killed immediately afterward correctly
+fails over to the one remaining live node rather than retrying either dead
+one. Full unit suite (379 tests) green throughout, including new coverage:
+`useEndpointHealthMonitor.test.ts` (membership discovery, and refusing to
+guess a port for a node without `api_host`/`api_port`), the Service Worker
+harness (demand-path failures now reported), and `PlaybackCoordinator.test.ts`
+(silent promotion, chained silent promotions addressing the correct source,
+and the `recordEndpointFailure` call).
+
+**New, separate finding — not yet fixed:** the *reactive* (full reload)
+recovery path, as opposed to the silent one above, can itself fail instantly
+when reactivating Direct Play at a non-zero position: `NotSupportedError`
+within ~11ms of dispatch, zero bytes ever requested. Verified with direct
+`curl` range requests against the exact node and exact byte offset in
+question (start, the failure position, and near end-of-file) that the
+underlying data is valid and fully readable — this is not a corrupt replica.
+Leading hypothesis (unconfirmed): an MP4/MKV container cannot begin decode
+from an arbitrary byte offset without a keyframe-aligned, container-aware
+start, and the hard-reactivation path may be attempting exactly that. Distinct
+from everything above — the silent path never hits this, since it never
+seeks or reloads — but blocks the remaining Phase 6 UAT boundaries (pause,
+seek, option-change, and any scenario forcing a genuine reactivation) until
+understood. Worth its own investigation before resuming that UAT.
 
 ## Later server work
 
@@ -293,6 +444,19 @@ node-local session IDs. Later server support should add:
 - [ ] Client-reachable API endpoint advertisement per durable node identity,
   including multiple LAN/WAN/address-family candidates, provenance, expiry and
   compatibility metadata.
+  - Minimal first step requested 2026-09-04, in direct response to the UAT
+    failure above: add an optional per-node advertised API host/port config
+    (NAT/port-forwarding), defaulting to the bound API host/port when unset,
+    and expose it as `api_host`/`api_port` on every entry in `/api/v1/status`'s
+    `nodes[]` (not just self — `connectivity.advertised` already covers
+    self-only external connectivity and is a different concept). Confirmed
+    live that a node's existing `host`/`port` in `nodes[]` is its internal RPC
+    bind address, not its API port (`10.44.1.51:7437` vs `:7438` observed on
+    the same node) — the client must not guess this from RPC port or from
+    another node's known-good port; only an explicit advertised value is
+    trustworthy. Client already has `ClusterNodeStatus.api_host`/`api_port`
+    (optional, for mixed-version clusters) and `discoverClusterEndpoints()`
+    wired to consume them the moment a server build reports them.
 - [ ] A cluster-replicated ephemeral session-existence record and capability
   accepted by any node, later carrying authentication/management permissions and
   expiry—but no playback state or owner.

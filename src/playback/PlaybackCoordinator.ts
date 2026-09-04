@@ -1,6 +1,6 @@
 import { createClientLogger } from '../diagnostics/ClientLog';
 import { isEndpointRetryablePlaybackFailure, PlaybackSourceError, type Player } from '../platform/Platform';
-import type { MediaSummary, PlaybackCapabilities, PlaybackEvent } from '../types';
+import type { MediaSummary, PlaybackCapabilities, PlaybackEvent, PlaybackSource } from '../types';
 import type {
   PlaybackAdmissionContext,
   PlaybackPreferencesUpdate,
@@ -193,6 +193,16 @@ export class PlaybackCoordinator {
   private streamOffsetMs = 0;
   /** Latest server-side session state; may be ahead of the source currently visible. */
   private serverSession?: PlaybackSession;
+  /**
+   * The Direct Play source actually loaded into the player right now, kept
+   * distinct from `serverSession.source`. A silently promoted alternate
+   * (see `promoteSilentDirectAlternate`) moves session bookkeeping forward
+   * without ever touching the player, so the read-ahead worker's fallback
+   * registration must keep addressing the URL genuinely loaded in the video
+   * element — not whatever session is current for lifecycle purposes — or
+   * it targets a source key the worker never configured.
+   */
+  private activeDirectPlaySource?: PlaybackSource;
 
   private snapshot: PlaybackCoordinatorSnapshot;
 
@@ -633,6 +643,7 @@ export class PlaybackCoordinator {
 
     this.serverSession = session;
     this.setSession(session);
+    this.activeDirectPlaySource = session.mode === 'direct' ? session.source : undefined;
     this.streamOffsetMs = session.mode === 'direct' ? 0 : Math.max(0, session.seekMs);
     const absoluteStartMs = session.mode === 'direct'
       ? localPositionMs
@@ -751,6 +762,23 @@ export class PlaybackCoordinator {
             await this.options.resolver.stop(alternate.sessionId).catch(() => undefined);
             return;
           }
+          // Byte-identical Direct Play content on a different node can be
+          // served under the same read-ahead cache key: register it as a
+          // fallback source now so an in-flight range request fails over
+          // silently the moment the primary node stops answering, with no
+          // video reload or visible stall. Must address the source actually
+          // loaded in the player, not `session.source` — a prior silent
+          // promotion already moved session bookkeeping on without ever
+          // touching the player, and the read-ahead worker only recognises
+          // the key it was originally configured with.
+          const activeSource = this.activeDirectPlaySource ?? session.source;
+          const registered = this.options.player.addDirectSourceAlternative?.(activeSource, alternate.source);
+          if (registered) {
+            this.promoteSilentDirectAlternate(session, alternate);
+            return;
+          }
+          // No read-ahead hook, or registration failed: fall through to the
+          // slower, reactive standby path below.
         } else if (alternate.mediaId !== session.mediaId
           || alternate.mode !== session.mode
           || (preflight ? !await preflight(alternate.source) : false)) {
@@ -782,6 +810,35 @@ export class PlaybackCoordinator {
       }
     })();
     this.alternatePreparations.add(preparation);
+  }
+
+  /**
+   * The read-ahead worker can start actually depending on a registered
+   * fallback source at any moment, with no signal back to the coordinator.
+   * Bookkeeping must move with it immediately rather than treating it as a
+   * disposable, thirty-second standby: leaving it on that clock would let it
+   * be stopped server-side while still in silent use, and would keep any
+   * future failure evidence pointed at a session that is no longer really
+   * the one in service. `activeDirectPlaySource` is deliberately left alone
+   * — the player itself is never touched here.
+   */
+  private promoteSilentDirectAlternate(previous: PlaybackSession, alternate: PlaybackSession): void {
+    this.serverSession = alternate;
+    this.setSession(alternate);
+    this.log.info('alternate-promoted-silently', {
+      previousSessionId: previous.sessionId,
+      alternateSessionId: alternate.sessionId,
+      endpoint: alternate.endpoint,
+    });
+    // No session-negotiation failure ever surfaces for this endpoint — the
+    // transport layer just quietly stopped using it — so nothing else would
+    // ever tell the registry it is down. Without this, a later reactive
+    // failover (for an unrelated cause) can still blindly pick this same
+    // endpoint back up as an apparently-untried, apparently-healthy candidate.
+    if (previous.endpoint) this.options.resolver.recordEndpointFailure?.(previous.endpoint.id);
+    void this.options.resolver.stop(previous.sessionId).catch((error) => {
+      this.log.warn('superseded-primary-close-failed', { sessionId: previous.sessionId, error });
+    });
   }
 
   private releaseObsoleteAlternates(nextSessionId: string): void {

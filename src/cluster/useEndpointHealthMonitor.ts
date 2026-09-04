@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { authenticatedRequestHeaders } from '../api/httpCompat';
+import type { ClusterStatusApi } from '../api/ClusterStatusApi';
 import type { EndpointRegistry, MachaEndpoint } from './EndpointRegistry';
 import { reportClusterReachable, reportClusterUnreachable } from '../api/serverConnection';
 import { createClientLogger } from '../diagnostics/ClientLog';
@@ -32,6 +33,35 @@ async function probeEndpoint(
     return { status: 'healthy', latencyMs: performance.now() - startedAt };
   } catch {
     return { status: 'unreachable' };
+  }
+}
+
+/**
+ * Learn live cluster membership from whichever known endpoint answers and
+ * merge it into the registry. This is how failover candidates reach beyond
+ * the single endpoint a user happens to have typed in: the cluster already
+ * reports every online node's host/port on this same status call, so the
+ * playback failover pool tracks real membership instead of staying frozen
+ * at bootstrap configuration.
+ */
+export async function discoverClusterEndpoints(
+  registry: EndpointRegistry,
+  clusterStatusApi: ClusterStatusApi,
+): Promise<void> {
+  try {
+    const { nodes } = await clusterStatusApi.status();
+    // `host`/`port` is the node's internal RPC bind address, not its HTTP API
+    // — using it here would guess at a port that is frequently wrong (a
+    // different service, or unreachable behind NAT). Only `api_host`/
+    // `api_port`, which the server advertises specifically for this purpose,
+    // are trustworthy; nodes not yet reporting it are simply not discovered.
+    const advertisements = nodes
+      .filter((node) => node.state === 'online' && node.api_host && node.api_port)
+      .map((node) => ({ nodeId: node.id, apiBaseUrls: [`http://${node.api_host}:${node.api_port}`] }));
+    if (advertisements.length > 0) registry.applyAdvertisement(advertisements);
+  } catch {
+    // Membership discovery is opportunistic. Health probing of already-known
+    // endpoints must keep working even when no endpoint can answer this yet.
   }
 }
 
@@ -71,6 +101,7 @@ export async function probeKnownEndpoints(
 /** Application-wide, bounded health loop. It owns no server or playback state. */
 export function useEndpointHealthMonitor(
   registry: EndpointRegistry,
+  clusterStatusApi: ClusterStatusApi,
   bearerToken: string | undefined,
   enabled: boolean,
 ): void {
@@ -80,6 +111,8 @@ export function useEndpointHealthMonitor(
     let timer: ReturnType<typeof setTimeout> | undefined;
 
     const cycle = async () => {
+      await discoverClusterEndpoints(registry, clusterStatusApi);
+      if (controller.signal.aborted) return;
       const reachable = await probeKnownEndpoints(registry, bearerToken, controller.signal);
       if (!controller.signal.aborted && registry.snapshot().length > 0) {
         if (reachable > 0) reportClusterReachable(); else reportClusterUnreachable();
@@ -92,5 +125,5 @@ export function useEndpointHealthMonitor(
       controller.abort();
       if (timer !== undefined) clearTimeout(timer);
     };
-  }, [bearerToken, enabled, registry]);
+  }, [bearerToken, clusterStatusApi, enabled, registry]);
 }

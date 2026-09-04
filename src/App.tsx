@@ -249,7 +249,7 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
     managementAvailable,
     endpointRegistry,
   } = useMachaServices({ serverUrl, bootstrapEndpoints, apiToken, demo, apiOverride, playbackOverride });
-  useEndpointHealthMonitor(endpointRegistry, apiToken, connectionRequired && bootstrapEndpoints.length > 0 && !effectiveConnectionGate);
+  useEndpointHealthMonitor(endpointRegistry, clusterStatusApi, apiToken, connectionRequired && bootstrapEndpoints.length > 0 && !effectiveConnectionGate);
   const metadataEditingAvailable = managementAvailable;
   const [unmatchedCount, setUnmatchedCount] = useState(0);
 

@@ -1,7 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { bootstrapEndpoints, EndpointRegistry } from './EndpointRegistry';
-import { probeKnownEndpoints } from './useEndpointHealthMonitor';
+import { discoverClusterEndpoints, probeKnownEndpoints } from './useEndpointHealthMonitor';
 import { clearClientDiagnostics, clientDiagnosticsSnapshot, configureClientDiagnostics } from '../diagnostics/ClientLog';
+import type { ClusterNodeStatus, ClusterStatusApi, ClusterStatusSnapshot } from '../api/ClusterStatusApi';
+
+function fakeClusterStatusApi(nodes: readonly ClusterNodeStatus[]): ClusterStatusApi {
+  const snapshot = { nodes: [...nodes] } as ClusterStatusSnapshot;
+  return {
+    status: async () => snapshot,
+    node: async () => { throw new Error('not implemented'); },
+    checkConnectivity: async () => { throw new Error('not implemented'); },
+  };
+}
 
 describe('API endpoint health probes', () => {
   beforeEach(() => {
@@ -119,5 +129,67 @@ describe('API endpoint health probes', () => {
 
     await expect(probe).resolves.toBe(1);
     expect(registry.snapshot()[0]?.health.consecutiveFailures).toBe(0);
+  });
+});
+
+describe('cluster membership discovery', () => {
+  it('adds online cluster nodes the registry did not already know about', async () => {
+    const registry = new EndpointRegistry(bootstrapEndpoints(['http://10.44.1.50:7438']));
+    const clusterStatusApi = fakeClusterStatusApi([
+      { id: 'node-50', state: 'online', host: '10.44.1.50', port: 7437, api_host: '10.44.1.50', api_port: 7438 } as ClusterNodeStatus,
+      { id: 'node-51', state: 'online', host: '10.44.1.51', port: 7437, api_host: '10.44.1.51', api_port: 7438 } as ClusterNodeStatus,
+      { id: 'node-offline', state: 'offline', host: '10.34.1.99', port: 7437, api_host: '10.34.1.99', api_port: 7438 } as ClusterNodeStatus,
+    ]);
+
+    await discoverClusterEndpoints(registry, clusterStatusApi);
+
+    const baseUrls = registry.snapshot().map(({ endpoint }) => endpoint.baseUrl);
+    expect(baseUrls).toContain('http://10.44.1.51:7438');
+    expect(baseUrls).not.toContain('http://10.34.1.99:7438');
+    // The originally configured endpoint must survive discovery unchanged.
+    expect(baseUrls).toContain('http://10.44.1.50:7438');
+  });
+
+  it('does not guess an API endpoint for a node that has not advertised one yet', async () => {
+    const registry = new EndpointRegistry(bootstrapEndpoints(['http://10.44.1.50:7438']));
+    const clusterStatusApi = fakeClusterStatusApi([
+      { id: 'node-50', state: 'online', host: '10.44.1.50', port: 7437, api_host: '10.44.1.50', api_port: 7438 } as ClusterNodeStatus,
+      // An older node in a mixed-version cluster: no api_host/api_port yet.
+      // `host`/`port` here is its RPC bind address on a different port and
+      // must never be guessed at as the API address.
+      { id: 'node-51', state: 'online', host: '10.44.1.51', port: 7437 } as ClusterNodeStatus,
+    ]);
+
+    await discoverClusterEndpoints(registry, clusterStatusApi);
+
+    const baseUrls = registry.snapshot().map(({ endpoint }) => endpoint.baseUrl);
+    expect(baseUrls).toEqual(['http://10.44.1.50:7438']);
+  });
+
+  it('makes newly discovered endpoints usable as failover candidates', async () => {
+    const registry = new EndpointRegistry(bootstrapEndpoints(['http://10.44.1.50:7438']));
+    registry.recordSuccess('http://10.44.1.50:7438');
+    const clusterStatusApi = fakeClusterStatusApi([
+      { id: 'node-50', state: 'online', host: '10.44.1.50', port: 7437, api_host: '10.44.1.50', api_port: 7438 } as ClusterNodeStatus,
+      { id: 'node-51', state: 'online', host: '10.44.1.51', port: 7437, api_host: '10.44.1.51', api_port: 7438 } as ClusterNodeStatus,
+    ]);
+
+    await discoverClusterEndpoints(registry, clusterStatusApi);
+    registry.recordFailure('http://10.44.1.50:7438');
+    const excluded = new Set(['http://10.44.1.50:7438']);
+
+    expect(registry.candidates(excluded).map(({ endpoint }) => endpoint.baseUrl)).toEqual(['http://10.44.1.51:7438']);
+  });
+
+  it('leaves the registry untouched when no endpoint can answer the status call', async () => {
+    const registry = new EndpointRegistry(bootstrapEndpoints(['http://10.44.1.50:7438']));
+    const clusterStatusApi: ClusterStatusApi = {
+      status: async () => { throw new Error('unreachable'); },
+      node: async () => { throw new Error('not implemented'); },
+      checkConnectivity: async () => { throw new Error('not implemented'); },
+    };
+
+    await expect(discoverClusterEndpoints(registry, clusterStatusApi)).resolves.toBeUndefined();
+    expect(registry.snapshot().map(({ endpoint }) => endpoint.baseUrl)).toEqual(['http://10.44.1.50:7438']);
   });
 });

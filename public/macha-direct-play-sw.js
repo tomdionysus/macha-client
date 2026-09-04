@@ -680,6 +680,9 @@ function wrapDemandResponse(cache, response, request, config, requested, request
             attemptedSources.add(replacement.sourceUrl);
           } catch (replacementError) {
             activeFetchFinished(cache);
+            // See demandFetch's catch: a demand-path exhaustion is the same
+            // urgent evidence a prefetch-path exhaustion already reports.
+            void postSourceFailure(cache, cache.sourceUrl, replacementError);
             controller.error(replacementError);
             return;
           }
@@ -726,6 +729,12 @@ async function demandFetch(cache, request, config, rangeOverride, requested) {
     return wrapDemandResponse(cache, response, request, config, requested, startedAt, controller, sourceUrl);
   } catch (error) {
     activeFetchFinished(cache);
+    // Unlike a prefetch miss, a failed demand fetch is about to surface as a
+    // real player-facing read error — but the client cannot react to what it
+    // is never told. This is the earliest and most urgent evidence a source
+    // has actually failed; it must reach the client at least as reliably as
+    // a speculative prefetch failure already does.
+    if (!(error && error.name === 'AbortError')) void postSourceFailure(cache, cache.sourceUrl, error);
     throw error;
   }
 }
@@ -853,6 +862,9 @@ function cacheThenDemandResponse(cache, request, config, requested, cachedEnd) {
           attemptedSources.add(replacement.sourceUrl);
         } catch (replacementError) {
           finishNetwork();
+          // See demandFetch's catch: a demand-path exhaustion is the same
+          // urgent evidence a prefetch-path exhaustion already reports.
+          void postSourceFailure(cache, cache.sourceUrl, replacementError);
           controller.error(replacementError);
         }
       }

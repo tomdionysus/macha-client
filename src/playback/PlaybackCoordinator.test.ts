@@ -524,9 +524,9 @@ describe('Evidence-triggered Direct Play recovery preparation', () => {
     expect(equivalentDirectSources(primary, { ...matching, source: { ...matching.source, sizeBytes: 99 } })).toBe(false);
   });
 
-  it('creates no standby until degradation evidence and owns the temporary alternate teardown', async () => {
+  it('creates no standby until degradation evidence, then registers and silently promotes it', async () => {
     const player = new FakePlayer();
-    const primary = session({ sessionId: 'primary', mediaId: 'macha:one' });
+    const primary = session({ sessionId: 'primary', mediaId: 'macha:one', endpoint: { id: 'node-a', baseUrl: 'http://a' } });
     const alternate = session({
       sessionId: 'alternate',
       mediaId: 'macha:one',
@@ -535,8 +535,10 @@ describe('Evidence-triggered Direct Play recovery preparation', () => {
     });
     primary.source.mediaId = 'macha:one';
     const pending = deferred<PlaybackSession | undefined>();
-    const api = resolver(primary) as ReturnType<typeof resolver> & { prepareAlternate: ReturnType<typeof vi.fn> };
+    const api = resolver(primary) as ReturnType<typeof resolver>
+      & { prepareAlternate: ReturnType<typeof vi.fn>; recordEndpointFailure: ReturnType<typeof vi.fn> };
     api.prepareAlternate = vi.fn(async () => pending.promise);
+    api.recordEndpointFailure = vi.fn();
     const coordinator = new PlaybackCoordinator({ media: media(), player, resolver: api, capabilities: async () => capabilities(), initialPositionMs: 0 });
 
     await coordinator.start();
@@ -547,22 +549,108 @@ describe('Evidence-triggered Direct Play recovery preparation', () => {
     await vi.waitFor(() => expect(api.prepareAlternate).toHaveBeenCalledTimes(1));
 
     pending.resolve(alternate);
-    await vi.waitFor(() => expect(api.prepareAlternate).toHaveBeenCalledTimes(1));
-    expect(player.directAlternatives).toHaveLength(0);
+    await vi.waitFor(() => expect(player.directAlternatives).toHaveLength(1));
+    // The alternate is registered as a same-cache-key fallback so an in-flight
+    // range request can fail over silently — no video reload, no visible
+    // stall — rather than only building a session for a later hard swap.
+    expect(player.directAlternatives[0]).toEqual({ active: primary.source, alternate: alternate.source });
     expect(player.playCalls).toHaveLength(1);
 
+    // Nothing tells the coordinator when the read-ahead worker actually uses
+    // the registered fallback, so bookkeeping must move immediately rather
+    // than waiting on reactive failure evidence: the superseded primary
+    // session is closed right away, well before the coordinator itself closes.
+    await vi.waitFor(() => expect(api.stop).toHaveBeenCalledWith('primary'));
+    // No session negotiation ever failed for the primary endpoint — nothing
+    // else would ever tell endpoint health tracking it is down — so a silent
+    // promotion must report that failure itself, or a later failover (for an
+    // unrelated cause) could still pick this same dead endpoint back up.
+    expect(api.recordEndpointFailure).toHaveBeenCalledWith('node-a');
+
     await coordinator.close();
-    expect(api.stop).toHaveBeenCalledWith('primary', {});
     expect(api.stop).toHaveBeenCalledWith('alternate', {});
   });
 
-  it('expires an evidence-triggered alternate after thirty seconds when the primary continues', async () => {
+  it('keeps registering fallbacks against the source truly loaded in the player across chained silent promotions', async () => {
+    // The player never reloads across a silent promotion, so a *second*
+    // degradation must still register its new fallback against the original
+    // source the read-ahead worker actually configured a key for — not
+    // whichever session promotion has most recently made current — or the
+    // worker cannot find the key it needs to attach the new fallback to.
+    const player = new FakePlayer();
+    const primary = session({ sessionId: 'primary', mediaId: 'macha:one' });
+    const alternateA = session({
+      sessionId: 'alternate-a',
+      mediaId: 'macha:one',
+      endpoint: { id: 'node-b', baseUrl: 'http://b' },
+      source: { ...primary.source, mediaId: 'macha:one', url: 'http://b/direct' },
+    });
+    const alternateB = session({
+      sessionId: 'alternate-b',
+      mediaId: 'macha:one',
+      endpoint: { id: 'node-c', baseUrl: 'http://c' },
+      source: { ...primary.source, mediaId: 'macha:one', url: 'http://c/direct' },
+    });
+    primary.source.mediaId = 'macha:one';
+    const api = resolver(primary) as ReturnType<typeof resolver> & { prepareAlternate: ReturnType<typeof vi.fn> };
+    api.prepareAlternate = vi.fn()
+      .mockResolvedValueOnce(alternateA)
+      .mockResolvedValueOnce(alternateB);
+    const coordinator = new PlaybackCoordinator({ media: media(), player, resolver: api, capabilities: async () => capabilities(), initialPositionMs: 0 });
+    await coordinator.start();
+
+    player.degrade(new PlaybackSourceError('read-ahead TCP failed', 'stream'));
+    await vi.waitFor(() => expect(player.directAlternatives).toHaveLength(1));
+    expect(player.directAlternatives[0]).toEqual({ active: primary.source, alternate: alternateA.source });
+    await vi.waitFor(() => expect(api.stop).toHaveBeenCalledWith('primary'));
+
+    player.degrade(new PlaybackSourceError('read-ahead TCP failed', 'stream'));
+    await vi.waitFor(() => expect(player.directAlternatives).toHaveLength(2));
+    expect(player.directAlternatives[1]).toEqual({ active: primary.source, alternate: alternateB.source });
+    await vi.waitFor(() => expect(api.stop).toHaveBeenCalledWith('alternate-a'));
+
+    await coordinator.close();
+    expect(api.stop).toHaveBeenCalledWith('alternate-b', {});
+  });
+
+  it('does not register a direct-source alternative for a transformed (non-direct) standby', async () => {
+    const player = new FakePlayer();
+    const primary = session({ sessionId: 'primary', mediaId: 'macha:one', mode: 'remux' });
+    const alternate = session({
+      sessionId: 'alternate',
+      mediaId: 'macha:one',
+      mode: 'remux',
+      endpoint: { id: 'node-b', baseUrl: 'http://b' },
+    });
+    const api = resolver(primary) as ReturnType<typeof resolver> & { prepareAlternate: ReturnType<typeof vi.fn> };
+    api.prepareAlternate = vi.fn(async () => alternate);
+    const coordinator = new PlaybackCoordinator({ media: media(), player, resolver: api, capabilities: async () => capabilities(), initialPositionMs: 0 });
+    await coordinator.start();
+
+    player.degrade(new PlaybackSourceError('read-ahead TCP failed', 'stream'));
+    await vi.waitFor(() => expect(api.prepareAlternate).toHaveBeenCalledTimes(1));
+    await flush();
+
+    expect(player.directAlternatives).toHaveLength(0);
+    await coordinator.close();
+  });
+
+  it('expires an evidence-triggered transformed standby after thirty seconds when the primary continues', async () => {
+    // A Direct Play standby is promoted immediately once its fallback source
+    // is registered (see the silent-promotion test above) rather than sitting
+    // on this expiry clock. Transformed (HLS/remux) sources have no
+    // equivalent read-ahead fallback and still rely on the thirty-second
+    // recovery window, only promoted reactively if the primary actually fails.
     vi.useFakeTimers();
     try {
       const player = new FakePlayer();
-      const primary = session({ sessionId: 'primary', mediaId: 'macha:one' });
-      const alternate = session({ sessionId: 'alternate', mediaId: 'macha:one', source: { ...primary.source, url: 'http://b/direct' } });
-      primary.source.mediaId = 'macha:one';
+      const primary = session({ sessionId: 'primary', mediaId: 'macha:one', mode: 'remux' });
+      const alternate = session({
+        sessionId: 'alternate',
+        mediaId: 'macha:one',
+        mode: 'remux',
+        source: { ...primary.source, url: 'http://b/direct' },
+      });
       const api = resolver(primary) as ReturnType<typeof resolver> & { prepareAlternate: ReturnType<typeof vi.fn> };
       api.prepareAlternate = vi.fn(async () => alternate);
       const coordinator = new PlaybackCoordinator({ media: media(), player, resolver: api, capabilities: async () => capabilities(), initialPositionMs: 0 });
@@ -572,6 +660,7 @@ describe('Evidence-triggered Direct Play recovery preparation', () => {
       await flush();
       await flush();
       expect(api.stop).not.toHaveBeenCalledWith('alternate');
+      expect(player.directAlternatives).toHaveLength(0);
 
       await vi.advanceTimersByTimeAsync(30_000);
       expect(api.stop).toHaveBeenCalledWith('alternate');

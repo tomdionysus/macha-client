@@ -80,10 +80,11 @@ export class ClusterPlaybackResolver implements PlaybackResolver {
     preparedAlternate?: PlaybackSession,
     context?: PlaybackAdmissionContext,
   ): Promise<PlaybackSession> {
-    if (failedSession.endpoint) {
-      this.failedGenerationEndpoints.add(failedSession.endpoint.id);
-      this.registry.recordFailure(failedSession.endpoint.id);
-    }
+    // Shares the exact bookkeeping PlaybackCoordinator calls explicitly for a
+    // silent (no-reload) transition — see recordEndpointFailure below — so
+    // "an endpoint just failed" is recorded identically regardless of which
+    // path noticed it, rather than two independent inline copies drifting.
+    if (failedSession.endpoint) this.recordEndpointFailure(failedSession.endpoint.id);
     if (preparedAlternate) {
       const owned = this.sessions.get(preparedAlternate.sessionId);
       if (owned
@@ -206,6 +207,11 @@ export class ClusterPlaybackResolver implements PlaybackResolver {
       if (retryableEndpointFailure(error)) this.registry.recordFailure(owned.endpoint.id);
       throw endpointFailure(owned.endpoint.id, owned.endpoint.baseUrl, error);
     }
+  }
+
+  recordEndpointFailure(endpointId: string): void {
+    this.failedGenerationEndpoints.add(endpointId);
+    this.registry.recordFailure(endpointId);
   }
 
   private resolver(endpoint: MachaEndpoint): MachaPlaybackResolver {

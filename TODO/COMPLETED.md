@@ -59,10 +59,13 @@ in one screen.
   proving the artwork URL resolves against node B specifically (not node A,
   not left relative) — confirmed it fails against the prior code and passes
   with the fix. Passed 369/369 tests and TypeScript typechecking.
-- [!] Not yet re-verified live in the browser against a real connected
-  cluster — the automation session used for the original UAT report had no
-  configured endpoint. Ask: reload the real connected tab and confirm poster
-  artwork now loads correctly cluster-wide, not just in Continue Watching.
+- [x] Re-verified live in the browser (2026-09-04) against the real connected
+  cluster node `10.44.1.200:7438`: reloaded Home, Movies and TV Shows on the
+  running dev server (`localhost:5173`), confirmed network requests for
+  artwork resolve against the node's own origin (signed `exp`/`sig` query
+  params intact) rather than `localhost:5173`, all posters decoded
+  (`naturalWidth`/`naturalHeight` populated) and rendered, and no console
+  errors — the fix holds cluster-wide, not just in Continue Watching.
 
 ## Artwork capability URLs: server ask sent
 
