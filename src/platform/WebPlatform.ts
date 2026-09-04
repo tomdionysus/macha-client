@@ -391,7 +391,7 @@ class WebPlayer implements Player {
     if (isHls(source)) {
       if (shouldUseManagedHls(this.options.forceNativeHls, Hls.isSupported())) {
         this.log.info('hls-js-selected', { url: source.url });
-        this.attachHls(video, source.url, positionMs, sourceGeneration);
+        this.attachHls(video, source.url, sourceGeneration);
       } else if (this.options.forceNativeHls || nativeHlsSupported(video)) {
         this.log.info('hls-native-selected', { url: source.url });
         video.src = source.url;
@@ -871,8 +871,12 @@ class WebPlayer implements Player {
     for (const listener of this.failureListeners) listener(error);
   }
 
-  private attachHls(video: HTMLVideoElement, url: string, positionMs: number, sourceGeneration: number): void {
-    const hls = new Hls(webHlsBufferConfig(positionMs));
+  private attachHls(video: HTMLVideoElement, url: string, sourceGeneration: number): void {
+    // hls.js's own startPosition seeks in raw source-local seconds and does not
+    // know about mediaOriginMs; the initial-seek listener above is the sole
+    // owner of the resume seek so hls.js and the app never race the same
+    // MediaSource with two independent seeks to (possibly) different targets.
+    const hls = new Hls(webHlsBufferConfig());
     const mediaRecovery = new ManagedHlsMediaRecoveryBudget();
     this.hls = hls;
     this.hlsMediaRecovery = mediaRecovery;

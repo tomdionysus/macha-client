@@ -1,6 +1,6 @@
 {
   "name": "macha-client",
-  "version": "0.8.1",
+  "version": "0.8.2",
   "private": true,
   "type": "module",
   "scripts": {
@@ -22,14 +22,16 @@
     "react-router-dom": "^7.18.2"
   },
   "devDependencies": {
+    "@testing-library/react": "^16.3.3",
     "@types/react": "^19.1.10",
     "@types/react-dom": "^19.1.7",
+    "@vitejs/plugin-legacy": "^7.2.1",
     "@vitejs/plugin-react": "^5.0.0",
+    "jsdom": "^27.0.0",
+    "terser": "^5.16.0",
     "typescript": "^5.9.2",
     "vite": "^7.1.2",
-    "vitest": "^3.2.4",
-    "@vitejs/plugin-legacy": "^7.2.1",
-    "terser": "^5.16.0"
+    "vitest": "^3.2.4"
   },
   "license": "GPL-3.0-or-later",
   "description": "Small React/TypeScript web and TV client for Macha.",

@@ -135,15 +135,15 @@ describe('Web media failure evidence', () => {
 
 
 describe('Web HLS buffer policy', () => {
-  it('keeps a bounded minute-scale forward VOD buffer and starts at the requested local position', () => {
-    expect(webHlsBufferConfig(42_000)).toMatchObject({
+  it('keeps a bounded minute-scale forward VOD buffer and leaves the initial seek to the app-level listener', () => {
+    expect(webHlsBufferConfig()).toMatchObject({
       enableWorker: true,
       maxBufferLength: 60,
       maxMaxBufferLength: 120,
       maxBufferSize: 128 * 1024 * 1024,
       backBufferLength: 30,
-      startPosition: 42,
     });
+    expect(webHlsBufferConfig()).not.toHaveProperty('startPosition');
   });
 });
 

@@ -1,50 +1,100 @@
-import { describe, expect, it, vi } from 'vitest';
-import { ArtworkViewportRegistry, isArtworkNearViewport } from './artworkViewport';
+// @vitest-environment jsdom
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { observeArtworkProximity as ObserveArtworkProximity } from './artworkViewport';
 
-describe('lazy artwork viewport policy', () => {
-  const viewport = { width: 1920, height: 1080 };
+/** jsdom implements no layout, so it never ships IntersectionObserver either; fake just enough of it to drive the code under test. */
+class FakeIntersectionObserver implements IntersectionObserver {
+  static instances: FakeIntersectionObserver[] = [];
+  readonly root = null;
+  readonly rootMargin: string;
+  readonly thresholds: ReadonlyArray<number> = [];
+  observed = new Set<Element>();
 
-  it('preloads artwork before it enters the viewport', () => {
-    expect(isArtworkNearViewport({ top: 1800, bottom: 2100, left: 100, right: 300 }, viewport, 1000)).toBe(true);
-    expect(isArtworkNearViewport({ top: 2200, bottom: 2500, left: 100, right: 300 }, viewport, 1000)).toBe(false);
+  constructor(private readonly callback: IntersectionObserverCallback, options?: IntersectionObserverInit) {
+    this.rootMargin = String(options?.rootMargin ?? '');
+    FakeIntersectionObserver.instances.push(this);
+  }
+
+  observe(element: Element): void { this.observed.add(element); }
+  unobserve(element: Element): void { this.observed.delete(element); }
+  disconnect(): void { this.observed.clear(); }
+  takeRecords(): IntersectionObserverEntry[] { return []; }
+
+  intersect(element: Element, isIntersecting: boolean): void {
+    this.callback([{ target: element, isIntersecting } as IntersectionObserverEntry], this);
+  }
+}
+
+describe('observeArtworkProximity', () => {
+  let observeArtworkProximity: typeof ObserveArtworkProximity;
+
+  // The module keeps one IntersectionObserver singleton for the app's whole
+  // lifetime (correct in production); reset it here so each test starts from
+  // a clean module and actually exercises its own fake observer.
+  beforeEach(async () => {
+    FakeIntersectionObserver.instances = [];
+    window.IntersectionObserver = FakeIntersectionObserver as unknown as typeof IntersectionObserver;
+    vi.resetModules();
+    ({ observeArtworkProximity } = await import('./artworkViewport'));
   });
 
-  it('covers horizontal scrolling as well as vertical scrolling', () => {
-    expect(isArtworkNearViewport({ top: 100, bottom: 400, left: 2500, right: 2800 }, viewport, 1000)).toBe(true);
-    expect(isArtworkNearViewport({ top: 100, bottom: 400, left: 3100, right: 3400 }, viewport, 1000)).toBe(false);
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
-  it('fires a request exactly once after an item becomes nearby', () => {
-    let rect = { top: 3000, bottom: 3300, left: 100, right: 300 };
-    const element = { getBoundingClientRect: () => rect };
-    const request = vi.fn();
-    const registry = new ArtworkViewportRegistry(1000);
-    registry.add(element, request);
-
-    registry.evaluate(viewport);
-    expect(request).not.toHaveBeenCalled();
-    expect(registry.size).toBe(1);
-
-    rect = { top: 1900, bottom: 2200, left: 100, right: 300 };
-    registry.evaluate(viewport);
-    registry.evaluate(viewport);
-
-    expect(request).toHaveBeenCalledTimes(1);
-    expect(registry.size).toBe(0);
+  it('preloads a 1000px margin around the viewport', () => {
+    observeArtworkProximity(document.createElement('div'), vi.fn());
+    expect(FakeIntersectionObserver.instances[0]?.rootMargin).toBe('1000px');
   });
 
-  it('does not let later scrolling revoke an already-triggered load', () => {
-    let rect = { top: 100, bottom: 400, left: 100, right: 300 };
-    const element = { getBoundingClientRect: () => rect };
-    const request = vi.fn();
-    const registry = new ArtworkViewportRegistry(1000);
-    registry.add(element, request);
+  it('fires the listener exactly once when the element intersects', () => {
+    const element = document.createElement('div');
+    const listener = vi.fn();
+    observeArtworkProximity(element, listener);
+    const observer = FakeIntersectionObserver.instances[0]!;
 
-    registry.evaluate(viewport);
-    rect = { top: 5000, bottom: 5300, left: 100, right: 300 };
-    registry.evaluate(viewport);
+    observer.intersect(element, false);
+    expect(listener).not.toHaveBeenCalled();
 
-    expect(request).toHaveBeenCalledTimes(1);
-    expect(registry.size).toBe(0);
+    observer.intersect(element, true);
+    expect(listener).toHaveBeenCalledOnce();
+    expect(observer.observed.has(element)).toBe(false);
+
+    // A later, stale callback for the same (now unobserved) element must not
+    // fire the listener again.
+    observer.intersect(element, true);
+    expect(listener).toHaveBeenCalledOnce();
+  });
+
+  it('reuses one observer across multiple elements', () => {
+    observeArtworkProximity(document.createElement('div'), vi.fn());
+    observeArtworkProximity(document.createElement('div'), vi.fn());
+    expect(FakeIntersectionObserver.instances).toHaveLength(1);
+  });
+
+  it('stops listening once the returned cleanup runs, before any intersection', () => {
+    const element = document.createElement('div');
+    const listener = vi.fn();
+    const stop = observeArtworkProximity(element, listener);
+    const observer = FakeIntersectionObserver.instances[0]!;
+
+    stop();
+    expect(observer.observed.has(element)).toBe(false);
+    observer.intersect(element, true);
+    expect(listener).not.toHaveBeenCalled();
+  });
+
+  it('loads immediately when IntersectionObserver is unavailable', async () => {
+    // @ts-expect-error simulating an older browser (e.g. Samsung Tizen 3) with no IntersectionObserver
+    delete window.IntersectionObserver;
+    vi.resetModules();
+    ({ observeArtworkProximity } = await import('./artworkViewport'));
+    const listener = vi.fn();
+
+    const stop = observeArtworkProximity(document.createElement('div'), listener);
+
+    expect(listener).toHaveBeenCalledOnce();
+    expect(FakeIntersectionObserver.instances).toHaveLength(0);
+    expect(stop).not.toThrow();
   });
 });

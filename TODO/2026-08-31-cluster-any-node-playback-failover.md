@@ -84,10 +84,10 @@ be described as seamless if it visibly stalls.
   required to recreate a generation on a different node.
 - [x] Introduce a node-scoped generation reference containing node identity,
   API origin and node-local session ID. Session IDs alone are insufficient.
-- [ ] Add deterministic two-node fake APIs/players and failure injection for
+- [x] Add deterministic two-node fake APIs/players and failure injection for
   request creation, manifest load, segment/range load, source preparation and
   teardown.
-- [ ] Characterize position, pause, preference and queue behaviour while a
+- [x] Characterize position, pause, preference and queue behaviour while a
   replacement is in flight.
 
 Exit criterion: tests can describe node A failing at every relevant boundary
@@ -95,12 +95,12 @@ without using global browser events or changing the route.
 
 ## Phase 1: endpoint registry and manual discovery
 
-- [ ] Replace the single stored server URL with a versioned set of seed/API
+- [x] Replace the single stored server URL with a versioned set of seed/API
   endpoints while migrating existing installations losslessly.
 - [ ] Keep durable node identity separate from endpoint URL. Until the server
   advertises client API identities, retain endpoint-derived provisional IDs and
   reconcile them when a node reports a durable ID.
-- [ ] Treat configured addresses as bootstrap API endpoints, not authoritative
+- [x] Treat configured addresses as bootstrap API endpoints, not authoritative
   membership. A successful bootstrap response will eventually populate and
   refresh the client-reachable endpoint registry; never reinterpret the current
   cluster transport `host`/`port` fields as HTTP API origins.
@@ -108,9 +108,9 @@ without using global browser events or changing the route.
   suitability. Actively check every known API endpoint immediately and every
   ten seconds with bounded, non-overlapping cycles and per-endpoint timeouts;
   combine those results with evidence from real requests.
-- [ ] Prefer a healthy sticky endpoint for ordinary traffic, but race or advance
+- [x] Prefer a healthy sticky endpoint for ordinary traffic, but race or advance
   to alternates after bounded failure. Avoid retry storms.
-- [ ] Make Web CORS and Samsung package origin policy explicit. The initial
+- [x] Make Web CORS and Samsung package origin policy explicit. The initial
   Samsung demonstration may include a build-time allow-list of test endpoints.
 
 Exit criterion: the client boots and browses through either of two manually
@@ -122,13 +122,13 @@ active read endpoint.
 - [x] Route safe catalogue/status/artwork reads through the endpoint registry
   with bounded alternate retry and request coalescing.
 - [x] Preserve content-addressed artwork cache usefulness across endpoint changes.
-- [ ] Do not silently replay management, ingest or other mutating requests until
+- [x] Do not silently replay management, ingest or other mutating requests until
   the server provides an idempotency contract. Report their originating endpoint
   and failure accurately.
-- [ ] Replace the global “server unreachable means navigate to Settings” rule
+- [x] Replace the global “server unreachable means navigate to Settings” rule
   with cluster availability. A single endpoint failure is internal diagnostics;
   only exhaustion of all suitable endpoints is user-visible.
-- [ ] Record node selection, attempt order, cooldown and recovery timing in the
+- [x] Record node selection, attempt order, cooldown and recovery timing in the
   bounded diagnostics buffer without exposing credentials.
 
 Exit criterion: normal client communication has no distinguished permanent

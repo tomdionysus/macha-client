@@ -8,9 +8,7 @@ import type {
 } from './CatalogueApi';
 import { MachaApiError, MachaCatalogueApi } from './MachaCatalogueApi';
 import type { EndpointRegistry, MachaEndpoint } from '../cluster/EndpointRegistry';
-import { endpointFailure, retryableEndpointFailure, unreachableEndpointFailure } from '../cluster/endpointFailure';
-import { ClusterEndpointRouter, MachaClusterRouteError } from '../cluster/endpointRouting';
-import { reportClusterReachable } from './serverConnection';
+import { ClusterEndpointRouter } from '../cluster/endpointRouting';
 
 type EndpointOperation<T> = (api: MachaCatalogueApi, endpoint: MachaEndpoint) => Promise<T>;
 
@@ -110,42 +108,23 @@ export class ClusterCatalogueApi implements CatalogueApi {
   }
 
   private async readArtwork(id: string, signal?: AbortSignal): Promise<Blob> {
-    let lastError: unknown;
+    // Artwork placement is deliberately sparse: a reachable node may not hold
+    // this content-addressed object yet. Route through the shared authority
+    // rather than reimplementing candidate/health bookkeeping here, so a 404
+    // is treated the same "temporary absence" way find() already treats one.
     let lastMissing: MachaApiError | undefined;
-    let allUnreachable = true;
-    const attempted: string[] = [];
-
-    for (const { endpoint } of this.router.registry.candidates()) {
-      attempted.push(endpoint.id);
-      if (signal?.aborted) throw abortReason(signal);
+    const artwork = await this.router.find(async (endpoint) => {
       try {
-        const artwork = await this.artworkAttempt(endpoint, id, signal);
-        // Artwork placement is deliberately sparse. Serving a content object is
-        // health evidence, but must not steal API authority from normal work.
-        this.router.registry.recordProbeSuccess(endpoint.id);
-        reportClusterReachable();
-        return artwork;
+        return await this.artworkAttempt(endpoint, id, signal);
       } catch (error) {
-        if (signal?.aborted) throw abortReason(signal);
         if (error instanceof MachaApiError && error.status === 404) {
-          // A reachable node may not hold this content-addressed object yet.
-          // Preserve its health and look for the same immutable object elsewhere.
-          this.router.registry.recordProbeSuccess(endpoint.id);
-          reportClusterReachable();
           lastMissing = error;
-          allUnreachable = false;
-          continue;
+          return undefined;
         }
-        if (!retryableEndpointFailure(error)) throw error;
-        allUnreachable = allUnreachable && unreachableEndpointFailure(error);
-        this.router.registry.recordFailure(endpoint.id);
-        lastError = endpointFailure(endpoint.id, endpoint.baseUrl, error);
+        throw error;
       }
-    }
-
-    if (lastError) {
-      throw new MachaClusterRouteError(attempted, allUnreachable, lastError);
-    }
+    }, signal, { advisory: true });
+    if (artwork) return artwork;
     throw lastMissing ?? new MachaApiError(`Artwork ${id} is unavailable on every configured node.`, 404, 'artwork_not_found');
   }
 

@@ -13,7 +13,6 @@ import type {
   SeasonSummary,
   ShowDetails,
 } from '../types';
-import { ArtworkRequestScheduler } from './ArtworkRequestScheduler';
 import { createClientLogger } from '../diagnostics/ClientLog';
 
 function abortReason(signal: AbortSignal): unknown {
@@ -46,7 +45,6 @@ function optionalNumber(value: number | null): number | undefined {
 export class MachaMediaApi implements MediaApi {
   private readonly artworkCache = new Map<string, Blob>();
   private readonly artworkRequests = new Map<string, Promise<Blob>>();
-  private readonly artworkScheduler = new ArtworkRequestScheduler(4);
   private readonly log = createClientLogger('artwork.api');
 
   constructor(private readonly catalogue: CatalogueApi) {}
@@ -152,9 +150,12 @@ export class MachaMediaApi implements MediaApi {
 
     let pending = this.artworkRequests.get(ref.id);
     if (!pending) {
-      const priority = signal ? 'foreground' : 'background';
-      this.log.debug('request-queued', { artworkId: ref.id, priority });
-      pending = this.artworkScheduler.schedule(() => this.catalogue.artwork(ref.id), priority).then((blob) => {
+      this.log.debug('request-queued', { artworkId: ref.id, priority: signal ? 'foreground' : 'background' });
+      // No client-side concurrency cap: the browser's own HTTP stack already
+      // manages concurrent requests per origin (and multiplexes them under
+      // HTTP/2), which a hand-rolled JS-side queue can only approximate and
+      // risks quietly wedging (a leaked slot silently starves the rest).
+      pending = this.catalogue.artwork(ref.id).then((blob) => {
         this.artworkCache.set(ref.id, blob);
         this.artworkRequests.delete(ref.id);
         this.log.debug('request-complete', { artworkId: ref.id, sizeBytes: blob.size });

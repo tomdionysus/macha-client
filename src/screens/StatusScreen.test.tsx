@@ -1,6 +1,6 @@
+// @vitest-environment jsdom
+import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { createElement } from 'react';
-import { renderToStaticMarkup } from 'react-dom/server';
 import type { EndpointCandidate } from '../cluster/EndpointRegistry';
 import type { ClusterNodeStatus, ClusterStatusSnapshot } from '../api/ClusterStatusApi';
 import type { IdentityAssociationResetResult, ManageApi } from '../api/ManageApi';
@@ -32,14 +32,10 @@ describe('status section routing', () => {
   });
 
   it('uses the shared icon refresh control instead of a connectivity text action', () => {
-    const html = renderToStaticMarkup(createElement(StatusHeader, {
-      eyebrow: 'Macha cluster',
-      refreshing: false,
-      onRefresh: () => undefined,
-    }));
-    expect(html).toContain('aria-label="Refresh status"');
-    expect(html).toContain('<svg');
-    expect(html).not.toContain('Check connectivity');
+    render(<StatusHeader eyebrow="Macha cluster" refreshing={false} onRefresh={() => undefined} />);
+
+    expect(screen.getByRole('button', { name: 'Refresh status' }).querySelector('svg')).not.toBeNull();
+    expect(screen.queryByText('Check connectivity')).toBeNull();
   });
 });
 

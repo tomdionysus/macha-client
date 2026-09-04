@@ -1,7 +1,13 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { bootstrapEndpoints, EndpointRegistry } from './EndpointRegistry';
 import { ClusterEndpointRouter } from './endpointRouting';
 import { reportClusterReachable } from '../api/serverConnection';
+import { clearClientDiagnostics, clientDiagnosticsSnapshot, configureClientDiagnostics } from '../diagnostics/ClientLog';
+
+beforeEach(() => {
+  clearClientDiagnostics();
+  configureClientDiagnostics({ level: 'debug', console: false, maxEntries: 100 });
+});
 
 afterEach(() => {
   reportClusterReachable();
@@ -62,6 +68,18 @@ describe('ClusterEndpointRouter', () => {
 
     expect(operation).toHaveBeenCalledTimes(1);
     expect(registry.snapshot().map(({ health }) => health.consecutiveFailures)).toEqual([0, 0]);
+  });
+
+  it('records node selection, attempt order and failure evidence to bounded diagnostics', async () => {
+    const router = new ClusterEndpointRouter(new EndpointRegistry(bootstrapEndpoints(['http://a', 'http://b'])));
+    await expect(router.request(async (endpoint) => endpoint.id === 'http://a'
+      ? Promise.reject(new TypeError('node A unreachable'))
+      : endpoint.id)).resolves.toBe('http://b');
+
+    const events = clientDiagnosticsSnapshot()
+      .filter((entry) => entry.scope === 'cluster.routing')
+      .map((entry) => entry.event);
+    expect(events).toEqual(['route-attempt', 'route-endpoint-failed', 'route-attempt', 'route-success']);
   });
 
   it('does not let an exhausted foreground read declare a cluster-wide outage', async () => {

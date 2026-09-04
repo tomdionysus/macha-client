@@ -59,15 +59,16 @@ A series page loads its series record and direct season children only. A season 
 Season pages prefer season artwork and fall back to series artwork. Episode cards prefer `still`/thumbnail artwork.
 
 Artwork is a non-critical, content-addressed data plane. Near-viewport requests
-enter a shared four-transfer scheduler so poster bursts cannot occupy every
-browser connection; detail and player artwork receives queue priority. Demand
-for the same immutable artwork ID is coalesced and successful Blobs remain
-cached across ordinary authoritative-endpoint changes. Each node attempt has a
-bounded deadline, and a node-local `404` searches the remaining nodes without
-changing API authority or declaring the responding node unhealthy. Exhausted
-network and browser-decode failures cool down and re-arm only while the card is
-again near the viewport. These transitions are diagnostic events, not global UI
-errors.
+are triggered by the browser's own IntersectionObserver rather than hand-rolled
+scroll/resize polling, so a card revealed by any layout change is never missed.
+Demand for the same immutable artwork ID is coalesced and successful Blobs
+remain cached across ordinary authoritative-endpoint changes. There is no
+client-side concurrency cap on artwork transfers; the browser's own connection
+management governs that. Each node attempt has a bounded deadline, and a
+node-local `404` searches the remaining nodes without changing API authority or
+declaring the responding node unhealthy. Exhausted network and browser-decode
+failures cool down and re-arm only while the card is again near the viewport.
+These transitions are diagnostic events, not global UI errors.
 
 ## Routing
 

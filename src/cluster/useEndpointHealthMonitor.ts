@@ -2,8 +2,11 @@ import { useEffect } from 'react';
 import { authenticatedRequestHeaders } from '../api/httpCompat';
 import type { EndpointRegistry, MachaEndpoint } from './EndpointRegistry';
 import { reportClusterReachable, reportClusterUnreachable } from '../api/serverConnection';
+import { createClientLogger } from '../diagnostics/ClientLog';
 
 export const ENDPOINT_HEALTH_INTERVAL_MS = 10_000;
+
+const log = createClientLogger('cluster.health');
 
 type Fetch = typeof fetch;
 
@@ -41,8 +44,9 @@ export async function probeKnownEndpoints(
     if (signal.aborted) return;
     if (result !== 'unreachable') reachable += 1;
     if (result === 'healthy') registry.recordProbeSuccess(endpoint.id);
-    else registry.recordFailure(endpoint.id);
+    else registry.recordProbeFailure(endpoint.id);
   }));
+  if (!signal.aborted) log.debug('probe-cycle', { reachable, known: endpoints.length });
   return reachable;
 }
 

@@ -1,122 +1,64 @@
 const DEFAULT_PRELOAD_MARGIN_PX = 1000;
 
-interface ViewportElement {
-  getBoundingClientRect(): RectLike;
-}
 type ProximityListener = () => void;
 
-export interface ViewportSize {
-  width: number;
-  height: number;
-}
-
-export interface RectLike {
-  top: number;
-  right: number;
-  bottom: number;
-  left: number;
-}
-
-export function isArtworkNearViewport(
-  rect: RectLike,
-  viewport: ViewportSize,
-  marginPx = DEFAULT_PRELOAD_MARGIN_PX,
-): boolean {
-  return rect.bottom >= -marginPx
-    && rect.top <= viewport.height + marginPx
-    && rect.right >= -marginPx
-    && rect.left <= viewport.width + marginPx;
-}
-
 /**
- * One-shot proximity registry used by lazy artwork.
+ * One-shot proximity notice used by lazy artwork, backed by the browser's own
+ * IntersectionObserver rather than hand-rolled scroll/resize polling.
  *
  * Registration is deliberately monotonic: once an element reaches the preload
- * region it is removed from the registry and its listener fires exactly once.
- * Scrolling away can never make an already-requested image "not requested"
- * again.
+ * region it is unobserved and its listener fires exactly once. Because the
+ * browser itself re-runs intersection checks on any layout change (not just a
+ * scroll or resize event), a card revealed by content moving elsewhere on the
+ * page is never missed the way a scroll-only check would miss it.
  */
-export class ArtworkViewportRegistry {
-  private readonly entries = new Map<ViewportElement, ProximityListener>();
-
-  constructor(private readonly marginPx = DEFAULT_PRELOAD_MARGIN_PX) {}
-
-  add(element: ViewportElement, listener: ProximityListener): () => void {
-    this.entries.set(element, listener);
-    return () => {
-      if (this.entries.get(element) === listener) this.entries.delete(element);
-    };
-  }
-
-  evaluate(viewport: ViewportSize): void {
-    for (const [element, listener] of [...this.entries]) {
-      if (!isArtworkNearViewport(element.getBoundingClientRect(), viewport, this.marginPx)) continue;
-      this.entries.delete(element);
-      listener();
-    }
-  }
-
-  get size(): number {
-    return this.entries.size;
-  }
-}
-
 class BrowserArtworkViewport {
-  private readonly registry = new ArtworkViewportRegistry();
-  private listening = false;
-  private scheduled = false;
+  private observer?: IntersectionObserver;
+  private readonly listeners = new Map<Element, ProximityListener>();
 
   observe(element: Element, listener: ProximityListener): () => void {
-    const remove = this.registry.add(element, () => {
-      listener();
-      this.stopIfIdle();
-    });
-    this.start();
-    this.schedule();
+    this.listeners.set(element, listener);
+    this.ensureObserver().observe(element);
     return () => {
-      remove();
-      this.stopIfIdle();
+      this.listeners.delete(element);
+      this.observer?.unobserve(element);
     };
   }
 
-  private start(): void {
-    if (this.listening || typeof window === 'undefined') return;
-    this.listening = true;
-    // Capture scroll events so nested rails/containers are covered too. There
-    // is one listener for the whole application, regardless of card count.
-    window.addEventListener('scroll', this.schedule, true);
-    window.addEventListener('resize', this.schedule);
+  private ensureObserver(): IntersectionObserver {
+    this.observer ??= new IntersectionObserver(this.onIntersect, {
+      rootMargin: `${DEFAULT_PRELOAD_MARGIN_PX}px`,
+    });
+    return this.observer;
   }
 
-  private stopIfIdle(): void {
-    if (!this.listening || this.registry.size !== 0 || typeof window === 'undefined') return;
-    window.removeEventListener('scroll', this.schedule, true);
-    window.removeEventListener('resize', this.schedule);
-    this.listening = false;
-  }
-
-  private readonly schedule = (): void => {
-    if (this.scheduled || typeof window === 'undefined') return;
-    this.scheduled = true;
-    const run = () => {
-      this.scheduled = false;
-      this.registry.evaluate({ width: window.innerWidth, height: window.innerHeight });
-      this.stopIfIdle();
-    };
-    if (typeof window.requestAnimationFrame === 'function') {
-      window.requestAnimationFrame(run);
-    } else {
-      window.setTimeout(run, 0);
+  private readonly onIntersect: IntersectionObserverCallback = (entries) => {
+    for (const entry of entries) {
+      if (!entry.isIntersecting) continue;
+      const listener = this.listeners.get(entry.target);
+      if (!listener) continue;
+      this.listeners.delete(entry.target);
+      this.observer?.unobserve(entry.target);
+      listener();
     }
   };
 }
 
-const browserArtworkViewport = new BrowserArtworkViewport();
+let browserArtworkViewport: BrowserArtworkViewport | undefined;
 
+/**
+ * Notify once `element` is within the preload margin of the viewport.
+ *
+ * Falls back to loading immediately during server-side rendering and on the
+ * rare browser with no IntersectionObserver (older Samsung Tizen firmware):
+ * the same graceful-degradation shape this already used for SSR, just with
+ * one more condition.
+ */
 export function observeArtworkProximity(element: Element, listener: ProximityListener): () => void {
-  if (typeof window === 'undefined') {
+  if (typeof window === 'undefined' || typeof IntersectionObserver === 'undefined') {
     listener();
     return () => undefined;
   }
+  browserArtworkViewport ??= new BrowserArtworkViewport();
   return browserArtworkViewport.observe(element, listener);
 }

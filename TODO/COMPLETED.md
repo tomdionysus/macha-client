@@ -1,12 +1,189 @@
 # Completed and tested
 
-Last updated: 2026-09-03
+Last updated: 2026-09-04
 
 This is the completed-work ledger for the current session. An item belongs here
 only after implementation and its stated verification are complete. Detailed
 design notes and exact test results remain in the linked records.
 
-## Playback-safe cluster outage handling
+## Artwork capability URLs: server ask sent
+
+- [x] Sent [the drafted ask](2026-09-04-artwork-capability-urls.md) to the
+  macha server session ("Macha Server Work"): embed short-lived signed artwork
+  URLs in catalogue responses, matching the existing stream/subtitle
+  capability-URL pattern, cacheable and backward compatible, so the client can
+  drop its hand-rolled artwork cache/dedup/retry machinery in favour of a plain
+  `<img loading="lazy">`. Awaiting a server-side response before any client
+  work on this can start.
+
+## Any-node failover plan: deterministic two-node fake APIs/players
+
+- [x] Closed the last open Phase 0 item in
+  [the any-node playback failover plan](2026-08-31-cluster-any-node-playback-failover.md):
+  "Add deterministic two-node fake APIs/players and failure injection for
+  request creation, manifest load, segment/range load, source preparation and
+  teardown." Per-layer coverage already existed but was scattered and ad hoc
+  (each test file hand-rolling its own `fetch` mock chain and wire-session
+  builder); nothing exercised the real production stack end to end.
+- [x] Added two shared, reusable test fixtures: `src/test/fakePlayer.ts` (a
+  `Player` test double implementing every optional hook) and
+  `src/test/fakeCluster.ts` (a multi-node fake Macha playback HTTP API wired
+  to the real `EndpointRegistry`/`ClusterPlaybackResolver` behind a stubbed
+  `fetch`, with a per-node FIFO queue for scripting session/error/network-
+  failure/hang responses).
+- [x] Added `src/playback/ClusterNodeFailover.test.ts`, the first test to
+  drive the real `PlaybackCoordinator` + real `ClusterPlaybackResolver` +
+  real `EndpointRegistry` together against two independently scripted fake
+  nodes: request-creation failure recovery, live-stream failover with real
+  DELETE teardown of the failed lease, and HLS standby preparation/promotion
+  without a redundant second admission — proving the pieces actually wire
+  together, not just each layer in isolation. Segment/range-load failover for
+  Direct Play already had equally deterministic two-node coverage in
+  `tests/directPlayReadAheadServiceWorker.test.ts`, untouched here.
+- [x] Passed 347/347 tests and TypeScript typechecking. No existing test was
+  modified.
+
+## Any-node failover plan: reconciled against actual implementation
+
+The [any-node playback failover plan](2026-08-31-cluster-any-node-playback-failover.md)
+had fallen behind the code — a lot of Phase 0-2 work was actually done during
+the "codex-refactor" work but never checked off. Verified each unchecked
+Phase 0-2 item against current source and tests and checked off the ones
+genuinely satisfied:
+
+- [x] Phase 0: "Characterize position, pause, preference and queue behaviour
+  while a replacement is in flight" — `PlaybackCoordinator.test.ts`'s
+  "transport invariants" describe block (e.g. "accepts play/pause intent
+  immediately while server generation work is in flight", "keeps the old
+  source running while a backwards HLS generation is prepared").
+- [x] Phase 1: "Replace the single stored server URL with a versioned set of
+  seed/API endpoints, migrating losslessly" — `src/state/client.ts`'s
+  `StoredBootstrapEndpoints{version:1,urls[]}` with lossless migration from
+  both the legacy single-URL key and an interim multi-endpoint key; tested in
+  `client.test.ts`.
+- [x] Phase 1: "Treat configured addresses as bootstrap API endpoints, not
+  authoritative membership" — `normalizeConnectionEndpoints` rejects
+  blank/same-origin entries; CORS is server-enforced per `docs/server-api.md`.
+- [x] Phase 1: "Prefer a healthy sticky endpoint... avoid retry storms" —
+  `EndpointRegistry.candidates()`'s sticky-preferred ordering plus the
+  `FAILURE_COOLDOWN_MS` ladder (already reviewed/fixed this session via
+  `recordProbeFailure`).
+- [x] Phase 1: "Make Web CORS and Samsung package origin policy explicit" —
+  `vite.config.ts`'s Samsung `config.xml` access-origin declaration; CORS
+  itself documented as server-enforced.
+- [x] Phase 2: "Do not silently replay mutating requests" — `ClusterEndpointRouter.mutation()`
+  tries exactly one endpoint, never retries; tested in `ClusterCatalogueApi.test.ts`
+  ("does not replay a mutation whose outcome is uncertain").
+- [x] Phase 2: "Replace the global unreachable-means-Settings rule with cluster
+  availability" — `reportClusterUnreachable()`/`reportClusterReachable()` are
+  cluster-wide, driven by `useEndpointHealthMonitor`'s all-endpoint reachable
+  count, not any single request; `shouldEnterConnectionGate` gates on that
+  flag alone.
+
+- [x] Phase 2: "Record node selection, attempt order, cooldown and recovery
+  timing in the bounded diagnostics buffer without exposing credentials" —
+  this was the one genuinely missing, unblocked item the reconciliation
+  found: the whole cluster routing layer logged nothing at all, unlike
+  playback. Added `createClientLogger('cluster.routing')` to
+  `ClusterEndpointRouter`'s `route()`/`find()`/`mutation()` (attempt with
+  order, success, per-endpoint failure with retryability, and exhaustion) and
+  `createClientLogger('cluster.health')`'s `probe-cycle` summary to
+  `probeKnownEndpoints`. Only endpoint ids/base URLs are logged, no
+  credentials. Added regressions asserting the exact event sequence for a
+  failover-then-succeed request and the reachable/known probe summary.
+
+Left unchecked and confirmed correctly still open: durable node identity
+reconciliation from server advertisement (blocked — nothing server-side to
+advertise yet), the PlaybackIntent/preferences-snapshot consolidation (needs a
+closer look at whether `PlaybackCoordinator` already retains preferences
+internally before sizing the work), and the compatibility-path rationalization
+(explicitly conditional on a cluster-wide capability guarantee the client
+can't unilaterally declare).
+
+## Native lazy-loaded artwork, without a hand-rolled scheduler
+
+- [x] Replaced hand-rolled scroll/resize/rAF viewport-proximity polling
+  (`src/hooks/artworkViewport.ts`) with the browser's native
+  IntersectionObserver. The previous approach could permanently miss a card
+  revealed by any layout change other than a real scroll/resize event (a row
+  loading/collapsing above it, for example), leaving it stuck on the
+  placeholder indefinitely.
+- [x] Removed the custom four-slot `ArtworkRequestScheduler` concurrency
+  limiter entirely (superseding the "shared four-transfer scheduler" bullet
+  under "Self-healing clustered artwork loading" below). It duplicated the
+  browser's own per-origin/HTTP-2 connection management, and its single
+  shared mutable `active` counter was the most plausible source of a silent,
+  cumulative "some posters just never load" report that persisted after the
+  IntersectionObserver fix alone didn't fully resolve it.
+- [x] Kept the artwork Blob cache and in-flight request dedup map in
+  `MachaMediaApi` — both simple, per-key, stateless-across-requests, and not
+  implicated.
+- [x] Documented the deeper structural fix and drafted a server-side ask
+  ([TODO/2026-09-04-artwork-capability-urls.md](2026-09-04-artwork-capability-urls.md))
+  to let artwork ride short-lived signed URLs the way playback stream/subtitle
+  URLs already do, which would let the client drop this machinery almost
+  entirely in favour of a plain `<img loading="lazy">`.
+- [x] Added IntersectionObserver-fake-backed regressions (`artworkViewport.test.ts`)
+  proving one-shot fire-on-intersect, cleanup-before-intersect, and the
+  no-IntersectionObserver (older Samsung Tizen) fallback. Passed 342/342
+  tests and TypeScript typechecking. No TV deployment was attempted.
+- [!] **Open caveat, not yet resolved**: `CHANGELOG.md`'s 0.7.4 entry records
+  that this project already used IntersectionObserver once and *deliberately
+  removed it* ("remove... reversible IntersectionObserver state") in favour
+  of the scroll/resize approach just replaced here. No reason survives in git
+  history (that era's commits are squashed rollups with empty bodies). Best
+  guess is Samsung Tizen 3 lacked IntersectionObserver and the old
+  implementation had no fallback for that — today's does
+  (`typeof IntersectionObserver === 'undefined'` → eager-load) — but this is
+  unverified. **Before shipping to the Samsung build specifically**, confirm
+  on-device that the fallback path actually engages rather than throwing, and
+  reconsider if the real historical reason turns out to be something else.
+
+## Playback/cluster correctness fixes from a "grad-level howler" review
+
+- [x] `EndpointRegistry`: added `recordProbeFailure()` so a background health
+  probe updates cooldown/health without ever clearing the endpoint currently
+  preferred by real traffic — previously a single transient probe blip on the
+  authoritative node could quietly and permanently surrender its authority,
+  a plausible cause of intermittent "media doesn't start."
+- [x] `WebHlsPolicy`/`WebPlatform`: removed hls.js's own `startPosition` seek,
+  leaving the app-level initial-seek listener (which correctly maps through
+  `mediaTimeline.toMediaTime`) as the sole owner of the resume seek —
+  eliminating a double-seek race on every resumed/Continue-Watching playback
+  that was a likely source of reported player jitter.
+- [x] `usePlaybackController`: added a one-shot ref guard so the
+  route-reconstruction effect can't re-issue `runtime.play()` for a
+  navigation that `startPlayback`/`selectQueueIndex` already started in the
+  same gesture, removing a real (if timing-dependent) risk of a duplicate
+  server session negotiation.
+- [x] `ClusterCatalogueApi.readArtwork` now routes through
+  `ClusterEndpointRouter.find()` (extended with an `advisory` option to
+  preserve "artwork success doesn't steal authority") instead of hand-rolling
+  its own candidate loop — closing a facade gap where the same authority bug
+  above could independently recur for artwork.
+- [x] Added targeted regressions for the probe-failure/authority fix and
+  verified the `usePlaybackController` fix by confirming its test fails
+  without the guard and passes with it. Passed 332/332 tests (at the time)
+  and TypeScript typechecking.
+
+## Hook/effect test coverage, using the platform's own testing idiom
+
+- [x] Added `@testing-library/react` + `jsdom` (matching this project's own
+  `node >=20` floor, not the newer default), scoped to files that opt in via
+  the per-file `// @vitest-environment jsdom` pragma so the rest of the suite
+  stays on the fast dependency-light `node` environment.
+- [x] Converted `AsyncIconButton`, `MediaPageTitle` and `StatusHeader`'s tests
+  from hand-rolled `renderToStaticMarkup` + HTML-string matching to real
+  `render`/`screen` queries.
+- [x] Added real hook/effect coverage that didn't exist before: exported and
+  tested `attachSpatialTvNavigation` (previously unreachable outside a
+  Samsung/Android build mode, so completely untested — now covers
+  focus-on-attach, geometry-based directional movement, Enter-to-activate,
+  Back routing and cleanup), `usePollingTask`'s actual `useEffect` wiring
+  (recreation on dependency change, cleanup on unmount, `enabled: false`),
+  and a `usePlaybackController` regression test for the duplicate-`play()`
+  race above.
+- [x] Passed 344/344 tests and TypeScript typechecking at the time.
 
 - [x] Restricted application-wide cluster-unreachable transitions to the
   dedicated all-endpoint health sweep; foreground API exhaustion remains local
@@ -71,7 +248,11 @@ design notes and exact test results remain in the linked records.
 
 - [x] Replaced unbounded browser-owned poster fan-out with a shared
   four-transfer scheduler; foreground detail/player artwork passes queued grid
-  work and duplicate demand coalesces by immutable artwork ID.
+  work and duplicate demand coalesces by immutable artwork ID. **Superseded
+  2026-09-04**: the scheduler itself was removed (see "Native lazy-loaded
+  artwork, without a hand-rolled scheduler" above) as a likely source of a
+  silent request-starvation bug; duplicate-demand coalescing is retained via
+  `MachaMediaApi`'s in-flight request map.
 - [x] Added an eight-second artwork-only node deadline that remains locally
   effective on legacy fetch implementations, plus alternate-node lookup for
   node-local `404` and retryable failures.

@@ -93,7 +93,8 @@ function sequentialCandidate(elements: HTMLElement[], current: HTMLElement, dire
   return next >= 0 && next < elements.length ? elements[next] : undefined;
 }
 
-function useSpatialTvNavigation(onBack?: () => boolean): () => void {
+/** Plain DOM wiring (not a hook) called from inside useTvNavigation's useEffect below. Exported so it's testable without a real Samsung/Android build mode. */
+export function attachSpatialTvNavigation(onBack?: () => boolean): () => void {
   const focusFirst = () => {
     const elements = tvElements();
     if (elements.length === 0) return;
@@ -191,6 +192,6 @@ export function requestTvDefaultFocus(): void {
 export function useTvNavigation(onBack?: () => boolean): void {
   useEffect(() => {
     if (!tvMode()) return undefined;
-    return useSpatialTvNavigation(onBack);
+    return attachSpatialTvNavigation(onBack);
   }, [onBack]);
 }

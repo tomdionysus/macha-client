@@ -99,4 +99,26 @@ describe('EndpointRegistry', () => {
     expect(registry.candidates().map(({ endpoint }) => endpoint.id)).toEqual(['http://a', 'http://b']);
     expect(registry.snapshot().find(({ endpoint }) => endpoint.id === 'http://b')?.health.lastSuccessAt).toBeDefined();
   });
+
+  it('lets a probe-failed preferred endpoint resume authority once its cooldown lapses, unlike a real failure', () => {
+    let now = 1_000;
+    const preferredAfterRealFailure = new EndpointRegistry(bootstrapEndpoints(['http://a', 'http://b']), () => now);
+    preferredAfterRealFailure.recordSuccess('http://a');
+    preferredAfterRealFailure.recordFailure('http://a');
+    now = 1_501;
+    // A genuine failure permanently gives up authority: once ready again, the
+    // never-failed alternative outranks it on failure count, not insertion.
+    expect(preferredAfterRealFailure.candidates()[0]?.endpoint.id).toBe('http://b');
+
+    now = 1_000;
+    const preferredAfterProbeFailure = new EndpointRegistry(bootstrapEndpoints(['http://a', 'http://b']), () => now);
+    preferredAfterProbeFailure.recordSuccess('http://a');
+    preferredAfterProbeFailure.recordProbeFailure('http://a');
+    // Still cooling down: a ready alternative is tried first either way.
+    expect(preferredAfterProbeFailure.candidates()[0]?.endpoint.id).toBe('http://b');
+    now = 1_501;
+    // But a mere probe blip must not have surrendered authority: once its
+    // cooldown lapses, the endpoint real traffic preferred resumes first.
+    expect(preferredAfterProbeFailure.candidates()[0]?.endpoint.id).toBe('http://a');
+  });
 });

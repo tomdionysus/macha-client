@@ -151,6 +151,15 @@ export class EndpointRegistry {
   }
 
   recordFailure(endpointIdValue: string): void {
+    this.recordUnhealthy(endpointIdValue, true);
+  }
+
+  /** Health probes must not reshuffle the sticky endpoint used by real work. */
+  recordProbeFailure(endpointIdValue: string): void {
+    this.recordUnhealthy(endpointIdValue, false);
+  }
+
+  private recordUnhealthy(endpointIdValue: string, demote: boolean): void {
     const previous = this.health.get(endpointIdValue);
     const consecutiveFailures = (previous?.consecutiveFailures ?? 0) + 1;
     const now = this.now();
@@ -161,7 +170,7 @@ export class EndpointRegistry {
       lastFailureAt: now,
       retryAt: now + FAILURE_COOLDOWN_MS[cooldownIndex],
     });
-    if (this.preferredId === endpointIdValue) this.preferredId = undefined;
+    if (demote && this.preferredId === endpointIdValue) this.preferredId = undefined;
     this.notify();
   }
 

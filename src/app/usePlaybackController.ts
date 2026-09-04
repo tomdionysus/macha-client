@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import type { MediaApi } from '../api/MediaApi';
 import type { Platform } from '../platform/Platform';
@@ -31,6 +31,11 @@ export function usePlaybackController(options: {
   const navigate = useNavigate();
   const location = useLocation();
   const activePlayback = runtimeState.request;
+  // Set immediately before any explicit runtime.play() call below and consumed
+  // by the route-reconstruction effect, so a navigation that already started
+  // playback deliberately is never re-started by that effect racing the same
+  // tick (which would open a second, wasted generation/session).
+  const explicitlyStartedItemIdRef = useRef<string | undefined>(undefined);
   const [queueState, setQueueState] = useState<PlaybackQueueState | undefined>(() => queueStore.load());
   const [volume, setVolume] = useState(() => platform.initialVolume?.() ?? volumeStore.load());
   const [continueWatching, setContinueWatching] = useState<PlaybackProgress[]>(() => (
@@ -88,6 +93,7 @@ export function usePlaybackController(options: {
       `${location.pathname}${location.search}`,
       item,
     );
+    explicitlyStartedItemIdRef.current = item.id;
     void runtime.play({
       media: item,
       startPositionMs: startOptions.fromStart ? 0 : storedPosition,
@@ -104,7 +110,20 @@ export function usePlaybackController(options: {
 
   useEffect(() => {
     if (runtimeState.phase === 'stopping') return undefined;
-    if (!playerItemId || activePlayback?.media.id === playerItemId) return undefined;
+    if (explicitlyStartedItemIdRef.current && explicitlyStartedItemIdRef.current !== playerItemId) {
+      explicitlyStartedItemIdRef.current = undefined;
+    }
+    if (!playerItemId || activePlayback?.media.id === playerItemId) {
+      explicitlyStartedItemIdRef.current = undefined;
+      return undefined;
+    }
+    if (explicitlyStartedItemIdRef.current === playerItemId) {
+      // startPlayback/selectQueueIndex already issued this exact play() and
+      // navigated here in the same gesture; reconstructing from route state
+      // would race that call with a second, redundant generation.
+      explicitlyStartedItemIdRef.current = undefined;
+      return undefined;
+    }
     let cancelled = false;
     const routeState = (location.state as PlaybackRouteState | null) ?? undefined;
     const fromStart = playbackStartsFromBeginning(location.search);
@@ -159,6 +178,7 @@ export function usePlaybackController(options: {
     if (!nextQueue) return;
     const media = nextQueue.items[nextIndex];
     setQueueState(nextQueue);
+    explicitlyStartedItemIdRef.current = media.id;
     void runtime.play({ media, startPositionMs: 0, returnTo: activePlayback?.returnTo ?? currentBrowsePath });
     if (playerRouteActive) {
       const state: PlaybackRouteState = {

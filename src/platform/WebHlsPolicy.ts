@@ -1,14 +1,13 @@
 import Hls from 'hls.js';
 import type { ManagedHlsMediaRecoveryBudget, ManagedHlsMediaRecoveryDecision } from './ManagedHlsRecovery';
 
-export function webHlsBufferConfig(positionMs: number): Record<string, number | boolean> {
+export function webHlsBufferConfig(): Record<string, number | boolean> {
   return {
     enableWorker: true,
     maxBufferLength: 60,
     maxMaxBufferLength: 120,
     maxBufferSize: 128 * 1024 * 1024,
     backBufferLength: 30,
-    startPosition: Math.max(0, positionMs / 1000),
   };
 }
 
