@@ -685,6 +685,18 @@ export class PlaybackCoordinator {
     });
   }
 
+  /**
+   * The client-owned preferences to recreate a generation with: the last
+   * server-confirmed session preferences, overridden by any representation
+   * change the viewer has already requested but the server has not yet
+   * confirmed. Both alternate preparation and failover must use this rather
+   * than the bare session echo, or a preference change racing a node failure
+   * would be silently dropped on recovery.
+   */
+  private currentPreferences(session: PlaybackSession): PlaybackPreferencesUpdate {
+    return { ...completePreferences(session), ...this.snapshot.pendingPreferences };
+  }
+
   private degrade(error: Error): void {
     if (this.disposed || !isEndpointRetryablePlaybackFailure(error)) return;
     const session = this.snapshot.session ?? this.serverSession;
@@ -726,7 +738,7 @@ export class PlaybackCoordinator {
           this.options.media,
           capabilities,
           this.snapshot.intent.positionMs,
-          completePreferences(session),
+          this.currentPreferences(session),
           this.options.admissionContext,
         );
         if (!alternate) return;
@@ -913,15 +925,7 @@ export class PlaybackCoordinator {
         this.options.media,
         capabilities,
         requestedPositionMs,
-        {
-          mode: failedSession.preferences.mode,
-          maxHeight: failedSession.preferences.maxHeight,
-          maxBitrate: failedSession.preferences.maxBitrate,
-          audioStream: failedSession.preferences.audioStream,
-          subtitleStream: failedSession.preferences.subtitleStream,
-          audioLanguage: failedSession.preferences.audioLanguage,
-          subtitleLanguage: failedSession.preferences.subtitleLanguage,
-        },
+        this.currentPreferences(failedSession),
         preparedAlternate,
         this.options.admissionContext,
       );

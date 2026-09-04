@@ -56,11 +56,11 @@ export class MachaCatalogueApi implements CatalogueApi {
     const query = queryString([['type', kind], ['parent', parent]]);
     const suffix = query ? `?${query}` : '';
     const response = await this.getJson<ItemEnvelope>(`/api/v1/catalogue/items${suffix}`);
-    return response.items;
+    return response.items.map((item) => this.withAbsoluteArtworkUrls(item));
   }
 
-  get(id: string): Promise<CatalogueItem> {
-    return this.getJson(`/api/v1/catalogue/items/${encodeURIComponent(id)}`);
+  async get(id: string): Promise<CatalogueItem> {
+    return this.withAbsoluteArtworkUrls(await this.getJson(`/api/v1/catalogue/items/${encodeURIComponent(id)}`));
   }
 
   async mediaProfile(mediaId: string, signal?: AbortSignal): Promise<CatalogueMediaProfile | undefined> {
@@ -85,15 +85,15 @@ export class MachaCatalogueApi implements CatalogueApi {
     }
   }
 
-  update(item: CatalogueItem, expectedRevision = item.revision): Promise<CatalogueItem> {
-    return this.request(`/api/v1/catalogue/items/${encodeURIComponent(item.id)}`, {
+  async update(item: CatalogueItem, expectedRevision = item.revision): Promise<CatalogueItem> {
+    return this.withAbsoluteArtworkUrls(await this.request(`/api/v1/catalogue/items/${encodeURIComponent(item.id)}`, {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
         'If-Match': `"rev-${expectedRevision}"`,
       },
       body: JSON.stringify(item),
-    });
+    }));
   }
 
   clearMetadata(id: string, expectedRevision?: number): Promise<void> {
@@ -108,16 +108,16 @@ export class MachaCatalogueApi implements CatalogueApi {
   async search(query: string, limit = 50): Promise<CatalogueItem[]> {
     const params = queryString([['q', query], ['limit', String(limit)]]);
     const response = await this.getJson<ItemEnvelope>(`/api/v1/catalogue/search?${params}`);
-    return response.items;
+    return response.items.map((item) => this.withAbsoluteArtworkUrls(item));
   }
 
-  putArtwork(itemId: string, role: string, mimeType: string, data: Blob): Promise<CatalogueArtwork> {
+  async putArtwork(itemId: string, role: string, mimeType: string, data: Blob): Promise<CatalogueArtwork> {
     const params = queryString([['role', role], ['mime', mimeType]]);
-    return this.request(`/api/v1/catalogue/items/${encodeURIComponent(itemId)}/artwork?${params}`, {
+    return this.withAbsoluteArtworkUrl(await this.request(`/api/v1/catalogue/items/${encodeURIComponent(itemId)}/artwork?${params}`, {
       method: 'POST',
       headers: { 'Content-Type': mimeType },
       body: data,
-    });
+    }));
   }
 
   async artwork(id: string, signal?: AbortSignal): Promise<Blob> {
@@ -131,6 +131,34 @@ export class MachaCatalogueApi implements CatalogueApi {
       throw new Error(`Macha catalogue returned non-image artwork for ${id} (${contentType}).`);
     }
     return blob;
+  }
+
+  /**
+   * A signed artwork capability URL arrives as a bare path, meaningful only
+   * relative to the node that issued it. Absolutizing it here — the same
+   * place MachaPlaybackResolver absolutizes stream/subtitle URLs — means
+   * every higher layer (ClusterCatalogueApi across nodes, MachaMediaApi,
+   * `<img src>`) can treat it as already correct, never rediscovering which
+   * node it came from. Left relative, the browser would resolve it against
+   * the client application's own origin instead.
+   */
+  private resolveArtworkUrl(path: string): string {
+    if (/^https?:\/\//i.test(path)) return path;
+    if (this.baseUrl) return `${this.baseUrl}${path.startsWith('/') ? '' : '/'}${path}`;
+    if (typeof window !== 'undefined') return new URL(path, window.location.origin).toString();
+    return path;
+  }
+
+  private withAbsoluteArtworkUrl(artwork: CatalogueArtwork): CatalogueArtwork {
+    return artwork.url ? { ...artwork, url: this.resolveArtworkUrl(artwork.url) } : artwork;
+  }
+
+  private withAbsoluteArtworkUrls(item: CatalogueItem): CatalogueItem {
+    return {
+      ...item,
+      artwork: item.artwork.map((entry) => this.withAbsoluteArtworkUrl(entry)),
+      effective_artwork: item.effective_artwork?.map((entry) => this.withAbsoluteArtworkUrl(entry)),
+    };
   }
 
   private getJson<T>(path: string): Promise<T> {

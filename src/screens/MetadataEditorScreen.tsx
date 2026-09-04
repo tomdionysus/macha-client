@@ -71,10 +71,12 @@ function ArtworkPreview({ api, artwork, selected, onSelect }: {
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
-    let cancelled = false;
-    let objectUrl: string | undefined;
     setUrl(undefined);
     setFailed(false);
+    // A signed capability URL needs no client-side fetch/Blob lifecycle.
+    if (artwork.url) return undefined;
+    let cancelled = false;
+    let objectUrl: string | undefined;
     void api.artwork(artwork.id).then((blob) => {
       if (cancelled) return;
       objectUrl = URL.createObjectURL(blob);
@@ -86,8 +88,9 @@ function ArtworkPreview({ api, artwork, selected, onSelect }: {
       cancelled = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [api, artwork.id]);
+  }, [api, artwork.id, artwork.url]);
 
+  const resolvedUrl = artwork.url ?? url;
   return (
     <button
       className={`metadata-artwork-option${selected ? ' selected' : ''}`}
@@ -98,8 +101,8 @@ function ArtworkPreview({ api, artwork, selected, onSelect }: {
       title={selected ? 'Selected image' : 'Use this image'}
     >
       <span className="metadata-artwork-image">
-        {url && <img src={url} alt="" />}
-        {!url && !failed && <span className="metadata-artwork-loading">…</span>}
+        {resolvedUrl && <img src={resolvedUrl} alt="" />}
+        {!resolvedUrl && !failed && <span className="metadata-artwork-loading">…</span>}
         {failed && <span className="metadata-artwork-loading">Unavailable</span>}
       </span>
       <span className="metadata-artwork-id">{artwork.id.slice(0, 10)}</span>

@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { EndpointCandidate } from '../cluster/EndpointRegistry';
 import type { ClusterNodeStatus, ClusterStatusSnapshot } from '../api/ClusterStatusApi';
 import type { IdentityAssociationResetResult, ManageApi } from '../api/ManageApi';
-import { acceptNodeIdentityAssociationReset, clientEndpointHealth, identityResetAcceptanceMessage, StatusHeader, statusSectionVisibility, withoutRetiredNodeIdentity } from './StatusScreen';
+import { acceptNodeIdentityAssociationReset, clientEndpointHealth, identityResetAcceptanceMessage, nodeNotYetReady, nodeStatusLabel, StatusHeader, statusSectionVisibility, withoutRetiredNodeIdentity } from './StatusScreen';
 
 function candidate(health: EndpointCandidate['health']): EndpointCandidate {
   return {
@@ -24,7 +24,7 @@ describe('client API endpoint status', () => {
 
 describe('status section routing', () => {
   it('renders exactly one top-level status section per route', () => {
-    for (const section of ['overview', 'client', 'connectivity', 'nodes'] as const) {
+    for (const section of ['overview', 'client', 'connectivity'] as const) {
       const visibility = statusSectionVisibility(section);
       expect(Object.values(visibility).filter(Boolean)).toHaveLength(1);
       expect(visibility[section]).toBe(true);
@@ -36,6 +36,32 @@ describe('status section routing', () => {
 
     expect(screen.getByRole('button', { name: 'Refresh status' }).querySelector('svg')).not.toBeNull();
     expect(screen.queryByText('Check connectivity')).toBeNull();
+  });
+});
+
+describe('per-node phase distinct from connection state', () => {
+  it('surfaces recovering/starting phase alongside an online state instead of collapsing to plain "online"', () => {
+    const online = { state: 'online' } as ClusterNodeStatus;
+    const ready = { state: 'online', phase: 'ready' } as ClusterNodeStatus;
+    const recovering = { state: 'online', phase: 'recovering' } as ClusterNodeStatus;
+    const starting = { state: 'online', phase: 'starting' } as ClusterNodeStatus;
+    const unknownPhase = { state: 'online', phase: 'unknown' } as ClusterNodeStatus;
+    const offlineRecovering = { state: 'offline', phase: 'recovering' } as ClusterNodeStatus;
+
+    expect(nodeNotYetReady(online)).toBe(false);
+    expect(nodeNotYetReady(ready)).toBe(false);
+    expect(nodeNotYetReady(recovering)).toBe(true);
+    expect(nodeNotYetReady(starting)).toBe(true);
+    // Honestly-reported "unknown" is not a claim of readiness, but it isn't
+    // evidence of unreadiness either — never guess past what the node reported.
+    expect(nodeNotYetReady(unknownPhase)).toBe(false);
+    // A node that isn't even online is already distinctly labelled by state.
+    expect(nodeNotYetReady(offlineRecovering)).toBe(false);
+
+    expect(nodeStatusLabel(online)).toBe('online');
+    expect(nodeStatusLabel(recovering)).toBe('online, recovering');
+    expect(nodeStatusLabel(starting)).toBe('online, starting');
+    expect(nodeStatusLabel(unknownPhase)).toBe('online');
   });
 });
 

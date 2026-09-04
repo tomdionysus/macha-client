@@ -11,6 +11,8 @@ export interface CatalogueArtwork {
   role: string;
   id: string;
   mime_type: string;
+  /** Short-lived signed capability URL. Absent from a node that has not yet upgraded. */
+  url?: string;
 }
 
 /** Exact JSON shape exposed by Macha's catalogue API. */

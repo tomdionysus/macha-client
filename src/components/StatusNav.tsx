@@ -5,7 +5,6 @@ const items = [
   { to: routes.status, label: 'Overview', end: true },
   { to: routes.statusClient, label: 'Client' },
   { to: routes.statusConnectivity, label: 'Connectivity' },
-  { to: routes.statusNodes, label: 'Nodes' },
 ] as const;
 
 export function StatusNav() {

@@ -30,6 +30,24 @@ export interface EndpointAdvertisement {
 
 const FAILURE_COOLDOWN_MS = [500, 2_000, 10_000, 30_000] as const;
 
+/** Rolling probe-latency samples kept per endpoint before averaging. */
+const LATENCY_SAMPLE_WINDOW = 5;
+/** A latency-only swap never runs again this soon after the last one. */
+const LATENCY_SWAP_COOLDOWN_MS = 60_000;
+/** Consecutive probe cycles the same alternate must stay materially faster before authority actually moves. */
+const LATENCY_SWAP_MIN_CONSECUTIVE_CYCLES = 3;
+/** An alternate must beat the preferred endpoint by at least this many milliseconds... */
+const LATENCY_SWAP_MIN_ABSOLUTE_IMPROVEMENT_MS = 200;
+/** ...and by at least this fraction, so two already-fast nodes never swap over noise. */
+const LATENCY_SWAP_MIN_RELATIVE_IMPROVEMENT = 0.4;
+
+export interface LatencySwap {
+  fromId: string;
+  toId: string;
+  fromLatencyMs: number;
+  toLatencyMs: number;
+}
+
 export function endpointId(baseUrl: string): string {
   return normalizeBaseUrl(baseUrl);
 }
@@ -56,6 +74,10 @@ export class EndpointRegistry {
   private readonly health = new Map<string, EndpointHealth>();
   private readonly listeners = new Set<() => void>();
   private preferredId?: string;
+  private readonly latencySamples = new Map<string, number[]>();
+  private latencyAdvantageId?: string;
+  private latencyAdvantageStreak = 0;
+  private lastLatencySwapAt?: number;
 
   constructor(endpoints: readonly MachaEndpoint[], private readonly now: () => number = Date.now) {
     this.endpoints = this.deduplicate(endpoints);
@@ -65,7 +87,12 @@ export class EndpointRegistry {
     this.endpoints = this.deduplicate(endpoints);
     const retained = new Set(this.endpoints.map((endpoint) => endpoint.id));
     for (const id of this.health.keys()) if (!retained.has(id)) this.health.delete(id);
+    for (const id of this.latencySamples.keys()) if (!retained.has(id)) this.latencySamples.delete(id);
     if (this.preferredId && !retained.has(this.preferredId)) this.preferredId = undefined;
+    if (this.latencyAdvantageId && !retained.has(this.latencyAdvantageId)) {
+      this.latencyAdvantageId = undefined;
+      this.latencyAdvantageStreak = 0;
+    }
     this.notify();
   }
 
@@ -172,6 +199,75 @@ export class EndpointRegistry {
     });
     if (demote && this.preferredId === endpointIdValue) this.preferredId = undefined;
     this.notify();
+  }
+
+  /** Record one successful round-trip time, independent of reachability bookkeeping. */
+  recordLatency(endpointIdValue: string, latencyMs: number): void {
+    const samples = this.latencySamples.get(endpointIdValue) ?? [];
+    samples.push(latencyMs);
+    if (samples.length > LATENCY_SAMPLE_WINDOW) samples.shift();
+    this.latencySamples.set(endpointIdValue, samples);
+  }
+
+  /** The current rolling average probe latency, or undefined with no samples yet. */
+  latencyMs(endpointIdValue: string): number | undefined {
+    const samples = this.latencySamples.get(endpointIdValue);
+    if (!samples || samples.length === 0) return undefined;
+    return samples.reduce((sum, value) => sum + value, 0) / samples.length;
+  }
+
+  /**
+   * Pre-emptively move authority to a healthy known endpoint whose rolling
+   * latency is materially and consistently faster than the current preferred
+   * endpoint. Independent of reachability: this only ever compares endpoints
+   * that are already out of any failure cooldown. A sustained-advantage streak
+   * across consecutive calls (one per health-probe cycle) plus a cooldown
+   * after any swap keep authority from flapping between two close nodes.
+   * Returns the swap that was made, if any, for the caller to log.
+   */
+  evaluateLatencySwap(now: number = this.now()): LatencySwap | undefined {
+    const resetAdvantage = () => {
+      this.latencyAdvantageId = undefined;
+      this.latencyAdvantageStreak = 0;
+    };
+    if (!this.preferredId || (this.lastLatencySwapAt !== undefined && now - this.lastLatencySwapAt < LATENCY_SWAP_COOLDOWN_MS)) {
+      resetAdvantage();
+      return undefined;
+    }
+    const preferredLatency = this.latencyMs(this.preferredId);
+    if (preferredLatency === undefined) {
+      resetAdvantage();
+      return undefined;
+    }
+
+    let fastest: { id: string; latencyMs: number } | undefined;
+    for (const { endpoint, health } of this.candidates()) {
+      if (endpoint.id === this.preferredId || (health.retryAt ?? 0) > now) continue;
+      const latency = this.latencyMs(endpoint.id);
+      if (latency === undefined) continue;
+      if (!fastest || latency < fastest.latencyMs) fastest = { id: endpoint.id, latencyMs: latency };
+    }
+
+    const materiallyFaster = fastest !== undefined
+      && fastest.latencyMs <= preferredLatency - LATENCY_SWAP_MIN_ABSOLUTE_IMPROVEMENT_MS
+      && fastest.latencyMs <= preferredLatency * (1 - LATENCY_SWAP_MIN_RELATIVE_IMPROVEMENT);
+    if (!materiallyFaster || !fastest) {
+      resetAdvantage();
+      return undefined;
+    }
+
+    this.latencyAdvantageStreak = this.latencyAdvantageId === fastest.id ? this.latencyAdvantageStreak + 1 : 1;
+    this.latencyAdvantageId = fastest.id;
+    if (this.latencyAdvantageStreak < LATENCY_SWAP_MIN_CONSECUTIVE_CYCLES) return undefined;
+
+    const swap: LatencySwap = {
+      fromId: this.preferredId, toId: fastest.id, fromLatencyMs: preferredLatency, toLatencyMs: fastest.latencyMs,
+    };
+    this.preferredId = fastest.id;
+    this.lastLatencySwapAt = now;
+    resetAdvantage();
+    this.notify();
+    return swap;
   }
 
   snapshot(): EndpointCandidate[] {

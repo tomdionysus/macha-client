@@ -5,6 +5,8 @@ export type MediaKind = CatalogueKind;
 export interface ArtworkRef {
   id: string;
   mimeType: string;
+  /** Short-lived signed capability URL, when the server supplies one. Renders directly with no client-side fetch/cache. */
+  url?: string;
 }
 
 export interface Artwork {

@@ -2,7 +2,10 @@
 
 Date: 2026-09-04
 
-Status: drafted, not yet sent. Hand this to the macha server session when ready.
+Status: sent 2026-09-04, landed server-side (v0.23.4) same day. Client cutover
+implemented; see COMPLETED.md "Artwork capability URLs: client cutover, and a
+real bug caught in UAT" for what landed and a real absolutization bug UAT
+caught and the fix required.
 
 ## Context
 

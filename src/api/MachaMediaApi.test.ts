@@ -46,6 +46,10 @@ class FakeCatalogue implements CatalogueApi {
       effective_artwork: [{ role: 'cover', id: 'artist-effective-art', mime_type: 'image/jpeg' }],
     }));
     if (id === 'album-1') return Promise.resolve(catalogueItem('album-1', 'album', { parent_id: 'artist-1', title: 'Album' }));
+    if (id === 'movie-with-capability-url') return Promise.resolve(catalogueItem('movie-with-capability-url', 'movie', {
+      title: 'Movie',
+      artwork: [{ role: 'poster', id: 'signed-poster', mime_type: 'image/jpeg', url: '/api/v1/catalogue/artwork/signed-poster?exp=1&sig=abc' }],
+    }));
     throw new Error('not found');
   }
   list(kind?: CatalogueKind, parent?: string): Promise<CatalogueItem[]> {
@@ -111,6 +115,14 @@ describe('MachaMediaApi', () => {
       artwork: { poster: { id: 'season-art', mimeType: 'image/jpeg' } },
     }));
     expect('episodes' in details.seasons[0]).toBe(false);
+  });
+
+  it('threads a signed artwork capability URL through to the mapped ArtworkRef', async () => {
+    const api = new MachaMediaApi(new FakeCatalogue());
+    const details = await api.details('movie-with-capability-url');
+    expect(details.artwork).toEqual({
+      poster: { id: 'signed-poster', mimeType: 'image/jpeg', url: '/api/v1/catalogue/artwork/signed-poster?exp=1&sig=abc' },
+    });
   });
 
   it('loads episode details only when the season page is opened', async () => {

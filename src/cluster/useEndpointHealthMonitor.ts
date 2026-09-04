@@ -10,20 +10,28 @@ const log = createClientLogger('cluster.health');
 
 type Fetch = typeof fetch;
 
+interface ProbeResult {
+  status: 'healthy' | 'reachable' | 'unreachable';
+  /** Round-trip time for a genuinely successful response only. */
+  latencyMs?: number;
+}
+
 async function probeEndpoint(
   endpoint: MachaEndpoint,
   bearerToken: string | undefined,
   fetchImpl: Fetch,
-): Promise<'healthy' | 'reachable' | 'unreachable'> {
+): Promise<ProbeResult> {
+  const startedAt = performance.now();
   try {
     const response = await fetchImpl(`${endpoint.baseUrl}/api/v1/catalogue/status`, {
       method: 'GET',
       headers: authenticatedRequestHeaders(undefined, bearerToken, { Accept: 'application/json' }),
       cache: 'no-store',
     });
-    return response.ok ? 'healthy' : 'reachable';
+    if (!response.ok) return { status: 'reachable' };
+    return { status: 'healthy', latencyMs: performance.now() - startedAt };
   } catch {
-    return 'unreachable';
+    return { status: 'unreachable' };
   }
 }
 
@@ -42,11 +50,21 @@ export async function probeKnownEndpoints(
     // consumer (or a playback request) is not evidence about node health.
     const result = await probeEndpoint(endpoint, bearerToken, fetchImpl);
     if (signal.aborted) return;
-    if (result !== 'unreachable') reachable += 1;
-    if (result === 'healthy') registry.recordProbeSuccess(endpoint.id);
-    else registry.recordProbeFailure(endpoint.id);
+    if (result.status !== 'unreachable') reachable += 1;
+    if (result.status === 'healthy') {
+      registry.recordProbeSuccess(endpoint.id);
+      if (result.latencyMs !== undefined) registry.recordLatency(endpoint.id, result.latencyMs);
+    } else {
+      registry.recordProbeFailure(endpoint.id);
+    }
   }));
-  if (!signal.aborted) log.debug('probe-cycle', { reachable, known: endpoints.length });
+  if (!signal.aborted) {
+    const swap = registry.evaluateLatencySwap();
+    if (swap) {
+      log.info('latency-preemptive-swap', swap);
+    }
+    log.debug('probe-cycle', { reachable, known: endpoints.length });
+  }
   return reachable;
 }
 

@@ -121,4 +121,111 @@ describe('EndpointRegistry', () => {
     // cooldown lapses, the endpoint real traffic preferred resumes first.
     expect(preferredAfterProbeFailure.candidates()[0]?.endpoint.id).toBe('http://a');
   });
+
+  describe('latency-based pre-emptive authority swap', () => {
+    it('does nothing without a sustained-advantage streak across consecutive cycles', () => {
+      const registry = new EndpointRegistry(bootstrapEndpoints(['http://a', 'http://b']));
+      registry.recordSuccess('http://a');
+      registry.recordLatency('http://a', 500);
+      registry.recordLatency('http://b', 50);
+
+      expect(registry.evaluateLatencySwap()).toBeUndefined();
+      expect(registry.evaluateLatencySwap()).toBeUndefined();
+      expect(registry.candidates()[0]?.endpoint.id).toBe('http://a');
+    });
+
+    it('moves authority once the same alternate stays materially faster for three consecutive cycles', () => {
+      const registry = new EndpointRegistry(bootstrapEndpoints(['http://a', 'http://b']));
+      registry.recordSuccess('http://a');
+      registry.recordLatency('http://a', 500);
+      registry.recordLatency('http://b', 50);
+
+      expect(registry.evaluateLatencySwap()).toBeUndefined();
+      expect(registry.evaluateLatencySwap()).toBeUndefined();
+      expect(registry.evaluateLatencySwap()).toEqual({
+        fromId: 'http://a', toId: 'http://b', fromLatencyMs: 500, toLatencyMs: 50,
+      });
+      expect(registry.candidates()[0]?.endpoint.id).toBe('http://b');
+    });
+
+    it('never swaps for an improvement below the absolute or relative threshold', () => {
+      const belowAbsolute = new EndpointRegistry(bootstrapEndpoints(['http://a', 'http://b']));
+      belowAbsolute.recordSuccess('http://a');
+      belowAbsolute.recordLatency('http://a', 100);
+      belowAbsolute.recordLatency('http://b', 1); // >60% faster but well under the 200ms absolute floor
+      for (let cycle = 0; cycle < 5; cycle += 1) expect(belowAbsolute.evaluateLatencySwap()).toBeUndefined();
+
+      const belowRelative = new EndpointRegistry(bootstrapEndpoints(['http://a', 'http://b']));
+      belowRelative.recordSuccess('http://a');
+      belowRelative.recordLatency('http://a', 1_000);
+      belowRelative.recordLatency('http://b', 850); // 150ms + 15% faster: neither bar cleared
+      for (let cycle = 0; cycle < 5; cycle += 1) expect(belowRelative.evaluateLatencySwap()).toBeUndefined();
+    });
+
+    it('resets the advantage streak when the faster candidate changes cycle to cycle', () => {
+      const registry = new EndpointRegistry(bootstrapEndpoints(['http://a', 'http://b', 'http://c']));
+      registry.recordSuccess('http://a');
+      registry.recordLatency('http://a', 500);
+      registry.recordLatency('http://b', 50);
+      expect(registry.evaluateLatencySwap()).toBeUndefined();
+
+      registry.recordLatency('http://c', 50);
+      // A different endpoint takes the "fastest" slot this cycle; the streak must restart.
+      registry.recordLatency('http://b', 500);
+      expect(registry.evaluateLatencySwap()).toBeUndefined();
+      expect(registry.evaluateLatencySwap()).toBeUndefined();
+      expect(registry.evaluateLatencySwap()).toBeDefined();
+    });
+
+    it('ignores a fast alternate that is still cooling down from a recent failure', () => {
+      let now = 1_000;
+      const registry = new EndpointRegistry(bootstrapEndpoints(['http://a', 'http://b']), () => now);
+      registry.recordSuccess('http://a');
+      registry.recordFailure('http://b');
+      registry.recordLatency('http://a', 500);
+      registry.recordLatency('http://b', 50);
+
+      for (let cycle = 0; cycle < 5; cycle += 1) expect(registry.evaluateLatencySwap(now)).toBeUndefined();
+      now = 1_501; // http://b's cooldown lapses
+      expect(registry.evaluateLatencySwap(now)).toBeUndefined();
+      expect(registry.evaluateLatencySwap(now)).toBeUndefined();
+      expect(registry.evaluateLatencySwap(now)).toEqual({
+        fromId: 'http://a', toId: 'http://b', fromLatencyMs: 500, toLatencyMs: 50,
+      });
+    });
+
+    it('will not swap again until the cooldown after a swap lapses', () => {
+      let now = 1_000;
+      const registry = new EndpointRegistry(bootstrapEndpoints(['http://a', 'http://b', 'http://c']), () => now);
+      registry.recordSuccess('http://a');
+      registry.recordLatency('http://a', 1_000);
+      registry.recordLatency('http://b', 500);
+      for (let cycle = 0; cycle < 2; cycle += 1) registry.evaluateLatencySwap(now);
+      expect(registry.evaluateLatencySwap(now)).toEqual(expect.objectContaining({ toId: 'http://b' }));
+
+      // http://c now looks even faster than the newly preferred http://b, but
+      // the post-swap cooldown must hold regardless of streak length.
+      registry.recordLatency('http://c', 200);
+      for (let cycle = 0; cycle < 5; cycle += 1) expect(registry.evaluateLatencySwap(now)).toBeUndefined();
+
+      now += 60_000; // the post-swap cooldown
+      for (let cycle = 0; cycle < 2; cycle += 1) expect(registry.evaluateLatencySwap(now)).toBeUndefined();
+      expect(registry.evaluateLatencySwap(now)).toEqual(expect.objectContaining({ fromId: 'http://b', toId: 'http://c' }));
+    });
+
+    it('never swaps before the preferred endpoint has its own latency sample', () => {
+      const registry = new EndpointRegistry(bootstrapEndpoints(['http://a', 'http://b']));
+      registry.recordSuccess('http://a');
+      registry.recordLatency('http://b', 50);
+
+      for (let cycle = 0; cycle < 5; cycle += 1) expect(registry.evaluateLatencySwap()).toBeUndefined();
+    });
+
+    it('averages latency over a bounded rolling window', () => {
+      const registry = new EndpointRegistry(bootstrapEndpoints(['http://a']));
+      for (const sample of [100, 100, 100, 100, 100, 500]) registry.recordLatency('http://a', sample);
+      // The oldest 100ms sample has rolled off a five-sample window.
+      expect(registry.latencyMs('http://a')).toBe((100 + 100 + 100 + 100 + 500) / 5);
+    });
+  });
 });

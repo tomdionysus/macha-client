@@ -46,6 +46,43 @@ describe('MachaCatalogueApi', () => {
     );
   });
 
+  it('absolutizes a relative signed artwork capability URL against the node origin', async () => {
+    const withArtwork = {
+      ...item,
+      artwork: [
+        { role: 'poster', id: 'sig-1', mime_type: 'image/jpeg', url: '/api/v1/catalogue/artwork/sig-1?exp=1&sig=abc' },
+        { role: 'backdrop', id: 'sig-2', mime_type: 'image/jpeg' },
+      ],
+      effective_artwork: [
+        { role: 'cover', id: 'sig-3', mime_type: 'image/jpeg', url: 'https://cdn.example/sig-3' },
+      ],
+    };
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ items: [withArtwork] })));
+    const api = new MachaCatalogueApi('http://node.test');
+
+    const [result] = await api.list();
+
+    // A relative capability URL is meaningless resolved against the client
+    // application's own origin; it must be resolved against this node's.
+    expect(result.artwork[0].url).toBe('http://node.test/api/v1/catalogue/artwork/sig-1?exp=1&sig=abc');
+    expect(result.artwork[1].url).toBeUndefined();
+    // Already-absolute (e.g. a CDN) and missing URLs both pass through untouched.
+    expect(result.effective_artwork?.[0].url).toBe('https://cdn.example/sig-3');
+  });
+
+  it('absolutizes artwork capability URLs from get() the same way as list()', async () => {
+    const withArtwork = {
+      ...item,
+      artwork: [{ role: 'poster', id: 'sig-1', mime_type: 'image/jpeg', url: '/api/v1/catalogue/artwork/sig-1?sig=abc' }],
+    };
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(withArtwork)));
+    const api = new MachaCatalogueApi('http://node.test');
+
+    const result = await api.get('show:black-books');
+
+    expect(result.artwork[0].url).toBe('http://node.test/api/v1/catalogue/artwork/sig-1?sig=abc');
+  });
+
   it('reads immutable media profiles and treats profile_not_available as temporary', async () => {
     const profile = { schema_version: 1, media_id: 'macha:abc', format: 'mp4', duration_ms: 60_000, bitrate: 1_000, streams: [] };
     const fetchMock = vi.fn()

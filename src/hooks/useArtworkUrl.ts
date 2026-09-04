@@ -11,7 +11,9 @@ export function useArtworkUrl(api: MediaApi, ref?: ArtworkRef): string | undefin
     let objectUrl: string | undefined;
     const controller = typeof AbortController === 'undefined' ? undefined : new AbortController();
     setUrl(undefined);
-    if (!ref) return;
+    // A signed capability URL needs no client-side fetch, cache or Blob
+    // lifecycle at all; the browser owns loading and caching directly.
+    if (!ref || ref.url) return undefined;
 
     void fetchArtworkWithRetry(() => api.artwork(ref, controller?.signal), controller?.signal).then((blob) => {
       if (!active) return;
@@ -26,7 +28,7 @@ export function useArtworkUrl(api: MediaApi, ref?: ArtworkRef): string | undefin
       controller?.abort();
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [api, ref?.id]);
+  }, [api, ref?.id, ref?.url]);
 
-  return url;
+  return ref?.url ?? url;
 }

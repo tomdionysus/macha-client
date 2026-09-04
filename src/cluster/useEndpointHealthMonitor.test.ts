@@ -75,6 +75,34 @@ describe('API endpoint health probes', () => {
     expect(registry.candidates()[0]?.endpoint.id).toBe('http://a');
   });
 
+  it('records observed latency from a successful probe and logs a reported pre-emptive swap', async () => {
+    const registry = new EndpointRegistry(bootstrapEndpoints(['http://a']));
+    const nowSpy = vi.spyOn(performance, 'now').mockReturnValueOnce(1_000).mockReturnValueOnce(1_500);
+    const fetchImpl = vi.fn(async () => new Response(null, { status: 200 })) as unknown as typeof fetch;
+    const recordLatencySpy = vi.spyOn(registry, 'recordLatency');
+    vi.spyOn(registry, 'evaluateLatencySwap').mockReturnValue({
+      fromId: 'http://a', toId: 'http://b', fromLatencyMs: 500, toLatencyMs: 50,
+    });
+
+    await probeKnownEndpoints(registry, undefined, new AbortController().signal, fetchImpl);
+    nowSpy.mockRestore();
+
+    expect(recordLatencySpy).toHaveBeenCalledWith('http://a', 500);
+    const entry = clientDiagnosticsSnapshot().find((candidate) => candidate.event === 'latency-preemptive-swap');
+    expect(entry).toMatchObject({ scope: 'cluster.health', data: { fromId: 'http://a', toId: 'http://b' } });
+  });
+
+  it('does not record latency for a reachable-but-non-ok response', async () => {
+    const registry = new EndpointRegistry(bootstrapEndpoints(['http://a']));
+    const recordLatencySpy = vi.spyOn(registry, 'recordLatency');
+    const fetchImpl = vi.fn(async () => new Response(null, { status: 503 })) as unknown as typeof fetch;
+
+    await probeKnownEndpoints(registry, undefined, new AbortController().signal, fetchImpl);
+
+    expect(recordLatencySpy).not.toHaveBeenCalled();
+    expect(registry.latencyMs('http://a')).toBeUndefined();
+  });
+
   it('never attaches lifecycle cancellation to status HTTP requests', async () => {
     const registry = new EndpointRegistry(bootstrapEndpoints(['http://a']));
     const lifecycle = new AbortController();

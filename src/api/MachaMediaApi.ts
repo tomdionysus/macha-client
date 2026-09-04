@@ -213,7 +213,7 @@ export class MachaMediaApi implements MediaApi {
     if (items.length === 0) return undefined;
     const byRole = (roles: string[]): ArtworkRef | undefined => {
       const item = items.find((candidate) => roles.includes(candidate.role));
-      return item ? { id: item.id, mimeType: item.mime_type } : undefined;
+      return item ? { id: item.id, mimeType: item.mime_type, url: item.url } : undefined;
     };
     const result: Artwork = {
       poster: byRole(['poster', 'cover']),

@@ -60,6 +60,21 @@ function freshnessLabel(node: ClusterNodeStatus): string {
   return `Last known · ${new Date(node.observed_at_unix_ms).toLocaleString()}`;
 }
 
+// A node can be `state: 'online'` (connected and gossiping) while
+// `phase: 'recovering'|'starting'` (not actually ready to serve). Surface that
+// distinctly rather than collapsing it into a plain "online" label.
+export function nodeNotYetReady(node: ClusterNodeStatus): boolean {
+  return node.state === 'online' && (node.phase === 'recovering' || node.phase === 'starting');
+}
+
+export function nodeStatusLabel(node: ClusterNodeStatus): string {
+  return nodeNotYetReady(node) ? `online, ${node.phase}` : node.state;
+}
+
+function nodeStatusClassName(node: ClusterNodeStatus): string {
+  return nodeNotYetReady(node) ? `${node.state} ${node.phase}` : node.state;
+}
+
 function UsageBar({ used, capacity }: { used: number; capacity: number }) {
   const width = capacity ? Math.min(100, Math.max(0, used / capacity * 100)) : 0;
   return <div className="cluster-usage-bar" aria-hidden="true"><span style={{ width: `${width}%` }} /></div>;
@@ -98,14 +113,13 @@ export function clientEndpointHealth(candidate: EndpointCandidate, now = Date.no
     : { className: 'untried', label: 'Not tried' };
 }
 
-export type StatusSection = 'overview' | 'client' | 'connectivity' | 'nodes';
+export type StatusSection = 'overview' | 'client' | 'connectivity';
 
 export function statusSectionVisibility(section: StatusSection) {
   return {
     overview: section === 'overview',
     client: section === 'client',
     connectivity: section === 'connectivity',
-    nodes: section === 'nodes',
   };
 }
 
@@ -215,11 +229,11 @@ function PublicConnectivity({ connectivity }: { connectivity: PublicConnectivity
 function NodeCard({ node, canManage, resetting, onReset }: { node: ClusterNodeStatus; canManage: boolean; resetting: boolean; onReset: (node: ClusterNodeStatus) => void }) {
   const canReset = canManage && Boolean(node.host && node.port);
   return (
-    <article className={`cluster-node-card ${node.state}`}>
+    <article className={`cluster-node-card ${nodeStatusClassName(node)}`}>
       <Link className="cluster-node-card-link" to={routes.statusNode(node.id)} data-tv-focusable="true">
         <div className="cluster-node-heading">
           <div><strong>{nodeName(node)}</strong><code>{node.id.slice(0, 12)}</code></div>
-          <span className={`cluster-state-pill ${node.state}`}>{node.state}</span>
+          <span className={`cluster-state-pill ${nodeStatusClassName(node)}`}>{nodeStatusLabel(node)}</span>
         </div>
         <div className="cluster-node-meta">
           <span>{node.roles.length ? node.roles.join(' · ') : 'node'}</span>
@@ -398,6 +412,10 @@ export function StatusScreen({ api, endpointRegistry, manageApi, section, apiTok
           <UsageBar used={cluster.cache_known.used_bytes} capacity={cluster.cache_known.capacity_bytes} />
         </article>}
       </div>
+
+      {managementMessage && <p className="cluster-check-result reachable">{managementMessage}</p>}
+      <div className="cluster-nodes-heading"><h2>Nodes</h2><span>Metadata generation {cluster.metadata_generation}</span></div>
+      <div className="cluster-node-grid">{snapshot.nodes.map((node) => <NodeCard key={node.id} node={node} canManage={Boolean(manageApi)} resetting={resettingNodeId === node.id} onReset={setResetCandidate} />)}</div>
       </>}
 
       {visible.connectivity && <>
@@ -405,12 +423,6 @@ export function StatusScreen({ api, endpointRegistry, manageApi, section, apiTok
         {snapshot.connectivity
           ? <PublicConnectivity connectivity={snapshot.connectivity} />
           : <div className="manage-empty">Connectivity status is not available from this node.</div>}
-      </>}
-
-      {visible.nodes && <>
-        {managementMessage && <p className="cluster-check-result reachable">{managementMessage}</p>}
-        <div className="cluster-nodes-heading"><h2>Nodes</h2><span>Metadata generation {cluster.metadata_generation}</span></div>
-        <div className="cluster-node-grid">{snapshot.nodes.map((node) => <NodeCard key={node.id} node={node} canManage={Boolean(manageApi)} resetting={resettingNodeId === node.id} onReset={setResetCandidate} />)}</div>
       </>}
       <ConfirmModal
         open={Boolean(resetCandidate)}
@@ -473,14 +485,14 @@ export function NodeStatusScreen({ api }: { api: ClusterStatusApi }) {
   });
 
   if (!node && !error) return <section className="cluster-status-screen node-status-screen"><StatusHeader eyebrow="Cluster node" title="Loading node status…" refreshing={refreshing} onRefresh={() => void refreshPage()} /></section>;
-  if (!node) return <section className="cluster-status-screen node-status-screen error-status"><StatusHeader eyebrow="Cluster node" title="Node unavailable" refreshing={refreshing} onRefresh={() => void refreshPage()} /><p>{error}</p><Link to={routes.statusNodes}>← Nodes</Link></section>;
+  if (!node) return <section className="cluster-status-screen node-status-screen error-status"><StatusHeader eyebrow="Cluster node" title="Node unavailable" refreshing={refreshing} onRefresh={() => void refreshPage()} /><p>{error}</p><Link to={routes.status}>← Overview</Link></section>;
 
   const runtime = node.runtime;
   const connectivity = check?.results[0];
   return (
     <section className="cluster-status-screen node-status-screen">
-      <Link className="back-button" to={routes.statusNodes} data-tv-focusable="true">← Nodes</Link>
-      <StatusHeader eyebrow="Cluster node" title={nodeName(node)} health={{ className: node.state === 'online' ? 'healthy' : node.state === 'retired' ? 'degraded' : 'critical', label: node.state }} refreshing={refreshing} onRefresh={() => void refreshPage()} />
+      <Link className="back-button" to={routes.status} data-tv-focusable="true">← Overview</Link>
+      <StatusHeader eyebrow="Cluster node" title={nodeName(node)} health={{ className: nodeNotYetReady(node) ? 'recovering' : node.state === 'online' ? 'healthy' : node.state === 'retired' ? 'degraded' : 'critical', label: nodeStatusLabel(node) }} refreshing={refreshing} onRefresh={() => void refreshPage()} />
       {error && <p className="manage-error">Live refresh failed: {error}</p>}
       {connectivity && <p className={`cluster-check-result ${connectivity.reachable ? 'reachable' : 'unreachable'}`}>Connectivity: {connectivity.reachable ? 'reachable' : 'unreachable'}{connectivity.error ? ` · ${connectivity.error}` : ''}</p>}
 

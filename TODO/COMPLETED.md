@@ -6,6 +6,64 @@ This is the completed-work ledger for the current session. An item belongs here
 only after implementation and its stated verification are complete. Detailed
 design notes and exact test results remain in the linked records.
 
+## Artwork capability URLs: client cutover, and a real bug caught in UAT
+
+The server session landed signed artwork capability URLs (`url` field on every
+artwork object in `/items`, `/items/{id}`, `/search`) and reported it back.
+Implemented the client side of
+[the original ask](2026-09-04-artwork-capability-urls.md):
+
+- [x] Added `url?: string` to `ArtworkRef` (`types.ts`) and wire-type
+  `CatalogueArtwork` (`api/CatalogueApi.ts`); threaded through
+  `MachaMediaApi.mapArtwork`.
+- [x] `LazyArtwork` now dispatches to a plain, hook-free `<img src loading>`
+  when `artwork.url` is present. Deliberately kept the existing Blob-fetch/
+  viewport-observer/decode-retry path (`useViewportArtworkUrl`,
+  `artworkViewport.ts`, `MachaMediaApi`'s cache/dedup) as a fallback for
+  artwork without a `url`, rather than deleting it as the original ask
+  envisioned: this client's whole architecture assumes a mixed-version
+  cluster, the server session's own build was "uncommitted, Tom pushes
+  manually" at time of writing, and the fallback costs nothing (a single
+  `artwork?.url` branch) versus real interop risk. Applied the same
+  short-circuit to `useArtworkUrl` (hero/backdrop images) and
+  `MetadataEditorScreen`'s `ArtworkPreview`.
+- [x] Added tests: `mapArtwork` threading, `LazyArtwork` (4 cases: capability
+  URL, eager capability URL, legacy fallback, no-artwork placeholder),
+  `useArtworkUrl` (3 cases).
+
+**UAT caught a real bug the tests above did not**: the user opened the app in
+a real browser and reported artwork requests failing against
+`localhost:5173` (the Vite dev server), not the actual Macha node. Root
+cause: the server's signed `url` is a bare relative path
+(`/api/v1/catalogue/artwork/<id>?exp=...&sig=...`), meaningful only relative
+to whichever node issued it. Handing that straight to `<img src>` lets the
+*browser* resolve it — against the current page's origin, never the API
+node's — whereas the existing Blob-fetch fallback path was unaffected
+because it resolves the node explicitly in JS
+(`ClusterCatalogueApi`/`MachaCatalogueApi`), which is also why Continue
+Watching kept working while other newly-converted surfaces didn't: it's the
+exact same code, so once this client build reaches artwork with a `url`
+field anywhere, it will hit this everywhere the fast path is taken, not just
+in one screen.
+
+- [x] Fixed at the correct layer, mirroring how `MachaPlaybackResolver`
+  already absolutizes stream/subtitle URLs: `MachaCatalogueApi` (the
+  single-node wire client) now resolves every artwork `url` against its own
+  `baseUrl` in `list`/`get`/`search`/`update`/`putArtwork`, before the item
+  ever reaches `ClusterCatalogueApi` or `MachaMediaApi`. Because
+  `ClusterCatalogueApi` already constructs one `MachaCatalogueApi` per
+  endpoint, this automatically resolves against whichever node actually
+  served that specific response — no extra endpoint-provenance plumbing
+  needed above this layer.
+- [x] Added a regression that fails node A and lets node B serve the item,
+  proving the artwork URL resolves against node B specifically (not node A,
+  not left relative) — confirmed it fails against the prior code and passes
+  with the fix. Passed 369/369 tests and TypeScript typechecking.
+- [!] Not yet re-verified live in the browser against a real connected
+  cluster — the automation session used for the original UAT report had no
+  configured endpoint. Ask: reload the real connected tab and confirm poster
+  artwork now loads correctly cluster-wide, not just in Continue Watching.
+
 ## Artwork capability URLs: server ask sent
 
 - [x] Sent [the drafted ask](2026-09-04-artwork-capability-urls.md) to the
@@ -15,6 +73,97 @@ design notes and exact test results remain in the linked records.
   drop its hand-rolled artwork cache/dedup/retry machinery in favour of a plain
   `<img loading="lazy">`. Awaiting a server-side response before any client
   work on this can start.
+
+## Any-node failover plan: latency-based pre-emptive authority swap
+
+- [x] Implemented the Phase 6 item in
+  [the any-node playback failover plan](2026-08-31-cluster-any-node-playback-failover.md):
+  "Record rolling API latency independently from reachability... define
+  hysteresis, cool-down and minimum improvement thresholds before
+  implementing this so authority cannot flap." Chose this over the plan's
+  other remaining non-blocked option (a dual-decoder hidden-standby HLS
+  player) after discussing tradeoffs: the TV platforms this plan targets
+  typically have exactly one hardware decoder session, so a second concurrent
+  `hls.js` pipeline risks silently degrading or failing outright, and the
+  realistic audience for "safe to double-decode" is desktop Web, where the
+  existing single-player fallback swap already avoids visible failure UI or
+  state loss.
+- [x] `EndpointRegistry` now tracks a bounded 5-sample rolling latency average
+  per endpoint (`recordLatency`/`latencyMs`), fed from the existing 10-second
+  health-probe cycle's own round-trip time — never from real request timing,
+  so ordinary traffic variance can't influence routing. `evaluateLatencySwap`
+  only moves `preferredId` when the fastest ready (non-cooling) alternate
+  beats the current preferred endpoint by both an absolute floor (200ms) and
+  a relative floor (40%) for three consecutive probe cycles running, and then
+  will not swap again for 60 seconds — hysteresis, minimum improvement and
+  cooldown, respectively, all named in the plan.
+- [x] Found and fixed a bug in my own first implementation before it shipped:
+  the swap cooldown compared against a `lastLatencySwapAt` initialized to
+  `0`, which could false-block the very first swap whenever `now` was small
+  (true in every test using the file's existing small-integer clock
+  convention, and not something to rely on `Date.now()` epoch size to avoid
+  in production either). Fixed with an explicit "never swapped yet" sentinel.
+- [x] Added 18 `EndpointRegistry` tests (hysteresis, both improvement floors,
+  streak-reset on a changing fastest candidate, cooldown-in-cooldown
+  interaction, rolling-window bounds) and 2 `useEndpointHealthMonitor` tests
+  proving the probe cycle records latency only for genuinely successful
+  responses and logs a reported swap. Passed 358/358 tests (one unrelated,
+  pre-existing wall-clock-timing test in `directPlayReadAhead.test.ts` flakes
+  under full-suite parallel load but passes in isolation and on repeat runs)
+  and TypeScript typechecking.
+
+## Any-node failover plan: server asks sent
+
+- [x] Sent the plan's "Later server work" requirements plus the Phase 6
+  node-51 data-availability gap to the macha server session ("Macha Server
+  Work"): durable node identity/endpoint advertisement, a cluster-replicated
+  ephemeral session-existence record with transparent recreation, retry-safe
+  playback-session creation across an ambiguous response (a real UAT timeout
+  case), cluster-consistent auth/CORS/TLS per advertised endpoint, explicit
+  immutable continuity evidence for Direct Play splicing, and the node-51
+  `open media: Input/output error` extent-availability gap from the
+  2026-09-01 UAT. Awaiting a server-side response before any of this can land;
+  client-side work continues independently in the meantime.
+
+## Any-node failover plan: HLS generations already fully node-local
+
+- [x] Verified the Phase 5 item "Treat HLS playlists and segments as
+  node-local generations. Do not assume independently created sessions have
+  interchangeable segment URLs or boundaries" in
+  [the any-node playback failover plan](2026-08-31-cluster-any-node-playback-failover.md)
+  against actual source and checked it off with no code change. `WebPlatform.attachHls`
+  destroys the prior `hls.js` instance and creates a fresh one per
+  `sourceGeneration`, gates every hls.js event on that generation matching the
+  current one, and always `loadSource()`s the new generation's own node-local
+  manifest URL. `preflightWebHlsSource` fetches an alternate's manifest/media
+  URLs independently via plain `fetch`, never touching the active `hls.js`
+  instance. Nothing in the client ever mixes or reuses a segment/manifest URL
+  across sessions.
+
+## Any-node failover plan: client-owned PlaybackIntent survives node failover
+
+- [x] Closed the remaining Phase 0 item in
+  [the any-node playback failover plan](2026-08-31-cluster-any-node-playback-failover.md):
+  "Introduce a client-owned PlaybackIntent snapshot containing all state
+  required to recreate a generation on a different node." `PlaybackCoordinator`
+  already tracked position (`snapshot.intent`) and pending representation
+  changes (`snapshot.pendingPreferences`) internally, so no new public type was
+  needed — but `prepareAlternate` and `recoverFromSourceFailure` each
+  reconstructed failover preferences straight from the last *server-confirmed*
+  session, one of them via a duplicated seven-field inline object literal.
+- [x] Found and fixed a real gap this exposed: a representation change
+  (mode/quality/audio/subtitle) already requested by the viewer but not yet
+  confirmed by the failing node was silently dropped on failover — recovery
+  recreated the generation with the stale server-echoed preferences instead.
+- [x] Added `PlaybackCoordinator.currentPreferences()`, the one place that
+  folds `pendingPreferences` over the last confirmed session, and pointed both
+  `prepareAlternate` and `recoverFromSourceFailure` at it, removing the
+  duplicate literal.
+- [x] Added a regression that stalls a representation-change PATCH to the
+  failing node and proves the not-yet-confirmed preference still reaches the
+  replacement node; confirmed it fails against the prior code and passes with
+  the fix. Passed 348/348 tests and TypeScript typechecking. No existing test
+  was changed, only extended.
 
 ## Any-node failover plan: deterministic two-node fake APIs/players
 

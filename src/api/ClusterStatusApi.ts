@@ -4,6 +4,7 @@ import { isGatewayConnectionFailure, serverUnreachable } from './serverConnectio
 
 export type TelemetryFreshness = 'live' | 'stale' | 'last_known' | 'unavailable';
 export type NodeState = 'online' | 'offline' | 'retired';
+export type NodePhase = 'starting' | 'recovering' | 'ready' | 'unknown';
 export type ClusterHealth = 'healthy' | 'recovering' | 'degraded' | 'critical';
 export type MetadataAvailability = 'unavailable' | 'read-only' | 'writable';
 
@@ -46,6 +47,8 @@ export interface NodeRuntimeStatus {
 export interface ClusterNodeStatus {
   id: string;
   state: NodeState;
+  // Older nodes in a mixed-version cluster may not report this yet.
+  phase?: NodePhase;
   telemetry_freshness: TelemetryFreshness;
   observed_at_unix_ms: number;
   live_age_ms: number | null;
@@ -212,6 +215,7 @@ export class MachaClusterStatusApi implements ClusterStatusApi {
 const demoNode: ClusterNodeStatus = {
   id: '00000000000000000000000000000001',
   state: 'online',
+  phase: 'ready',
   telemetry_freshness: 'live',
   observed_at_unix_ms: Date.now(),
   live_age_ms: 0,

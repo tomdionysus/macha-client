@@ -19,6 +19,7 @@ function PlaylistArtwork({ api, entry }: { api: MediaApi; entry: MusicPlaylistEn
       <LazyArtwork
         api={api}
         artwork={entry.track.artwork?.poster ?? entry.track.artwork?.thumbnail}
+        alt={entry.track.title}
         placeholder={<span>{entry.track.title.slice(0, 1)}</span>}
       />
     </span>

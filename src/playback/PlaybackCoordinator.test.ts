@@ -702,6 +702,41 @@ describe('PlaybackCoordinator player failures', () => {
     expect(coordinator.getSnapshot().session?.endpoint?.id).toBe('node-b');
   });
 
+  it('recreates a failed generation with a representation change the failed node had not yet confirmed', async () => {
+    const player = new FakePlayer();
+    const initial = session({ endpoint: { id: 'node-a', baseUrl: 'http://a' } });
+    const stuckUpdate = deferred<PlaybackSession>();
+    const replacement = session({
+      sessionId: 's2', endpoint: { id: 'node-b', baseUrl: 'http://b' },
+      source: { ...initial.source, url: 'http://b/replacement.mp4' },
+    });
+    const api = resolver(initial, async () => stuckUpdate.promise) as ReturnType<typeof resolver> & { failover: ReturnType<typeof vi.fn> };
+    api.failover = vi.fn(async () => replacement);
+    const coordinator = new PlaybackCoordinator({ media: media(), player, resolver: api, capabilities: async () => capabilities(), initialPositionMs: 0 });
+    await coordinator.start();
+
+    // A representation change is in flight to node A (never resolves in this
+    // test) when node A's stream itself fails. The not-yet-confirmed
+    // preference must still reach the replacement node.
+    coordinator.update({ preferences: { audioStream: 2, audioLanguage: 'fra' } });
+    expect(coordinator.getSnapshot().pendingPreferences).toMatchObject({ audioStream: 2, audioLanguage: 'fra' });
+
+    player.fail(new Error('node A stream failed'));
+
+    await vi.waitFor(() => expect(api.failover).toHaveBeenCalledWith(
+      initial,
+      expect.any(Object),
+      expect.any(Object),
+      0,
+      expect.objectContaining({ audioStream: 2, audioLanguage: 'fra' }),
+      undefined,
+      undefined,
+    ));
+    await vi.waitFor(() => expect(player.playCalls.at(-1)?.source.url).toBe('http://b/replacement.mp4'));
+    stuckUpdate.resolve(initial);
+    await flush();
+  });
+
   it('backs off cleanup of the old session only after the replacement is streaming', async () => {
     vi.useFakeTimers();
     try {

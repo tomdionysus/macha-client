@@ -34,7 +34,6 @@ export const routes = {
   status: '/status',
   statusClient: '/status/client',
   statusConnectivity: '/status/connectivity',
-  statusNodes: '/status/nodes',
   statusNode: (id: string) => `/status/nodes/${segment(id)}`,
   manage: '/manage',
   manageFiles: '/manage/files',

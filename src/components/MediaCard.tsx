@@ -34,6 +34,7 @@ function Poster({ api, item, progress }: Pick<Props, 'api' | 'item' | 'progress'
       <LazyArtwork
         api={api}
         artwork={item.artwork?.poster ?? item.artwork?.thumbnail}
+        alt={item.title}
         placeholder={<div className="poster-placeholder">{item.title.slice(0, 1)}</div>}
       />
       {progress !== undefined && progress > 0 && (

@@ -80,7 +80,7 @@ be described as seamless if it visibly stalls.
   missing/expired, retryable server admission, stream network, media decode and
   incompatible source. Decoder/content failures must not condemn a healthy node
   without evidence.
-- [ ] Introduce a client-owned `PlaybackIntent` snapshot containing all state
+- [x] Introduce a client-owned `PlaybackIntent` snapshot containing all state
   required to recreate a generation on a different node.
 - [x] Introduce a node-scoped generation reference containing node identity,
   API origin and node-local session ID. Session IDs alone are insufficient.
@@ -97,9 +97,14 @@ without using global browser events or changing the route.
 
 - [x] Replace the single stored server URL with a versioned set of seed/API
   endpoints while migrating existing installations losslessly.
-- [ ] Keep durable node identity separate from endpoint URL. Until the server
+- [x] Keep durable node identity separate from endpoint URL. Until the server
   advertises client API identities, retain endpoint-derived provisional IDs and
-  reconcile them when a node reports a durable ID.
+  reconcile them when a node reports a durable ID. Implemented:
+  `EndpointRegistry` stores `nodeId?: string` separately from `baseUrl`, and
+  `applyAdvertisement()` reconciles a server-advertised durable ID onto the
+  existing endpoint-derived identity without collapsing distinct endpoints;
+  covered by `EndpointRegistry.test.ts`. Dormant until the server actually
+  advertises durable node IDs, but no client-side work remains.
 - [x] Treat configured addresses as bootstrap API endpoints, not authoritative
   membership. A successful bootstrap response will eventually populate and
   refresh the client-reachable endpoint registry; never reinterpret the current
@@ -207,15 +212,20 @@ position discontinuity or viewer-visible stall.
 
 ## Phase 5: transformed/HLS make-before-break
 
-- [ ] Treat HLS playlists and segments as node-local generations. Do not assume
+- [x] Treat HLS playlists and segments as node-local generations. Do not assume
   independently created sessions have interchangeable segment URLs or boundaries.
 - [x] When failure evidence arrives while buffered media remains, continue the
   active player and prepare an alternate generation at the current client-owned
   logical position.
-- [ ] On platforms with sufficient decoder resources, load the alternate into a
-  hidden/muted standby player, wait for decoded/buffered readiness, align its
-  logical timeline, then switch presentation/audio atomically and dispose the old
-  player generation.
+- [~] Decided against, 2026-09-04: a hidden/muted dual-decoder standby player was
+  weighed against a latency-based pre-emptive authority swap (moving client API
+  authority away from a consistently slow node before failure, rather than
+  racing decoders after it). The swap was chosen — lower complexity, no double
+  decode-resource cost on constrained platforms (Tizen/Android), and it prevents
+  the slow-node case from ever reaching a failure-driven swap at all. See Phase 6
+  latency-swap item below and `EndpointRegistry`'s `evaluateLatencySwap`. The
+  single-player preflight-and-replace path below remains the failure-driven
+  fallback for every platform.
 - [x] Where dual decoding is unavailable, preflight the alternate manifest and
   first media data, retain the old frame/buffer as long as possible, then perform
   the smallest single-player source replacement supported by the platform.
@@ -242,9 +252,10 @@ under the defined test.
   Input/output error` because the requested extent was unavailable. Ensure at
   least one surviving node can read every extent required for advertised media,
   or session failover cannot produce an alternate stream regardless of client
-  routing.
+  routing. Sent to the macha server session on 2026-09-04 alongside the "Later
+  server work" requirements below; awaiting a response.
 
-- [ ] Record rolling API latency independently from reachability. Consider
+- [x] Record rolling API latency independently from reachability. Consider
   pre-emptively moving client API authority when another healthy node remains
   materially faster across a bounded sample window. Define hysteresis,
   cool-down and minimum improvement thresholds before implementing this so
@@ -267,6 +278,14 @@ are permitted for this gate.
   three success levels above.
 
 ## Later server work
+
+Status: sent to the macha server session ("Macha Server Work") on 2026-09-04 as
+the six numbered requirements below, plus the node-51 data-availability gap
+from Phase 6. Awaiting a server-side response; not yet landed. The
+session-existence/capability and idempotency-key bullets below are now given a
+concrete shape in
+[the session Bearer auth draft](2026-09-04-session-bearer-auth.md); resolve
+there, not here, once that lands.
 
 The client-first demonstration deliberately uses manual endpoints and unrelated
 node-local session IDs. Later server support should add:

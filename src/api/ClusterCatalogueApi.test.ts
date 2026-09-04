@@ -29,6 +29,28 @@ describe('ClusterCatalogueApi', () => {
     expect(fetchMock.mock.calls[0]?.[0]).toBe('http://b/api/v1/catalogue/items?type=movie');
   });
 
+  it('absolutizes a signed artwork capability URL against whichever node actually served it', async () => {
+    const itemWithArtwork = {
+      id: 'movie:one', kind: 'movie', title: 'Movie', sort_title: 'Movie', synopsis: '',
+      parent_id: null, year: null, season_number: null, episode_number: null, disc_number: null,
+      track_number: null, aliases: [], external_ids: {}, media_ids: [], revision: 1, updated_ns: 0,
+      artwork: [{ role: 'poster', id: 'sig-1', mime_type: 'image/jpeg', url: '/api/v1/catalogue/artwork/sig-1?sig=abc' }],
+    };
+    const fetchMock = vi.fn()
+      .mockRejectedValueOnce(new TypeError('node A unreachable'))
+      .mockResolvedValue(response({ items: [itemWithArtwork] }));
+    vi.stubGlobal('fetch', fetchMock);
+    const registry = new EndpointRegistry(bootstrapEndpoints(['http://a', 'http://b']));
+    const api = new ClusterCatalogueApi(registry);
+
+    const [result] = await api.list('movie');
+
+    // Node A failed and node B actually served this response: the relative
+    // capability URL must resolve against node B, not node A or the client's
+    // own origin, regardless of which node ends up authoritative next.
+    expect(result.artwork[0].url).toBe('http://b/api/v1/catalogue/artwork/sig-1?sig=abc');
+  });
+
   it('does not make a nominally successful but unready catalogue authoritative', async () => {
     const unavailable = {
       enabled: true, ready: false, metadata_generation: 0, root: null, items: 0,

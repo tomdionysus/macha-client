@@ -56,6 +56,7 @@ function EpisodeCard({ api, episode, progress, playbackEpisode, queue, queueInde
             <LazyArtwork
               api={api}
               artwork={episode.artwork?.thumbnail ?? episode.artwork?.backdrop}
+              alt={episode.title}
               draggable={false}
               placeholder={<div className="episode-still-placeholder">{episode.episodeNumber}</div>}
             />
