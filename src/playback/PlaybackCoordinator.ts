@@ -177,7 +177,7 @@ export class PlaybackCoordinator {
   private pendingMutation?: PendingMutation;
   private debouncedSeekMutation?: PendingMutation;
   private seekDebounceTimer?: ReturnType<typeof setTimeout>;
-  private activeMutation?: { reason: PendingMutation['reason']; controller: AbortController };
+  private activeMutation?: { reason: PendingMutation['reason']; controller: AbortController; settled: Promise<void> };
   private lastSeekTransitionAt = 0;
   private mutationRevision = 0;
   private sourceActivationRevision = 0;
@@ -540,7 +540,9 @@ export class PlaybackCoordinator {
       const requestedPositionRevision = this.positionRevision;
       const startedAt = performance.now();
       const controller = new AbortController();
-      this.activeMutation = { reason: pending.reason, controller };
+      let resolveSettled!: () => void;
+      const settled = new Promise<void>((resolve) => { resolveSettled = resolve; });
+      this.activeMutation = { reason: pending.reason, controller, settled };
 
       try {
         // AbortSignal cancels modern fetch implementations. The local race also
@@ -611,6 +613,7 @@ export class PlaybackCoordinator {
         this.patchSnapshot({ notice: error instanceof Error ? error.message : String(error) });
       } finally {
         if (this.activeMutation?.controller === controller) this.activeMutation = undefined;
+        resolveSettled();
       }
     }
   }
@@ -927,6 +930,33 @@ export class PlaybackCoordinator {
   private fail(error: unknown): void {
     if (this.disposed || this.snapshot.fatalError) return;
     const fatalError = error instanceof Error ? error : new Error(String(error));
+    const activeMutation = this.activeMutation;
+    if (activeMutation?.reason === 'seek') {
+      // Same expected-teardown race degrade() guards against: a stream error
+      // can surface from the server tearing down this generation to honor an
+      // in-flight seek PATCH, indistinguishable at the moment it arrives from
+      // a genuine fatal failure. Unlike degrade(), a fatal error must always
+      // end up recovered or shown — never silently dropped — so instead of a
+      // bare early return, wait for the mutation to settle and judge from
+      // what actually happened: if it replaced the source, this error was
+      // about a generation already gone and is dropped as stale; otherwise
+      // it's handled exactly as if this guard were never here.
+      const failingSource = this.snapshot.session ?? this.serverSession;
+      void activeMutation.settled.then(() => {
+        if (this.disposed || this.snapshot.fatalError) return;
+        const current = this.snapshot.session ?? this.serverSession;
+        if (failingSource && current && sourceIdentity(failingSource) !== sourceIdentity(current)) {
+          this.log.debug('stream-error-superseded-by-seek', { sessionId: failingSource.sessionId, error: fatalError });
+          return;
+        }
+        this.failNow(fatalError);
+      });
+      return;
+    }
+    this.failNow(fatalError);
+  }
+
+  private failNow(fatalError: Error): void {
     const failedSession = this.snapshot.session ?? this.serverSession;
     if (failedSession && this.options.resolver.failover && isEndpointRetryablePlaybackFailure(fatalError) && !this.failoverPromise) {
       this.failoverPromise = this.recoverFromSourceFailure(failedSession, fatalError).finally(() => {

@@ -1,4 +1,53 @@
+import { MachaConnectionError, serverUnreachable } from './serverConnection';
+
 export type HeaderValues = Record<string, string | undefined>;
+
+/** Applies to every request in the cluster status/catalogue/routing layer. Playback/streaming transfers are exempt and manage their own deadlines. */
+export const DEFAULT_REQUEST_TIMEOUT_MS = 8_000;
+
+function isAbortError(error: unknown): boolean {
+  return Boolean(error && typeof error === 'object' && (error as { name?: unknown }).name === 'AbortError');
+}
+
+/**
+ * Bounds a request with a timeout, composed with whatever cancellation the
+ * caller already threads through `init.signal` — without `AbortSignal.any`,
+ * which is absent on browsers old enough to have a real `AbortController` but
+ * predate that static (this is a TV app; see `AbortControllerPolyfill.ts`).
+ *
+ * A genuine caller cancellation still surfaces as a plain AbortError, so
+ * `retryableEndpointFailure` keeps treating it as client intent rather than
+ * endpoint health. Only a timeout is reported as `MachaConnectionError`: from
+ * here, a request that never answers looks exactly like an endpoint that
+ * never answers, and must retry/fail over the same way one already does.
+ */
+export async function fetchWithTimeout(
+  fetcher: (url: string, init?: RequestInit) => Promise<Response>,
+  url: string,
+  init: RequestInit,
+  timeoutMs: number,
+): Promise<Response> {
+  const controller = new AbortController();
+  const consumerSignal = init.signal ?? undefined;
+  let timedOut = false;
+  const onConsumerAbort = () => controller.abort(consumerSignal?.reason);
+  consumerSignal?.addEventListener('abort', onConsumerAbort, { once: true });
+  if (consumerSignal?.aborted) onConsumerAbort();
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
+  try {
+    return await fetcher(url, { ...init, signal: controller.signal });
+  } catch (error) {
+    if (timedOut) throw new MachaConnectionError(`Request to ${url} exceeded ${timeoutMs} ms.`);
+    if (isAbortError(error)) throw error;
+    throw serverUnreachable();
+  } finally {
+    clearTimeout(timer);
+    consumerSignal?.removeEventListener('abort', onConsumerAbort);
+  }
+}
 
 export interface ParsedResponseBody {
   body: unknown;

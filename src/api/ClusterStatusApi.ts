@@ -1,5 +1,5 @@
 import type { IdentityAssociationReset } from './ManageApi';
-import { mergeRequestHeaders, normalizeBaseUrl, readResponseBody } from './httpCompat';
+import { DEFAULT_REQUEST_TIMEOUT_MS, fetchWithTimeout, mergeRequestHeaders, normalizeBaseUrl, readResponseBody } from './httpCompat';
 import { NO_AUTH, type AuthenticatedFetch } from './SessionManager';
 import { isGatewayConnectionFailure, serverUnreachable } from './serverConnection';
 
@@ -182,15 +182,12 @@ export class MachaClusterStatusApi implements ClusterStatusApi {
   }
 
   private async request<T>(path: string, method: 'GET' | 'POST'): Promise<T> {
-    let response: Response;
-    try {
-      response = await this.auth.fetch(`${this.baseUrl}${path}`, {
-        method,
-        headers: mergeRequestHeaders(undefined, { Accept: 'application/json' }),
-      });
-    } catch {
-      throw serverUnreachable();
-    }
+    const response = await fetchWithTimeout(
+      (url, init) => this.auth.fetch(url, init),
+      `${this.baseUrl}${path}`,
+      { method, headers: mergeRequestHeaders(undefined, { Accept: 'application/json' }) },
+      DEFAULT_REQUEST_TIMEOUT_MS,
+    );
 
     const { body, wasJson } = await readResponseBody(response);
     if (isGatewayConnectionFailure(response, wasJson)) throw serverUnreachable();

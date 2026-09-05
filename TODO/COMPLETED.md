@@ -2,6 +2,142 @@
 
 Last updated: 2026-09-06
 
+## Endpoint registry now has memory across a reload
+
+Runtime-discovered cluster membership (`discoverClusterEndpoints()`) lived
+only in memory; a page reload reseeded purely from the single configured
+bootstrap URL. If the client had already failed over away from that node
+because it went down, a reload while it was still down had no way back in.
+
+- [x] Added `getDiscoveredEndpoints()`/`setDiscoveredEndpoints()` to
+  `src/state/client.ts`, mirroring the existing `getBootstrapEndpoints()`
+  versioned-envelope pattern exactly, under their own key
+  (`macha-discovered-endpoints-v1`) — kept deliberately separate from
+  `macha-bootstrap-endpoints-v1` per `docs/server-api.md`'s explicit
+  instruction that discovered candidates must never be persisted as user
+  configuration. Bounded to 16 URLs, capped at write time. As part of
+  generalizing the shared read/normalize/rewrite helper to work for either
+  key, fixed a latent bug where it always rewrote a normalized value back
+  into the bootstrap key regardless of which key it had actually read from
+  (harmless before, since it only ever had the one caller) — regression
+  test in `client.test.ts` confirmed this against the pre-fix behavior.
+- [x] Added `persistConfirmedEndpoints()` to `useEndpointHealthMonitor.ts`,
+  called once per health cycle: recomputes (never accumulates) the current
+  set of `source: 'discovered'` endpoints with a recorded `lastSuccessAt`
+  and writes it, so the persisted set always tracks what's *currently*
+  confirmed rather than growing unbounded discovery history, and a no-op if
+  unchanged from what's already stored.
+- [x] `App.tsx` now seeds `EndpointRegistry` with the configured bootstrap
+  endpoints followed by the persisted ones under `source: 'environment'`
+  (previously-unused groundwork already reserved for exactly this) — the
+  registry's own dedup keeps the bootstrap version on any conflict, and
+  `'environment'` (like `'bootstrap'`) survives `applyAdvertisement()`'s
+  replace-on-refresh, which only ever discards `'discovered'` entries. A
+  stale environment endpoint from a cluster the user has since moved away
+  from self-heals within one health cycle, since the persisted set is fully
+  recomputed (not merged) from live state every cycle.
+- [x] Regression tests in `client.test.ts` (persistence, bounding, clearing,
+  the key-generic self-heal fix) and `useEndpointHealthMonitor.test.ts`
+  (only confirmed-reachable discovered endpoints persist, never the
+  bootstrap endpoint itself, and stale entries clear once no longer
+  advertised) — confirmed to fail against pre-fix/no-op behavior.
+- [x] Full suite green (69 files / 429 tests), `tsc --noEmit` clean.
+  Live-verified against the real 3-node cluster: after one ~10s health
+  cycle, `localStorage['macha-discovered-endpoints-v1']` correctly held the
+  two non-bootstrap nodes; a full reload with that state present seeded and
+  rendered the Status screen normally, no console errors.
+
+## `fail()`'s reactive path no longer races an in-flight seek-driven generation replacement
+
+`degrade()` was fixed 2026-09-05 (live A/V-desync report) to ignore playback
+errors while a seek-driven generation replacement (`this.activeMutation?.reason
+=== 'seek'`) is already in flight — a stream error from the server tearing
+down the superseded generation looked identical to fresh degradation
+evidence. `fail()`, the fatal-error path, was deliberately left unguarded at
+the time: a bare copy of that short-circuit would risk silently dropping a
+genuinely unrelated fatal error mid-seek, with neither recovery nor failure
+UI — worse than the race it would fix.
+
+- [x] `fail()` now defers instead of ignoring. When a fatal error arrives
+  while `this.activeMutation?.reason === 'seek'` is in flight, it captures
+  the currently-playing session and waits for that specific mutation to
+  settle — a new `settled: Promise<void>` on `activeMutation`, resolved in
+  `drainMutations()`'s existing `finally` right as the mutation's fate (its
+  own success/abort/failure) is decided.
+- [x] Once settled, it compares `sourceIdentity()` of the captured session
+  against the current one: if the seek replaced the source, the error was
+  about a generation already gone and is dropped as stale (same reasoning
+  `degrade()` uses); otherwise it's handled exactly as if the guard were
+  never there, via a `failNow()` extracted from the original `fail()` body
+  (`recoverFromSourceFailure()` or `failTerminal()`).
+- [x] Two new regression tests in `PlaybackCoordinator.test.ts`, mirroring
+  the existing `degrade()` race test's shape (`deferred<PlaybackSession>()`
+  to keep the seek's `resolver.update()` genuinely in flight): one proves a
+  stream error is held and then dropped once the seek's replacement source
+  lands; the other proves a genuinely unrelated fatal error still surfaces
+  (via `recoverFromSourceFailure`/`failTerminal`) once the seek settles
+  without changing the source (there, the seek's own update rejects). Both
+  confirmed to fail against the pre-fix unguarded `fail()`.
+- [x] Full suite green (69 files / 421 tests), `tsc --noEmit` clean. Plan
+  doc (`TODO/2026-08-31-cluster-any-node-playback-failover.md`, Phase 5)
+  updated with the follow-up fix.
+
+## Bounded per-request timeout across the cluster status/catalogue/routing fetch layer
+
+Every fetch in this layer previously had no timeout at all — the only
+`AbortSignal`s in play were caller-supplied for unmount cancellation. Caught
+live: a single already-known-good endpoint took 19.7s on one request,
+serialized behind nothing and blocking unrelated work. Nothing in the failover
+router (`ClusterEndpointRouter`) could kick in either, since a hung request
+never rejects on its own.
+
+- [x] Added `fetchWithTimeout()` and `DEFAULT_REQUEST_TIMEOUT_MS` (8s) to
+  `src/api/httpCompat.ts` — the one module every low-level API class already
+  imports. It composes a caller-supplied `init.signal` with its own
+  timeout-driven `AbortController` by hand (no `AbortSignal.any`/
+  `AbortSignal.timeout`: absent on browsers old enough to have a real
+  `AbortController` but predate those statics — this is a TV app with its own
+  `AbortControllerPolyfill.ts` for that exact gap). A genuine caller
+  cancellation still surfaces as a plain `AbortError` (so
+  `retryableEndpointFailure` keeps treating it as client intent, never
+  endpoint health); a timeout throws a `MachaConnectionError` instead, since a
+  request that never answers looks exactly like an endpoint that never
+  answers and must retry/fail over the same way one already does.
+- [x] Wired into every request path in the layer: `MachaClusterStatusApi`,
+  `MachaAcquisitionApi`, `MachaManageApi`, `MachaServerApi`,
+  `MachaCatalogueApi`'s private `fetch()` (covers `list`/`get`/`search`/
+  `update`/`clearMetadata`/`putArtwork`/`status`, none of which had *any*
+  timeout before — only `artwork()` did, via `ClusterCatalogueApi`'s own
+  older 8s mechanism, left untouched), and `probeEndpoint` in
+  `useEndpointHealthMonitor.ts` (a hung probe previously wedged the entire
+  10s health-monitoring loop forever, defeating the mechanism the live
+  incident was actually about). Playback/streaming byte-range transfers are
+  explicitly out of scope — they already manage their own deadlines
+  (`ClusterPlaybackResolver`'s `awaitWithEndpointDeadline`,
+  `WebPlatform.ts`'s HLS preflight) with different, deliberate tradeoffs
+  (e.g. not aborting a mutation mid-flight).
+- [x] Fixed the 4 blanket `catch { throw serverUnreachable(); }` blocks
+  (Status/Acquisition/Manage/Server) as a side effect of routing them through
+  the shared helper — they previously would have swallowed a real caller
+  cancellation into a misleading "unreachable" error too, matching
+  `MachaCatalogueApi`'s pre-existing `error.name === 'AbortError'` guard.
+- [x] Regression tests: `src/api/httpCompat.test.ts` (new) proves
+  `fetchWithTimeout` resolves normally under the timeout, abandons a hung
+  request at the deadline as a retryable `MachaConnectionError` (confirmed to
+  hang/fail without the fix, via a temporarily neutered abort call), and
+  forwards genuine caller cancellation as a plain `AbortError`. Updated two
+  `useEndpointHealthMonitor.test.ts` tests and one `MachaCatalogueApi.test.ts`
+  test whose assertions assumed no signal (or the exact same signal object)
+  ever reached `fetch` — now legitimately false, since a bounded-timeout
+  signal is always attached; the underlying invariants they were protecting
+  (lifecycle cancellation never reaches the health probe; caller cancellation
+  still reaches the real fetch call, just via a composed signal rather than
+  the same object) still hold and are still asserted.
+- [x] Full suite green (69 files / 419 tests) and `tsc --noEmit` clean.
+  Live-verified against the real 3-node cluster: Home, Status, and Manage
+  screens all load real data through the new path with no console errors and
+  no unexpected network failures.
+
 This is the completed-work ledger for the current session. An item belongs here
 only after implementation and its stated verification are complete. Detailed
 design notes and exact test results remain in the linked records.

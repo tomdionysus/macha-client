@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { bootstrapEndpoints, EndpointRegistry } from './EndpointRegistry';
-import { discoverClusterEndpoints, probeKnownEndpoints } from './useEndpointHealthMonitor';
+import { discoverClusterEndpoints, persistConfirmedEndpoints, probeKnownEndpoints } from './useEndpointHealthMonitor';
 import { fixedBearerToken } from '../api/SessionManager';
 import { clearClientDiagnostics, clientDiagnosticsSnapshot, configureClientDiagnostics } from '../diagnostics/ClientLog';
 import type { ClusterNodeStatus, ClusterStatusApi, ClusterStatusSnapshot } from '../api/ClusterStatusApi';
@@ -12,6 +12,16 @@ function fakeClusterStatusApi(nodes: readonly ClusterNodeStatus[]): ClusterStatu
     node: async () => { throw new Error('not implemented'); },
     checkConnectivity: async () => { throw new Error('not implemented'); },
   };
+}
+
+class MemoryStorage implements Storage {
+  private readonly values = new Map<string, string>();
+  get length(): number { return this.values.size; }
+  clear(): void { this.values.clear(); }
+  getItem(key: string): string | null { return this.values.get(key) ?? null; }
+  key(index: number): string | null { return [...this.values.keys()][index] ?? null; }
+  removeItem(key: string): void { this.values.delete(key); }
+  setItem(key: string, value: string): void { this.values.set(key, value); }
 }
 
 describe('API endpoint health probes', () => {
@@ -56,7 +66,7 @@ describe('API endpoint health probes', () => {
     const controller = new AbortController();
     let finish!: (response: Response) => void;
     const fetchImpl = vi.fn((_url: string | URL | Request, init?: RequestInit) => {
-      expect(init?.signal).toBeUndefined();
+      expect(init?.signal?.aborted).toBe(false);
       return new Promise<Response>((resolve) => { finish = resolve; });
     }) as typeof fetch;
 
@@ -117,14 +127,21 @@ describe('API endpoint health probes', () => {
   it('never attaches lifecycle cancellation to status HTTP requests', async () => {
     const registry = new EndpointRegistry(bootstrapEndpoints(['http://a']));
     const lifecycle = new AbortController();
+    let capturedSignal: AbortSignal | undefined;
     let finish!: (response: Response) => void;
     const fetchImpl = vi.fn((_url: string | URL | Request, init?: RequestInit) => {
-      expect(init?.signal).toBeUndefined();
+      capturedSignal = init?.signal ?? undefined;
       return new Promise<Response>((resolve) => { finish = resolve; });
     }) as typeof fetch;
 
     const probe = probeKnownEndpoints(registry, fixedBearerToken(undefined, fetchImpl), lifecycle.signal);
     await new Promise((resolve) => setTimeout(resolve, 5));
+    // Cancelling one React consumer (or a playback request) is not evidence
+    // about node health — the request's own signal (the bounded-timeout one
+    // added alongside it) must never be the same object as that lifecycle
+    // signal, so an unrelated unmount can never cancel it.
+    expect(capturedSignal).not.toBe(lifecycle.signal);
+    expect(capturedSignal?.aborted).toBe(false);
     expect(registry.snapshot()[0]?.health).toEqual({ consecutiveFailures: 0 });
     finish(new Response(null, { status: 200 }));
 
@@ -192,5 +209,48 @@ describe('cluster membership discovery', () => {
 
     await expect(discoverClusterEndpoints(registry, clusterStatusApi)).resolves.toBeUndefined();
     expect(registry.snapshot().map(({ endpoint }) => endpoint.baseUrl)).toEqual(['http://10.44.1.50:7438']);
+  });
+});
+
+describe('persisted endpoint memory across a reload', () => {
+  it('persists a discovered endpoint only once it has actually been confirmed reachable', () => {
+    const storage = new MemoryStorage();
+    const registry = new EndpointRegistry(bootstrapEndpoints(['http://10.44.1.50:7438']));
+    registry.applyAdvertisement([{ nodeId: 'node-51', apiBaseUrls: ['http://10.44.1.51:7438'] }]);
+
+    persistConfirmedEndpoints(registry, storage);
+    expect(storage.getItem('macha-discovered-endpoints-v1')).toBeNull();
+
+    registry.recordProbeSuccess('http://10.44.1.51:7438');
+    persistConfirmedEndpoints(registry, storage);
+    expect(JSON.parse(storage.getItem('macha-discovered-endpoints-v1') ?? '')).toEqual({
+      version: 1,
+      urls: ['http://10.44.1.51:7438'],
+    });
+  });
+
+  it('never persists the configured bootstrap endpoint itself, even once confirmed reachable', () => {
+    const storage = new MemoryStorage();
+    const registry = new EndpointRegistry(bootstrapEndpoints(['http://10.44.1.50:7438']));
+
+    registry.recordSuccess('http://10.44.1.50:7438');
+    persistConfirmedEndpoints(registry, storage);
+
+    expect(storage.getItem('macha-discovered-endpoints-v1')).toBeNull();
+  });
+
+  it('clears previously persisted endpoints once none are confirmed reachable any more', () => {
+    const storage = new MemoryStorage();
+    const registry = new EndpointRegistry(bootstrapEndpoints(['http://10.44.1.50:7438']));
+    registry.applyAdvertisement([{ nodeId: 'node-51', apiBaseUrls: ['http://10.44.1.51:7438'] }]);
+    registry.recordProbeSuccess('http://10.44.1.51:7438');
+    persistConfirmedEndpoints(registry, storage);
+    expect(storage.getItem('macha-discovered-endpoints-v1')).not.toBeNull();
+
+    // The next discovery cycle no longer reports node-51 online at all.
+    registry.applyAdvertisement([{ nodeId: 'node-50', apiBaseUrls: ['http://10.44.1.50:7438'] }]);
+    persistConfirmedEndpoints(registry, storage);
+
+    expect(storage.getItem('macha-discovered-endpoints-v1')).toBeNull();
   });
 });

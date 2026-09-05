@@ -23,6 +23,7 @@ import {
   getApiToken,
   getClientId,
   getBootstrapEndpoints,
+  getDiscoveredEndpoints,
   setApiToken as persistApiToken,
   setBootstrapEndpoints as persistBootstrapEndpoints,
 } from './state/client';
@@ -243,7 +244,16 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
   const volumeStore = useMemo(() => new VolumeStore(clientId), [clientId]);
   const endpointKey = bootstrapEndpoints.join('\n');
   const endpointRegistry = useMemo(
-    () => new EndpointRegistry(bootstrapClusterEndpoints(bootstrapEndpoints)),
+    () => new EndpointRegistry([
+      ...bootstrapClusterEndpoints(bootstrapEndpoints),
+      // Runtime-discovered membership confirmed reachable in a previous
+      // session — never user configuration (`docs/server-api.md`), so it's
+      // seeded after the real bootstrap seeds and dropped on any conflict by
+      // the registry's own dedup. Gives a reload somewhere to fall back to
+      // if the single configured endpoint happens to be down at that exact
+      // moment; the next successful discovery cycle supersedes it either way.
+      ...bootstrapClusterEndpoints(getDiscoveredEndpoints(), 'environment'),
+    ]),
     [endpointKey],
   );
   const { auth, ready: sessionReady } = useSession({

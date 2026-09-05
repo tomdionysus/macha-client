@@ -295,6 +295,24 @@ position discontinuity or viewer-visible stall.
   treat a stream error during an in-flight seek-driven generation
   replacement as fresh degradation evidence").
 
+  **Follow-up designed and fixed 2026-09-06.** `fail()` now defers instead
+  of ignoring: when a fatal error arrives while `this.activeMutation?.reason
+  === 'seek'` is in flight, it captures the currently-playing session and
+  waits for that mutation to settle (a new `settled` promise on
+  `activeMutation`, resolved in `drainMutations()`'s existing `finally`)
+  before acting. Once settled, it compares `sourceIdentity()` of the
+  captured session against the current one: if the seek replaced the
+  source, the error was about a generation already gone and is dropped as
+  stale (same reasoning as `degrade()`); otherwise it's handled exactly as
+  if the guard were never there (`recoverFromSourceFailure()` or
+  `failTerminal()`, via the extracted `failNow()`). Regression covered by
+  `PlaybackCoordinator.test.ts` ("does not act on a stream error during an
+  in-flight seek-driven generation replacement until the seek settles, then
+  drops it as stale once the seek replaces the source" and "still surfaces
+  a fatal error that arrives during an in-flight seek once the seek settles
+  without replacing the source"), both confirmed to fail against the
+  pre-fix unguarded `fail()`. Full suite green, `tsc --noEmit` clean.
+
 Exit criterion: controlled loss of node A during HLS playback switches to node B
 without visible failure UI or state loss. UAT records any freeze/audio gap and
 may claim viewer-transparent handoff only when none is observable/measurable

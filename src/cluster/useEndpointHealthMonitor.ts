@@ -1,9 +1,10 @@
 import { useEffect } from 'react';
-import { mergeRequestHeaders } from '../api/httpCompat';
+import { DEFAULT_REQUEST_TIMEOUT_MS, fetchWithTimeout, mergeRequestHeaders } from '../api/httpCompat';
 import { NO_AUTH, type AuthenticatedFetch } from '../api/SessionManager';
 import type { ClusterStatusApi } from '../api/ClusterStatusApi';
 import type { EndpointRegistry, MachaEndpoint } from './EndpointRegistry';
 import { reportClusterReachable, reportClusterUnreachable } from '../api/serverConnection';
+import { getDiscoveredEndpoints, setDiscoveredEndpoints } from '../state/client';
 import { createClientLogger } from '../diagnostics/ClientLog';
 
 export const ENDPOINT_HEALTH_INTERVAL_MS = 10_000;
@@ -19,16 +20,37 @@ interface ProbeResult {
 async function probeEndpoint(endpoint: MachaEndpoint, auth: AuthenticatedFetch): Promise<ProbeResult> {
   const startedAt = performance.now();
   try {
-    const response = await auth.fetch(`${endpoint.baseUrl}/api/v1/catalogue/status`, {
-      method: 'GET',
-      headers: mergeRequestHeaders(undefined, { Accept: 'application/json' }),
-      cache: 'no-store',
-    });
+    const response = await fetchWithTimeout(
+      (url, init) => auth.fetch(url, init),
+      `${endpoint.baseUrl}/api/v1/catalogue/status`,
+      { method: 'GET', headers: mergeRequestHeaders(undefined, { Accept: 'application/json' }), cache: 'no-store' },
+      DEFAULT_REQUEST_TIMEOUT_MS,
+    );
     if (!response.ok) return { status: 'reachable' };
     return { status: 'healthy', latencyMs: performance.now() - startedAt };
   } catch {
     return { status: 'unreachable' };
   }
+}
+
+/**
+ * A small, bounded set of endpoints this client has actually reached at some
+ * point, but never configured — a reload's only fallback if the single
+ * configured bootstrap endpoint happens to be down at that exact moment
+ * (`EndpointRegistry` otherwise reseeds runtime-discovered membership from
+ * nothing on every reload). Purely a resumable-history hint, per
+ * `docs/principles-and-laws.md`: recomputed from live state every cycle, so
+ * it always tracks what is *currently* confirmed rather than accumulating
+ * unbounded discovery history, and is superseded the moment a fresh
+ * `applyAdvertisement()` succeeds.
+ */
+export function persistConfirmedEndpoints(registry: EndpointRegistry, storage: Storage = localStorage): void {
+  const confirmed = registry.snapshot()
+    .filter(({ endpoint, health }) => endpoint.source === 'discovered' && health.lastSuccessAt !== undefined)
+    .map(({ endpoint }) => endpoint.baseUrl);
+  const current = getDiscoveredEndpoints(storage);
+  if (confirmed.length === current.length && confirmed.every((url, index) => url === current[index])) return;
+  setDiscoveredEndpoints(confirmed, storage);
 }
 
 /**
@@ -111,6 +133,7 @@ export function useEndpointHealthMonitor(
       if (!controller.signal.aborted && registry.snapshot().length > 0) {
         if (reachable > 0) reportClusterReachable(); else reportClusterUnreachable();
       }
+      if (!controller.signal.aborted) persistConfirmedEndpoints(registry);
       if (!controller.signal.aborted) timer = setTimeout(() => void cycle(), ENDPOINT_HEALTH_INTERVAL_MS);
     };
     void cycle();

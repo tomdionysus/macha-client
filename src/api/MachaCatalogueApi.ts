@@ -1,4 +1,4 @@
-import { mergeRequestHeaders, normalizeBaseUrl, queryString, readResponseBody } from './httpCompat';
+import { DEFAULT_REQUEST_TIMEOUT_MS, fetchWithTimeout, mergeRequestHeaders, normalizeBaseUrl, queryString, readResponseBody } from './httpCompat';
 import { NO_AUTH, type AuthenticatedFetch } from './SessionManager';
 import { parseErrorEnvelope } from './errorEnvelope';
 import { isGatewayConnectionFailure, serverUnreachable } from './serverConnection';
@@ -180,14 +180,14 @@ export class MachaCatalogueApi implements CatalogueApi {
     }
   }
 
-  private async fetch(path: string, accept: string, init: RequestInit = { method: 'GET' }): Promise<Response> {
+  private fetch(path: string, accept: string, init: RequestInit = { method: 'GET' }): Promise<Response> {
     const headers = mergeRequestHeaders(init.headers, { Accept: accept });
-    try {
-      return await this.auth.fetch(`${this.baseUrl}${path}`, { ...init, headers });
-    } catch (error) {
-      if (error && typeof error === 'object' && (error as { name?: unknown }).name === 'AbortError') throw error;
-      throw serverUnreachable();
-    }
+    return fetchWithTimeout(
+      (url, requestInit) => this.auth.fetch(url, requestInit),
+      `${this.baseUrl}${path}`,
+      { ...init, headers },
+      DEFAULT_REQUEST_TIMEOUT_MS,
+    );
   }
 
   private async throwResponseError(response: Response): Promise<never> {

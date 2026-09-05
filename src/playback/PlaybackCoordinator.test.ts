@@ -813,6 +813,64 @@ describe('PlaybackCoordinator player failures', () => {
     expect(coordinator.getSnapshot().session?.endpoint?.id).toBe('node-b');
   });
 
+  it('does not act on a stream error during an in-flight seek-driven generation replacement until the seek settles, then drops it as stale once the seek replaces the source', async () => {
+    // Mirrors the degrade() race (see the transport-invariants test above),
+    // but fail() can never just drop the error the way degrade() does — it
+    // must wait for the seek's own generation replacement to settle and
+    // judge from what actually happened, since a bare early return would
+    // leave a genuinely unrelated fatal error with neither recovery nor
+    // failure UI.
+    const player = new FakePlayer();
+    const initial = session({ mode: 'transcode', seekMs: 30_000 });
+    const update = deferred<PlaybackSession>();
+    const api = resolver(initial, async () => update.promise) as ReturnType<typeof resolver> & { failover: ReturnType<typeof vi.fn> };
+    api.failover = vi.fn();
+    const coordinator = new PlaybackCoordinator({ media: media(), player, resolver: api, capabilities: async () => capabilities(), initialPositionMs: 40_000 });
+    await coordinator.start();
+
+    coordinator.seek(10_000);
+    await vi.waitFor(() => expect(api.update).toHaveBeenCalledTimes(1));
+
+    player.fail(new PlaybackSourceError('old generation torn down', 'stream'));
+    await flush();
+    expect(coordinator.getSnapshot().fatalError).toBeUndefined();
+    expect(api.failover).not.toHaveBeenCalled();
+
+    update.resolve(session({ mode: 'transcode', seekMs: 8_000, source: { ...initial.source, url: '/generation-8000.m3u8' } }));
+    await flush();
+    await flush();
+
+    expect(coordinator.getSnapshot().fatalError).toBeUndefined();
+    expect(api.failover).not.toHaveBeenCalled();
+    await coordinator.close();
+  });
+
+  it('still surfaces a fatal error that arrives during an in-flight seek once the seek settles without replacing the source', async () => {
+    // The other half of the race above: the fatal error is genuinely
+    // unrelated to the seek (here, the seek's own generation request fails),
+    // so once the in-flight mutation settles the error must still be
+    // handled — not silently swallowed by a naive copy of degrade()'s guard.
+    const player = new FakePlayer();
+    const initial = session({ mode: 'transcode', seekMs: 30_000 });
+    const update = deferred<PlaybackSession>();
+    const api = resolver(initial, async () => update.promise) as ReturnType<typeof resolver> & { failover: ReturnType<typeof vi.fn> };
+    api.failover = vi.fn();
+    const coordinator = new PlaybackCoordinator({ media: media(), player, resolver: api, capabilities: async () => capabilities(), initialPositionMs: 40_000 });
+    await coordinator.start();
+
+    coordinator.seek(10_000);
+    await vi.waitFor(() => expect(api.update).toHaveBeenCalledTimes(1));
+
+    player.fail(new PlaybackSourceError('browser rejected the video stream', 'media'));
+    await flush();
+    expect(coordinator.getSnapshot().fatalError).toBeUndefined();
+
+    update.reject(new Error('generation update failed'));
+    await vi.waitFor(() => expect(coordinator.getSnapshot().fatalError?.message).toBe('browser rejected the video stream'));
+    expect(api.failover).not.toHaveBeenCalled();
+    await coordinator.close();
+  });
+
   it('recreates a failed generation with a representation change the failed node had not yet confirmed', async () => {
     const player = new FakePlayer();
     const initial = session({ endpoint: { id: 'node-a', baseUrl: 'http://a' } });

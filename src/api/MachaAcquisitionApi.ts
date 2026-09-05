@@ -7,7 +7,7 @@ import type {
   TorrentStatus,
 } from './AcquisitionApi';
 import { parseErrorEnvelope } from './errorEnvelope';
-import { mergeRequestHeaders, normalizeBaseUrl, readResponseBody } from './httpCompat';
+import { DEFAULT_REQUEST_TIMEOUT_MS, fetchWithTimeout, mergeRequestHeaders, normalizeBaseUrl, readResponseBody } from './httpCompat';
 import { NO_AUTH, type AuthenticatedFetch } from './SessionManager';
 import { isGatewayConnectionFailure, serverUnreachable } from './serverConnection';
 
@@ -97,15 +97,12 @@ export class MachaAcquisitionApi implements AcquisitionApi {
   }
 
   private async request<T>(path: string, init: RequestInit): Promise<T> {
-    let response: Response;
-    try {
-      response = await this.auth.fetch(`${this.baseUrl}${path}`, {
-        ...init,
-        headers: mergeRequestHeaders(init.headers, { Accept: 'application/json' }),
-      });
-    } catch {
-      throw serverUnreachable();
-    }
+    const response = await fetchWithTimeout(
+      (url, requestInit) => this.auth.fetch(url, requestInit),
+      `${this.baseUrl}${path}`,
+      { ...init, headers: mergeRequestHeaders(init.headers, { Accept: 'application/json' }) },
+      DEFAULT_REQUEST_TIMEOUT_MS,
+    );
 
     if (!response.ok) await this.throwResponseError(response);
     return await response.json() as T;

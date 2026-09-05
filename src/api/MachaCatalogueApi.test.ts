@@ -175,15 +175,28 @@ describe('MachaCatalogueApi', () => {
   });
 
   it('passes artwork cancellation through to fetch', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response(new Blob(['image']), { status: 200 }));
+    let capturedSignal: AbortSignal | undefined;
+    let resolveFetch!: (response: Response) => void;
+    const fetchMock = vi.fn((_url: string, init?: RequestInit) => {
+      capturedSignal = init?.signal ?? undefined;
+      return new Promise<Response>((resolve) => { resolveFetch = resolve; });
+    });
     vi.stubGlobal('fetch', fetchMock);
     const api = new MachaCatalogueApi('http://node.test');
     const controller = new AbortController();
 
-    await api.artwork('abcd', controller.signal);
+    // The bounded-timeout wrapper composes the caller's signal into its own
+    // AbortController rather than passing the same object through (no
+    // `AbortSignal.any` on the legacy browsers this app also targets) — so
+    // cancelling the caller's controller must still abort whatever signal
+    // fetch actually received, even though it is no longer the same object.
+    const request = api.artwork('abcd', controller.signal);
+    expect(capturedSignal?.aborted).toBe(false);
+    controller.abort();
+    expect(capturedSignal?.aborted).toBe(true);
 
-    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(init.signal).toBe(controller.signal);
+    resolveFetch(new Response(new Blob(['image']), { status: 200 }));
+    await request;
   });
 
   it('clears catalogue metadata with optimistic revision protection', async () => {

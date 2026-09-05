@@ -209,29 +209,6 @@ failures). Remaining work, in priority order:
   hard-reactivation path may be attempting exactly that. This blocks the
   remaining Phase 6 boundaries above (pause/seek/option-change all force a
   real reactivation).
-- [ ] **`fail()`'s reactive path has the same shape of race `degrade()` had.**
-  `degrade()` now correctly ignores playback errors while a seek-driven
-  generation replacement (`this.activeMutation?.reason === 'seek'`) is
-  already in flight (fixed 2026-09-05, live A/V-desync report — see the plan
-  doc, Phase 5). `fail()` was deliberately left unguarded: the same
-  short-circuit there would risk silently swallowing a genuinely unrelated
-  fatal error during a seek, with neither recovery nor failure UI. Needs a
-  real design (e.g. wait for the in-flight mutation to settle before
-  treating a fatal error as fresh), not a copy of the `degrade()` fix.
-- [ ] **No bounded per-request timeout anywhere in the cluster status/
-  catalogue/routing fetch layer.** Every `AbortSignal` in that layer is
-  caller-supplied for unmount cancellation only, never a timeout. Caught
-  live: a single already-known-good endpoint took 19.7s on one request,
-  serialized behind nothing, blocking unrelated work. Add a real
-  `AbortController`-based timeout to every fetch in this layer.
-- [ ] **Endpoint registry has no memory across a reload.** Runtime-discovered
-  cluster membership (`discoverClusterEndpoints()`) lives only in memory; a
-  page reload reseeds purely from the single original bootstrap URL in
-  localStorage. If the client already failed over away from that node
-  because it went down, a reload while it's still down has no way back in.
-  Persist a small, bounded set of endpoints actually confirmed working
-  (not unbounded discovery history), treated as `bootstrap`/`environment`
-  source so it survives `applyAdvertisement()`'s replace-on-refresh.
 - [ ] **Phase 3 compatibility-path rationalisation** — explicitly deferred,
   not actionable yet: blocked on a minimum-supported-node-capability
   guarantee (immutable media profiles) that does not exist yet.
