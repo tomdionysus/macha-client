@@ -1,6 +1,7 @@
 import type { IdentityAssociationReset } from './ManageApi';
-import { authenticatedRequestHeaders, normalizeBaseUrl, readResponseBody, type BearerTokenSource } from './httpCompat';
-import { isGatewayConnectionFailure, reportUnauthorized, serverUnreachable } from './serverConnection';
+import { mergeRequestHeaders, normalizeBaseUrl, readResponseBody } from './httpCompat';
+import { NO_AUTH, type AuthenticatedFetch } from './SessionManager';
+import { isGatewayConnectionFailure, serverUnreachable } from './serverConnection';
 
 export type TelemetryFreshness = 'live' | 'stale' | 'last_known' | 'unavailable';
 export type NodeState = 'online' | 'offline' | 'retired';
@@ -176,20 +177,20 @@ export class MachaClusterStatusApiError extends Error {
 export class MachaClusterStatusApi implements ClusterStatusApi {
   private readonly baseUrl: string;
 
-  constructor(baseUrl: string, private readonly bearerToken?: BearerTokenSource) {
+  constructor(baseUrl: string, private readonly auth: AuthenticatedFetch = NO_AUTH) {
     this.baseUrl = normalizeBaseUrl(baseUrl);
   }
 
   private async request<T>(path: string, method: 'GET' | 'POST'): Promise<T> {
-    const headers = authenticatedRequestHeaders(undefined, this.bearerToken);
-
     let response: Response;
     try {
-      response = await fetch(`${this.baseUrl}${path}`, { method, headers });
+      response = await this.auth.fetch(`${this.baseUrl}${path}`, {
+        method,
+        headers: mergeRequestHeaders(undefined, { Accept: 'application/json' }),
+      });
     } catch {
       throw serverUnreachable();
     }
-    if (response.status === 401) reportUnauthorized();
 
     const { body, wasJson } = await readResponseBody(response);
     if (isGatewayConnectionFailure(response, wasJson)) throw serverUnreachable();

@@ -144,4 +144,99 @@ describe('LazyArtwork', () => {
 
     expect(screen.getByText('no artwork')).not.toBeNull();
   });
+
+  it('ignores a re-signed URL for an artwork already loaded, so a re-fetch does not smash the browser cache', () => {
+    // The server re-signs exp/sig on every catalogue re-fetch even when the
+    // image hasn't changed. Once this artwork id has loaded successfully
+    // once, a merely-reissued URL for the same id must not force a new
+    // <img src> — that would be a fresh HTTP-cache key for identical bytes.
+    const { rerender } = render(
+      <LazyArtwork
+        api={fakeApi()}
+        artwork={{ id: 'poster-1', mimeType: 'image/jpeg', url: '/signed/poster-1?sig=first' }}
+        alt="Movie poster"
+        placeholder={<span>placeholder</span>}
+      />,
+    );
+    fireEvent.load(screen.getByRole('img', { name: 'Movie poster' }));
+
+    rerender(
+      <LazyArtwork
+        api={fakeApi()}
+        artwork={{ id: 'poster-1', mimeType: 'image/jpeg', url: '/signed/poster-1?sig=second' }}
+        alt="Movie poster"
+        placeholder={<span>placeholder</span>}
+      />,
+    );
+
+    expect(screen.getByRole<HTMLImageElement>('img', { name: 'Movie poster' }).src).toContain('sig=first');
+  });
+
+  it('adopts a fresh remount of the same artwork id from wherever it last loaded, across component instances', () => {
+    // The point of caching by id (not by component instance) is surviving a
+    // full unmount/remount of the card — e.g. navigating away from Home and
+    // back, which is exactly when the catalogue re-fetch reissues the URL.
+    const { unmount } = render(
+      <LazyArtwork
+        api={fakeApi()}
+        artwork={{ id: 'poster-2', mimeType: 'image/jpeg', url: '/signed/poster-2?sig=first' }}
+        alt="Movie poster"
+        placeholder={<span>placeholder</span>}
+      />,
+    );
+    fireEvent.load(screen.getByRole('img', { name: 'Movie poster' }));
+    unmount();
+
+    render(
+      <LazyArtwork
+        api={fakeApi()}
+        artwork={{ id: 'poster-2', mimeType: 'image/jpeg', url: '/signed/poster-2?sig=second' }}
+        alt="Movie poster"
+        placeholder={<span>placeholder</span>}
+      />,
+    );
+
+    expect(screen.getByRole<HTMLImageElement>('img', { name: 'Movie poster' }).src).toContain('sig=first');
+  });
+
+  it('falls back to the fresh URL once the cached copy actually fails', () => {
+    const { rerender } = render(
+      <LazyArtwork
+        api={fakeApi()}
+        artwork={{ id: 'poster-3', mimeType: 'image/jpeg', url: '/signed/poster-3?sig=stale' }}
+        alt="Movie poster"
+        placeholder={<span>placeholder</span>}
+      />,
+    );
+    fireEvent.load(screen.getByRole('img', { name: 'Movie poster' }));
+
+    fireEvent.error(screen.getByRole('img', { name: 'Movie poster' }));
+    fireEvent.error(screen.getByRole('img', { name: 'Movie poster' }));
+    fireEvent.error(screen.getByRole('img', { name: 'Movie poster' }));
+    expect(screen.queryByRole('img', { name: 'Movie poster' })).toBeNull();
+
+    rerender(
+      <LazyArtwork
+        api={fakeApi()}
+        artwork={{ id: 'poster-3', mimeType: 'image/jpeg', url: '/signed/poster-3?sig=fresh' }}
+        alt="Movie poster"
+        placeholder={<span>placeholder</span>}
+      />,
+    );
+
+    expect(screen.getByRole<HTMLImageElement>('img', { name: 'Movie poster' }).src).toContain('sig=fresh');
+  });
+
+  it('loads a never-before-seen artwork id from its given URL, not some other id\'s cached entry', () => {
+    render(
+      <LazyArtwork
+        api={fakeApi()}
+        artwork={{ id: 'poster-unique', mimeType: 'image/jpeg', url: '/signed/poster-unique?sig=only' }}
+        alt="Movie poster"
+        placeholder={<span>placeholder</span>}
+      />,
+    );
+
+    expect(screen.getByRole<HTMLImageElement>('img', { name: 'Movie poster' }).src).toContain('sig=only');
+  });
 });

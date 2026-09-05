@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MachaManageApi } from './MachaManageApi';
+import { fixedBearerToken } from './SessionManager';
 
 function jsonResponse(value: unknown, init: ResponseInit = {}): Response {
   return new Response(JSON.stringify(value), {
@@ -28,7 +29,7 @@ describe('MachaManageApi', () => {
   it('loads only the server-provided actionable unmatched set with authentication', async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ count: 1, items: [unmatched] }));
     vi.stubGlobal('fetch', fetchMock);
-    const api = new MachaManageApi('http://node.test/', 'secret');
+    const api = new MachaManageApi('http://node.test/', fixedBearerToken('secret'));
 
     await expect(api.unmatched()).resolves.toEqual([unmatched]);
 
@@ -100,7 +101,7 @@ describe('MachaManageApi', () => {
       metadata_generation: 42,
     }));
     vi.stubGlobal('fetch', fetchMock);
-    const api = new MachaManageApi('http://node.test', 'secret');
+    const api = new MachaManageApi('http://node.test', fixedBearerToken('secret'));
 
     const result = await api.resetIdentityAssociation({ host: '10.44.1.50', reason: 'clear by ip' });
 

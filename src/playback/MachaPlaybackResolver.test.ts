@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MachaCatalogueApi } from '../api/MachaCatalogueApi';
 import { MachaPlaybackResolver } from './MachaPlaybackResolver';
+import { fixedBearerToken } from '../api/SessionManager';
 import type { MediaSummary, PlaybackCapabilities } from '../types';
 
 const media: MediaSummary = {
@@ -82,7 +83,7 @@ describe('MachaPlaybackResolver', () => {
   it('creates a playback session with browser capabilities and bearer auth', async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse(sessionResponse(), 201));
     vi.stubGlobal('fetch', fetchMock);
-    const resolver = new MachaPlaybackResolver('http://node.test/', 'secret');
+    const resolver = new MachaPlaybackResolver('http://node.test/', fixedBearerToken('secret'));
 
     const session = await resolver.resolve(media, capabilities);
 
@@ -195,7 +196,7 @@ describe('MachaPlaybackResolver', () => {
   it('prefers Direct on Samsung while Web remains Auto', async () => {
     const fetchMock = vi.fn().mockImplementation(async () => jsonResponse(sessionResponse(), 201));
     vi.stubGlobal('fetch', fetchMock);
-    const resolver = new MachaPlaybackResolver('http://node.test', 'secret');
+    const resolver = new MachaPlaybackResolver('http://node.test', fixedBearerToken('secret'));
 
     await resolver.resolve(media, { ...capabilities, platform: 'tizen' });
     const [, samsungInit] = fetchMock.mock.calls[0] as [string, RequestInit];
@@ -214,7 +215,7 @@ describe('MachaPlaybackResolver', () => {
   it('includes the initial resume position in session creation', async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse(sessionResponse({ seek_ms: 42_000 }), 201));
     vi.stubGlobal('fetch', fetchMock);
-    const resolver = new MachaPlaybackResolver('http://node.test', 'secret');
+    const resolver = new MachaPlaybackResolver('http://node.test', fixedBearerToken('secret'));
 
     const session = await resolver.resolve(media, capabilities, 42_000);
 
@@ -232,7 +233,7 @@ describe('MachaPlaybackResolver', () => {
       },
     }), 201));
     vi.stubGlobal('fetch', fetchMock);
-    const resolver = new MachaPlaybackResolver('http://node.test', 'secret');
+    const resolver = new MachaPlaybackResolver('http://node.test', fixedBearerToken('secret'));
 
     await resolver.resolve(media, capabilities, 42_000, { mode: 'transcode', maxHeight: 720 });
 
@@ -246,7 +247,7 @@ describe('MachaPlaybackResolver', () => {
   it('only sends decoder resolution limits when the platform explicitly reports them', async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse(sessionResponse(), 201));
     vi.stubGlobal('fetch', fetchMock);
-    const resolver = new MachaPlaybackResolver('http://node.test', 'secret');
+    const resolver = new MachaPlaybackResolver('http://node.test', fixedBearerToken('secret'));
 
     await resolver.resolve(media, { ...capabilities, maxWidth: 3840, maxHeight: 2160 });
 
@@ -262,7 +263,7 @@ describe('MachaPlaybackResolver', () => {
   it('keeps a configured reverse-proxy prefix on returned capability URLs', async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse(sessionResponse(), 201));
     vi.stubGlobal('fetch', fetchMock);
-    const resolver = new MachaPlaybackResolver('/macha', 'secret');
+    const resolver = new MachaPlaybackResolver('/macha', fixedBearerToken('secret'));
 
     const session = await resolver.resolve(media, capabilities);
 
@@ -273,7 +274,7 @@ describe('MachaPlaybackResolver', () => {
   it('sends seek-only PATCHes without preferences so the server can use its fast path', async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse(sessionResponse({ seek_ms: 42000 })));
     vi.stubGlobal('fetch', fetchMock);
-    const resolver = new MachaPlaybackResolver('http://node.test', 'secret');
+    const resolver = new MachaPlaybackResolver('http://node.test', fixedBearerToken('secret'));
 
     const session = await resolver.update('session-1', { seekMs: 42_000 });
 
@@ -293,7 +294,7 @@ describe('MachaPlaybackResolver', () => {
       });
     });
     vi.stubGlobal('fetch', fetchMock);
-    const resolver = new MachaPlaybackResolver('http://node.test', 'secret');
+    const resolver = new MachaPlaybackResolver('http://node.test', fixedBearerToken('secret'));
     const controller = new AbortController();
 
     const request = resolver.update('session-1', { seekMs: 42_000 }, controller.signal);
@@ -313,7 +314,7 @@ describe('MachaPlaybackResolver', () => {
       selection: { video_stream: 0, audio_stream: 1, subtitle_stream: 5 },
     })));
     vi.stubGlobal('fetch', fetchMock);
-    const resolver = new MachaPlaybackResolver('http://node.test', 'secret');
+    const resolver = new MachaPlaybackResolver('http://node.test', fixedBearerToken('secret'));
 
     await resolver.update('session-1', {
       preferences: { subtitleStream: 5, subtitleLanguage: '' },
@@ -343,7 +344,7 @@ describe('MachaPlaybackResolver', () => {
       },
     })));
     vi.stubGlobal('fetch', fetchMock);
-    const resolver = new MachaPlaybackResolver('http://node.test', 'secret');
+    const resolver = new MachaPlaybackResolver('http://node.test', fixedBearerToken('secret'));
 
     const session = await resolver.update('session-1', { preferences: { mode: 'direct' } });
 
@@ -368,7 +369,7 @@ describe('MachaPlaybackResolver', () => {
       },
     })));
     vi.stubGlobal('fetch', fetchMock);
-    const resolver = new MachaPlaybackResolver('http://node.test', 'secret');
+    const resolver = new MachaPlaybackResolver('http://node.test', fixedBearerToken('secret'));
 
     const session = await resolver.update('session-1', {
       seekMs: 5_040_000,
@@ -402,7 +403,7 @@ describe('MachaPlaybackResolver', () => {
   it('deletes the playback session explicitly', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
     vi.stubGlobal('fetch', fetchMock);
-    const resolver = new MachaPlaybackResolver('http://node.test', 'secret');
+    const resolver = new MachaPlaybackResolver('http://node.test', fixedBearerToken('secret'));
 
     await resolver.stop('session-1');
 
@@ -415,7 +416,7 @@ describe('MachaPlaybackResolver', () => {
   it('can keep the DELETE alive during browser navigation teardown', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
     vi.stubGlobal('fetch', fetchMock);
-    const resolver = new MachaPlaybackResolver('http://node.test', 'secret');
+    const resolver = new MachaPlaybackResolver('http://node.test', fixedBearerToken('secret'));
 
     await resolver.stop('session-1', { keepalive: true });
 
@@ -433,7 +434,7 @@ describe('MachaPlaybackResolver', () => {
       },
     }, 409));
     vi.stubGlobal('fetch', fetchMock);
-    const resolver = new MachaPlaybackResolver('http://node.test', 'secret');
+    const resolver = new MachaPlaybackResolver('http://node.test', fixedBearerToken('secret'));
 
     await expect(resolver.resolve(media, capabilities)).rejects.toMatchObject({
       message: 'Macha playback request failed: No playable media source',

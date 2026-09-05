@@ -7,6 +7,7 @@ import { useRefreshableAsync } from '../hooks/useRefreshableAsync';
 import { ErrorMessage, Loading } from '../components/Status';
 import { useArtworkUrl } from '../hooks/useArtworkUrl';
 import { requestTvDefaultFocus } from '../hooks/useTvNavigation';
+import { buildPlatformTraits } from '../platform/platformTraits';
 import { useEffect } from 'react';
 import { EditButton } from '../components/EditButton';
 import { MediaPageTitle } from '../components/MediaPageTitle';
@@ -92,7 +93,7 @@ export function DetailScreen({ api, itemId, onBack, onPlay, onPlayFromStart, pro
           <button
             className="media-control-button"
             data-tv-focusable="true"
-            data-tv-default-focus={import.meta.env.MODE === 'samsung' || import.meta.env.MODE === 'android' ? 'true' : undefined}
+            data-tv-default-focus={buildPlatformTraits.usesDpadNavigation ? 'true' : undefined}
             onClick={() => onPlay(media)}
             type="button"
             aria-label={resumable ? 'Resume playback' : 'Play'}

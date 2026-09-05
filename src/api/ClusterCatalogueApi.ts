@@ -9,7 +9,7 @@ import type {
 import { MachaApiError, MachaCatalogueApi } from './MachaCatalogueApi';
 import type { EndpointRegistry, MachaEndpoint } from '../cluster/EndpointRegistry';
 import { ClusterEndpointRouter } from '../cluster/endpointRouting';
-import type { BearerTokenSource } from './httpCompat';
+import { NO_AUTH, type AuthenticatedFetch } from './SessionManager';
 
 type EndpointOperation<T> = (api: MachaCatalogueApi, endpoint: MachaEndpoint) => Promise<T>;
 
@@ -37,7 +37,7 @@ export class ClusterCatalogueApi implements CatalogueApi {
 
   constructor(
     routerOrRegistry: ClusterEndpointRouter | EndpointRegistry,
-    private readonly bearerToken?: BearerTokenSource,
+    private readonly auth: AuthenticatedFetch = NO_AUTH,
   ) {
     this.router = routerOrRegistry instanceof ClusterEndpointRouter
       ? routerOrRegistry
@@ -244,7 +244,7 @@ export class ClusterCatalogueApi implements CatalogueApi {
   private api(endpoint: MachaEndpoint): MachaCatalogueApi {
     let api = this.apis.get(endpoint.id);
     if (!api) {
-      api = new MachaCatalogueApi(endpoint.baseUrl, this.bearerToken);
+      api = new MachaCatalogueApi(endpoint.baseUrl, this.auth);
       this.apis.set(endpoint.id, api);
     }
     return api;

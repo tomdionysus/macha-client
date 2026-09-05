@@ -5,11 +5,11 @@ import type {
   ManageApi, ManualMetadata, ManualMetadataResult, MatchSearchResult, UnmatchedDetail, UnmatchedFile,
 } from './ManageApi';
 import { MachaManageApi } from './MachaManageApi';
-import type { BearerTokenSource } from './httpCompat';
+import { NO_AUTH, type AuthenticatedFetch } from './SessionManager';
 
 export class ClusterManageApi implements ManageApi {
   private readonly apis = new Map<string, MachaManageApi>();
-  constructor(private readonly router: ClusterEndpointRouter, private readonly bearerToken?: BearerTokenSource) {}
+  constructor(private readonly router: ClusterEndpointRouter, private readonly auth: AuthenticatedFetch = NO_AUTH) {}
 
   unmatched(): Promise<UnmatchedFile[]> { return this.read((api) => api.unmatched()); }
   unmatchedDetail(id: string): Promise<UnmatchedDetail> { return this.read((api) => api.unmatchedDetail(id)); }
@@ -39,7 +39,7 @@ export class ClusterManageApi implements ManageApi {
 
   private api(endpoint: MachaEndpoint): MachaManageApi {
     let api = this.apis.get(endpoint.id);
-    if (!api) { api = new MachaManageApi(endpoint.baseUrl, this.bearerToken); this.apis.set(endpoint.id, api); }
+    if (!api) { api = new MachaManageApi(endpoint.baseUrl, this.auth); this.apis.set(endpoint.id, api); }
     return api;
   }
 }

@@ -4,7 +4,7 @@ import { createClientLogger } from '../diagnostics/ClientLog';
 import { ClusterEndpointRouter } from '../cluster/endpointRouting';
 import type { MediaSummary, PlaybackCapabilities } from '../types';
 import { MachaPlaybackResolver, newPlaybackIdempotencyKey } from './MachaPlaybackResolver';
-import type { BearerTokenSource } from '../api/httpCompat';
+import { NO_AUTH, type AuthenticatedFetch } from '../api/SessionManager';
 import type {
   PlaybackPreferencesUpdate,
   PlaybackResolver,
@@ -52,7 +52,7 @@ export class ClusterPlaybackResolver implements PlaybackResolver {
 
   constructor(
     routerOrRegistry: ClusterEndpointRouter | EndpointRegistry,
-    private readonly bearerToken?: BearerTokenSource,
+    private readonly auth: AuthenticatedFetch = NO_AUTH,
     private readonly generationAttemptTimeoutMs = 12_000,
   ) {
     this.registry = routerOrRegistry instanceof ClusterEndpointRouter
@@ -212,7 +212,7 @@ export class ClusterPlaybackResolver implements PlaybackResolver {
   private resolver(endpoint: MachaEndpoint): MachaPlaybackResolver {
     let resolver = this.resolvers.get(endpoint.id);
     if (!resolver) {
-      resolver = new MachaPlaybackResolver(endpoint.baseUrl, this.bearerToken);
+      resolver = new MachaPlaybackResolver(endpoint.baseUrl, this.auth);
       this.resolvers.set(endpoint.id, resolver);
     }
     return resolver;

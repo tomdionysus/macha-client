@@ -1,70 +1,287 @@
 # Completed and tested
 
-Last updated: 2026-09-05
+Last updated: 2026-09-06
 
 This is the completed-work ledger for the current session. An item belongs here
 only after implementation and its stated verification are complete. Detailed
 design notes and exact test results remain in the linked records.
 
-## Session/auth REST contract migration, and a real bug caught in the live joint test
+## Anonymous session survives a reload: validate-then-mint, not mint-every-time
+
+Following directly from the deep-link 401 fix below: every reload re-minted a
+brand new anonymous session from scratch, a real server round trip creating a
+new session record, even though the *previous* token was usually still
+perfectly valid. That's a viewer-visible delay on every single reload for no
+reason — a direct violation of Law 2, "Thou Shalt Not Make The Viewer Wait"
+(`docs/principles-and-laws.md`). It also widened the exact race the deep-link
+fix closes: the longer `sessionReady` takes to become true, the bigger the
+window for something to fire an authenticated request too early.
+
+- [x] `SessionManager` now persists `{token, expiresAtMs}` to `sessionStorage`
+  (tab-scoped, gone with the tab — matching an anonymous session's own
+  lifetime) on every successful mint, and `start()` tries a cached,
+  unexpired token first via a new cheap validity check
+  (`SessionAuth.validateAnonymousSessionAnyNode`, reusing the same
+  lightweight `GET /api/v1/catalogue/status` the health monitor already
+  probes) before ever minting fresh. A live server check — not just trusting
+  the locally-recorded expiry — both proves the token still authenticates
+  and doubles as an endpoint-reachability check, and correctly handles
+  reconfiguring to a different server (the old token 401s against the new
+  one, falling through to a fresh mint) with no extra bookkeeping needed.
+  A rejection or an unreachable-during-validation failure both fall through
+  to a normal fresh mint, which will hit the same nodes and fail the same
+  way if the cluster is genuinely unreachable.
+- [x] **Found and fixed a second, related bug while verifying this live**:
+  `SessionManager.fetch()` reactively re-minted on *any* 401, including one
+  from a request that fired before any token existed yet (nothing to
+  reject). Depending on timing, a slow such request's 401 could arrive
+  *after* a fast, successful cache validation had already adopted a good
+  session — silently clobbering it with a wasteful fresh mint. Fixed by
+  capturing whether a token existed *before* issuing the request and only
+  reacting to 401 when it did; a tokenless 401 is never evidence the current
+  session is bad, since there wasn't one to reject.
+- [x] **Found and fixed a third bug this exposed**: `App.tsx`'s
+  Manage-unmatched-count effect fired `manageApi.unmatched()` unconditionally
+  on mount, before `sessionReady`, and its dependency array never included
+  `sessionReady` — so an early 401 there would leave the badge silently and
+  permanently stuck at 0, never actually retrying once the session became
+  ready. Gated it on `sessionReady` and added it to the deps.
+- [x] Added `src/api/SessionManager.test.ts` coverage: adopts a validated
+  cached session without minting, mints and re-caches when validation
+  rejects it, skips validation entirely for an already-expired cached entry,
+  and — the regression for the second bug — does not re-mint when a slow
+  request's tokenless 401 resolves after a token was already adopted.
+  Confirmed that last one fails against the prior code (temporarily
+  disabled the `hadToken` guard, reran, restored it) and passes with the fix.
+- [x] Live-verified against the real cluster: the same cached token survived
+  three consecutive hard reloads unchanged (no re-mint), and the original
+  deep-link-into-`/play/:itemId` scenario still resumed playback cleanly
+  with the cache-validation path active underneath.
+- [x] Passed 416/416 tests and TypeScript typechecking.
+
+## Deep-linked `/play/:itemId` reload could 401 before the session mint completed
+
+Investigating the "readyState 0 forever" Direct Play P0 (see `ACTIVE.md`) live
+via browser automation surfaced a real, unrelated bug: a hard reload (or any
+fresh navigation) straight into `/play/:itemId` occasionally failed instantly
+with "Macha playback request failed: a valid session bearer token is
+required" — reproduced live and confirmed with a real user report of the same
+failure mid-session.
+
+Root cause: `App.tsx` blocks every other route behind a `!sessionReady`
+Loading screen (added in the session/auth migration) specifically so no
+route fires an authenticated request before the first session mint
+completes. But `usePlaybackController`'s route-reconstruction effect — the
+one that reconstructs an active player from `location.pathname` alone,
+needed for exactly this kind of deep link — runs unconditionally as part of
+that hook, which is called *before* `App.tsx`'s early return. It had no way
+to see `sessionReady` at all, so it could fire `api.details()`/`runtime.play()`
+immediately with no token yet minted, on the very first render.
+
+- [x] Added an optional `sessionReady` option to `usePlaybackController`
+  (default `true`, so existing callers/tests are unaffected) and gated the
+  reconstruction effect on it, re-running once it flips true — this can never
+  re-gate or interrupt something already playing, since the same effect
+  already bails out immediately whenever `activePlayback` exists.
+  `App.tsx` now passes its own `sessionReady` (from `useSession`) straight
+  through — that value already folds in the `!connectionRequired` case.
+- [x] Added a regression in `usePlaybackController.test.tsx` proving
+  reconstruction is deferred while `sessionReady` is false and fires once it
+  becomes true; confirmed it fails against the prior code (temporarily
+  disabled the guard, reran, restored it) and passes with the fix.
+- [x] Live-verified against the real cluster: a hard reload directly into
+  `/play/tmdb:movie:8374` — the exact failing scenario — now resumes
+  playback cleanly instead of 401ing.
+- [x] Passed 411/411 tests and TypeScript typechecking.
+
+## Platform UI traits, and no mini player on Samsung/Android
+
+Codex's earlier "single core, multiple platform" work left `Platform` with
+only playback-technical fields; every UI-behavior decision (D-pad nav,
+hash routing, TV back handling, player control scheme) was re-derived ad
+hoc from `platform.name`/`import.meta.env.MODE` at each call site, in three
+different, inconsistent groupings. Fixed as a prerequisite before touching
+any of that behavior:
+
+- [x] `src/platform/platformTraits.ts` — five named traits
+  (`usesDpadNavigation`, `usesHashRouting`, `receivesBackKeyEvents`,
+  `usesRemoteMediaControls`, `hasPointerControls`), each documented with
+  *why* it exists and which platforms currently share it (named after the
+  decision, not collapsed just because two platforms agree on it today).
+  Migrated every scattered check to read from it — `main.tsx` (router
+  choice), `useTvNavigation.ts` (deleted the now-redundant private
+  `tvMode()`), `DetailScreen.tsx`, `useMediaRouteBack.ts`, `App.tsx`'s
+  `samsungBack`, and `PlayerScreen.tsx` (`samsungControls`/`webControls`,
+  plus two in-file duplicates of the same `platform.name === 'web'` check
+  found while in there). Left alone deliberately: `bootSplash.ts`,
+  `state/client.ts`, the platform badge label, `main.tsx`'s
+  diagnostics-config/fatal-handler block (infra/cosmetic, not
+  UI-interaction behavior), and `detectPlatform()` itself (the canonical
+  place `MODE` decides platform identity, not a scattered check to fix).
+  Pure consolidation — every trait's value is identical to what it replaced.
+
+The mini player bar doesn't work on a real TV remote (no pointer to reach a
+small persistent control) — removed on Samsung and Android specifically:
+
+- [x] `PlayerScreen.tsx`: the remote-back and Android-dev-keyboard-Escape
+  paths now call `onStop()` (full close) instead of `onMinimize()`; the
+  visible minimize/back button in the full chrome no longer renders outside
+  `webControls`. Extracted the decision into a tested pure function,
+  `playerBackAction(webControls)`, matching this file's existing
+  `playerBufferedTimelineEnabled`-style testability pattern.
+- [x] Android's hardware back button is intercepted **natively** before any
+  JS runs (`platforms/android`'s `MainActivity.onBackPressed()` calls
+  `WebView.goBack()` directly) — confirmed by reading the Java source, not
+  assumed. A pure web-side fix would have been silently unreachable on a
+  real device. Added a JS↔native hook: `MainActivity` now asks
+  `window.__machaHandleBack()` first (via `evaluateJavascript`) and only
+  falls back to `WebView.goBack()`/`finish()` if it's absent or returns
+  false; `PlayerScreen.tsx` registers that hook to call `onStop()` while the
+  full player is showing. Not device-tested — no Android hardware/emulator
+  available here; the Java change is small and mechanically matches the
+  existing `onBackPressed` shape, but treat it as unverified until run on a
+  real device or emulator.
+- [x] **Live-verified on Samsung** (`vite --mode samsung`, demo content):
+  minimize button confirmed absent from the DOM; dispatching the Samsung
+  remote "Return" key (`keyCode 10009`) from the full player now closes
+  playback and returns to the previous screen, with no mini bar appearing.
+- [x] Added `src/screens/PlayerScreen.test.ts` coverage for
+  `playerBackAction`.
+
+**The live Samsung check caught a second real, pre-existing bug**: closing
+from the full player (not the mini bar) silently restarted the same title
+from position 0 instead of closing. Root cause: `stop()`/`handleEnded()`
+navigate away from `/play/:id` and asynchronously clear the runtime's active
+request; if the runtime's phase reaches `idle` (request cleared) on a render
+where the router hasn't yet committed the navigate-away, the
+reconstruct-from-route effect sees "on the player route, no active
+playback" — indistinguishable from a reload deep-linked into the player —
+and restarts it. This existed before this session's changes (the explicit
+close button also hits it) but was rarely exercised, since minimize (the
+overwhelmingly common path) never clears the request and so never races.
+Making back/close the normal path on TV made it fire on nearly every exit.
+
+- [x] Fixed with a `suppressReconstructRef` in `usePlaybackController.ts`,
+  set when `stop()`/`handleEnded()` navigate away from an active player
+  route, cleared only once the route has actually left `/play/:id` —
+  proving the intentional stop this was guarding actually completed, not
+  just that some render happened to run.
+- [x] Added `src/app/usePlaybackController.stopRace.test.tsx`: mocks
+  `react-router-dom`'s `useNavigate`/`useLocation` to decouple "navigate()
+  was called" from "the route changed" (a real `MemoryRouter` flushes both
+  together in a synchronous test, hiding the exact race). Confirmed this
+  test fails against the pre-fix code (reverted it and re-ran to check)
+  before confirming it passes against the fix.
+- [x] Passed 409/409 tests and TypeScript typechecking.
+
+## Session/auth REST contract migration: a proper SessionManager, two real bugs caught live
 
 The server session implemented a new anonymous-session auth subsystem
 (`POST /api/v1/session` mint, `Authorization: Bearer` required on every other
-route) in parallel with this client-side work, then stood up a local dev
-instance for a live joint check.
+route) in parallel with this client-side work. This landed in three passes,
+each catching something the previous one missed.
 
-- [x] Replaced the manually-entered `apiToken` model with anonymous session
-  lifecycle management. Every API client (`Macha*Api`/`Cluster*Api`, plus the
-  playback resolver) now reads a live `SessionTokenStore`
-  (`src/api/SessionTokenStore.ts`) at request time via a widened
-  `BearerTokenSource` type in `src/api/httpCompat.ts`, so a token refresh
-  reaches every already-constructed, long-lived client immediately — notably
-  the playback resolver, which owns per-session node bookkeeping that would
-  otherwise be orphaned by recreating it on every token change.
-- [x] `useSessionAuth` (`src/app/useSessionAuth.ts`) mints via
-  `mintAnonymousSessionAnyNode` (`src/api/SessionAuth.ts`, tries every known
-  endpoint) at startup, re-mints shortly before `expires_unix_ms`, and
-  re-mints reactively on a `macha:session-unauthorized` event fired from
-  every API client's 401 path (`reportUnauthorized()` in
-  `src/api/serverConnection.ts`). A manually configured bearer token in
-  Settings still overrides auto-mint entirely, unchanged from before.
-- [x] Removed the legacy `Macha-Viewer-Session` header and the whole
-  `viewer_session_id`/`PlaybackAdmissionContext` concept — retired outright
-  rather than just no longer sent, since this app only ever runs one
-  `PlaybackRuntime` per tab, so per-viewer session multiplexing had nothing
-  to distinguish. Removed the `Idempotency-Key` header; the idempotency key
-  now travels as `POST /api/v1/playback/sessions?idempotency_key=<...>`.
+**Pass 1 — the contract itself.** Every API client (`Macha*Api`/`Cluster*Api`,
+plus the playback resolver) authenticates through an injected auth
+dependency instead of a manually-entered token. Removed the legacy
+`Macha-Viewer-Session` header and the whole `viewer_session_id`/
+`PlaybackAdmissionContext` concept outright (this app only ever runs one
+`PlaybackRuntime` per tab, so per-viewer multiplexing had nothing to
+distinguish) and the `Idempotency-Key` header (now
+`POST /api/v1/playback/sessions?idempotency_key=<...>`).
 
-**The live joint test caught a real bug no unit test had**: within seconds of
-pointing the client at the server session's real instance, it fired
+**Pass 2 — a live joint test against the server session's real instance
+caught a real bug no unit test had**: within seconds, the client fired
 thousands of `POST /api/v1/session` calls in a tight loop (all landing as
 201s — the server was never at fault). Root cause: `setTimeout`'s delay is a
-32-bit signed int internally (~24.8-day max); scheduling the proactive
-pre-expiry refresh for the full remaining duration of this contract's
-~30-day session TTL silently overflowed to ~0ms, so the client re-minted
-immediately after every "successful" mint, forever.
+32-bit signed int (~24.8-day max); scheduling the proactive pre-expiry
+refresh for the full remaining duration of this contract's ~30-day session
+TTL silently overflowed to ~0ms, so the client re-minted immediately after
+every "successful" mint, forever. Fixed by chunking the wait into re-checks
+no longer than 24h, recomputing the real remaining time on each recheck.
 
-- [x] Fixed by chunking the wait into re-checks no longer than 24h instead of
-  scheduling one timer for the full remaining duration, recomputing the real
-  remaining time on each recheck.
-- [x] Added `src/app/useSessionAuth.test.ts` (7 tests), including a
-  regression that fakes a 30-day expiry and asserts no premature re-mint —
-  would have failed against the pre-fix code.
-- [x] Re-verified live afterward: a single clean mint at boot, no repeat
-  loop, `Authorization: Bearer` attaches correctly on subsequent calls, and
-  requests racing ahead of the initial mint correctly 401 and self-heal via
-  the reactive re-mint path.
-- [x] Passed 393/393 tests and TypeScript typechecking.
+**Pass 3 — booting a fresh client against the real cluster surfaced two more
+real problems**, prompting a full architectural redo of the first pass
+rather than another patch:
+- Several requests fire at cold boot (concurrent catalogue loads, the
+  health-monitor's own probe) before the session mint — itself an async
+  network round trip — has completed. Those 401s reached the user as a raw,
+  permanently-stuck error banner ("a valid session bearer token is
+  required"): nothing re-triggered the failed screen once the token
+  actually arrived.
+- The auth/401 plumbing itself had spread across a dozen files: a
+  `BearerTokenSource` union type threaded through every client's
+  constructor, a `reportUnauthorized()` 401-check line copy-pasted into six
+  leaf API classes plus the health monitor, and a global
+  `window` `CustomEvent` used purely to get a 401 signal back to the one
+  hook that could act on it.
+
+Rebuilt as a proper `SessionManager` (`src/api/SessionManager.ts`): one
+class owns minting, proactive refresh, and — because every API client now
+authenticates by calling `sessionManager.fetch(url, init)` instead of
+building its own headers — 401 detection and reactive re-mint too, all
+internally, with no event bus needed. `sessionManager` is a genuine
+app-lifetime singleton; `src/app/useSession.ts` is a thin React interface
+onto it (configures it for current connection settings, subscribes to its
+`ready` state) rather than a hook that owns or constructs a session, so
+every API client and the health monitor share the exact same live instance.
+`fixedBearerToken(token)` is the second, much simpler implementation of the
+same `AuthenticatedFetch` interface — the Settings screen's manual override
+and every test double, both by construction incapable of drifting from
+what production code actually depends on.
+
+App-level: added a `sessionReady` gate (`src/App.tsx`) that blocks the real
+route tree and the health monitor's polling/discovery — not just the
+manual-token-vs-auto-mint distinction — until the first mint attempt
+settles, success or failure; a failure hands off to the existing
+cluster-unreachable gate instead of hanging. Never gates mid-playback.
+
+- [x] `src/api/SessionManager.ts` + `src/api/SessionManager.test.ts` (11
+  tests, incl. the setTimeout-overflow regression, now against the class
+  directly).
+- [x] `src/app/useSession.ts` + `src/app/useSession.test.ts` (5 tests).
+- [x] Every leaf/cluster API class, `useEndpointHealthMonitor.ts`,
+  `useMachaServices.ts` migrated from `bearerToken?: BearerTokenSource` to
+  `auth: AuthenticatedFetch`; deleted `SessionTokenStore.ts`,
+  `useSessionAuth.ts`, `SESSION_UNAUTHORIZED_EVENT`/`reportUnauthorized()`.
+- [x] Live-verified against the real cluster (`10.44.1.50`, plus whatever it
+  advertises via cluster discovery): a single clean mint at boot, the
+  stuck-error banner is gone, health-monitor polling of every known node —
+  including newly-discovered ones — never fires unauthenticated.
+- [x] Passed 406/406 tests and TypeScript typechecking.
 
 **Known residual gap, accepted rather than chased further**: the peer's dev
 instance had streaming/FFmpeg disabled, so the idempotency query parameter on
 an actual `POST /api/v1/playback/sessions` call, and a real token
 expiry/re-mint cycle (the TTL is ~30 days — impractical to wait out), were
 each verified only by unit test with a mocked clock/fetch, not against a live
-server. Both are low-risk (a query param already unit-tested end-to-end
-against the resolver's own request-building logic; expiry math is now
-covered by the regression test above) and will be exercised incidentally the
-next time a real playback UAT runs (tracked separately in `ACTIVE.md`).
+server. Both are low-risk and will be exercised incidentally the next time a
+real playback UAT runs (tracked separately in `ACTIVE.md`).
+
+## Poster artwork cache-smashing
+
+Signed capability artwork URLs (`/api/v1/catalogue/artwork/<id>?exp=...&sig=...`)
+are re-signed by the server on every catalogue re-fetch, even when the
+underlying image hasn't changed and the previous signature hasn't actually
+expired. Handing each fresh signature straight to `<img src>` makes every
+re-fetch a brand-new browser HTTP-cache key, so revisiting a screen (e.g.
+Home) re-downloaded and re-decoded every poster already on screen — the
+server's `Cache-Control` never got a chance to do anything, since the cache
+key itself was what churned.
+
+- [x] `LazyArtwork`'s `CapabilityArtwork` (`src/components/LazyArtwork.tsx`)
+  now maps artwork `id` -> the last URL that actually loaded successfully
+  (module-level, survives a full unmount/remount from screen navigation). A
+  same-id re-fetch with a merely-reissued signature is ignored in favor of
+  the already-cached URL; a real failure (the cached copy genuinely expired
+  or evaporated) still falls through to the fresh URL the caller just gave.
+- [x] Added 4 tests: ignoring a re-signed URL for an already-loaded id,
+  surviving a full remount, falling back to a fresh URL after a real
+  failure, and a never-before-seen id loading from its own URL untouched by
+  another id's cache entry.
+- [x] Passed the existing `LazyArtwork.test.tsx` suite unchanged — none of
+  those tests fire a real `onLoad`, so the new cache never activates for
+  them, confirming no behavior change for anything already covered.
 
 ## Artwork capability URLs: client cutover, and a real bug caught in UAT
 

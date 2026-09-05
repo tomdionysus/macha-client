@@ -12,10 +12,10 @@ import { detectPlatform } from './platform';
 import { diagnosticsSettings } from './settings';
 import { installDirectPlayReadAheadDiagnostics, warmDirectPlayReadAhead } from './playback/directPlayReadAhead';
 import { installAbortControllerPolyfill } from './platform/AbortControllerPolyfill';
+import { buildPlatformTraits } from './platform/platformTraits';
 import './styles.css';
 
 const samsung = import.meta.env.MODE === 'samsung';
-const android = import.meta.env.MODE === 'android';
 installAbortControllerPolyfill(window);
 configureClientDiagnostics({
   level: samsung ? 'warn' : diagnosticsSettings.playbackLogLevel,
@@ -25,7 +25,7 @@ configureClientDiagnostics({
 installClientDiagnosticsConsole();
 if (!samsung) installDirectPlayReadAheadDiagnostics();
 const log = createClientLogger('app.boot');
-const Router = samsung || android ? HashRouter : BrowserRouter;
+const Router = buildPlatformTraits.usesHashRouting ? HashRouter : BrowserRouter;
 
 function describeError(error: unknown): string {
   if (error instanceof Error) return error.stack || error.message;

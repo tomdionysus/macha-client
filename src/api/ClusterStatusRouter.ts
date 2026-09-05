@@ -7,14 +7,14 @@ import {
   type ClusterStatusSnapshot,
   type ConnectivityCheck,
 } from './ClusterStatusApi';
-import type { BearerTokenSource } from './httpCompat';
+import { NO_AUTH, type AuthenticatedFetch } from './SessionManager';
 
 /** Safe status reads fail over; diagnostic POST actions execute exactly once. */
 export class ClusterStatusRouter implements ClusterStatusApi {
   private readonly apis = new Map<string, MachaClusterStatusApi>();
 
   private readonly router: ClusterEndpointRouter;
-  constructor(routerOrRegistry: ClusterEndpointRouter | EndpointRegistry, private readonly bearerToken?: BearerTokenSource) {
+  constructor(routerOrRegistry: ClusterEndpointRouter | EndpointRegistry, private readonly auth: AuthenticatedFetch = NO_AUTH) {
     this.router = routerOrRegistry instanceof ClusterEndpointRouter
       ? routerOrRegistry
       : new ClusterEndpointRouter(routerOrRegistry);
@@ -43,7 +43,7 @@ export class ClusterStatusRouter implements ClusterStatusApi {
   private api(endpoint: MachaEndpoint): MachaClusterStatusApi {
     let api = this.apis.get(endpoint.id);
     if (!api) {
-      api = new MachaClusterStatusApi(endpoint.baseUrl, this.bearerToken);
+      api = new MachaClusterStatusApi(endpoint.baseUrl, this.auth);
       this.apis.set(endpoint.id, api);
     }
     return api;

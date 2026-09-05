@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MachaServerApi } from './MachaServerApi';
+import { fixedBearerToken } from './SessionManager';
 
 describe('MachaServerApi', () => {
   afterEach(() => vi.unstubAllGlobals());
@@ -13,7 +14,7 @@ describe('MachaServerApi', () => {
     }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
     vi.stubGlobal('fetch', fetchMock);
 
-    const api = new MachaServerApi('http://node.test/', 'secret');
+    const api = new MachaServerApi('http://node.test/', fixedBearerToken('secret'));
     const status = await api.status();
 
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];

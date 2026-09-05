@@ -1,7 +1,7 @@
-import { authenticatedRequestHeaders, normalizeBaseUrl, queryString, type BearerTokenSource } from '../api/httpCompat';
+import { mergeRequestHeaders, normalizeBaseUrl, queryString } from '../api/httpCompat';
+import { NO_AUTH, type AuthenticatedFetch } from '../api/SessionManager';
 import { createClientLogger } from '../diagnostics/ClientLog';
 import { parseErrorEnvelope } from '../api/errorEnvelope';
-import { reportUnauthorized } from '../api/serverConnection';
 import type { MediaSummary, PlaybackCapabilities, PlaybackMode, PlaybackSource } from '../types';
 import type {
   PlaybackOptions,
@@ -169,7 +169,7 @@ export class MachaPlaybackResolver implements PlaybackResolver {
 
   constructor(
     baseUrl: string,
-    private readonly bearerToken?: BearerTokenSource,
+    private readonly auth: AuthenticatedFetch = NO_AUTH,
   ) {
     this.baseUrl = normalizeBaseUrl(baseUrl);
   }
@@ -386,12 +386,13 @@ export class MachaPlaybackResolver implements PlaybackResolver {
     const requestId = ++this.requestSequence;
     const method = init.method ?? 'GET';
     const started = performance.now();
-    const headers = authenticatedRequestHeaders(init.headers, this.bearerToken, {
+    const headers = mergeRequestHeaders(init.headers, {
+      Accept: 'application/json',
       'Content-Type': init.body !== undefined ? 'application/json' : undefined,
     });
     this.log.debug('http-request', { requestId, method, path, body: this.parseRequestBody(init.body) });
     try {
-      const response = await fetch(`${this.baseUrl}${path}`, { ...init, headers });
+      const response = await this.auth.fetch(`${this.baseUrl}${path}`, { ...init, headers });
       const elapsedMs = Math.round((performance.now() - started) * 10) / 10;
       this.log.debug('http-response', {
         requestId,
@@ -447,7 +448,6 @@ export class MachaPlaybackResolver implements PlaybackResolver {
     response: Response,
     request: { requestId: number; method: string; path: string; elapsedMs: number },
   ): Promise<never> {
-    if (response.status === 401) reportUnauthorized();
     let body: unknown;
     try {
       body = await response.json() as unknown;

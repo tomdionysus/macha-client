@@ -17,6 +17,7 @@ import { ConfirmModal } from '../components/Modal';
 import { AsyncIconButton } from '../components/AsyncIconButton';
 import { RefreshIcon } from '../components/ManageIcons';
 import { probeKnownEndpoints } from '../cluster/useEndpointHealthMonitor';
+import type { AuthenticatedFetch } from '../api/SessionManager';
 import { reportClusterReachable, reportClusterUnreachable } from '../api/serverConnection';
 
 function formatBytes(value: number): string {
@@ -278,12 +279,12 @@ export async function acceptNodeIdentityAssociationReset(
   return result;
 }
 
-export function StatusScreen({ api, endpointRegistry, manageApi, section, apiToken }: {
+export function StatusScreen({ api, endpointRegistry, manageApi, section, auth }: {
   api: ClusterStatusApi;
   endpointRegistry: EndpointRegistry;
   manageApi?: ManageApi;
   section: StatusSection;
-  apiToken?: string;
+  auth: AuthenticatedFetch;
 }) {
   const [snapshot, setSnapshot] = useState<ClusterStatusSnapshot>();
   const [error, setError] = useState<string>();
@@ -324,7 +325,7 @@ export function StatusScreen({ api, endpointRegistry, manageApi, section, apiTok
     try {
       if (section === 'client') {
         const controller = new AbortController();
-        const reachable = await probeKnownEndpoints(endpointRegistry, apiToken, controller.signal);
+        const reachable = await probeKnownEndpoints(endpointRegistry, auth, controller.signal);
         if (endpointRegistry.snapshot().length > 0) {
           if (reachable > 0) reportClusterReachable(); else reportClusterUnreachable();
         }
@@ -339,7 +340,7 @@ export function StatusScreen({ api, endpointRegistry, manageApi, section, apiTok
     } finally {
       setRefreshing(false);
     }
-  }, [api, apiToken, endpointRegistry, refresh, section]);
+  }, [api, auth, endpointRegistry, refresh, section]);
 
   const resetIdentityAssociation = useCallback(async (node: ClusterNodeStatus) => {
     if (!manageApi || !node.host || !node.port) return;

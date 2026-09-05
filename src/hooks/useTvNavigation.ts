@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { SamsungDpadInput, type SamsungDpadCommand, type SamsungDpadDirection } from '../platform/SamsungDpadInput';
+import { buildPlatformTraits } from '../platform/platformTraits';
 
 const SELECTOR = '[data-tv-focusable="true"]:not([disabled])';
 const SELECTED_ATTRIBUTE = 'data-tv-selected';
@@ -180,18 +181,14 @@ export function attachSpatialTvNavigation(onBack?: () => boolean): () => void {
   };
 }
 
-function tvMode(): boolean {
-  return import.meta.env.MODE === 'samsung' || import.meta.env.MODE === 'android';
-}
-
 export function requestTvDefaultFocus(): void {
-  if (!tvMode()) return;
+  if (!buildPlatformTraits.usesDpadNavigation) return;
   window.setTimeout(() => window.dispatchEvent(new Event('macha:tv-focus-default')), 0);
 }
 
 export function useTvNavigation(onBack?: () => boolean): void {
   useEffect(() => {
-    if (!tvMode()) return undefined;
+    if (!buildPlatformTraits.usesDpadNavigation) return undefined;
     return attachSpatialTvNavigation(onBack);
   }, [onBack]);
 }

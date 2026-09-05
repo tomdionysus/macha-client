@@ -6,6 +6,7 @@ import { createClientLogger } from '../diagnostics/ClientLog';
 import { useArtworkUrl } from '../hooks/useArtworkUrl';
 import { requestTvDefaultFocus } from '../hooks/useTvNavigation';
 import type { Platform } from '../platform/Platform';
+import { platformTraits } from '../platform/platformTraits';
 import type { PlaybackUpdate } from '../playback/PlaybackResolver';
 import { isSubtitleOnlyPlaybackUpdate, type PlaybackCoordinatorSnapshot } from '../playback/PlaybackCoordinator';
 import { PlaybackRuntime, type PlaybackRuntimeRequest, type PlaybackRuntimeSnapshot } from '../playback/PlaybackRuntime';
@@ -156,6 +157,16 @@ export function playerBufferedTimelineEnabled(samsungControls: boolean): boolean
   return !samsungControls;
 }
 
+/**
+ * What a back-like action (remote "Return" key, Escape/Backspace) should do
+ * on the full-presentation player. Only `webControls` platforms have a
+ * pointer that can reach a floating mini-player bar, so only they minimize;
+ * every other platform closes outright, same as the explicit close button.
+ */
+export function playerBackAction(webControls: boolean): 'minimize' | 'stop' {
+  return webControls ? 'minimize' : 'stop';
+}
+
 export function playerControlShowsPlay(intentPaused: boolean, failed: boolean): boolean {
   return failed || intentPaused;
 }
@@ -175,14 +186,16 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
   const hostRef = useRef<HTMLDivElement | null>(null);
   const chromeRef = useRef<HTMLDivElement | null>(null);
   const hideTimerRef = useRef<number | undefined>(undefined);
+  const hoveringChromeRef = useRef(false);
   const scrubValueRef = useRef<number | undefined>(undefined);
   const lastReportRef = useRef(0);
   const lastPositionPersistRef = useRef(0);
   const endedHandledRef = useRef(false);
   const lastEventByMediaRef = useRef(new Map<string, PlaybackEvent>());
   const log = useMemo(() => createClientLogger('playback.screen', { mediaId: media.id }), [media.id]);
-  const webControls = platform.name === 'web';
-  const samsungControls = import.meta.env.MODE === 'samsung';
+  const traits = platformTraits(platform);
+  const webControls = traits.hasPointerControls;
+  const samsungControls = traits.usesRemoteMediaControls;
   const interactionControlled = webControls || samsungControls;
   const [runtimePlayback, setRuntimePlayback] = useState<PlaybackCoordinatorSnapshot | undefined>(() => runtime.getPlaybackSnapshot());
   const [runtimeState, setRuntimeState] = useState<PlaybackRuntimeSnapshot>(() => runtime.getSnapshot());
@@ -214,6 +227,7 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
     setScrubValue(undefined);
     setLocalNotice(undefined);
     setOptionsVisible(false);
+    hoveringChromeRef.current = false;
   }, [media.id]);
 
   useEffect(() => {
@@ -294,7 +308,7 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
       window.clearTimeout(hideTimerRef.current);
       hideTimerRef.current = undefined;
     }
-    if (fatalError) return;
+    if (fatalError || hoveringChromeRef.current) return;
     setControlsVisible(false);
     setOptionsVisible(false);
     const chrome = chromeRef.current;
@@ -308,9 +322,16 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
     if (hideTimerRef.current !== undefined) window.clearTimeout(hideTimerRef.current);
     hideTimerRef.current = undefined;
     if (fatalError) return;
+    // Keep the bar up for the whole span of a status change (seek, stream
+    // reconfiguration, subtitle load) rather than letting it hide mid-transition
+    // and making the interaction look like it did nothing.
+    if (playback.preparingSource) return;
+    // A resting pointer over the bar means the viewer is actively looking at
+    // or about to use it — auto-hide under the mouse reads as broken chrome.
+    if (hoveringChromeRef.current) return;
     if (!interactionControlled && (playback.intent.paused || optionsVisible)) return;
     hideTimerRef.current = window.setTimeout(hideControls, uiSettings.playerControlsHideDelayMs);
-  }, [fatalError, hideControls, interactionControlled, optionsVisible, playback.intent.paused]);
+  }, [fatalError, hideControls, interactionControlled, optionsVisible, playback.intent.paused, playback.preparingSource]);
 
   const showControls = useCallback(() => {
     setControlsVisible(true);
@@ -406,6 +427,18 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
   }, [fatalError]);
 
   useEffect(() => {
+    if (!playback.preparingSource) {
+      armControlsHide();
+      return;
+    }
+    setControlsVisible(true);
+    if (hideTimerRef.current !== undefined) {
+      window.clearTimeout(hideTimerRef.current);
+      hideTimerRef.current = undefined;
+    }
+  }, [armControlsHide, playback.preparingSource]);
+
+  useEffect(() => {
     const onFullscreenChange = () => {
       setFullscreen(document.fullscreenElement === pageRef.current);
       if (presentation === 'full' && !interactionControlled) showControls();
@@ -425,14 +458,30 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
   }, [presentation, samsungControls]);
 
   const toggleFullscreen = useCallback(async () => {
-    if (platform.name !== 'web' || !document.fullscreenEnabled || !pageRef.current) return;
+    if (!webControls || !document.fullscreenEnabled || !pageRef.current) return;
     try {
       if (document.fullscreenElement) await document.exitFullscreen();
       else await pageRef.current.requestFullscreen();
     } catch (error) {
       log.warn('fullscreen-failed', { error });
     }
-  }, [log, platform.name]);
+  }, [log, webControls]);
+
+  useEffect(() => {
+    // Android's hardware/remote back button is intercepted natively before
+    // any DOM keydown fires (see platforms/android's MainActivity), so
+    // there is no keyboard event to hook here the way Samsung's remote
+    // "Return" key works below. MainActivity calls this directly instead,
+    // falling back to its own WebView-history/finish() behavior when it's
+    // absent (not on the full player) or returns false.
+    const host = window as unknown as { __machaHandleBack?: () => boolean };
+    host.__machaHandleBack = () => {
+      if (presentation !== 'full') return false;
+      onStop();
+      return true;
+    };
+    return () => { delete host.__machaHandleBack; };
+  }, [onStop, presentation]);
 
   useEffect(() => {
     const onKeyDown = (keyEvent: KeyboardEvent) => {
@@ -457,7 +506,10 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
           setScrubPosition(undefined);
           return;
         }
-        onMinimize();
+        // No mini player on a TV remote — there's nowhere to reasonably
+        // navigate a persistent floating bar to, and no pointer to reach it
+        // with. Back closes the player outright, same as the close button.
+        onStop();
         return;
       }
       if (presentation === 'full' && samsungOk && !controlsVisible) {
@@ -488,8 +540,14 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
       if (presentation === 'full' && !samsungControls && (keyEvent.key === 'Escape' || keyEvent.key === 'Backspace')) {
         keyEvent.preventDefault();
         keyEvent.stopPropagation();
-        if (optionsVisible) setOptionsVisible(false);
-        else onMinimize();
+        if (optionsVisible) { setOptionsVisible(false); return; }
+        // Non-web here means Android: only reachable today via a keyboard
+        // in a dev build — a real device intercepts its hardware back
+        // button natively before any JS runs (see platforms/android's
+        // MainActivity), so this is dev/keyboard-testing parity, not yet
+        // the actual on-device fix.
+        if (playerBackAction(webControls) === 'minimize') onMinimize();
+        else onStop();
         return;
       }
       if (mediaCommand || (presentation === 'full' && keyEvent.key === ' ')) {
@@ -611,6 +669,19 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
         ref={chromeRef}
         className={`player-chrome ${controlsVisible || fatalError ? 'visible' : ''}`}
         onPointerDown={() => { if (webControls) showControls(); }}
+        onPointerEnter={(pointerEvent) => {
+          if (!webControls || (pointerEvent.pointerType && pointerEvent.pointerType !== 'mouse')) return;
+          hoveringChromeRef.current = true;
+          if (hideTimerRef.current !== undefined) {
+            window.clearTimeout(hideTimerRef.current);
+            hideTimerRef.current = undefined;
+          }
+        }}
+        onPointerLeave={(pointerEvent) => {
+          if (!webControls || (pointerEvent.pointerType && pointerEvent.pointerType !== 'mouse')) return;
+          hoveringChromeRef.current = false;
+          armControlsHide();
+        }}
       >
         <div className="player-titlebar">
           <div className="player-title-copy">
@@ -694,7 +765,9 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
         </div>
 
         <div className="player-button-row">
-          <button type="button" data-tv-focusable="true" onClick={onMinimize} aria-label="Minimise player"><PlayerIcon name="back" /></button>
+          {webControls && (
+            <button type="button" data-tv-focusable="true" onClick={onMinimize} aria-label="Minimise player"><PlayerIcon name="back" /></button>
+          )}
           {queuePosition && queuePosition.total > 1 && (
             <button type="button" data-tv-focusable="true" onClick={() => { if (canPrevious) onPrevious(); else setLocalNotice('Already at the first item.'); }} aria-label="Previous item"><PlayerIcon name="previous" /></button>
           )}
@@ -720,7 +793,7 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
             <PlayerIcon name="options" />
           </button>
           {!samsungControls && <VolumeControl volume={volume} onChange={onVolumeChange} />}
-          {platform.name === 'web' && document.fullscreenEnabled && (
+          {webControls && document.fullscreenEnabled && (
             <button type="button" data-tv-focusable="true" onClick={() => void toggleFullscreen()} aria-label={fullscreen ? 'Exit fullscreen' : 'Fullscreen'} title={fullscreen ? 'Exit fullscreen' : 'Fullscreen'}>
               <PlayerIcon name={fullscreen ? 'fullscreen-exit' : 'fullscreen'} />
             </button>

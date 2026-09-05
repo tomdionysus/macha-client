@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { bootstrapEndpoints, EndpointRegistry } from './EndpointRegistry';
 import { discoverClusterEndpoints, probeKnownEndpoints } from './useEndpointHealthMonitor';
+import { fixedBearerToken } from '../api/SessionManager';
 import { clearClientDiagnostics, clientDiagnosticsSnapshot, configureClientDiagnostics } from '../diagnostics/ClientLog';
 import type { ClusterNodeStatus, ClusterStatusApi, ClusterStatusSnapshot } from '../api/ClusterStatusApi';
 
@@ -25,7 +26,7 @@ describe('API endpoint health probes', () => {
       status: String(url).startsWith('http://a/') ? 200 : 503,
     })) as unknown as typeof fetch;
 
-    await probeKnownEndpoints(registry, undefined, new AbortController().signal, fetchImpl);
+    await probeKnownEndpoints(registry, fixedBearerToken(undefined, fetchImpl), new AbortController().signal);
 
     const entry = clientDiagnosticsSnapshot().find((candidate) => candidate.scope === 'cluster.health');
     expect(entry).toMatchObject({ event: 'probe-cycle', data: { reachable: 2, known: 2 } });
@@ -39,7 +40,7 @@ describe('API endpoint health probes', () => {
     }));
     const fetchImpl = fetchSpy as unknown as typeof fetch;
 
-    await expect(probeKnownEndpoints(registry, 'secret', new AbortController().signal, fetchImpl)).resolves.toBe(2);
+    await expect(probeKnownEndpoints(registry, fixedBearerToken('secret', fetchImpl), new AbortController().signal)).resolves.toBe(2);
 
     expect(fetchSpy.mock.calls.map(([url]) => String(url))).toEqual([
       'http://a/api/v1/catalogue/status',
@@ -59,7 +60,7 @@ describe('API endpoint health probes', () => {
       return new Promise<Response>((resolve) => { finish = resolve; });
     }) as typeof fetch;
 
-    const probe = probeKnownEndpoints(registry, undefined, controller.signal, fetchImpl);
+    const probe = probeKnownEndpoints(registry, fixedBearerToken(undefined, fetchImpl), controller.signal);
     controller.abort();
     finish(new Response(null, { status: 200 }));
     await probe;
@@ -75,7 +76,7 @@ describe('API endpoint health probes', () => {
       status: String(url).startsWith('http://a/') ? 503 : 200,
     })) as unknown as typeof fetch;
 
-    await probeKnownEndpoints(registry, undefined, new AbortController().signal, fetchImpl);
+    await probeKnownEndpoints(registry, fixedBearerToken(undefined, fetchImpl), new AbortController().signal);
     // Still cooling down from the probe failure: a ready alternative sorts first.
     expect(registry.candidates()[0]?.endpoint.id).toBe('http://b');
 
@@ -94,7 +95,7 @@ describe('API endpoint health probes', () => {
       fromId: 'http://a', toId: 'http://b', fromLatencyMs: 500, toLatencyMs: 50,
     });
 
-    await probeKnownEndpoints(registry, undefined, new AbortController().signal, fetchImpl);
+    await probeKnownEndpoints(registry, fixedBearerToken(undefined, fetchImpl), new AbortController().signal);
     nowSpy.mockRestore();
 
     expect(recordLatencySpy).toHaveBeenCalledWith('http://a', 500);
@@ -107,7 +108,7 @@ describe('API endpoint health probes', () => {
     const recordLatencySpy = vi.spyOn(registry, 'recordLatency');
     const fetchImpl = vi.fn(async () => new Response(null, { status: 503 })) as unknown as typeof fetch;
 
-    await probeKnownEndpoints(registry, undefined, new AbortController().signal, fetchImpl);
+    await probeKnownEndpoints(registry, fixedBearerToken(undefined, fetchImpl), new AbortController().signal);
 
     expect(recordLatencySpy).not.toHaveBeenCalled();
     expect(registry.latencyMs('http://a')).toBeUndefined();
@@ -122,7 +123,7 @@ describe('API endpoint health probes', () => {
       return new Promise<Response>((resolve) => { finish = resolve; });
     }) as typeof fetch;
 
-    const probe = probeKnownEndpoints(registry, undefined, lifecycle.signal, fetchImpl);
+    const probe = probeKnownEndpoints(registry, fixedBearerToken(undefined, fetchImpl), lifecycle.signal);
     await new Promise((resolve) => setTimeout(resolve, 5));
     expect(registry.snapshot()[0]?.health).toEqual({ consecutiveFailures: 0 });
     finish(new Response(null, { status: 200 }));

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MachaClusterStatusApi } from './ClusterStatusApi';
+import { fixedBearerToken } from './SessionManager';
 
 function jsonResponse(value: unknown): Response {
   return new Response(JSON.stringify(value), { status: 200, headers: { 'Content-Type': 'application/json' } });
@@ -12,7 +13,7 @@ describe('MachaClusterStatusApi', () => {
     const payload = { cluster: { health: 'recovering' }, startup: { phase: 'recovering', control_plane: 'ready', api: 'ready' }, nodes: [], generated_at_unix_ms: 1 };
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse(payload));
     vi.stubGlobal('fetch', fetchMock);
-    const api = new MachaClusterStatusApi('http://node.test/', 'secret');
+    const api = new MachaClusterStatusApi('http://node.test/', fixedBearerToken('secret'));
 
     await expect(api.status()).resolves.toEqual(payload);
 

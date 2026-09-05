@@ -16,9 +16,9 @@ import { ClusterServerApi } from '../api/ClusterServerApi';
 import { DemoPlaybackResolver } from '../playback/DemoPlaybackResolver';
 import { ClusterPlaybackResolver } from '../playback/ClusterPlaybackResolver';
 import type { PlaybackResolver } from '../playback/PlaybackResolver';
-import { bootstrapEndpoints, EndpointRegistry } from '../cluster/EndpointRegistry';
+import type { EndpointRegistry } from '../cluster/EndpointRegistry';
 import { ClusterEndpointRouter } from '../cluster/endpointRouting';
-import type { SessionTokenStore } from '../api/SessionTokenStore';
+import type { AuthenticatedFetch } from '../api/SessionManager';
 
 export interface MachaServices {
   catalogueApi: CatalogueApi;
@@ -29,34 +29,27 @@ export interface MachaServices {
   clusterStatusApi: ClusterStatusApi;
   acquisitionApi: AcquisitionApi;
   managementAvailable: boolean;
-  /** Shared, client-owned API endpoint evidence for routing and diagnostics. */
-  endpointRegistry: EndpointRegistry;
 }
 
 export function useMachaServices(options: {
-  serverUrl: string;
-  bootstrapEndpoints: readonly string[];
-  tokenStore: SessionTokenStore;
+  endpointRegistry: EndpointRegistry;
+  auth: AuthenticatedFetch;
   demo: boolean;
   apiOverride?: MediaApi;
   playbackOverride?: PlaybackResolver;
 }): MachaServices {
-  const { bootstrapEndpoints: bootstrapUrls, tokenStore, demo, apiOverride, playbackOverride } = options;
-  const endpointKey = bootstrapUrls.join('\n');
-  const endpointRegistry = useMemo(
-    () => new EndpointRegistry(bootstrapEndpoints(bootstrapUrls)),
-    [endpointKey],
-  );
+  const { endpointRegistry, auth, demo, apiOverride, playbackOverride } = options;
   const endpointRouter = useMemo(() => new ClusterEndpointRouter(endpointRegistry), [endpointRegistry]);
-  // Every service below reads the token live off `tokenStore` at request
-  // time, so a session refresh (expiry, 401) is never a reason to recreate
-  // these — recreating them would orphan an active playback generation's
-  // node ownership. They only need rebuilding when routing itself changes.
+  // Every service below authenticates through `auth` at request time — the
+  // real one is the app-wide session singleton, so a refresh (expiry, 401)
+  // is never a reason to recreate these; recreating them would orphan an
+  // active playback generation's node ownership. They only need rebuilding
+  // when routing itself changes.
   const catalogueApi = useMemo(
-    () => new ClusterCatalogueApi(endpointRouter, tokenStore),
-    [endpointRouter, tokenStore],
+    () => new ClusterCatalogueApi(endpointRouter, auth),
+    [endpointRouter, auth],
   );
-  const manageApi = useMemo<ManageApi>(() => new ClusterManageApi(endpointRouter, tokenStore), [endpointRouter, tokenStore]);
+  const manageApi = useMemo<ManageApi>(() => new ClusterManageApi(endpointRouter, auth), [endpointRouter, auth]);
   const mediaApi = useMemo<MediaApi>(() => {
     if (apiOverride) return apiOverride;
     return demo ? new MockMediaApi() : new MachaMediaApi(catalogueApi);
@@ -64,19 +57,19 @@ export function useMachaServices(options: {
   const playbackResolver = useMemo<PlaybackResolver>(() => {
     if (playbackOverride) return playbackOverride;
     if (demo) return new DemoPlaybackResolver();
-    return new ClusterPlaybackResolver(endpointRouter, tokenStore);
-  }, [demo, endpointRouter, playbackOverride, tokenStore]);
+    return new ClusterPlaybackResolver(endpointRouter, auth);
+  }, [demo, endpointRouter, playbackOverride, auth]);
   const serverApi = useMemo<ServerApi>(
-    () => demo ? new DemoServerApi() : new ClusterServerApi(endpointRouter, tokenStore),
-    [demo, endpointRouter, tokenStore],
+    () => demo ? new DemoServerApi() : new ClusterServerApi(endpointRouter, auth),
+    [demo, endpointRouter, auth],
   );
   const clusterStatusApi = useMemo<ClusterStatusApi>(
-    () => demo ? new DemoClusterStatusApi() : new ClusterStatusRouter(endpointRouter, tokenStore),
-    [demo, endpointRouter, tokenStore],
+    () => demo ? new DemoClusterStatusApi() : new ClusterStatusRouter(endpointRouter, auth),
+    [demo, endpointRouter, auth],
   );
   const acquisitionApi = useMemo(
-    () => demo ? new DemoAcquisitionApi() : new ClusterAcquisitionApi(endpointRouter, tokenStore),
-    [demo, endpointRouter, tokenStore],
+    () => demo ? new DemoAcquisitionApi() : new ClusterAcquisitionApi(endpointRouter, auth),
+    [demo, endpointRouter, auth],
   );
 
   return {
@@ -88,6 +81,5 @@ export function useMachaServices(options: {
     clusterStatusApi,
     acquisitionApi,
     managementAvailable: !demo && !apiOverride,
-    endpointRegistry,
   };
 }

@@ -1,5 +1,6 @@
-import { authenticatedRequestHeaders, normalizeBaseUrl, readResponseBody, type BearerTokenSource } from './httpCompat';
-import { isGatewayConnectionFailure, reportUnauthorized, serverUnreachable } from './serverConnection';
+import { mergeRequestHeaders, normalizeBaseUrl, readResponseBody } from './httpCompat';
+import { NO_AUTH, type AuthenticatedFetch } from './SessionManager';
+import { isGatewayConnectionFailure, serverUnreachable } from './serverConnection';
 export interface ServerStatus {
   version: string | null;
   playback: Record<string, unknown>;
@@ -47,21 +48,21 @@ export class MachaServerApi implements ServerApi {
 
   constructor(
     baseUrl: string,
-    private readonly bearerToken?: BearerTokenSource,
+    private readonly auth: AuthenticatedFetch = NO_AUTH,
   ) {
     this.baseUrl = normalizeBaseUrl(baseUrl);
   }
 
   async status(): Promise<ServerStatus> {
-    const headers = authenticatedRequestHeaders(undefined, this.bearerToken);
-
     let response: Response;
     try {
-      response = await fetch(`${this.baseUrl}/api/v1/playback/status`, { method: 'GET', headers });
+      response = await this.auth.fetch(`${this.baseUrl}/api/v1/playback/status`, {
+        method: 'GET',
+        headers: mergeRequestHeaders(undefined, { Accept: 'application/json' }),
+      });
     } catch {
       throw serverUnreachable();
     }
-    if (response.status === 401) reportUnauthorized();
 
     const parsed = await readResponseBody(response);
     const playback = objectValue(parsed.body) ?? {};

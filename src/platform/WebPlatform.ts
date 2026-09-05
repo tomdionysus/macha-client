@@ -343,8 +343,6 @@ class WebPlayer implements Player {
       // Recreating it forces the browser to rebuild the entire playback DOM
       // and can also drop element-scoped state such as fullscreen/PiP.
       video.pause();
-      video.removeAttribute('src');
-      video.load();
       this.log.debug('media-element-reused');
     }
 
@@ -391,6 +389,13 @@ class WebPlayer implements Player {
     if (isHls(source)) {
       if (shouldUseManagedHls(this.options.forceNativeHls, Hls.isSupported())) {
         this.log.info('hls-js-selected', { url: source.url });
+        if (existingVideo) {
+          // hls.js manages the media element's source itself (a MediaSource
+          // object URL) rather than a plain URL we assign, so it needs an
+          // explicit reset of whatever the previous generation left behind.
+          video.removeAttribute('src');
+          video.load();
+        }
         this.attachHls(video, source.url, sourceGeneration);
       } else if (this.options.forceNativeHls || nativeHlsSupported(video)) {
         this.log.info('hls-native-selected', { url: source.url });
@@ -419,6 +424,13 @@ class WebPlayer implements Player {
         mimeType: source.mimeType,
         readAhead: directUrl !== source.url,
       });
+      // No manual removeAttribute('src')/load() reset before this: assigning a
+      // new src already runs the media element load algorithm and supersedes
+      // whatever the previous generation was doing. Doing both back-to-back in
+      // the same tick was observed live to leave the element stuck at
+      // readyState 0 forever (no request ever issued, no error) while the
+      // read-ahead Service Worker was controlling the page — the redundant
+      // reset raced the reassignment rather than the two ever combining safely.
       video.src = directUrl;
     }
 

@@ -77,10 +77,29 @@ public final class MainActivity extends Activity {
         if (hasFocus) enterImmersiveMode();
     }
 
+    /**
+     * Ask the web app whether it wants to handle back itself before falling
+     * through to WebView history / finishing the activity. The full player
+     * screen uses this to close playback outright instead of letting
+     * WebView.goBack() silently pop the hash route while the video keeps
+     * playing off-screen (the old, TV-unfriendly "mini player" behavior) —
+     * see src/screens/PlayerScreen.tsx's `window.__machaHandleBack`
+     * registration.
+     */
     @Override
     public void onBackPressed() {
-        if (webView != null && webView.canGoBack()) webView.goBack();
-        else super.onBackPressed();
+        if (webView == null) {
+            finish();
+            return;
+        }
+        webView.evaluateJavascript(
+            "(function(){try{return !!(window.__machaHandleBack&&window.__machaHandleBack());}catch(e){return false;}})();",
+            (String result) -> {
+                if ("true".equals(result)) return;
+                if (webView.canGoBack()) webView.goBack();
+                else finish();
+            }
+        );
     }
 
     @Override

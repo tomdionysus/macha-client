@@ -1,6 +1,7 @@
-import { authenticatedRequestHeaders, normalizeBaseUrl, queryString, readResponseBody, type BearerTokenSource } from './httpCompat';
+import { mergeRequestHeaders, normalizeBaseUrl, queryString, readResponseBody } from './httpCompat';
+import { NO_AUTH, type AuthenticatedFetch } from './SessionManager';
 import { parseErrorEnvelope } from './errorEnvelope';
-import { isGatewayConnectionFailure, reportUnauthorized, serverUnreachable } from './serverConnection';
+import { isGatewayConnectionFailure, serverUnreachable } from './serverConnection';
 import type {
   IdentityAssociationResetRequest,
   IdentityAssociationResetResult,
@@ -23,7 +24,7 @@ export class MachaManageApiError extends Error {
 export class MachaManageApi implements ManageApi {
   private readonly baseUrl: string;
 
-  constructor(baseUrl: string, private readonly bearerToken?: BearerTokenSource) {
+  constructor(baseUrl: string, private readonly auth: AuthenticatedFetch = NO_AUTH) {
     this.baseUrl = normalizeBaseUrl(baseUrl);
   }
 
@@ -108,15 +109,16 @@ export class MachaManageApi implements ManageApi {
   }
 
   private async request<T>(path: string, init: RequestInit): Promise<T> {
-    const headers = authenticatedRequestHeaders(init.headers, this.bearerToken);
     let response: Response;
     try {
-      response = await fetch(`${this.baseUrl}${path}`, { ...init, headers });
+      response = await this.auth.fetch(`${this.baseUrl}${path}`, {
+        ...init,
+        headers: mergeRequestHeaders(init.headers, { Accept: 'application/json' }),
+      });
     } catch {
       throw serverUnreachable();
     }
     if (!response.ok) {
-      if (response.status === 401) reportUnauthorized();
       const { body, wasJson } = await readResponseBody(response);
       if (isGatewayConnectionFailure(response, wasJson)) throw serverUnreachable();
       const parsed = parseErrorEnvelope(body, `${response.status} ${response.statusText}`);

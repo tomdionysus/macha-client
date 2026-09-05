@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MachaAcquisitionApi } from './MachaAcquisitionApi';
+import { fixedBearerToken } from './SessionManager';
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -19,7 +20,7 @@ describe('MachaAcquisitionApi', () => {
       .mockResolvedValueOnce(jsonResponse({ jobs: [] }));
     vi.stubGlobal('fetch', fetchMock);
 
-    const api = new MachaAcquisitionApi('http://macha:8080/', 'secret');
+    const api = new MachaAcquisitionApi('http://macha:8080/', fixedBearerToken('secret'));
     const snapshot = await api.snapshot();
 
     expect(snapshot.ingestStatus.enabled).toBe(true);

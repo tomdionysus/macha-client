@@ -5,7 +5,13 @@ export type MediaKind = CatalogueKind;
 export interface ArtworkRef {
   id: string;
   mimeType: string;
-  /** Short-lived signed capability URL, when the server supplies one. Renders directly with no client-side fetch/cache. */
+  /**
+   * Short-lived signed capability URL, when the server supplies one.
+   * Renders directly with no client-side blob fetch — the browser owns
+   * fetching, decode and HTTP caching. `LazyArtwork` does remember the last
+   * URL that loaded successfully for this `id`, since the server re-signs
+   * this on every catalogue fetch even when the image hasn't changed.
+   */
   url?: string;
 }
 

@@ -7,8 +7,9 @@ import type {
   TorrentStatus,
 } from './AcquisitionApi';
 import { parseErrorEnvelope } from './errorEnvelope';
-import { authenticatedRequestHeaders, normalizeBaseUrl, readResponseBody, type BearerTokenSource } from './httpCompat';
-import { isGatewayConnectionFailure, reportUnauthorized, serverUnreachable } from './serverConnection';
+import { mergeRequestHeaders, normalizeBaseUrl, readResponseBody } from './httpCompat';
+import { NO_AUTH, type AuthenticatedFetch } from './SessionManager';
+import { isGatewayConnectionFailure, serverUnreachable } from './serverConnection';
 
 interface IngestJobsEnvelope { jobs: IngestJob[]; }
 interface TorrentJobsEnvelope { jobs: TorrentJob[]; }
@@ -31,7 +32,7 @@ export class MachaAcquisitionApi implements AcquisitionApi {
 
   constructor(
     baseUrl: string,
-    private readonly bearerToken?: BearerTokenSource,
+    private readonly auth: AuthenticatedFetch = NO_AUTH,
   ) {
     this.baseUrl = normalizeBaseUrl(baseUrl);
   }
@@ -96,11 +97,12 @@ export class MachaAcquisitionApi implements AcquisitionApi {
   }
 
   private async request<T>(path: string, init: RequestInit): Promise<T> {
-    const headers = authenticatedRequestHeaders(init.headers, this.bearerToken);
-
     let response: Response;
     try {
-      response = await fetch(`${this.baseUrl}${path}`, { ...init, headers });
+      response = await this.auth.fetch(`${this.baseUrl}${path}`, {
+        ...init,
+        headers: mergeRequestHeaders(init.headers, { Accept: 'application/json' }),
+      });
     } catch {
       throw serverUnreachable();
     }
@@ -110,7 +112,6 @@ export class MachaAcquisitionApi implements AcquisitionApi {
   }
 
   private async throwResponseError(response: Response): Promise<never> {
-    if (response.status === 401) reportUnauthorized();
     const { body, wasJson } = await readResponseBody(response);
     if (isGatewayConnectionFailure(response, wasJson)) throw serverUnreachable();
     const parsed = parseErrorEnvelope(body, `${response.status} ${response.statusText}`);

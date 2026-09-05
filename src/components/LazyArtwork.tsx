@@ -16,6 +16,21 @@ interface Props {
 }
 
 /**
+ * The server re-signs a capability URL's `exp`/`sig` on every catalogue
+ * fetch of the same artwork, even when nothing about the image changed and
+ * its previous signature hasn't actually expired yet. Handing each fresh
+ * signature straight to `<img src>` makes every re-fetch a new browser
+ * HTTP-cache key, so revisiting a screen re-downloads and re-decodes every
+ * poster already on screen — the server's `Cache-Control` never gets a
+ * chance to do anything, since the cache key itself is what's churning, not
+ * a mismatch. This maps artwork id -> the last URL that actually loaded
+ * successfully, so a same-image resign gets ignored in favor of the
+ * already-cached one; a real failure (the cached copy genuinely expired or
+ * evaporated) still falls through to the fresh URL the caller just gave us.
+ */
+const lastLoadedUrlById = new Map<string, string>();
+
+/**
  * When the catalogue already handed us a short-lived signed capability URL,
  * the browser owns fetching, decode and caching — but NOT retry: a plain
  * `<img>` that fails once (a transient network blip, a node hiccup, a
@@ -25,16 +40,38 @@ interface Props {
  * since a capability `<img>` has no blob to invalidate) rather than trusting
  * the browser to cover for a dead source.
  */
-function CapabilityArtwork({ url, alt, draggable, eager, placeholder }: { url: string; alt: string; draggable?: boolean; eager: boolean; placeholder: ReactNode }) {
+function CapabilityArtwork({ id, url, alt, draggable, eager, placeholder }: { id: string; url: string; alt: string; draggable?: boolean; eager: boolean; placeholder: ReactNode }) {
+  const [displayUrl, setDisplayUrl] = useState(() => lastLoadedUrlById.get(id) ?? url);
   const [attempt, setAttempt] = useState(0);
   const [failures, setFailures] = useState(0);
 
-  useEffect(() => { setAttempt(0); setFailures(0); }, [url]);
+  useEffect(() => {
+    // A genuinely different artwork: prefer whatever we already know is
+    // good for it, ignoring a merely re-signed URL for the same id (the
+    // other effect below, keyed on `url`) until proven otherwise.
+    setDisplayUrl(lastLoadedUrlById.get(id) ?? url);
+    setAttempt(0);
+    setFailures(0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
+  useEffect(() => {
+    // Only adopt a fresh URL for the SAME id once its predecessor has
+    // exhausted its retries — otherwise this fires on every catalogue
+    // re-signing of an artwork already loaded fine, smashing the cache for
+    // no reason.
+    if (failures < 3) return;
+    setDisplayUrl(url);
+    setAttempt((current) => current + 1);
+    setFailures(0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [url]);
   useEffect(() => {
     if (failures < 3) return undefined;
     const timer = setTimeout(() => { setFailures(0); setAttempt((current) => current + 1); }, VISIBLE_ARTWORK_RECOVERY_DELAY_MS);
     return () => clearTimeout(timer);
   }, [failures]);
+
+  const handleLoad = () => { lastLoadedUrlById.set(id, displayUrl); };
 
   const handleError = () => {
     if (failures >= 2) {
@@ -48,7 +85,7 @@ function CapabilityArtwork({ url, alt, draggable, eager, placeholder }: { url: s
   return (
     <span className="lazy-artwork">
       {failures < 3
-        ? <img key={attempt} src={url} alt={alt} decoding="async" draggable={draggable} loading={eager ? 'eager' : 'lazy'} onError={handleError} />
+        ? <img key={attempt} src={displayUrl} alt={alt} decoding="async" draggable={draggable} loading={eager ? 'eager' : 'lazy'} onLoad={handleLoad} onError={handleError} />
         : placeholder}
     </span>
   );
@@ -56,7 +93,7 @@ function CapabilityArtwork({ url, alt, draggable, eager, placeholder }: { url: s
 
 export function LazyArtwork(props: Props) {
   return props.artwork?.url
-    ? <CapabilityArtwork url={props.artwork.url} alt={props.alt ?? ''} draggable={props.draggable} eager={props.eager ?? false} placeholder={props.placeholder} />
+    ? <CapabilityArtwork id={props.artwork.id} url={props.artwork.url} alt={props.alt ?? ''} draggable={props.draggable} eager={props.eager ?? false} placeholder={props.placeholder} />
     : <LegacyLazyArtwork {...props} />;
 }
 

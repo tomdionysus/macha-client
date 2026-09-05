@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MachaCatalogueApi } from './MachaCatalogueApi';
+import { fixedBearerToken } from './SessionManager';
 
 function jsonResponse(value: unknown, init: ResponseInit = {}): Response {
   return new Response(JSON.stringify(value), {
@@ -126,7 +127,7 @@ describe('MachaCatalogueApi', () => {
   it('uses the catalogue search envelope and configured bearer token', async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ items: [item] }));
     vi.stubGlobal('fetch', fetchMock);
-    const api = new MachaCatalogueApi('http://node.test', 'secret');
+    const api = new MachaCatalogueApi('http://node.test', fixedBearerToken('secret'));
 
     await api.search('black books', 25);
 
@@ -139,7 +140,7 @@ describe('MachaCatalogueApi', () => {
     const artwork = { role: 'poster', id: 'sha256:abcd', mime_type: 'image/jpeg' };
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse(artwork));
     vi.stubGlobal('fetch', fetchMock);
-    const api = new MachaCatalogueApi('http://node.test', 'secret');
+    const api = new MachaCatalogueApi('http://node.test', fixedBearerToken('secret'));
     const blob = new Blob(['image'], { type: 'image/jpeg' });
 
     await expect(api.putArtwork('movie:one', 'poster', 'image/jpeg', blob)).resolves.toEqual(artwork);
@@ -155,7 +156,7 @@ describe('MachaCatalogueApi', () => {
   it('fetches content-addressed artwork with authentication', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(new Blob(['image']), { status: 200, headers: { 'Content-Type': 'image/jpeg' } }));
     vi.stubGlobal('fetch', fetchMock);
-    const api = new MachaCatalogueApi('http://node.test', 'secret');
+    const api = new MachaCatalogueApi('http://node.test', fixedBearerToken('secret'));
     await api.artwork('abcd');
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe('http://node.test/api/v1/catalogue/artwork/abcd');
@@ -188,7 +189,7 @@ describe('MachaCatalogueApi', () => {
   it('clears catalogue metadata with optimistic revision protection', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
     vi.stubGlobal('fetch', fetchMock);
-    const api = new MachaCatalogueApi('http://node.test', 'secret');
+    const api = new MachaCatalogueApi('http://node.test', fixedBearerToken('secret'));
 
     await api.clearMetadata('show:black-books', 7);
 

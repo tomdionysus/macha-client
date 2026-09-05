@@ -1,14 +1,14 @@
 import type { EndpointRegistry, MachaEndpoint } from '../cluster/EndpointRegistry';
 import { MachaServerApi, type ServerApi, type ServerStatus } from './MachaServerApi';
 import { ClusterEndpointRouter } from '../cluster/endpointRouting';
-import type { BearerTokenSource } from './httpCompat';
+import { NO_AUTH, type AuthenticatedFetch } from './SessionManager';
 
 /** Read-only playback capability status across all suitable API endpoints. */
 export class ClusterServerApi implements ServerApi {
   private readonly apis = new Map<string, MachaServerApi>();
   private readonly router: ClusterEndpointRouter;
 
-  constructor(routerOrRegistry: ClusterEndpointRouter | EndpointRegistry, private readonly bearerToken?: BearerTokenSource) {
+  constructor(routerOrRegistry: ClusterEndpointRouter | EndpointRegistry, private readonly auth: AuthenticatedFetch = NO_AUTH) {
     this.router = routerOrRegistry instanceof ClusterEndpointRouter
       ? routerOrRegistry
       : new ClusterEndpointRouter(routerOrRegistry);
@@ -27,7 +27,7 @@ export class ClusterServerApi implements ServerApi {
   private api(endpoint: MachaEndpoint): MachaServerApi {
     let api = this.apis.get(endpoint.id);
     if (!api) {
-      api = new MachaServerApi(endpoint.baseUrl, this.bearerToken);
+      api = new MachaServerApi(endpoint.baseUrl, this.auth);
       this.apis.set(endpoint.id, api);
     }
     return api;

@@ -1,15 +1,14 @@
 import { useEffect } from 'react';
-import { authenticatedRequestHeaders, type BearerTokenSource } from '../api/httpCompat';
+import { mergeRequestHeaders } from '../api/httpCompat';
+import { NO_AUTH, type AuthenticatedFetch } from '../api/SessionManager';
 import type { ClusterStatusApi } from '../api/ClusterStatusApi';
 import type { EndpointRegistry, MachaEndpoint } from './EndpointRegistry';
-import { reportClusterReachable, reportClusterUnreachable, reportUnauthorized } from '../api/serverConnection';
+import { reportClusterReachable, reportClusterUnreachable } from '../api/serverConnection';
 import { createClientLogger } from '../diagnostics/ClientLog';
 
 export const ENDPOINT_HEALTH_INTERVAL_MS = 10_000;
 
 const log = createClientLogger('cluster.health');
-
-type Fetch = typeof fetch;
 
 interface ProbeResult {
   status: 'healthy' | 'reachable' | 'unreachable';
@@ -17,22 +16,15 @@ interface ProbeResult {
   latencyMs?: number;
 }
 
-async function probeEndpoint(
-  endpoint: MachaEndpoint,
-  bearerToken: BearerTokenSource,
-  fetchImpl: Fetch,
-): Promise<ProbeResult> {
+async function probeEndpoint(endpoint: MachaEndpoint, auth: AuthenticatedFetch): Promise<ProbeResult> {
   const startedAt = performance.now();
   try {
-    const response = await fetchImpl(`${endpoint.baseUrl}/api/v1/catalogue/status`, {
+    const response = await auth.fetch(`${endpoint.baseUrl}/api/v1/catalogue/status`, {
       method: 'GET',
-      headers: authenticatedRequestHeaders(undefined, bearerToken, { Accept: 'application/json' }),
+      headers: mergeRequestHeaders(undefined, { Accept: 'application/json' }),
       cache: 'no-store',
     });
-    if (!response.ok) {
-      if (response.status === 401) reportUnauthorized();
-      return { status: 'reachable' };
-    }
+    if (!response.ok) return { status: 'reachable' };
     return { status: 'healthy', latencyMs: performance.now() - startedAt };
   } catch {
     return { status: 'unreachable' };
@@ -71,9 +63,8 @@ export async function discoverClusterEndpoints(
 /** Probe every currently known HTTP API endpoint once, in parallel. */
 export async function probeKnownEndpoints(
   registry: EndpointRegistry,
-  bearerToken: BearerTokenSource,
+  auth: AuthenticatedFetch,
   signal: AbortSignal,
-  fetchImpl: Fetch = fetch,
 ): Promise<number> {
   const endpoints = registry.snapshot().map(({ endpoint }) => endpoint);
   let reachable = 0;
@@ -81,7 +72,7 @@ export async function probeKnownEndpoints(
     // The lifecycle signal governs whether this result is still publishable;
     // it must never be attached to the HTTP request. Cancelling one React
     // consumer (or a playback request) is not evidence about node health.
-    const result = await probeEndpoint(endpoint, bearerToken, fetchImpl);
+    const result = await probeEndpoint(endpoint, auth);
     if (signal.aborted) return;
     if (result.status !== 'unreachable') reachable += 1;
     if (result.status === 'healthy') {
@@ -105,7 +96,7 @@ export async function probeKnownEndpoints(
 export function useEndpointHealthMonitor(
   registry: EndpointRegistry,
   clusterStatusApi: ClusterStatusApi,
-  bearerToken: BearerTokenSource,
+  auth: AuthenticatedFetch = NO_AUTH,
   enabled: boolean,
 ): void {
   useEffect(() => {
@@ -116,7 +107,7 @@ export function useEndpointHealthMonitor(
     const cycle = async () => {
       await discoverClusterEndpoints(registry, clusterStatusApi);
       if (controller.signal.aborted) return;
-      const reachable = await probeKnownEndpoints(registry, bearerToken, controller.signal);
+      const reachable = await probeKnownEndpoints(registry, auth, controller.signal);
       if (!controller.signal.aborted && registry.snapshot().length > 0) {
         if (reachable > 0) reportClusterReachable(); else reportClusterUnreachable();
       }
@@ -128,5 +119,5 @@ export function useEndpointHealthMonitor(
       controller.abort();
       if (timer !== undefined) clearTimeout(timer);
     };
-  }, [bearerToken, clusterStatusApi, enabled, registry]);
+  }, [auth, clusterStatusApi, enabled, registry]);
 }

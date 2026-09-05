@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { boundedPlayerSeekTarget, isSubtitleOnlyUpdate, playerBufferedTimelineEnabled, playerControlShowsPlay, samsungSeekDeltaForKey, samsungSliderSeekDeltaForKey, webSeekDeltaForKey } from './PlayerScreen';
+import { boundedPlayerSeekTarget, isSubtitleOnlyUpdate, playerBackAction, playerBufferedTimelineEnabled, playerControlShowsPlay, samsungSeekDeltaForKey, samsungSliderSeekDeltaForKey, webSeekDeltaForKey } from './PlayerScreen';
 
 describe('player UI transport bindings', () => {
   it('maps Web left/right arrows to ten-second seeks', () => {
@@ -48,6 +48,11 @@ describe('player UI transport bindings', () => {
     expect(playerControlShowsPlay(false, true)).toBe(true);
     expect(playerControlShowsPlay(false, false)).toBe(false);
     expect(playerControlShowsPlay(true, false)).toBe(true);
+  });
+
+  it('minimizes on back only where a pointer can reach a mini player, closes everywhere else', () => {
+    expect(playerBackAction(true)).toBe('minimize');
+    expect(playerBackAction(false)).toBe('stop');
   });
 
   it('recognises subtitle-only updates', () => {

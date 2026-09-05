@@ -48,6 +48,57 @@ describe('Web player preparation', () => {
   });
 });
 
+describe('Web player source reassignment', () => {
+  function fakeVideo() {
+    const emptyRanges = { length: 0, start: () => 0, end: () => 0 } as unknown as TimeRanges;
+    return {
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      removeAttribute: vi.fn(),
+      setAttribute: vi.fn(),
+      load: vi.fn(),
+      pause: vi.fn(),
+      canPlayType: vi.fn(() => ''),
+      parentNode: null,
+      paused: true,
+      volume: 1,
+      src: '',
+      currentTime: 0,
+      duration: NaN,
+      ended: false,
+      seeking: false,
+      readyState: 0,
+      networkState: 0,
+      buffered: emptyRanges,
+      seekable: emptyRanges,
+      playbackRate: 1,
+      currentSrc: '',
+      error: null,
+    } as unknown as HTMLVideoElement;
+  }
+
+  it('does not reset the reused media element via removeAttribute/load before assigning a new direct-play source', async () => {
+    const video = fakeVideo();
+    vi.stubGlobal('document', { createElement: vi.fn(() => video) });
+    const player = new WebPlatform().createPlayer();
+    player.attach({ firstChild: null, appendChild: vi.fn() } as unknown as HTMLElement);
+
+    const source = { mediaId: 'm1', url: 'https://node.test/stream', mimeType: 'video/mp4', mode: 'direct' as const };
+    // Two plays share one reused <video> element (the second exercises the
+    // "existingVideo" reset path). Assigning a new src already runs the media
+    // element load algorithm; a redundant removeAttribute('src')/load() call
+    // immediately beforehand was observed live to race that reassignment and
+    // leave the element stuck loading forever under an active Service Worker.
+    await player.play(source, 0, true);
+    await player.play(source, 0, true);
+
+    expect(video.removeAttribute).not.toHaveBeenCalled();
+    expect(video.load).not.toHaveBeenCalled();
+    expect(video.src).toBe(source.url);
+  });
+
+});
+
 describe('Web HLS engine policy', () => {
   it('prefers hls.js/MSE on modern Web even when native HLS also exists', () => {
     expect(shouldUseManagedHls(undefined, true)).toBe(true);

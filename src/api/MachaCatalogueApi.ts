@@ -1,6 +1,7 @@
-import { authenticatedRequestHeaders, normalizeBaseUrl, queryString, readResponseBody, type BearerTokenSource } from './httpCompat';
+import { mergeRequestHeaders, normalizeBaseUrl, queryString, readResponseBody } from './httpCompat';
+import { NO_AUTH, type AuthenticatedFetch } from './SessionManager';
 import { parseErrorEnvelope } from './errorEnvelope';
-import { isGatewayConnectionFailure, reportUnauthorized, serverUnreachable } from './serverConnection';
+import { isGatewayConnectionFailure, serverUnreachable } from './serverConnection';
 import type {
   CatalogueApi,
   CatalogueArtwork,
@@ -43,7 +44,7 @@ export class MachaCatalogueApi implements CatalogueApi {
 
   constructor(
     baseUrl: string,
-    private readonly bearerToken?: BearerTokenSource,
+    private readonly auth: AuthenticatedFetch = NO_AUTH,
   ) {
     this.baseUrl = normalizeBaseUrl(baseUrl);
   }
@@ -180,11 +181,9 @@ export class MachaCatalogueApi implements CatalogueApi {
   }
 
   private async fetch(path: string, accept: string, init: RequestInit = { method: 'GET' }): Promise<Response> {
-    const headers = authenticatedRequestHeaders(init.headers, this.bearerToken, {
-      Accept: accept,
-    });
+    const headers = mergeRequestHeaders(init.headers, { Accept: accept });
     try {
-      return await fetch(`${this.baseUrl}${path}`, { ...init, headers });
+      return await this.auth.fetch(`${this.baseUrl}${path}`, { ...init, headers });
     } catch (error) {
       if (error && typeof error === 'object' && (error as { name?: unknown }).name === 'AbortError') throw error;
       throw serverUnreachable();
@@ -192,7 +191,6 @@ export class MachaCatalogueApi implements CatalogueApi {
   }
 
   private async throwResponseError(response: Response): Promise<never> {
-    if (response.status === 401) reportUnauthorized();
     const { body, wasJson } = await readResponseBody(response);
     if (isGatewayConnectionFailure(response, wasJson)) throw serverUnreachable();
     const parsed = parseErrorEnvelope(body, `${response.status} ${response.statusText}`);
