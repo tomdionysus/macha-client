@@ -1,9 +1,9 @@
-import { authenticatedRequestHeaders, normalizeBaseUrl } from '../api/httpCompat';
+import { authenticatedRequestHeaders, normalizeBaseUrl, queryString, type BearerTokenSource } from '../api/httpCompat';
 import { createClientLogger } from '../diagnostics/ClientLog';
 import { parseErrorEnvelope } from '../api/errorEnvelope';
+import { reportUnauthorized } from '../api/serverConnection';
 import type { MediaSummary, PlaybackCapabilities, PlaybackMode, PlaybackSource } from '../types';
 import type {
-  PlaybackAdmissionContext,
   PlaybackOptions,
   PlaybackPreferencesUpdate,
   PlaybackResolver,
@@ -169,7 +169,7 @@ export class MachaPlaybackResolver implements PlaybackResolver {
 
   constructor(
     baseUrl: string,
-    private readonly bearerToken?: string,
+    private readonly bearerToken?: BearerTokenSource,
   ) {
     this.baseUrl = normalizeBaseUrl(baseUrl);
   }
@@ -179,7 +179,6 @@ export class MachaPlaybackResolver implements PlaybackResolver {
     capabilities: PlaybackCapabilities,
     seekMs?: number,
     preferences?: PlaybackPreferencesUpdate,
-    context?: PlaybackAdmissionContext,
     signal?: AbortSignal,
     idempotencyKey = newPlaybackIdempotencyKey(),
   ): Promise<PlaybackSession> {
@@ -219,15 +218,14 @@ export class MachaPlaybackResolver implements PlaybackResolver {
     // profiles are advisory metadata and must not enter the viewer's critical
     // path. A non-conforming server response is surfaced immediately so the
     // cluster resolver can recover on another endpoint rather than polling it.
-    const wire = await this.request<WireSession>('/api/v1/playback/sessions', {
-      method: 'POST',
-      headers: {
-        'Idempotency-Key': idempotencyKey,
-        ...(context?.viewerSessionId ? { 'Macha-Viewer-Session': context.viewerSessionId } : {}),
+    const wire = await this.request<WireSession>(
+      `/api/v1/playback/sessions?${queryString([['idempotency_key', idempotencyKey]])}`,
+      {
+        method: 'POST',
+        body: JSON.stringify(body),
+        signal,
       },
-      body: JSON.stringify(body),
-      signal,
-    });
+    );
     const session = this.mapSession(wire);
     this.log.info('session-created', this.sessionSummary(session));
     return session;
@@ -449,6 +447,7 @@ export class MachaPlaybackResolver implements PlaybackResolver {
     response: Response,
     request: { requestId: number; method: string; path: string; elapsedMs: number },
   ): Promise<never> {
+    if (response.status === 401) reportUnauthorized();
     let body: unknown;
     try {
       body = await response.json() as unknown;

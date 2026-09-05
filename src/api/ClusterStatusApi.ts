@@ -1,6 +1,6 @@
 import type { IdentityAssociationReset } from './ManageApi';
-import { authenticatedRequestHeaders, normalizeBaseUrl, readResponseBody } from './httpCompat';
-import { isGatewayConnectionFailure, serverUnreachable } from './serverConnection';
+import { authenticatedRequestHeaders, normalizeBaseUrl, readResponseBody, type BearerTokenSource } from './httpCompat';
+import { isGatewayConnectionFailure, reportUnauthorized, serverUnreachable } from './serverConnection';
 
 export type TelemetryFreshness = 'live' | 'stale' | 'last_known' | 'unavailable';
 export type NodeState = 'online' | 'offline' | 'retired';
@@ -176,7 +176,7 @@ export class MachaClusterStatusApiError extends Error {
 export class MachaClusterStatusApi implements ClusterStatusApi {
   private readonly baseUrl: string;
 
-  constructor(baseUrl: string, private readonly bearerToken?: string) {
+  constructor(baseUrl: string, private readonly bearerToken?: BearerTokenSource) {
     this.baseUrl = normalizeBaseUrl(baseUrl);
   }
 
@@ -189,6 +189,7 @@ export class MachaClusterStatusApi implements ClusterStatusApi {
     } catch {
       throw serverUnreachable();
     }
+    if (response.status === 401) reportUnauthorized();
 
     const { body, wasJson } = await readResponseBody(response);
     if (isGatewayConnectionFailure(response, wasJson)) throw serverUnreachable();

@@ -2,10 +2,11 @@ import type { AcquisitionApi, AcquisitionSnapshot, IngestJob, TorrentJob } from 
 import type { MachaEndpoint } from '../cluster/EndpointRegistry';
 import { ClusterEndpointRouter } from '../cluster/endpointRouting';
 import { MachaAcquisitionApi } from './MachaAcquisitionApi';
+import type { BearerTokenSource } from './httpCompat';
 
 export class ClusterAcquisitionApi implements AcquisitionApi {
   private readonly apis = new Map<string, MachaAcquisitionApi>();
-  constructor(private readonly router: ClusterEndpointRouter, private readonly bearerToken?: string) {}
+  constructor(private readonly router: ClusterEndpointRouter, private readonly bearerToken?: BearerTokenSource) {}
 
   snapshot(): Promise<AcquisitionSnapshot> { return this.read((api) => api.snapshot()); }
   submitPath(path: string): Promise<string> { return this.write((api) => api.submitPath(path)); }

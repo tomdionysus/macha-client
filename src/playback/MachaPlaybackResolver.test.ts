@@ -87,7 +87,7 @@ describe('MachaPlaybackResolver', () => {
     const session = await resolver.resolve(media, capabilities);
 
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe('http://node.test/api/v1/playback/sessions');
+    expect(url.split('?')[0]).toBe('http://node.test/api/v1/playback/sessions');
     expect(new Headers(init.headers).get('Authorization')).toBe('Bearer secret');
     expect(JSON.parse(String(init.body))).toEqual(expect.objectContaining({
       item_id: 'movie:test',
@@ -114,17 +114,19 @@ describe('MachaPlaybackResolver', () => {
     expect(session.options.audioStreams[0]).toEqual(expect.objectContaining({ index: 1, language: 'eng', channels: 2, bitrate: 192_000 }));
   });
 
-  it('sends the persistent player identity on playback admission', async () => {
+  it('sends the idempotency key as a query parameter, not a header', async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse(sessionResponse(), 201));
     vi.stubGlobal('fetch', fetchMock);
     const resolver = new MachaPlaybackResolver('http://node.test');
 
-    await resolver.resolve(media, capabilities, undefined, undefined, { viewerSessionId: 'viewer-stable' });
+    await resolver.resolve(media, capabilities);
 
-    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const query = new URL(url, 'http://node.test').searchParams;
+    expect(query.get('idempotency_key')).toBeTruthy();
     const headers = new Headers(init.headers);
-    expect(headers.get('Macha-Viewer-Session')).toBe('viewer-stable');
-    expect(headers.get('Idempotency-Key')).toBeTruthy();
+    expect(headers.get('Idempotency-Key')).toBeNull();
+    expect(headers.get('Macha-Viewer-Session')).toBeNull();
   });
 
   it('treats a non-conforming session profile_pending response as an endpoint failure without polling', async () => {
@@ -150,7 +152,7 @@ describe('MachaPlaybackResolver', () => {
         profileRequested = true;
         return new Promise<Response>(() => undefined);
       }
-      if (url.endsWith('/playback/sessions')) return Promise.resolve(jsonResponse(sessionResponse(), 201));
+      if (url.includes('/playback/sessions')) return Promise.resolve(jsonResponse(sessionResponse(), 201));
       return Promise.reject(new Error(`Unexpected request: ${url}`));
     });
     vi.stubGlobal('fetch', fetchMock);
@@ -160,7 +162,7 @@ describe('MachaPlaybackResolver', () => {
     void catalogue.mediaProfile('macha:immutable');
     expect(profileRequested).toBe(true);
     await expect(playback.resolve(media, capabilities)).resolves.toMatchObject({ sessionId: 'session-1' });
-    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+    expect(fetchMock.mock.calls.map(([url]) => (url as string).split('?')[0])).toEqual([
       'http://node.test/api/v1/catalogue/media/macha%3Aimmutable/profile',
       'http://node.test/api/v1/playback/sessions',
     ]);
@@ -264,7 +266,7 @@ describe('MachaPlaybackResolver', () => {
 
     const session = await resolver.resolve(media, capabilities);
 
-    expect(fetchMock.mock.calls[0][0]).toBe('/macha/api/v1/playback/sessions');
+    expect((fetchMock.mock.calls[0][0] as string).split('?')[0]).toBe('/macha/api/v1/playback/sessions');
     expect(session.source.url).toBe('/macha/api/v1/playback/stream/session-1/cap/1/master.m3u8');
   });
 

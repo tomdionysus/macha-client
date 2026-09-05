@@ -125,11 +125,6 @@ export interface PlaybackStopOptions {
   keepalive?: boolean;
 }
 
-/** Stable identity for every server lease owned by one persistent player. */
-export interface PlaybackAdmissionContext {
-  viewerSessionId: string;
-}
-
 /** Server-side playback negotiation and session-control seam. */
 export interface PlaybackResolver {
   readonly available: boolean;
@@ -138,7 +133,6 @@ export interface PlaybackResolver {
     capabilities: PlaybackCapabilities,
     seekMs?: number,
     preferences?: PlaybackPreferencesUpdate,
-    context?: PlaybackAdmissionContext,
   ): Promise<PlaybackSession>;
   update(sessionId: string, update: PlaybackUpdate, signal?: AbortSignal): Promise<PlaybackSession>;
   stop(sessionId: string, options?: PlaybackStopOptions): Promise<void>;
@@ -150,7 +144,6 @@ export interface PlaybackResolver {
     seekMs: number,
     preferences: PlaybackPreferencesUpdate,
     preparedAlternate?: PlaybackSession,
-    context?: PlaybackAdmissionContext,
   ): Promise<PlaybackSession>;
   /** Prepare one bounded standby generation without delaying active playback. */
   prepareAlternate?(
@@ -159,7 +152,6 @@ export interface PlaybackResolver {
     capabilities: PlaybackCapabilities,
     seekMs: number,
     preferences: PlaybackPreferencesUpdate,
-    context?: PlaybackAdmissionContext,
   ): Promise<PlaybackSession | undefined>;
   /**
    * Record that a specific endpoint has failed without negotiating any new

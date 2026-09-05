@@ -50,12 +50,26 @@ export function normalizeBaseUrl(value: string): string {
   return trimmed.replace(/\/+$/, '');
 }
 
+/**
+ * A bearer token can be handed to an API client either as a fixed string
+ * (tests, one-off manual overrides) or as a live `SessionTokenStore` whose
+ * `.current` value can change after the client was constructed — e.g. an
+ * anonymous session token that gets re-minted after it expires. Reading it
+ * fresh at request time (instead of once at construction) means a refreshed
+ * token reaches every already-constructed, long-lived client immediately.
+ */
+export type BearerTokenSource = string | undefined | { readonly current: string | undefined };
+
+export function resolveBearerToken(source: BearerTokenSource): string | undefined {
+  return typeof source === 'string' || source === undefined ? source : source.current;
+}
+
 export function authenticatedRequestHeaders(
   initial: HeadersInit | undefined,
-  bearerToken: string | undefined,
+  bearerToken: BearerTokenSource,
   values: HeaderValues = {},
 ): Record<string, string> {
-  const token = bearerToken?.trim();
+  const token = resolveBearerToken(bearerToken)?.trim();
   return mergeRequestHeaders(initial, {
     Accept: 'application/json',
     Authorization: token ? `Bearer ${token}` : undefined,

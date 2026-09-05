@@ -7,13 +7,14 @@ import {
   type ClusterStatusSnapshot,
   type ConnectivityCheck,
 } from './ClusterStatusApi';
+import type { BearerTokenSource } from './httpCompat';
 
 /** Safe status reads fail over; diagnostic POST actions execute exactly once. */
 export class ClusterStatusRouter implements ClusterStatusApi {
   private readonly apis = new Map<string, MachaClusterStatusApi>();
 
   private readonly router: ClusterEndpointRouter;
-  constructor(routerOrRegistry: ClusterEndpointRouter | EndpointRegistry, private readonly bearerToken?: string) {
+  constructor(routerOrRegistry: ClusterEndpointRouter | EndpointRegistry, private readonly bearerToken?: BearerTokenSource) {
     this.router = routerOrRegistry instanceof ClusterEndpointRouter
       ? routerOrRegistry
       : new ClusterEndpointRouter(routerOrRegistry);

@@ -33,13 +33,13 @@ describe('ClusterPlaybackResolver', () => {
     const session = await resolver.resolve(media, capabilities, 12_000, { audioLanguage: 'eng' });
     expect(session.endpoint).toEqual({ id: 'http://b', baseUrl: 'http://b' });
     expect(session.source.url).toBe('http://b/api/v1/playback/stream/session-b');
-    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+    expect(fetchMock.mock.calls.map(([url]) => (url as string).split('?')[0])).toEqual([
       'http://a/api/v1/playback/sessions',
       'http://b/api/v1/playback/sessions',
     ]);
-    const attemptHeaders = fetchMock.mock.calls.map(([, init]) => new Headers((init as RequestInit).headers));
-    expect(attemptHeaders[0]?.get('Idempotency-Key')).toBeTruthy();
-    expect(attemptHeaders[1]?.get('Idempotency-Key')).toBe(attemptHeaders[0]?.get('Idempotency-Key'));
+    const attemptKeys = fetchMock.mock.calls.map(([url]) => new URL(url as string, 'http://x').searchParams.get('idempotency_key'));
+    expect(attemptKeys[0]).toBeTruthy();
+    expect(attemptKeys[1]).toBe(attemptKeys[0]);
     const secondBody = JSON.parse(String((fetchMock.mock.calls[1]?.[1] as RequestInit).body));
     expect(secondBody).toEqual(expect.objectContaining({ seek_ms: 12_000, preferences: expect.objectContaining({ audio_language: 'eng' }) }));
   });
@@ -59,27 +59,25 @@ describe('ClusterPlaybackResolver', () => {
       sessionId: expect.stringContaining('session-b'),
     });
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    const headers = fetchMock.mock.calls.map(([, init]) => new Headers((init as RequestInit).headers));
-    expect(headers[0]?.get('Idempotency-Key')).toBeTruthy();
-    expect(headers[1]?.get('Idempotency-Key')).toBe(headers[0]?.get('Idempotency-Key'));
+    const keys = fetchMock.mock.calls.map(([url]) => new URL(url as string, 'http://x').searchParams.get('idempotency_key'));
+    expect(keys[0]).toBeTruthy();
+    expect(keys[1]).toBe(keys[0]);
   });
 
-  it('retains one viewer identity while distinct admissions receive distinct idempotency keys', async () => {
+  it('gives each top-level admission call its own idempotency key', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify(wireSession('session-a')), { status: 201, headers: { 'Content-Type': 'application/json' } }))
       .mockResolvedValueOnce(new Response(JSON.stringify(wireSession('session-b')), { status: 201, headers: { 'Content-Type': 'application/json' } }));
     vi.stubGlobal('fetch', fetchMock);
     const resolver = new ClusterPlaybackResolver(new EndpointRegistry(bootstrapEndpoints(['http://a', 'http://b'])));
-    const context = { viewerSessionId: 'viewer-stable' };
 
-    const primary = await resolver.resolve(media, capabilities, 0, undefined, context);
-    await resolver.failover(primary, media, capabilities, 20_000, { mode: 'auto' }, undefined, context);
+    const primary = await resolver.resolve(media, capabilities, 0, undefined);
+    await resolver.failover(primary, media, capabilities, 20_000, { mode: 'auto' }, undefined);
 
-    const headers = fetchMock.mock.calls.map(([, init]) => new Headers((init as RequestInit).headers));
-    expect(headers.map((entry) => entry.get('Macha-Viewer-Session'))).toEqual(['viewer-stable', 'viewer-stable']);
-    expect(headers[0]?.get('Idempotency-Key')).toBeTruthy();
-    expect(headers[1]?.get('Idempotency-Key')).toBeTruthy();
-    expect(headers[1]?.get('Idempotency-Key')).not.toBe(headers[0]?.get('Idempotency-Key'));
+    const urls = fetchMock.mock.calls.map(([url]) => new URL(url as string, 'http://x').searchParams.get('idempotency_key'));
+    expect(urls[0]).toBeTruthy();
+    expect(urls[1]).toBeTruthy();
+    expect(urls[1]).not.toBe(urls[0]);
   });
 
   it('routes updates and teardown to the generation endpoint', async () => {
@@ -93,7 +91,7 @@ describe('ClusterPlaybackResolver', () => {
     const session = await resolver.resolve(media, capabilities);
     await resolver.update(session.sessionId, { seekMs: 20_000 });
     await resolver.stop(session.sessionId);
-    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+    expect(fetchMock.mock.calls.map(([url]) => (url as string).split('?')[0])).toEqual([
       'http://a/api/v1/playback/sessions',
       'http://a/api/v1/playback/sessions/session-a',
       'http://a/api/v1/playback/sessions/session-a',
@@ -146,13 +144,13 @@ describe('ClusterPlaybackResolver', () => {
     const replacement = await resolver.failover(active, media, capabilities, 21_000, { mode: 'auto' });
 
     expect(replacement.endpoint?.id).toBe('http://c');
-    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+    expect(fetchMock.mock.calls.map(([url]) => (url as string).split('?')[0])).toEqual([
       'http://a/api/v1/playback/sessions',
       'http://b/api/v1/playback/sessions',
       'http://c/api/v1/playback/sessions',
     ]);
-    const replacementAttempts = fetchMock.mock.calls.slice(1).map(([, init]) => ({
-      key: new Headers((init as RequestInit).headers).get('Idempotency-Key'),
+    const replacementAttempts = fetchMock.mock.calls.slice(1).map(([url, init]) => ({
+      key: new URL(url as string, 'http://x').searchParams.get('idempotency_key'),
       body: (init as RequestInit).body,
     }));
     expect(replacementAttempts[0]?.key).toBeTruthy();
@@ -166,18 +164,16 @@ describe('ClusterPlaybackResolver', () => {
     vi.stubGlobal('fetch', fetchMock);
     const registry = new EndpointRegistry(bootstrapEndpoints(['http://a', 'http://b']));
     const resolver = new ClusterPlaybackResolver(registry);
-    const context = { viewerSessionId: 'viewer-standby' };
-    const primary = await resolver.resolve(media, capabilities, undefined, undefined, context);
+    const primary = await resolver.resolve(media, capabilities, undefined, undefined);
 
-    const alternate = await resolver.prepareAlternate(primary, media, capabilities, 5_000, { mode: 'auto' }, context);
+    const alternate = await resolver.prepareAlternate(primary, media, capabilities, 5_000, { mode: 'auto' });
 
     expect(alternate?.endpoint?.id).toBe('http://b');
     expect(registry.candidates()[0]?.endpoint.id).toBe('http://a');
     const body = JSON.parse(String((fetchMock.mock.calls[1]?.[1] as RequestInit).body));
     expect(body.preferences.mode).toBe('direct');
-    const headers = fetchMock.mock.calls.map(([, init]) => new Headers((init as RequestInit).headers));
-    expect(headers.map((entry) => entry.get('Macha-Viewer-Session'))).toEqual(['viewer-standby', 'viewer-standby']);
-    expect(headers[1]?.get('Idempotency-Key')).not.toBe(headers[0]?.get('Idempotency-Key'));
+    const idempotencyKeys = fetchMock.mock.calls.map(([url]) => new URL(url as string, 'http://x').searchParams.get('idempotency_key'));
+    expect(idempotencyKeys[1]).not.toBe(idempotencyKeys[0]);
   });
 
   it('abandons a hung standby POST and attempts the next known endpoint', async () => {
@@ -199,7 +195,7 @@ describe('ClusterPlaybackResolver', () => {
     const alternate = await resolver.prepareAlternate(primary, media, capabilities, 0, { mode: 'direct' });
 
     expect(alternate?.endpoint?.id).toBe('http://c');
-    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+    expect(fetchMock.mock.calls.map(([url]) => (url as string).split('?')[0])).toEqual([
       'http://a/api/v1/playback/sessions',
       'http://b/api/v1/playback/sessions',
       'http://c/api/v1/playback/sessions',

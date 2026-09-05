@@ -1,5 +1,6 @@
 export const SERVER_UNREACHABLE_EVENT = 'macha:server-unreachable';
 export const SERVER_REACHABLE_EVENT = 'macha:server-reachable';
+export const SESSION_UNAUTHORIZED_EVENT = 'macha:session-unauthorized';
 
 export const SERVER_UNREACHABLE_MESSAGE =
   'All configured API endpoints are unreachable.';
@@ -40,5 +41,12 @@ export function reportClusterReachable(): void {
   clusterUnreachableReported = false;
   if (recovered && typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
     window.dispatchEvent(new CustomEvent(SERVER_REACHABLE_EVENT));
+  }
+}
+
+/** The current bearer token was rejected — the session likely expired or was revoked. */
+export function reportUnauthorized(): void {
+  if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+    window.dispatchEvent(new CustomEvent(SESSION_UNAUTHORIZED_EVENT));
   }
 }

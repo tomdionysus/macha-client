@@ -1,6 +1,6 @@
-import { authenticatedRequestHeaders, normalizeBaseUrl, queryString, readResponseBody } from './httpCompat';
+import { authenticatedRequestHeaders, normalizeBaseUrl, queryString, readResponseBody, type BearerTokenSource } from './httpCompat';
 import { parseErrorEnvelope } from './errorEnvelope';
-import { isGatewayConnectionFailure, serverUnreachable } from './serverConnection';
+import { isGatewayConnectionFailure, reportUnauthorized, serverUnreachable } from './serverConnection';
 import type {
   IdentityAssociationResetRequest,
   IdentityAssociationResetResult,
@@ -23,7 +23,7 @@ export class MachaManageApiError extends Error {
 export class MachaManageApi implements ManageApi {
   private readonly baseUrl: string;
 
-  constructor(baseUrl: string, private readonly bearerToken?: string) {
+  constructor(baseUrl: string, private readonly bearerToken?: BearerTokenSource) {
     this.baseUrl = normalizeBaseUrl(baseUrl);
   }
 
@@ -116,6 +116,7 @@ export class MachaManageApi implements ManageApi {
       throw serverUnreachable();
     }
     if (!response.ok) {
+      if (response.status === 401) reportUnauthorized();
       const { body, wasJson } = await readResponseBody(response);
       if (isGatewayConnectionFailure(response, wasJson)) throw serverUnreachable();
       const parsed = parseErrorEnvelope(body, `${response.status} ${response.statusText}`);

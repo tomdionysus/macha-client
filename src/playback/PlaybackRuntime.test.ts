@@ -186,10 +186,6 @@ describe('PlaybackRuntime ownership state machine', () => {
 
     expect(api.resolve).toHaveBeenCalledTimes(2);
     expect(api.resolve.mock.calls[1]?.[0]).toMatchObject({ id: 'B' });
-    const firstAdmission = api.resolve.mock.calls[0]?.[4] as { viewerSessionId?: string } | undefined;
-    const secondAdmission = api.resolve.mock.calls[1]?.[4] as { viewerSessionId?: string } | undefined;
-    expect(firstAdmission?.viewerSessionId).toBeTruthy();
-    expect(secondAdmission?.viewerSessionId).toBe(firstAdmission?.viewerSessionId);
     expect(runtime.getSnapshot()).toMatchObject({ phase: 'playing', request: { media: { id: 'B' } } });
     await runtime.stop();
   });

@@ -9,6 +9,7 @@ import type {
 import { MachaApiError, MachaCatalogueApi } from './MachaCatalogueApi';
 import type { EndpointRegistry, MachaEndpoint } from '../cluster/EndpointRegistry';
 import { ClusterEndpointRouter } from '../cluster/endpointRouting';
+import type { BearerTokenSource } from './httpCompat';
 
 type EndpointOperation<T> = (api: MachaCatalogueApi, endpoint: MachaEndpoint) => Promise<T>;
 
@@ -36,7 +37,7 @@ export class ClusterCatalogueApi implements CatalogueApi {
 
   constructor(
     routerOrRegistry: ClusterEndpointRouter | EndpointRegistry,
-    private readonly bearerToken?: string,
+    private readonly bearerToken?: BearerTokenSource,
   ) {
     this.router = routerOrRegistry instanceof ClusterEndpointRouter
       ? routerOrRegistry

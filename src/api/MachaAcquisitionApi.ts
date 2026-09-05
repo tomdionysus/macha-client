@@ -7,8 +7,8 @@ import type {
   TorrentStatus,
 } from './AcquisitionApi';
 import { parseErrorEnvelope } from './errorEnvelope';
-import { authenticatedRequestHeaders, normalizeBaseUrl, readResponseBody } from './httpCompat';
-import { isGatewayConnectionFailure, serverUnreachable } from './serverConnection';
+import { authenticatedRequestHeaders, normalizeBaseUrl, readResponseBody, type BearerTokenSource } from './httpCompat';
+import { isGatewayConnectionFailure, reportUnauthorized, serverUnreachable } from './serverConnection';
 
 interface IngestJobsEnvelope { jobs: IngestJob[]; }
 interface TorrentJobsEnvelope { jobs: TorrentJob[]; }
@@ -31,7 +31,7 @@ export class MachaAcquisitionApi implements AcquisitionApi {
 
   constructor(
     baseUrl: string,
-    private readonly bearerToken?: string,
+    private readonly bearerToken?: BearerTokenSource,
   ) {
     this.baseUrl = normalizeBaseUrl(baseUrl);
   }
@@ -110,6 +110,7 @@ export class MachaAcquisitionApi implements AcquisitionApi {
   }
 
   private async throwResponseError(response: Response): Promise<never> {
+    if (response.status === 401) reportUnauthorized();
     const { body, wasJson } = await readResponseBody(response);
     if (isGatewayConnectionFailure(response, wasJson)) throw serverUnreachable();
     const parsed = parseErrorEnvelope(body, `${response.status} ${response.statusText}`);

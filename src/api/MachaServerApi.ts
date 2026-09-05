@@ -1,5 +1,5 @@
-import { authenticatedRequestHeaders, normalizeBaseUrl, readResponseBody } from './httpCompat';
-import { isGatewayConnectionFailure, serverUnreachable } from './serverConnection';
+import { authenticatedRequestHeaders, normalizeBaseUrl, readResponseBody, type BearerTokenSource } from './httpCompat';
+import { isGatewayConnectionFailure, reportUnauthorized, serverUnreachable } from './serverConnection';
 export interface ServerStatus {
   version: string | null;
   playback: Record<string, unknown>;
@@ -47,7 +47,7 @@ export class MachaServerApi implements ServerApi {
 
   constructor(
     baseUrl: string,
-    private readonly bearerToken?: string,
+    private readonly bearerToken?: BearerTokenSource,
   ) {
     this.baseUrl = normalizeBaseUrl(baseUrl);
   }
@@ -61,6 +61,7 @@ export class MachaServerApi implements ServerApi {
     } catch {
       throw serverUnreachable();
     }
+    if (response.status === 401) reportUnauthorized();
 
     const parsed = await readResponseBody(response);
     const playback = objectValue(parsed.body) ?? {};

@@ -1,10 +1,70 @@
 # Completed and tested
 
-Last updated: 2026-09-04
+Last updated: 2026-09-05
 
 This is the completed-work ledger for the current session. An item belongs here
 only after implementation and its stated verification are complete. Detailed
 design notes and exact test results remain in the linked records.
+
+## Session/auth REST contract migration, and a real bug caught in the live joint test
+
+The server session implemented a new anonymous-session auth subsystem
+(`POST /api/v1/session` mint, `Authorization: Bearer` required on every other
+route) in parallel with this client-side work, then stood up a local dev
+instance for a live joint check.
+
+- [x] Replaced the manually-entered `apiToken` model with anonymous session
+  lifecycle management. Every API client (`Macha*Api`/`Cluster*Api`, plus the
+  playback resolver) now reads a live `SessionTokenStore`
+  (`src/api/SessionTokenStore.ts`) at request time via a widened
+  `BearerTokenSource` type in `src/api/httpCompat.ts`, so a token refresh
+  reaches every already-constructed, long-lived client immediately — notably
+  the playback resolver, which owns per-session node bookkeeping that would
+  otherwise be orphaned by recreating it on every token change.
+- [x] `useSessionAuth` (`src/app/useSessionAuth.ts`) mints via
+  `mintAnonymousSessionAnyNode` (`src/api/SessionAuth.ts`, tries every known
+  endpoint) at startup, re-mints shortly before `expires_unix_ms`, and
+  re-mints reactively on a `macha:session-unauthorized` event fired from
+  every API client's 401 path (`reportUnauthorized()` in
+  `src/api/serverConnection.ts`). A manually configured bearer token in
+  Settings still overrides auto-mint entirely, unchanged from before.
+- [x] Removed the legacy `Macha-Viewer-Session` header and the whole
+  `viewer_session_id`/`PlaybackAdmissionContext` concept — retired outright
+  rather than just no longer sent, since this app only ever runs one
+  `PlaybackRuntime` per tab, so per-viewer session multiplexing had nothing
+  to distinguish. Removed the `Idempotency-Key` header; the idempotency key
+  now travels as `POST /api/v1/playback/sessions?idempotency_key=<...>`.
+
+**The live joint test caught a real bug no unit test had**: within seconds of
+pointing the client at the server session's real instance, it fired
+thousands of `POST /api/v1/session` calls in a tight loop (all landing as
+201s — the server was never at fault). Root cause: `setTimeout`'s delay is a
+32-bit signed int internally (~24.8-day max); scheduling the proactive
+pre-expiry refresh for the full remaining duration of this contract's
+~30-day session TTL silently overflowed to ~0ms, so the client re-minted
+immediately after every "successful" mint, forever.
+
+- [x] Fixed by chunking the wait into re-checks no longer than 24h instead of
+  scheduling one timer for the full remaining duration, recomputing the real
+  remaining time on each recheck.
+- [x] Added `src/app/useSessionAuth.test.ts` (7 tests), including a
+  regression that fakes a 30-day expiry and asserts no premature re-mint —
+  would have failed against the pre-fix code.
+- [x] Re-verified live afterward: a single clean mint at boot, no repeat
+  loop, `Authorization: Bearer` attaches correctly on subsequent calls, and
+  requests racing ahead of the initial mint correctly 401 and self-heal via
+  the reactive re-mint path.
+- [x] Passed 393/393 tests and TypeScript typechecking.
+
+**Known residual gap, accepted rather than chased further**: the peer's dev
+instance had streaming/FFmpeg disabled, so the idempotency query parameter on
+an actual `POST /api/v1/playback/sessions` call, and a real token
+expiry/re-mint cycle (the TTL is ~30 days — impractical to wait out), were
+each verified only by unit test with a mocked clock/fetch, not against a live
+server. Both are low-risk (a query param already unit-tested end-to-end
+against the resolver's own request-building logic; expiry math is now
+covered by the regression test above) and will be exercised incidentally the
+next time a real playback UAT runs (tracked separately in `ACTIVE.md`).
 
 ## Artwork capability URLs: client cutover, and a real bug caught in UAT
 

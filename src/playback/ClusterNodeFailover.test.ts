@@ -39,7 +39,7 @@ describe('Cluster node failover integration', () => {
 
     expect(player.playCalls.at(-1)?.source.url).toBe('http://node-b/api/v1/playback/stream/session-b');
     expect(coordinator.getSnapshot().session?.endpoint?.id).toBe('http://node-b');
-    expect(cluster.calls.map((call) => call.url)).toEqual([
+    expect(cluster.calls.map((call) => call.url.split('?')[0])).toEqual([
       'http://node-a/api/v1/playback/sessions',
       'http://node-b/api/v1/playback/sessions',
     ]);

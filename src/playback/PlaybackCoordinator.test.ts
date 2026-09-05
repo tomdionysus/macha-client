@@ -708,8 +708,7 @@ describe('PlaybackCoordinator player failures', () => {
     });
     const api = resolver(initial) as ReturnType<typeof resolver> & { failover: ReturnType<typeof vi.fn> };
     api.failover = vi.fn(async () => replacement);
-    const admissionContext = { viewerSessionId: 'viewer-stable' };
-    const coordinator = new PlaybackCoordinator({ media: media(), player, resolver: api, capabilities: async () => capabilities(), initialPositionMs: 0, admissionContext });
+    const coordinator = new PlaybackCoordinator({ media: media(), player, resolver: api, capabilities: async () => capabilities(), initialPositionMs: 0 });
     await coordinator.start();
 
     player.emit({ positionMs: 0, durationMs: 600_000, paused: false, ended: false });
@@ -725,7 +724,6 @@ describe('PlaybackCoordinator player failures', () => {
       240_000,
       expect.any(Object),
       undefined,
-      admissionContext,
     ));
     await vi.waitFor(() => expect(player.playCalls.at(-1)?.source.url).toBe('http://b/replacement.mp4'));
     expect(coordinator.getSnapshot().fatalError).toBeUndefined();
@@ -787,8 +785,7 @@ describe('PlaybackCoordinator player failures', () => {
     });
     const api = resolver(initial) as ReturnType<typeof resolver> & { failover: ReturnType<typeof vi.fn> };
     api.failover = vi.fn(async () => replacement);
-    const failoverContext = { viewerSessionId: 'viewer-failover' };
-    const coordinator = new PlaybackCoordinator({ media: media(), player, resolver: api, capabilities: async () => capabilities(), initialPositionMs: 0, admissionContext: failoverContext });
+    const coordinator = new PlaybackCoordinator({ media: media(), player, resolver: api, capabilities: async () => capabilities(), initialPositionMs: 0 });
     await coordinator.start();
     player.emit({ positionMs: 0, durationMs: 600_000, paused: false, ended: false });
     player.emit({ positionMs: 42_000, durationMs: 600_000, paused: false, ended: false });
@@ -811,7 +808,6 @@ describe('PlaybackCoordinator player failures', () => {
       42_000,
       expect.objectContaining({ mode: 'remux', maxHeight: 720, subtitleLanguage: 'eng' }),
       undefined,
-      failoverContext,
     );
     expect(coordinator.getSnapshot().fatalError).toBeUndefined();
     expect(coordinator.getSnapshot().session?.endpoint?.id).toBe('node-b');
@@ -844,7 +840,6 @@ describe('PlaybackCoordinator player failures', () => {
       expect.any(Object),
       0,
       expect.objectContaining({ audioStream: 2, audioLanguage: 'fra' }),
-      undefined,
       undefined,
     ));
     await vi.waitFor(() => expect(player.playCalls.at(-1)?.source.url).toBe('http://b/replacement.mp4'));
@@ -920,7 +915,6 @@ describe('PlaybackCoordinator player failures', () => {
       0,
       expect.any(Object),
       alternate,
-      undefined,
     );
   });
 
@@ -956,7 +950,6 @@ describe('PlaybackCoordinator player failures', () => {
       0,
       expect.any(Object),
       alternate,
-      undefined,
     );
   });
 

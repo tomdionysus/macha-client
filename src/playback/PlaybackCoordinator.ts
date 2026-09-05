@@ -2,7 +2,6 @@ import { createClientLogger } from '../diagnostics/ClientLog';
 import { isEndpointRetryablePlaybackFailure, PlaybackSourceError, type Player } from '../platform/Platform';
 import type { MediaSummary, PlaybackCapabilities, PlaybackEvent, PlaybackSource } from '../types';
 import type {
-  PlaybackAdmissionContext,
   PlaybackPreferencesUpdate,
   PlaybackResolver,
   PlaybackSession,
@@ -34,7 +33,6 @@ export interface PlaybackCoordinatorOptions {
   capabilities: () => Promise<PlaybackCapabilities>;
   initialPositionMs: number;
   initialPreferences?: PlaybackPreferencesUpdate;
-  admissionContext?: PlaybackAdmissionContext;
 }
 
 type Listener = (snapshot: PlaybackCoordinatorSnapshot) => void;
@@ -260,7 +258,6 @@ export class PlaybackCoordinator {
         capabilities,
         requestedPositionMs,
         this.options.initialPreferences,
-        this.options.admissionContext,
       );
       if (this.disposed) {
         await this.options.resolver.stop(session.sessionId, this.closeOptions).catch(() => undefined);
@@ -757,7 +754,6 @@ export class PlaybackCoordinator {
           capabilities,
           this.snapshot.intent.positionMs,
           this.currentPreferences(session),
-          this.options.admissionContext,
         );
         if (!alternate) return;
         if (this.disposed || activationRevision !== this.sourceActivationRevision || this.snapshot.session?.sessionId !== session.sessionId) {
@@ -991,7 +987,6 @@ export class PlaybackCoordinator {
         requestedPositionMs,
         this.currentPreferences(failedSession),
         preparedAlternate,
-        this.options.admissionContext,
       );
       if (this.disposed) {
         await this.options.resolver.stop(next.sessionId).catch(() => undefined);

@@ -30,16 +30,6 @@ export interface PlaybackRuntimeSnapshot {
 type LifecycleListener = (snapshot: PlaybackRuntimeSnapshot) => void;
 type PlaybackListener = (snapshot: PlaybackCoordinatorSnapshot | undefined) => void;
 
-export function newPlaybackViewerSessionId(): string {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID();
-  if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
-    const bytes = new Uint8Array(16);
-    crypto.getRandomValues(bytes);
-    return [...bytes].map((byte) => byte.toString(16).padStart(2, '0')).join('');
-  }
-  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
-}
-
 function requestError(media: MediaSummary): Error | undefined {
   if (media.kind !== 'movie' && media.kind !== 'episode' && media.kind !== 'track') {
     return new Error('This catalogue item is not directly playable.');
@@ -76,7 +66,6 @@ export class PlaybackRuntime {
   private disposed = false;
   private failureCleanupGeneration?: number;
   private capabilitiesPromise?: Promise<PlaybackCapabilities>;
-  private readonly viewerSessionId = newPlaybackViewerSessionId();
 
   constructor(
     private readonly platform: Platform,
@@ -197,7 +186,6 @@ export class PlaybackRuntime {
         capabilities: () => this.capabilities(),
         initialPositionMs: Math.max(0, request.startPositionMs),
         initialPreferences: initialPreferences ? { ...initialPreferences } : undefined,
-        admissionContext: { viewerSessionId: this.viewerSessionId },
       });
       this.coordinator = coordinator;
       this.unsubscribeCoordinator = coordinator.subscribe((snapshot) => {

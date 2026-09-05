@@ -45,6 +45,8 @@ import { NodeStatusScreen, StatusScreen } from './screens/StatusScreen';
 import { pathForMedia, routes } from './routing';
 import { playerRouteItemId } from './app/playbackRoute';
 import { useMachaServices } from './app/useMachaServices';
+import { useSessionAuth } from './app/useSessionAuth';
+import { SessionTokenStore } from './api/SessionTokenStore';
 import { useMediaRouteBack } from './app/useMediaRouteBack';
 import { useMusicController } from './app/useMusicController';
 import { usePlaybackRuntime } from './app/usePlaybackRuntime';
@@ -227,6 +229,7 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
   const [bootstrapEndpoints, setBootstrapEndpoints] = useState(() => getBootstrapEndpoints());
   const serverUrl = bootstrapEndpoints[0] ?? '';
   const [apiToken, setApiToken] = useState(() => getApiToken());
+  const tokenStore = useMemo(() => new SessionTokenStore(), []);
   const [connectionNotice, setConnectionNotice] = useState<string>();
   const [clusterUnreachable, setClusterUnreachable] = useState(false);
   const [connectionGate, setConnectionGate] = useState<ConnectionGate | undefined>(() =>
@@ -248,8 +251,14 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
     acquisitionApi,
     managementAvailable,
     endpointRegistry,
-  } = useMachaServices({ serverUrl, bootstrapEndpoints, apiToken, demo, apiOverride, playbackOverride });
-  useEndpointHealthMonitor(endpointRegistry, clusterStatusApi, apiToken, connectionRequired && bootstrapEndpoints.length > 0 && !effectiveConnectionGate);
+  } = useMachaServices({ serverUrl, bootstrapEndpoints, tokenStore, demo, apiOverride, playbackOverride });
+  useSessionAuth(tokenStore, {
+    connectionRequired,
+    serverConfigured: bootstrapEndpoints.length > 0,
+    manualToken: apiToken,
+    endpointRegistry,
+  });
+  useEndpointHealthMonitor(endpointRegistry, clusterStatusApi, tokenStore, connectionRequired && bootstrapEndpoints.length > 0 && !effectiveConnectionGate);
   const metadataEditingAvailable = managementAvailable;
   const [unmatchedCount, setUnmatchedCount] = useState(0);
 

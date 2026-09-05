@@ -4,8 +4,8 @@ import { createClientLogger } from '../diagnostics/ClientLog';
 import { ClusterEndpointRouter } from '../cluster/endpointRouting';
 import type { MediaSummary, PlaybackCapabilities } from '../types';
 import { MachaPlaybackResolver, newPlaybackIdempotencyKey } from './MachaPlaybackResolver';
+import type { BearerTokenSource } from '../api/httpCompat';
 import type {
-  PlaybackAdmissionContext,
   PlaybackPreferencesUpdate,
   PlaybackResolver,
   PlaybackSession,
@@ -52,7 +52,7 @@ export class ClusterPlaybackResolver implements PlaybackResolver {
 
   constructor(
     routerOrRegistry: ClusterEndpointRouter | EndpointRegistry,
-    private readonly bearerToken?: string,
+    private readonly bearerToken?: BearerTokenSource,
     private readonly generationAttemptTimeoutMs = 12_000,
   ) {
     this.registry = routerOrRegistry instanceof ClusterEndpointRouter
@@ -65,10 +65,9 @@ export class ClusterPlaybackResolver implements PlaybackResolver {
     capabilities: PlaybackCapabilities,
     seekMs?: number,
     preferences?: PlaybackPreferencesUpdate,
-    context?: PlaybackAdmissionContext,
   ): Promise<PlaybackSession> {
     this.failedGenerationEndpoints = new Set();
-    return this.create(media, capabilities, seekMs, preferences, context, new Set(), true);
+    return this.create(media, capabilities, seekMs, preferences, new Set(), true);
   }
 
   async failover(
@@ -78,7 +77,6 @@ export class ClusterPlaybackResolver implements PlaybackResolver {
     seekMs: number,
     preferences: PlaybackPreferencesUpdate,
     preparedAlternate?: PlaybackSession,
-    context?: PlaybackAdmissionContext,
   ): Promise<PlaybackSession> {
     // Shares the exact bookkeeping PlaybackCoordinator calls explicitly for a
     // silent (no-reload) transition — see recordEndpointFailure below — so
@@ -94,7 +92,7 @@ export class ClusterPlaybackResolver implements PlaybackResolver {
         return preparedAlternate;
       }
     }
-    return this.create(media, capabilities, seekMs, preferences, context, this.failedGenerationEndpoints, true, this.generationAttemptTimeoutMs);
+    return this.create(media, capabilities, seekMs, preferences, this.failedGenerationEndpoints, true, this.generationAttemptTimeoutMs);
   }
 
   async prepareAlternate(
@@ -103,7 +101,6 @@ export class ClusterPlaybackResolver implements PlaybackResolver {
     capabilities: PlaybackCapabilities,
     seekMs: number,
     preferences: PlaybackPreferencesUpdate,
-    context?: PlaybackAdmissionContext,
   ): Promise<PlaybackSession | undefined> {
     if (!activeSession.endpoint) return undefined;
     const excluded = new Set(this.failedGenerationEndpoints);
@@ -114,7 +111,6 @@ export class ClusterPlaybackResolver implements PlaybackResolver {
         capabilities,
         seekMs,
         { ...preferences, mode: activeSession.mode === 'direct' ? 'direct' : preferences.mode },
-        context,
         excluded,
         false,
         this.generationAttemptTimeoutMs,
@@ -134,7 +130,6 @@ export class ClusterPlaybackResolver implements PlaybackResolver {
     capabilities: PlaybackCapabilities,
     seekMs: number | undefined,
     preferences: PlaybackPreferencesUpdate | undefined,
-    context: PlaybackAdmissionContext | undefined,
     excluded: ReadonlySet<string>,
     preferOnSuccess: boolean,
     attemptTimeoutMs?: number,
@@ -151,7 +146,7 @@ export class ClusterPlaybackResolver implements PlaybackResolver {
         standby: !preferOnSuccess,
       });
       try {
-        const request = resolver.resolve(media, capabilities, seekMs, preferences, context, undefined, idempotencyKey);
+        const request = resolver.resolve(media, capabilities, seekMs, preferences, undefined, idempotencyKey);
         const session = attemptTimeoutMs
           ? await awaitWithEndpointDeadline(request, attemptTimeoutMs)
           : await request;

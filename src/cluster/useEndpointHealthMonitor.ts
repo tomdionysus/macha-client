@@ -1,8 +1,8 @@
 import { useEffect } from 'react';
-import { authenticatedRequestHeaders } from '../api/httpCompat';
+import { authenticatedRequestHeaders, type BearerTokenSource } from '../api/httpCompat';
 import type { ClusterStatusApi } from '../api/ClusterStatusApi';
 import type { EndpointRegistry, MachaEndpoint } from './EndpointRegistry';
-import { reportClusterReachable, reportClusterUnreachable } from '../api/serverConnection';
+import { reportClusterReachable, reportClusterUnreachable, reportUnauthorized } from '../api/serverConnection';
 import { createClientLogger } from '../diagnostics/ClientLog';
 
 export const ENDPOINT_HEALTH_INTERVAL_MS = 10_000;
@@ -19,7 +19,7 @@ interface ProbeResult {
 
 async function probeEndpoint(
   endpoint: MachaEndpoint,
-  bearerToken: string | undefined,
+  bearerToken: BearerTokenSource,
   fetchImpl: Fetch,
 ): Promise<ProbeResult> {
   const startedAt = performance.now();
@@ -29,7 +29,10 @@ async function probeEndpoint(
       headers: authenticatedRequestHeaders(undefined, bearerToken, { Accept: 'application/json' }),
       cache: 'no-store',
     });
-    if (!response.ok) return { status: 'reachable' };
+    if (!response.ok) {
+      if (response.status === 401) reportUnauthorized();
+      return { status: 'reachable' };
+    }
     return { status: 'healthy', latencyMs: performance.now() - startedAt };
   } catch {
     return { status: 'unreachable' };
@@ -68,7 +71,7 @@ export async function discoverClusterEndpoints(
 /** Probe every currently known HTTP API endpoint once, in parallel. */
 export async function probeKnownEndpoints(
   registry: EndpointRegistry,
-  bearerToken: string | undefined,
+  bearerToken: BearerTokenSource,
   signal: AbortSignal,
   fetchImpl: Fetch = fetch,
 ): Promise<number> {
@@ -102,7 +105,7 @@ export async function probeKnownEndpoints(
 export function useEndpointHealthMonitor(
   registry: EndpointRegistry,
   clusterStatusApi: ClusterStatusApi,
-  bearerToken: string | undefined,
+  bearerToken: BearerTokenSource,
   enabled: boolean,
 ): void {
   useEffect(() => {
