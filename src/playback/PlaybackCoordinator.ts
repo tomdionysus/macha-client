@@ -183,6 +183,8 @@ export class PlaybackCoordinator {
   private sourceActivationRevision = 0;
   private positionRevision = 0;
   private seekIntentActive = false;
+  /** The last position the player itself reported, independent of optimistic seek intent. */
+  private lastObservedPositionMs?: number;
   private failoverPromise?: Promise<void>;
   private readonly alternateSessions = new Map<string, PlaybackSession>();
   private readonly alternatePreparations = new Set<Promise<void>>();
@@ -522,6 +524,27 @@ export class PlaybackCoordinator {
     active.controller.abort(new DOMException('Seek superseded by newer viewer intent', 'AbortError'));
   }
 
+  /**
+   * `seek()` pins its target optimistically, and until the player reports
+   * reaching it `onPlayerEvent` deliberately ignores real positions. A
+   * mutation that never lands would otherwise leave that target pinned for
+   * the rest of the session — the scrubber (`PlayerScreen` renders
+   * `intent.positionMs`) frozen at a position playback never reached while it
+   * plays on elsewhere, and resume requests derived from the same field.
+   * Fall back to the last position the player actually reported, unless newer
+   * seek intent is already queued to supersede this one anyway.
+   */
+  private rollbackUnfulfilledSeek(): void {
+    if (!this.seekIntentActive || this.pendingMutation || this.debouncedSeekMutation) return;
+    this.seekIntentActive = false;
+    const positionMs = this.lastObservedPositionMs;
+    if (positionMs === undefined) return;
+    this.patchSnapshot({
+      intent: { ...this.snapshot.intent, positionMs },
+      event: { ...this.snapshot.event, positionMs },
+    });
+  }
+
   private async drainMutations(): Promise<void> {
     while (!this.disposed) {
       const pending = this.pendingMutation;
@@ -611,6 +634,7 @@ export class PlaybackCoordinator {
           error,
         });
         this.patchSnapshot({ notice: error instanceof Error ? error.message : String(error) });
+        this.rollbackUnfulfilledSeek();
       } finally {
         if (this.activeMutation?.controller === controller) this.activeMutation = undefined;
         resolveSettled();
@@ -868,6 +892,7 @@ export class PlaybackCoordinator {
     if (this.disposed) return;
     const session = this.snapshot.session;
     const absolutePositionMs = next.positionMs + (session?.mode === 'direct' ? 0 : this.streamOffsetMs);
+    this.lastObservedPositionMs = absolutePositionMs;
     const absolute: PlaybackEvent = {
       ...next,
       positionMs: absolutePositionMs,

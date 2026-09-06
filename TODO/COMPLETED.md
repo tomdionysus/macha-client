@@ -2,6 +2,78 @@
 
 Last updated: 2026-09-06
 
+## A failed seek no longer pins the scrubber at a position playback never reached
+
+Found while analysing the flagged seek/option-change failover gap (see
+`ACTIVE.md`), and separable from it: this half needed no design decision.
+
+`seek()` pins its target optimistically — setting `intent.positionMs`,
+`event.positionMs` and `seekIntentActive = true` before the generation PATCH
+is even attempted — and while `seekIntentActive` is true, `onPlayerEvent`
+deliberately ignores real player positions so transient attach events cannot
+overwrite viewer intent. Nothing in `drainMutations()`'s failure path ever
+unwound that. `seekIntentActive` only clears when the player reports reaching
+the target, which never happens if the generation request failed, so:
+
+- `PlayerScreen.tsx` renders the scrubber from `intent.positionMs`, leaving it
+  frozen at a position playback never reached, for the rest of the session,
+  while the stream plays on somewhere else.
+- `PlaybackRuntime.ts` derives `startPositionMs` from the same field, so the
+  wrong position propagated into resume/reactivation requests too.
+- This fired for *any* failed seek PATCH, including a benign 4xx from a
+  perfectly healthy node — it needed no cluster failure at all.
+
+- [x] `PlaybackCoordinator` now tracks `lastObservedPositionMs` (the last
+  position the player itself reported, recorded in `onPlayerEvent`
+  independently of optimistic intent), and a failed mutation calls the new
+  `rollbackUnfulfilledSeek()`: it clears `seekIntentActive` so position
+  reporting follows the player again, and restores the last observed
+  position. It deliberately does nothing when newer seek intent is already
+  queued (`pendingMutation`/`debouncedSeekMutation`), since that supersedes
+  the failed one anyway.
+- [x] Regression test in `PlaybackCoordinator.test.ts` ("restores the observed
+  position when a seek-driven generation replacement fails") asserts both
+  halves: the position returns to the observed one, and subsequent player
+  events are followed again rather than staying pinned. Confirmed to fail
+  against the pre-fix code (scrubber stuck at the unreached target).
+- [x] Full suite green (69 files / 432 tests), `tsc --noEmit` clean. The
+  remaining failover-policy question is deliberately deferred — see
+  `ACTIVE.md`.
+
+## Phase 6 failover: audited automated coverage, fixed a real hung-session-POST bug
+
+With no live cluster available, audited what the automated suite already
+proves for the Phase 6 UAT scenarios listed as "not yet exercised" (HLS
+failure, failure during session POST/manifest transfer/pause/seek/
+option-change), to find genuine test gaps to close versus scenarios that
+turned out not applicable or to be real, undesigned production gaps (the
+latter were *not* implemented — see `TODO/ACTIVE.md`'s Phase 6 entry for
+what's flagged for a design decision instead).
+
+- [x] Found and fixed a real bug: `ClusterPlaybackResolver.resolve()` (the
+  client's very first session-creation POST) omitted the `attemptTimeoutMs`
+  argument its own sibling methods (`failover()`, `prepareAlternate()`)
+  already pass — so a node that hung on the first POST (accepted the
+  connection, never responded) would hang the client forever with nothing
+  to notice or retry. Fixed by passing `this.generationAttemptTimeoutMs`
+  like every other call site. Regression test added to
+  `ClusterPlaybackResolver.test.ts` ("abandons a hung initial session
+  POST..."), confirmed to fail (a real 5-second test timeout) against the
+  pre-fix code, mirroring the existing hung-standby-POST test's pattern and
+  timeout override.
+- [x] Added a test proving the session-creation candidate/failover loop is
+  genuinely mode-agnostic for HLS, not just implied by the Direct Play
+  case: `ClusterNodeFailover.test.ts` ("creates the initial HLS generation
+  on the surviving node after request-creation failure").
+- [x] Confirmed `WebHlsPolicy.ts`'s error classification is provably
+  detail-agnostic (branches only on `data.type`, never `data.details`), so
+  a manifest-specific error is already exercised identically to the
+  existing `fragLoadError` test — no real test gap there, so no redundant
+  test added.
+- [x] Confirmed "failure during pause" is inapplicable: pause/resume are
+  purely local player calls with no resolver/network round trip at all.
+- [x] Full suite green (69 files / 431 tests), `tsc --noEmit` clean.
+
 ## Endpoint registry now has memory across a reload
 
 Runtime-discovered cluster membership (`discoverClusterEndpoints()`) lived

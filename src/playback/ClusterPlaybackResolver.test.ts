@@ -202,6 +202,33 @@ describe('ClusterPlaybackResolver', () => {
     ]);
   });
 
+  it('abandons a hung initial session POST and attempts the next known endpoint', async () => {
+    // Unlike failover()/prepareAlternate(), the very first resolve() must
+    // also be timeout-bounded — a node that accepts the connection but never
+    // answers must not hang playback forever with nothing else queued behind
+    // it, exactly like the standby-POST case above.
+    const fetchMock = vi.fn()
+      .mockImplementationOnce((_url: string, init?: RequestInit) => {
+        expect(init?.signal).toBeUndefined();
+        return new Promise<Response>(() => undefined);
+      })
+      .mockResolvedValueOnce(new Response(JSON.stringify(wireSession('session-b')), { status: 201, headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+    const resolver = new ClusterPlaybackResolver(
+      new EndpointRegistry(bootstrapEndpoints(['http://a', 'http://b'])),
+      undefined,
+      5,
+    );
+
+    const session = await resolver.resolve(media, capabilities);
+
+    expect(session.endpoint?.id).toBe('http://b');
+    expect(fetchMock.mock.calls.map(([url]) => (url as string).split('?')[0])).toEqual([
+      'http://a/api/v1/playback/sessions',
+      'http://b/api/v1/playback/sessions',
+    ]);
+  });
+
   it('promotes a prepared transformed generation without creating a duplicate lease', async () => {
     const transformed = (id: string) => ({
       ...wireSession(id),

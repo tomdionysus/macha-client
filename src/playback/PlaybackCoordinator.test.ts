@@ -639,6 +639,37 @@ describe('Evidence-triggered Direct Play recovery preparation', () => {
     await coordinator.close();
   });
 
+  it('restores the observed position when a seek-driven generation replacement fails', async () => {
+    // seek() pins its target optimistically and suppresses real position
+    // reporting until the player reaches it. If the generation request never
+    // lands, that target must not stay pinned: the scrubber renders
+    // intent.positionMs, so it would otherwise sit at a position playback
+    // never reached, permanently, while the stream plays on somewhere else.
+    const player = new FakePlayer();
+    const initial = session({ mode: 'transcode', seekMs: 30_000 });
+    const update = deferred<PlaybackSession>();
+    const api = resolver(initial, async () => update.promise);
+    const coordinator = new PlaybackCoordinator({ media: media(), player, resolver: api, capabilities: async () => capabilities(), initialPositionMs: 40_000 });
+    await coordinator.start();
+    // Settle the startup activation target (generation origin 30s + local 10s
+    // == the 40s start), so position reporting is following the player again.
+    player.emit({ positionMs: 10_000, durationMs: 600_000, paused: false, ended: false });
+    player.emit({ positionMs: 11_000, durationMs: 600_000, paused: false, ended: false });
+    expect(coordinator.getSnapshot().intent.positionMs).toBe(41_000);
+
+    coordinator.seek(10_000);
+    await vi.waitFor(() => expect(api.update).toHaveBeenCalledTimes(1));
+    expect(coordinator.getSnapshot().intent.positionMs).toBe(10_000);
+
+    update.reject(new Error('node rejected the seek'));
+
+    await vi.waitFor(() => expect(coordinator.getSnapshot().intent.positionMs).toBe(41_000));
+    // And position reporting follows the player again rather than staying pinned.
+    player.emit({ positionMs: 12_000, durationMs: 600_000, paused: false, ended: false });
+    expect(coordinator.getSnapshot().intent.positionMs).toBe(42_000);
+    await coordinator.close();
+  });
+
   it('does not register a direct-source alternative for a transformed (non-direct) standby', async () => {
     const player = new FakePlayer();
     const primary = session({ sessionId: 'primary', mediaId: 'macha:one', mode: 'remux' });

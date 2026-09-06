@@ -67,7 +67,7 @@ export class ClusterPlaybackResolver implements PlaybackResolver {
     preferences?: PlaybackPreferencesUpdate,
   ): Promise<PlaybackSession> {
     this.failedGenerationEndpoints = new Set();
-    return this.create(media, capabilities, seekMs, preferences, new Set(), true);
+    return this.create(media, capabilities, seekMs, preferences, new Set(), true, this.generationAttemptTimeoutMs);
   }
 
   async failover(

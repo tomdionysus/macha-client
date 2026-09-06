@@ -187,10 +187,81 @@ failures). Remaining work, in priority order:
 
 - [ ] **Finish Phase 6 UAT.** Direct Play range-transfer failure is verified
   (silent mid-stream swap, no video reload, confirmed live with zero
-  measured stall). Not yet exercised: HLS failure, and failure specifically
-  during session POST, manifest transfer, pause, seek and option-change.
-  Also still open: prove the client never navigates away, loses its
-  queue/preferences, creates an unbounded retry/session loop, or waits on
+  measured stall). Not yet *live-exercised*: HLS failure, and failure
+  specifically during session POST and manifest transfer.
+  **Audited 2026-09-06** (automated-coverage check only, no live cluster
+  available that session) for what each of these already proves or doesn't
+  at the unit/integration level, ahead of the still-needed live UAT:
+  - Session POST failure: well covered for Direct Play
+    (`ClusterPlaybackResolver.test.ts`, `ClusterNodeFailover.test.ts`); added
+    an equivalent HLS-mode (`remux`) test proving the candidate loop is
+    genuinely mode-agnostic, not just implied.
+  - Found and fixed a real bug while auditing this, unrelated to live UAT:
+    `ClusterPlaybackResolver.resolve()` (the *initial* session POST) called
+    `create()` without `attemptTimeoutMs` — unlike `failover()`/
+    `prepareAlternate()`, which both pass it. A node that hung (accepted the
+    connection, never responded) on the very first POST would hang playback
+    forever with no failover, no error, nothing queued behind it to notice.
+    Fixed: `resolve()` now passes `this.generationAttemptTimeoutMs` like its
+    siblings. Regression test in `ClusterPlaybackResolver.test.ts`
+    ("abandons a hung initial session POST...") confirmed to fail (real
+    5-second timeout) against the pre-fix code.
+  - HLS failure (mid-stream): already has full-stack coverage
+    (`ClusterNodeFailover.test.ts`, "prepares an HLS standby..."), but the
+    trigger is synthetic (`player.degrade()`/`.fail()` calls), not a real
+    hls.js manifest/segment failure flowing through `WebPlayer`. Checked
+    `WebHlsPolicy.ts`'s error classification specifically: it branches only
+    on `data.type` (`NETWORK_ERROR`/`MEDIA_ERROR`), never on `data.details`
+    — so a manifest-load error is already provably classified identically
+    to the already-tested `fragLoadError` case; no test gap there. Proving
+    a *real* hls.js manifest fetch failure end-to-end would need a heavier
+    fixture (real `hls.js` against jsdom) — not attempted; the existing
+    synthetic-trigger integration test plus the type-based policy unit
+    tests are judged adequate until/unless that's shown insufficient.
+  - Pause: confirmed not applicable. `PlaybackCoordinator.setPaused()` is
+    purely local (`player.pause()`/`.resume()`) — no resolver call exists,
+    so there is nothing server-side that could fail. Removed from this list.
+  - **Seek and option-change: NOT just untested — a real, undesigned gap.**
+    `PlaybackCoordinator.drainMutations()`'s catch block (handling every
+    seek/representation/subtitle PATCH failure from `resolver.update()`)
+    only does `patchSnapshot({ notice: ... })`; it never calls `this.fail()`.
+    Failover-on-error only exists on the *player's* failure/degradation
+    channel, not on a failed PATCH itself. So today, a seek or option-change
+    that fails because the owning node just died gets a client-side notice
+    and otherwise silently does nothing — no retry, no failover, no
+    recreation on another node — until/unless the player *also* independently
+    notices the stream died. **Deferred deliberately (2026-09-06): revisit
+    with the live cluster**, since judging the real UX cost needs to be seen
+    rather than reasoned about. Analysis done so far, so it need not be
+    re-derived:
+    - Severity is lower while *playing* — the dead node kills the stream too,
+      so the player's own failure channel eventually triggers failover
+      anyway; the cost is latency plus a confusing "my seek did nothing".
+      While *paused* it is a genuine dead end: nothing is loading, so no
+      player error will ever arrive, and the seek is simply lost.
+    - The naive implementation is actively dangerous. `ClusterPlaybackResolver
+      .update()` wraps every failure via `endpointFailure()`, and
+      `retryableEndpointFailure()` returns true for *any* `MachaEndpointError`
+      — so gating on the wrapper treats a 400/422 "server rejected this
+      request" as node-loss evidence, and would burn through every candidate
+      node before landing on a fatal error screen. Strictly worse than the
+      current notice.
+    - A correct discrimination does exist: the raw error survives as
+      `MachaEndpointError.cause` with its HTTP status intact, and
+      `retryableEndpointFailure(cause)` classifies correctly (TypeError/5xx/
+      429 → true; 400/404/422 → false). The open design question is layering:
+      `PlaybackCoordinator` is deliberately cluster-agnostic and does not
+      import the cluster error types, so this needs either a small
+      classification hook on the `PlaybackResolver` interface or the resolver
+      tagging the error — plus a decision on how it interacts with the
+      fail()/seek-race deferral (see `COMPLETED.md`, 2026-09-06).
+    - **Fixed separately, no design decision needed:** the same failure path
+      used to leave `seek()`'s optimistic target pinned forever (see
+      `COMPLETED.md`). That was the user-visible half of this gap and is done;
+      what remains here is purely the failover-policy question.
+  Also still open (needs the live cluster, not addressable by more unit
+  tests): prove the client never navigates away, loses its queue/
+  preferences, creates an unbounded retry/session loop, or waits on
   old-node cleanup during any of the above.
 - [ ] **Blocked on the server, no client action available:** a node that
   becomes the failover target must actually be able to read the extent it's

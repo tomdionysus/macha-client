@@ -45,6 +45,28 @@ describe('Cluster node failover integration', () => {
     ]);
   });
 
+  it('creates the initial HLS generation on the surviving node after request-creation failure', async () => {
+    // The candidate loop in ClusterPlaybackResolver.create() decides nothing
+    // about mode — this proves that explicitly rather than only implying it
+    // from the Direct Play case above.
+    const cluster = createFakeCluster(['http://node-a', 'http://node-b']);
+    cluster.node('http://node-a').queueNetworkFailure('node A unreachable');
+    cluster.node('http://node-b').queueSession('session-b', { mode: 'remux' });
+    const player = createFakePlayer();
+    const coordinator = new PlaybackCoordinator({
+      media, player, resolver: cluster.resolver, capabilities: async () => capabilities, initialPositionMs: 0,
+    });
+
+    await coordinator.start();
+
+    expect(player.playCalls.at(-1)?.source.url).toBe('http://node-b/api/v1/playback/stream/session-b/index.m3u8');
+    expect(coordinator.getSnapshot().session?.endpoint?.id).toBe('http://node-b');
+    expect(cluster.calls.map((call) => call.url.split('?')[0])).toEqual([
+      'http://node-a/api/v1/playback/sessions',
+      'http://node-b/api/v1/playback/sessions',
+    ]);
+  });
+
   it('recreates a failed live generation on the surviving node and tears down the failed node lease', async () => {
     const cluster = createFakeCluster(['http://node-a', 'http://node-b']);
     cluster.node('http://node-a').queueSession('session-a');
