@@ -55,7 +55,7 @@ export function SeasonScreen({ api, seriesId, seasonId, onBack, progress, onPlay
         {season.synopsis && <p className="synopsis">{season.synopsis}</p>}
         <section className="episode-section">
           <h2>Episodes</h2>
-          <EpisodeRail api={api} episodes={season.episodes} progress={progress} series={series} season={season} onPlayEpisode={onPlayEpisode} />
+          <EpisodeRail api={api} episodes={season.episodes} progress={progress} onPlayEpisode={onPlayEpisode} />
         </section>
       </div>
     </section>

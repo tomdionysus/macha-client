@@ -57,6 +57,8 @@ export interface Episode extends MediaSummary {
   kind: 'episode';
   seasonNumber: number;
   episodeNumber: number;
+  /** Always present on an API-produced episode; the catalogue wire item only carries `parent_id`. */
+  playbackContext: PlaybackHierarchyContext;
 }
 
 export interface SeasonSummary extends MediaSummary {

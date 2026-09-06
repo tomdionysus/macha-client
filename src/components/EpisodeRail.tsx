@@ -2,14 +2,12 @@ import { useRef, type MouseEvent, type PointerEvent, type WheelEvent } from 'rea
 import type { MediaApi } from '../api/MediaApi';
 import { LazyArtwork } from './LazyArtwork';
 import { PlayIcon, RestartIcon } from './PlaybackIcons';
-import type { Episode, PlaybackProgress, SeasonDetails, ShowDetails } from '../types';
+import type { Episode, PlaybackProgress } from '../types';
 
 interface Props {
   api: MediaApi;
   episodes: Episode[];
   progress: Map<string, PlaybackProgress>;
-  series: ShowDetails;
-  season: SeasonDetails;
   onPlayEpisode: (episode: Episode, queue: Episode[], queueIndex: number, fromStart: boolean) => void;
 }
 
@@ -93,14 +91,7 @@ function EpisodeCard({ api, episode, progress, playbackEpisode, queue, queueInde
   );
 }
 
-export function EpisodeRail({ api, episodes, progress, series, season, onPlayEpisode }: Props) {
-  const playbackQueue: Episode[] = episodes.map((episode) => ({
-    ...episode,
-    playbackContext: {
-      series: { id: series.id, title: series.title },
-      season: { id: season.id, title: season.title, seasonNumber: season.seasonNumber },
-    },
-  }));
+export function EpisodeRail({ api, episodes, progress, onPlayEpisode }: Props) {
   const railRef = useRef<HTMLDivElement | null>(null);
   const drag = useRef<DragState | undefined>(undefined);
   const suppressClick = useRef(false);
@@ -179,8 +170,8 @@ export function EpisodeRail({ api, episodes, progress, series, season, onPlayEpi
             api={api}
             episode={episode}
             progress={progress.get(episode.id)}
-            playbackEpisode={playbackQueue[index]}
-            queue={playbackQueue}
+            playbackEpisode={episodes[index]}
+            queue={episodes}
             queueIndex={index}
             onPlayEpisode={onPlayEpisode}
           />

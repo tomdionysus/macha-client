@@ -98,31 +98,87 @@ describe('SessionManager', () => {
     await vi.waitFor(() => expect(mint).toHaveBeenCalledTimes(2));
   });
 
-  it('does not re-mint on a slow request whose 401 arrives after a token was already adopted', async () => {
-    // A caller that raced ahead of the very first mint (no token exists yet
-    // at the moment it fires) gets a 401 for the obvious reason — that is not
-    // evidence the *current*, since-adopted session is bad. Reacting to it
-    // once it finally resolves would clobber a perfectly good session with a
-    // wasteful, redundant mint.
-    const mint = vi.spyOn(SessionAuth, 'mintAnonymousSessionAnyNode').mockResolvedValue({
-      token: 'token-a', expiresAtMs: Date.now() + DAY_MS,
-    });
-    let resolveSlowFetch: (response: Response) => void;
-    const fetchMock = vi.fn().mockImplementation(() => new Promise((resolve) => { resolveSlowFetch = resolve; }));
+  it('holds a request fired before the first token exists until the mint lands, then sends it authenticated', async () => {
+    // A caller that races ahead of the very first mint (e.g. an effect that
+    // fires on mount) must not go out tokenless — that can only 401. It waits
+    // for the bootstrap already in flight and carries the resulting token.
+    let resolveMint: (session: SessionAuth.AnonymousSession) => void;
+    const mint = vi.spyOn(SessionAuth, 'mintAnonymousSessionAnyNode')
+      .mockImplementation(() => new Promise((resolve) => { resolveMint = resolve; }));
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
     const manager = new SessionManager();
     manager.start(new EndpointRegistry(bootstrapEndpoints(['http://a'])));
 
-    // Fired while manager.token is still undefined (mint hasn't resolved yet).
-    const slowFetch = manager.fetch('http://a/x');
+    const early = manager.fetch('http://a/x');
+    await Promise.resolve();
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    resolveMint!({ token: 'token-a', expiresAtMs: Date.now() + DAY_MS });
+    expect((await early).status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(new Headers(fetchMock.mock.calls[0][1].headers).get('Authorization')).toBe('Bearer token-a');
+    expect(mint).toHaveBeenCalledTimes(1);
+  });
+
+  it('retries once with the re-minted token when the token it sent is rejected', async () => {
+    const mint = vi.spyOn(SessionAuth, 'mintAnonymousSessionAnyNode')
+      .mockResolvedValueOnce({ token: 'token-a', expiresAtMs: Date.now() + DAY_MS })
+      .mockResolvedValueOnce({ token: 'token-b', expiresAtMs: Date.now() + DAY_MS });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(null, { status: 401 }))
+      .mockResolvedValueOnce(new Response(null, { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const manager = new SessionManager();
+    manager.start(new EndpointRegistry(bootstrapEndpoints(['http://a'])));
     await vi.waitFor(() => expect(manager.isReady).toBe(true));
-    expect(mint).toHaveBeenCalledTimes(1);
 
-    // Only now does the slow, tokenless request's 401 actually arrive.
-    resolveSlowFetch!(new Response(null, { status: 401 }));
-    await slowFetch;
+    const response = await manager.fetch('http://a/x');
 
-    expect(mint).toHaveBeenCalledTimes(1);
+    expect(response.status).toBe(200);
+    expect(mint).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(new Headers(fetchMock.mock.calls[1][1].headers).get('Authorization')).toBe('Bearer token-b');
+  });
+
+  it('coalesces overlapping 401s into one re-mint and never clobbers the session it just adopted', async () => {
+    // Two requests go out on token-a; both are rejected. The first re-mints
+    // to token-b and retries. By the time the second, slower 401 arrives the
+    // session it was sent on has already been replaced — minting again would
+    // throw away a perfectly good token-b. It must simply retry with token-b.
+    const mint = vi.spyOn(SessionAuth, 'mintAnonymousSessionAnyNode')
+      .mockResolvedValueOnce({ token: 'token-a', expiresAtMs: Date.now() + DAY_MS })
+      .mockResolvedValue({ token: 'token-b', expiresAtMs: Date.now() + DAY_MS });
+    const fetchMock = vi.fn().mockImplementation((_url: string, init: RequestInit) => Promise.resolve(
+      new Response(null, { status: new Headers(init.headers).get('Authorization') === 'Bearer token-a' ? 401 : 200 }),
+    ));
+    vi.stubGlobal('fetch', fetchMock);
+    const manager = new SessionManager();
+    manager.start(new EndpointRegistry(bootstrapEndpoints(['http://a'])));
+    await vi.waitFor(() => expect(manager.isReady).toBe(true));
+
+    const [first, second] = await Promise.all([manager.fetch('http://a/x'), manager.fetch('http://a/y')]);
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    expect(mint).toHaveBeenCalledTimes(2);
+  });
+
+  it('returns the original 401 when re-minting fails, rather than retrying tokenless or looping', async () => {
+    vi.spyOn(SessionAuth, 'mintAnonymousSessionAnyNode')
+      .mockResolvedValueOnce({ token: 'token-a', expiresAtMs: Date.now() + DAY_MS })
+      .mockRejectedValueOnce(new Error('unreachable'));
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 401 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const manager = new SessionManager();
+    manager.start(new EndpointRegistry(bootstrapEndpoints(['http://a'])));
+    await vi.waitFor(() => expect(manager.isReady).toBe(true));
+
+    const response = await manager.fetch('http://a/x');
+
+    expect(response.status).toBe(401);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    manager.stop();
   });
 
   it('never lets a long-lived expiry overflow setTimeout into an immediate re-mint loop', async () => {

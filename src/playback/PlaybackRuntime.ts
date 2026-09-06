@@ -34,9 +34,6 @@ function requestError(media: MediaSummary): Error | undefined {
   if (media.kind !== 'movie' && media.kind !== 'episode' && media.kind !== 'track') {
     return new Error('This catalogue item is not directly playable.');
   }
-  if (media.kind === 'episode' && !media.playbackContext) {
-    return new Error('Episode playback hierarchy context is missing.');
-  }
   return undefined;
 }
 

@@ -26,19 +26,8 @@ export function usePlaybackController(options: {
   progressStore: ContinueWatchingStore;
   queueStore: PlaybackQueueStore;
   volumeStore: VolumeStore;
-  /**
-   * Whether the app's session/auth has completed its first mint. Unlike every
-   * other route, App.tsx cannot gate this hook's own effects behind that on
-   * its caller's side — this hook runs unconditionally before App's
-   * `!sessionReady` early return. A reload deep-linked straight into
-   * `/play/:itemId` would otherwise have the reconstruction effect below fire
-   * on the very first render, issuing an authenticated request before the
-   * session mint completes and failing with a bearer-token error. Defaults to
-   * `true` so callers/tests that don't model session lifecycle are unaffected.
-   */
-  sessionReady?: boolean;
 }) {
-  const { api, platform, runtime, runtimeState, progressStore, queueStore, volumeStore, sessionReady = true } = options;
+  const { api, platform, runtime, runtimeState, progressStore, queueStore, volumeStore } = options;
   const navigate = useNavigate();
   const location = useLocation();
   const activePlayback = runtimeState.request;
@@ -129,10 +118,6 @@ export function usePlaybackController(options: {
 
   useEffect(() => {
     if (runtimeState.phase === 'stopping') return undefined;
-    // Only relevant to reconstructing a route with no active playback yet
-    // (the branch just below bails out immediately once one exists), so this
-    // can never re-gate or interrupt something already playing.
-    if (!sessionReady) return undefined;
     if (suppressReconstructRef.current) {
       // Only the route catching up (leaving `/play/:id`) proves the
       // intentional stop this was guarding actually completed — clearing on
@@ -195,7 +180,7 @@ export function usePlaybackController(options: {
       });
     })().catch((error) => console.error('[macha] unable to reconstruct playback route', error));
     return () => { cancelled = true; };
-  }, [activePlayback?.media.id, api, location.search, location.state, playerItemId, progressStore, queueStore, runtime, runtimeState.phase, sessionReady]);
+  }, [activePlayback?.media.id, api, location.search, location.state, playerItemId, progressStore, queueStore, runtime, runtimeState.phase]);
 
   const persistPlaybackPosition = useCallback((media: MediaSummary, positionMs: number) => {
     const persisted = queueStore.load();

@@ -271,7 +271,7 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
     acquisitionApi,
     managementAvailable,
   } = useMachaServices({ endpointRegistry, auth, apiOverride, playbackOverride });
-  useEndpointHealthMonitor(endpointRegistry, clusterStatusApi, auth, connectionRequired && bootstrapEndpoints.length > 0 && !effectiveConnectionGate && sessionReady);
+  useEndpointHealthMonitor(endpointRegistry, clusterStatusApi, auth, connectionRequired && bootstrapEndpoints.length > 0 && !effectiveConnectionGate);
   const metadataEditingAvailable = managementAvailable;
   const [unmatchedCount, setUnmatchedCount] = useState(0);
 
@@ -287,16 +287,11 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
     progressStore,
     queueStore,
     volumeStore,
-    sessionReady,
   });
   const activePlayback = playback.activePlayback;
 
   useEffect(() => {
-    // Also wait for sessionReady: firing before the first token exists always
-    // 401s, and this effect's own deps never include the moment readiness
-    // flips true, so an early fire here would leave the badge silently and
-    // permanently stuck at 0 rather than actually retrying.
-    if (!managementAvailable || effectiveConnectionGate || !sessionReady) {
+    if (!managementAvailable || effectiveConnectionGate) {
       setUnmatchedCount(0);
       return undefined;
     }
@@ -305,7 +300,7 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
       .then((items) => { if (!cancelled) setUnmatchedCount(items.length); })
       .catch(() => { /* Manage itself will surface API errors when opened. */ });
     return () => { cancelled = true; };
-  }, [effectiveConnectionGate, manageApi, managementAvailable, sessionReady]);
+  }, [effectiveConnectionGate, manageApi, managementAvailable]);
 
   const samsungBack = useCallback(() => {
     if (!buildPlatformTraits.receivesBackKeyEvents) return false;
@@ -426,9 +421,9 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
     {playerHost}
   </div>;
 
-  // Every route requires a valid session unconditionally now — firing
-  // catalogue/status requests before the first token exists just 401s and
-  // previously left the app showing a raw server error with no recovery.
+  // Presentation only: hold the splash until the cold-start mint settles
+  // rather than flashing empty screens. Correctness does not depend on it —
+  // `SessionManager.fetch()` holds any early request for the token itself.
   // Never gate on this mid-playback: a slow re-auth (e.g. reconfiguring the
   // endpoint) must not interrupt something already playing.
   if (connectionRequired && !sessionReady && !activePlayback) return <div className={`app-shell${miniPlayerActive ? ' has-mini-player' : ''}`}>

@@ -96,21 +96,38 @@ export class SessionManager implements AuthenticatedFetch {
     this.refreshTimer = undefined;
   }
 
+  /**
+   * An authenticated request, end to end. Callers never need to know
+   * whether a session exists yet or is still valid:
+   *
+   * - Fired before the first token exists (cold start, bootstrap in flight),
+   *   the request waits for that bootstrap rather than going out tokenless —
+   *   a request that can only 401 is not worth sending.
+   * - A 401 on the token that was actually sent means that session is dead:
+   *   re-mint (coalesced with any mint already in flight) and retry once with
+   *   the new token. A 401 for a token that has *already* been replaced by
+   *   the time it arrives (a slow request overlapping someone else's re-mint)
+   *   must not mint again — that would clobber the good new session — so it
+   *   just retries with the current one.
+   * - If re-minting fails there is nothing better to retry with: the
+   *   original 401 is returned, and the failure-retry timer owns recovery.
+   */
   async fetch(url: string, init: RequestInit = {}): Promise<Response> {
-    // Captured before the request, not read again after: a caller that fired
-    // before start()/bootstrap() produced any token yet is not evidence the
-    // token is bad — there wasn't one to reject. Re-minting on that 401 would
-    // be redundant at best (a mint or validation is already in flight) and
-    // actively harmful at worst: a slower unrelated request's tokenless 401
-    // arriving just after a fast, successful cache validation would blow away
-    // a perfectly good just-adopted session for no reason.
-    const hadToken = this.token !== undefined;
-    const headers = mergeRequestHeaders(init.headers, {
-      Authorization: this.token ? `Bearer ${this.token}` : undefined,
+    if (this.token === undefined && this.inFlight) await this.inFlight;
+    const sent = this.token;
+    const response = await this.send(url, init, sent);
+    if (response.status !== 401 || sent === undefined) return response;
+    await (this.token === sent ? this.mint() : this.inFlight ?? Promise.resolve());
+    const current = this.token;
+    if (current === undefined || current === sent) return response;
+    return this.send(url, init, current);
+  }
+
+  private send(url: string, init: RequestInit, token: string | undefined): Promise<Response> {
+    return fetch(url, {
+      ...init,
+      headers: mergeRequestHeaders(init.headers, { Authorization: token ? `Bearer ${token}` : undefined }),
     });
-    const response = await fetch(url, { ...init, headers });
-    if (response.status === 401 && hadToken) void this.mint();
-    return response;
   }
 
   private settle(): void {

@@ -2,6 +2,90 @@
 
 Last updated: 2026-09-06
 
+## Episode ancestry is produced by the API, not stitched on by callers
+
+Found live 2026-09-06: a deep link to `/play/tmdb:episode:6468133` showed
+"Playback failed — Episode playback hierarchy context is missing." for a
+perfectly playable episode. `playbackContext` (series id/title, season
+id/title/number) is presentational catalogue data — the wire item carries
+only `parent_id`, and nothing in playback consumes it — but its invariant was
+enforced in the wrong layer and produced in the wrong layer:
+
+- `PlaybackRuntime.requestError()` refused to play an episode without it,
+  because the runtime is the choke point on the way into Continue Watching,
+  whose card renders series/season links from it. A rendering invariant
+  policed by the session engine — hence the silent, nonsensical failure.
+- `EpisodeRail` (a scroller) was where episodes got their ancestry attached,
+  so every other producer lacked it: `details(episodeId)` (the deep-link and
+  `/episodes/:id` paths) and pre-field persisted entries (the whole reason
+  `continueWatchingMigration.ts` existed).
+
+- [x] `MachaMediaApi` is now the sole producer via one private
+  `episode(item, season, show)` builder: `details(seasonId)` fetches the show
+  alongside the episode list (`Promise.all`), and a new `details(episodeId)`
+  branch walks episode → season → show. `Episode.playbackContext` is now a
+  required field, so the type carries the guarantee.
+- [x] Deleted: the `EpisodeRail` map and its `series`/`season` props; the
+  runtime's episode gate; the hand-rolled season→show walk in
+  `continueWatchingMigration.ts` (now just re-reads the episode via
+  `api.details`). `usePlaybackController`'s deep-link fallback needed no
+  change at all. Net −75/+79 lines across 7 files, most of it tests.
+- [x] Only the `season`/`episode` branches of `details()` changed; movie,
+  track, album and artist mapping is byte-identical and their existing
+  `MachaMediaApi.test.ts` cases pass unchanged. New test: "resolves series and
+  season ancestry for an episode loaded directly, as a deep link does"; the
+  season test now asserts the ancestry too. Full suite green (433 tests),
+  `tsc --noEmit` clean.
+- [x] Live UAT against the 3-node cluster, window foregrounded and
+  `document.visibilityState` confirmed `visible` (see the P0 process note in
+  `ACTIVE.md`), every case reaching `readyState 4` with time advancing:
+  - Deep link `/play/tmdb:episode:6468133` plays; heading "The Golden Rule —
+    Fallout S02E02", the series title coming from the resolved ancestry.
+  - `/episodes/tmdb:episode:6468133` → Play plays (same heading).
+  - Season screen `Alone › World Championship` renders its rail; playing from
+    it gives "Worlds Collide: Part 1 — Alone S13E01".
+  - After 35s of playback (past `MINIMUM_PROGRESS_MS`), Home shows the new
+    Continue Watching card with both links: `Alone → /series/tmdb:tv:63726`
+    and `World Championship · S13E01 → …/seasons/tmdb:season:63726:13`; the
+    pre-existing Chernobyl card is intact; no console errors.
+  - Control: movie deep link `tmdb:movie:607` plays Direct (H264, 1:37:56).
+  - Music grids are empty on this cluster, so those paths rest on the
+    unchanged unit tests.
+- [x] **Found and fixed during that UAT — `SessionManager.fetch()` did not
+  actually deliver an authenticated request.** Stripping `playbackContext`
+  from a persisted entry to simulate legacy data, the repair failed on load
+  with `a valid session bearer token is required`. Root cause was in the
+  session layer, not the caller: `fetch()` sent a request tokenless if it
+  fired before the cold-start mint landed, and on a 401 with a live token it
+  kicked off a re-mint but *returned the 401 anyway* — the new session was
+  never used for the request that needed it. `useSession` then pushed the
+  burden onto callers ("every real request must wait for `ready`"), which
+  is the same shape as the ancestry bug above: an invariant every call site
+  must remember, and one forgot. (First instinct was to add one more
+  `sessionReady` gate to the migration effect; reverted — wrong layer.)
+  `SessionManager.fetch()` now owns the contract: a tokenless request awaits
+  the in-flight bootstrap; a 401 on the token actually sent awaits the
+  (coalesced) re-mint and retries once with the new token; a 401 whose token
+  was already superseded retries with the current one without minting again
+  (so a slow request can't clobber a good new session); a failed re-mint
+  returns the original 401, no loop. Four contract tests in
+  `SessionManager.test.ts` — hold-until-minted, retry-once, coalesce/no-
+  clobber, fail-without-loop — the first three confirmed to fail against the
+  old behaviour. Re-ran live with the session cache cleared (true cold
+  mint) and no call-site gate: entry repaired on load, card rendered both
+  links, no 401 in the console. Suite: 69 files / 436 tests, `tsc --noEmit`
+  clean. Yesterday's call-site `sessionReady` gates (health monitor, the
+  unmatched-count effect, `usePlaybackController`'s option and its
+  reconstruction guard, plus that guard's test) were then removed as
+  redundant; the only remaining consumer of `ready` is the splash-until-
+  minted render gate in `App.tsx`, which is presentation, not correctness.
+
+Not done, deliberately: the field is still called `playbackContext` (a
+misnomer, but renaming touches persisted localStorage shapes), and
+`SeasonScreen` still fetches `details(seriesId)` for a title and artwork
+that `SeasonDetails` could now carry — a follow-on that would net fewer
+requests than today.
+
 ## A failed seek no longer pins the scrubber at a position playback never reached
 
 Found while analysing the flagged seek/option-change failover gap (see

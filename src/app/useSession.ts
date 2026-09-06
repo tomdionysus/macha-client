@@ -14,11 +14,11 @@ export interface Session {
  * its state; it does not own or construct a session. Exactly one session
  * exists for the life of the app (or of a test, when `manager` is injected).
  *
- * Every real request (catalogue loads, health-monitor polling and
- * discovery) must wait for `ready` before firing — every route on this
- * cluster requires `Authorization` unconditionally, so firing before the
- * first token exists is not a race worth accepting: it 401s every time, and
- * previously left the app showing a raw server error with no recovery.
+ * `ready` is a presentation signal (hold the splash until the cold-start
+ * mint settles), not a correctness gate: a request made through `auth`
+ * before the first token exists waits for that mint itself, and a 401 on a
+ * live token re-mints and retries — `SessionManager.fetch()` owns both, so
+ * no caller has to remember to wait.
  */
 export function useSession(options: {
   connectionRequired: boolean;

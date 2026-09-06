@@ -25,6 +25,15 @@ function catalogueItem(id: string, kind: CatalogueKind, partial: Partial<Catalog
   };
 }
 
+const EPISODE_1 = catalogueItem('episode-1', 'episode', {
+  parent_id: 'season-1',
+  season_number: 1,
+  episode_number: 2,
+  title: 'Episode',
+  media_ids: ['file:abc'],
+  artwork: [{ role: 'still', id: 'art123', mime_type: 'image/jpeg' }],
+});
+
 class FakeCatalogue implements CatalogueApi {
   mediaProfile(): Promise<undefined> { return Promise.resolve(undefined); }
   status(): Promise<CatalogueStatus> { throw new Error('not used'); }
@@ -41,6 +50,7 @@ class FakeCatalogue implements CatalogueApi {
       title: 'Season 1',
       artwork: [{ role: 'poster', id: 'season-art', mime_type: 'image/jpeg' }],
     }));
+    if (id === 'episode-1') return Promise.resolve(EPISODE_1);
     if (id === 'artist-1') return Promise.resolve(catalogueItem('artist-1', 'artist', {
       title: 'Artist',
       effective_artwork: [{ role: 'cover', id: 'artist-effective-art', mime_type: 'image/jpeg' }],
@@ -61,16 +71,7 @@ class FakeCatalogue implements CatalogueApi {
         artwork: [{ role: 'poster', id: 'season-art', mime_type: 'image/jpeg' }],
       })]);
     }
-    if (kind === 'episode' && parent === 'season-1') {
-      return Promise.resolve([catalogueItem('episode-1', 'episode', {
-        parent_id: 'season-1',
-        season_number: 1,
-        episode_number: 2,
-        title: 'Episode',
-        media_ids: ['file:abc'],
-        artwork: [{ role: 'still', id: 'art123', mime_type: 'image/jpeg' }],
-      })]);
-    }
+    if (kind === 'episode' && parent === 'season-1') return Promise.resolve([EPISODE_1]);
     if (kind === 'album' && parent === 'artist-1') {
       return Promise.resolve([catalogueItem('album-1', 'album', { parent_id: 'artist-1', title: 'Album', year: 1999 })]);
     }
@@ -136,6 +137,24 @@ describe('MachaMediaApi', () => {
       mediaIds: ['file:abc'],
       artwork: { thumbnail: { id: 'art123', mimeType: 'image/jpeg' } },
       releaseDate: undefined,
+      playbackContext: {
+        series: { id: 'show', title: 'Show' },
+        season: { id: 'season-1', title: 'Season 1', seasonNumber: 1 },
+      },
+    }));
+  });
+
+  it('resolves series and season ancestry for an episode loaded directly, as a deep link does', async () => {
+    const api = new MachaMediaApi(new FakeCatalogue());
+    const details = await api.details('episode-1');
+    expect(details.kind).toBe('episode');
+    expect(details).toEqual(expect.objectContaining({
+      id: 'episode-1',
+      subtitle: 'S01E02',
+      playbackContext: {
+        series: { id: 'show', title: 'Show' },
+        season: { id: 'season-1', title: 'Season 1', seasonNumber: 1 },
+      },
     }));
   });
 

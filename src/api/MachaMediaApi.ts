@@ -98,20 +98,23 @@ export class MachaMediaApi implements MediaApi {
     }
 
     if (item.kind === 'season') {
-      const episodeItems = await this.catalogue.list('episode', item.id);
-      const seasonNumber = item.season_number ?? 0;
+      const [show, episodeItems] = await Promise.all([
+        this.catalogue.get(this.parentId(item)),
+        this.catalogue.list('episode', item.id),
+      ]);
       const episodes = episodeItems
-        .map((episode): Episode => ({
-          ...this.media(episode),
-          kind: 'episode',
-          seasonNumber: episode.season_number ?? seasonNumber,
-          episodeNumber: episode.episode_number ?? 0,
-        }))
+        .map((episode) => this.episode(episode, item, show))
         .sort((a, b) => a.episodeNumber - b.episodeNumber);
       return {
-        ...this.seasonSummary(item, item.parent_id ?? ''),
+        ...this.seasonSummary(item, show.id),
         episodes,
       } as SeasonDetails;
+    }
+
+    if (item.kind === 'episode') {
+      const season = await this.catalogue.get(this.parentId(item));
+      const show = await this.catalogue.get(this.parentId(season));
+      return this.episode(item, season, show);
     }
 
     if (item.kind === 'artist') {
@@ -174,6 +177,30 @@ export class MachaMediaApi implements MediaApi {
 
   invalidateArtwork(ref: ArtworkRef): void {
     this.artworkCache.delete(ref.id);
+  }
+
+  /**
+   * The single producer of episodes. The wire item carries only its season's
+   * `parent_id`, so the series/season ancestry that Continue Watching cards
+   * and the player heading render is resolved here, never by callers.
+   */
+  private episode(item: CatalogueItem, season: CatalogueItem, show: CatalogueItem): Episode {
+    const seasonNumber = season.season_number ?? 0;
+    return {
+      ...this.media(item),
+      kind: 'episode',
+      seasonNumber: item.season_number ?? seasonNumber,
+      episodeNumber: item.episode_number ?? 0,
+      playbackContext: {
+        series: { id: show.id, title: show.title },
+        season: { id: season.id, title: season.title || `Season ${seasonNumber}`, seasonNumber },
+      },
+    };
+  }
+
+  private parentId(item: CatalogueItem): string {
+    if (!item.parent_id) throw new Error(`Catalogue ${item.kind} ${item.id} has no parent.`);
+    return item.parent_id;
   }
 
   private seasonSummary(item: CatalogueItem, showId: string): SeasonSummary {

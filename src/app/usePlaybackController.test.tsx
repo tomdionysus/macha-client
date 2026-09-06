@@ -88,43 +88,4 @@ describe('usePlaybackController route reconstruction', () => {
     expect(details).toHaveBeenCalledWith('m2');
     expect(play).toHaveBeenCalledTimes(1);
   });
-
-  it('defers reconstruction until the session is ready, then reconstructs once it is', async () => {
-    const play = vi.fn().mockResolvedValue(undefined);
-    const runtime = { play, stop: vi.fn(), setReturnTo: vi.fn() } as unknown as PlaybackRuntime;
-    const details = vi.fn().mockResolvedValue(movie('m3'));
-    const api = { details } as unknown as MediaApi;
-    const progressStore = new ContinueWatchingStore('test-client');
-    const queueStore = new PlaybackQueueStore('test-client');
-    const volumeStore = new VolumeStore('test-client');
-
-    // A reload deep-linked into /play/:itemId: App.tsx blocks every other
-    // route behind !sessionReady, but this hook's own effects run before
-    // that gate. Without the guard, reconstruction would fire immediately
-    // and issue an authenticated request before the session mint completes.
-    const { rerender } = renderHook(
-      (sessionReady: boolean) => usePlaybackController({
-        api, platform, runtime, runtimeState: stalledSnapshot(), progressStore, queueStore, volumeStore, sessionReady,
-      }),
-      {
-        initialProps: false,
-        wrapper: ({ children }) => <MemoryRouter initialEntries={['/play/m3']}>{children}</MemoryRouter>,
-      },
-    );
-
-    await act(async () => {
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-    expect(details).not.toHaveBeenCalled();
-    expect(play).not.toHaveBeenCalled();
-
-    rerender(true);
-    await act(async () => {
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-    expect(details).toHaveBeenCalledWith('m3');
-    expect(play).toHaveBeenCalledTimes(1);
-  });
 });
