@@ -115,29 +115,3 @@ export class MachaAcquisitionApi implements AcquisitionApi {
     throw new MachaAcquisitionApiError(`Macha acquisition request failed: ${parsed.message}`, response.status, parsed.code);
   }
 }
-
-export class DemoAcquisitionApi implements AcquisitionApi {
-  async snapshot(): Promise<AcquisitionSnapshot> {
-    return {
-      ingestStatus: {
-        enabled: false,
-        staging: { path: '', limit_bytes: 0, disk_bytes: 0, reserved_bytes: 0, accounted_bytes: 0 },
-      },
-      torrentStatus: { enabled: false, build_available: false, search_enabled: false },
-      ingestJobs: [],
-      torrentJobs: [],
-    };
-  }
-
-  submitPath(): Promise<string> { return Promise.reject(new Error('Import is unavailable in demo mode.')); }
-  submitMagnet(): Promise<string> { return Promise.reject(new Error('Torrent acquisition is unavailable in demo mode.')); }
-  pauseIngest(): Promise<IngestJob> { return Promise.reject(new Error('Import is unavailable in demo mode.')); }
-  resumeIngest(): Promise<IngestJob> { return Promise.reject(new Error('Import is unavailable in demo mode.')); }
-  cancelIngest(): Promise<IngestJob> { return Promise.reject(new Error('Import is unavailable in demo mode.')); }
-  clearIngest(): Promise<void> { return Promise.reject(new Error('Import is unavailable in demo mode.')); }
-  pauseTorrent(): Promise<TorrentJob> { return Promise.reject(new Error('Torrent acquisition is unavailable in demo mode.')); }
-  resumeTorrent(): Promise<TorrentJob> { return Promise.reject(new Error('Torrent acquisition is unavailable in demo mode.')); }
-  retryTorrent(): Promise<TorrentJob> { return Promise.reject(new Error('Torrent acquisition is unavailable in demo mode.')); }
-  cancelTorrent(): Promise<TorrentJob> { return Promise.reject(new Error('Torrent acquisition is unavailable in demo mode.')); }
-  clearTorrent(): Promise<void> { return Promise.reject(new Error('Torrent acquisition is unavailable in demo mode.')); }
-}

@@ -226,8 +226,7 @@ function MetadataEditorRoute({ api }: { api: CatalogueApi }) {
 export default function App({ platform, apiOverride, playbackOverride }: Props) {
   const navigate = useNavigate();
   const location = useLocation();
-  const demo = import.meta.env.VITE_DEMO === 'true';
-  const connectionRequired = !demo && !apiOverride;
+  const connectionRequired = !apiOverride;
 
   const [bootstrapEndpoints, setBootstrapEndpoints] = useState(() => getBootstrapEndpoints());
   const [apiToken, setApiToken] = useState(() => getApiToken());
@@ -271,7 +270,7 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
     clusterStatusApi,
     acquisitionApi,
     managementAvailable,
-  } = useMachaServices({ endpointRegistry, auth, demo, apiOverride, playbackOverride });
+  } = useMachaServices({ endpointRegistry, auth, apiOverride, playbackOverride });
   useEndpointHealthMonitor(endpointRegistry, clusterStatusApi, auth, connectionRequired && bootstrapEndpoints.length > 0 && !effectiveConnectionGate && sessionReady);
   const metadataEditingAvailable = managementAvailable;
   const [unmatchedCount, setUnmatchedCount] = useState(0);

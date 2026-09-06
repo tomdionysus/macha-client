@@ -47,7 +47,7 @@ describe('useSession', () => {
     expect(mint).not.toHaveBeenCalled();
   });
 
-  it('is immediately ready when no connection is required (demo/override mode)', () => {
+  it('is immediately ready when no connection is required (override mode)', () => {
     const mint = vi.spyOn(SessionAuth, 'mintAnonymousSessionAnyNode');
     const { result } = renderSession({ connectionRequired: false });
 

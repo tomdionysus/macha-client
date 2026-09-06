@@ -1,6 +1,6 @@
 {
   "name": "macha-client",
-  "version": "0.10.2",
+  "version": "0.10.3",
   "private": true,
   "type": "module",
   "scripts": {

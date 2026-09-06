@@ -78,15 +78,3 @@ export class MachaServerApi implements ServerApi {
     };
   }
 }
-
-export class DemoServerApi implements ServerApi {
-  async status(): Promise<ServerStatus> {
-    return {
-      version: 'demo',
-      playback: { enabled: true, ready: true, mode: 'demo' },
-      playbackAvailable: true,
-      httpStatus: 200,
-      message: null,
-    };
-  }
-}

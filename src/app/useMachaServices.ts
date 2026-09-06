@@ -1,19 +1,16 @@
 import { useMemo } from 'react';
-import { DemoAcquisitionApi } from '../api/MachaAcquisitionApi';
 import { ClusterAcquisitionApi } from '../api/ClusterAcquisitionApi';
 import type { AcquisitionApi } from '../api/AcquisitionApi';
 import type { CatalogueApi } from '../api/CatalogueApi';
-import { DemoClusterStatusApi, type ClusterStatusApi } from '../api/ClusterStatusApi';
+import type { ClusterStatusApi } from '../api/ClusterStatusApi';
 import { ClusterStatusRouter } from '../api/ClusterStatusRouter';
 import { ClusterCatalogueApi } from '../api/ClusterCatalogueApi';
 import { ClusterManageApi } from '../api/ClusterManageApi';
 import type { ManageApi } from '../api/ManageApi';
 import { MachaMediaApi } from '../api/MachaMediaApi';
 import type { MediaApi } from '../api/MediaApi';
-import { MockMediaApi } from '../api/MockMediaApi';
-import { DemoServerApi, type ServerApi } from '../api/MachaServerApi';
+import type { ServerApi } from '../api/MachaServerApi';
 import { ClusterServerApi } from '../api/ClusterServerApi';
-import { DemoPlaybackResolver } from '../playback/DemoPlaybackResolver';
 import { ClusterPlaybackResolver } from '../playback/ClusterPlaybackResolver';
 import type { PlaybackResolver } from '../playback/PlaybackResolver';
 import type { EndpointRegistry } from '../cluster/EndpointRegistry';
@@ -34,11 +31,10 @@ export interface MachaServices {
 export function useMachaServices(options: {
   endpointRegistry: EndpointRegistry;
   auth: AuthenticatedFetch;
-  demo: boolean;
   apiOverride?: MediaApi;
   playbackOverride?: PlaybackResolver;
 }): MachaServices {
-  const { endpointRegistry, auth, demo, apiOverride, playbackOverride } = options;
+  const { endpointRegistry, auth, apiOverride, playbackOverride } = options;
   const endpointRouter = useMemo(() => new ClusterEndpointRouter(endpointRegistry), [endpointRegistry]);
   // Every service below authenticates through `auth` at request time — the
   // real one is the app-wide session singleton, so a refresh (expiry, 401)
@@ -50,26 +46,25 @@ export function useMachaServices(options: {
     [endpointRouter, auth],
   );
   const manageApi = useMemo<ManageApi>(() => new ClusterManageApi(endpointRouter, auth), [endpointRouter, auth]);
-  const mediaApi = useMemo<MediaApi>(() => {
-    if (apiOverride) return apiOverride;
-    return demo ? new MockMediaApi() : new MachaMediaApi(catalogueApi);
-  }, [apiOverride, catalogueApi, demo]);
-  const playbackResolver = useMemo<PlaybackResolver>(() => {
-    if (playbackOverride) return playbackOverride;
-    if (demo) return new DemoPlaybackResolver();
-    return new ClusterPlaybackResolver(endpointRouter, auth);
-  }, [demo, endpointRouter, playbackOverride, auth]);
+  const mediaApi = useMemo<MediaApi>(
+    () => apiOverride ?? new MachaMediaApi(catalogueApi),
+    [apiOverride, catalogueApi],
+  );
+  const playbackResolver = useMemo<PlaybackResolver>(
+    () => playbackOverride ?? new ClusterPlaybackResolver(endpointRouter, auth),
+    [endpointRouter, playbackOverride, auth],
+  );
   const serverApi = useMemo<ServerApi>(
-    () => demo ? new DemoServerApi() : new ClusterServerApi(endpointRouter, auth),
-    [demo, endpointRouter, auth],
+    () => new ClusterServerApi(endpointRouter, auth),
+    [endpointRouter, auth],
   );
   const clusterStatusApi = useMemo<ClusterStatusApi>(
-    () => demo ? new DemoClusterStatusApi() : new ClusterStatusRouter(endpointRouter, auth),
-    [demo, endpointRouter, auth],
+    () => new ClusterStatusRouter(endpointRouter, auth),
+    [endpointRouter, auth],
   );
   const acquisitionApi = useMemo(
-    () => demo ? new DemoAcquisitionApi() : new ClusterAcquisitionApi(endpointRouter, auth),
-    [demo, endpointRouter, auth],
+    () => new ClusterAcquisitionApi(endpointRouter, auth),
+    [endpointRouter, auth],
   );
 
   return {
@@ -80,6 +75,6 @@ export function useMachaServices(options: {
     serverApi,
     clusterStatusApi,
     acquisitionApi,
-    managementAvailable: !demo && !apiOverride,
+    managementAvailable: !apiOverride,
   };
 }

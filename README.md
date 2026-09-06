@@ -40,7 +40,7 @@ Continue Watching and the playback queue are local browser/application state. Th
 
 - Node.js 20 or later.
 - npm.
-- Macha 0.9.1 with the catalogue and streaming HTTP APIs enabled, or demo mode.
+- Macha 0.9.1 with the catalogue and streaming HTTP APIs enabled.
 
 ## Build
 
@@ -77,12 +77,6 @@ npm run dev
 `.env.example` configures the Macha API directly. Macha emits CORS headers, so
 the Vite development server does not proxy API requests. Blank lines in the
 endpoint list are ignored rather than interpreted as the client origin.
-
-For the self-contained UI/playback demo:
-
-```sh
-VITE_DEMO=true npm run dev
-```
 
 ## Routes
 
