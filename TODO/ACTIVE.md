@@ -14,10 +14,74 @@ client. Server-side backlogs (e.g. `macha`'s own `TODO/ACTIVE.md`) are a
 different repo's concern and are not tracked or duplicated here, even when a
 client bug and a server bug are related.
 
+**The test cluster is deliberately not uniform.** `gbni-1` (`10.44.1.50`) is
+wired, `gbni-2` (`10.44.1.51`) is on **wireless** (a knowingly flaky link),
+and `es-1` (`10.34.1.50`) is a remote site across the internet. This is the
+point — the client is developed in the conditions it must actually survive.
+So: never read a cross-node measurement as if the nodes were equivalent, and
+never call a slow or stalled result on `gbni-2`/`es-1` a client bug until the
+same test has been run against wired `gbni-1`.
+
+Equally, do not reach for the topology to explain every odd number. On
+2026-09-07 the server's `peer_latency_ms` looked badly asymmetric
+(gbni-1→gbni-2 114 ms against gbni-2→gbni-1 4 ms) and the tidy explanation —
+every path *toward* the wireless node slow, wifi power-save buffering inbound
+frames — was wrong. The metric was sampling every control call, counting
+payload and handler time as network distance. Sampling heartbeat pings only,
+the same pair measured 2 ms and 5 ms and es-1→gbni-2 went from 207 ms to
+62 ms. Check how a metric is sampled before explaining its shape with the
+wiring.
+
 Priority reflects active-breakage/user-impact, not effort: P0 is a live or
 recently-live correctness problem in playback itself; P1 is important,
 scoped, and actionable now; P2 is real but either blocked on something
 outside this repo or needs groundwork before it can be started safely.
+
+## P0 — Samsung: every stream delivered as fMP4 HLS fails, in its own way
+
+Established 2026-09-07 by testing each combination on the QE55Q6FAM itself.
+The fault is the **segment carriage**, not any codec:
+
+| stream handed to the set as fMP4 | result |
+| --- | --- |
+| HEVC, copied | black screen, time never advances |
+| E-AC-3, copied | ~0.5s of sound every 10–20s |
+| AAC, transcoded | no sound at all |
+
+The same streams direct-play or play progressively without complaint, so the
+streams are fine. Consistent with the hardware: a 2017 Tizen 3 panel whose
+native HLS player was built for MPEG-TS, while fMP4 carriage of HEVC and the
+Dolby codecs is the newer arrangement in the HLS spec.
+
+**Do not chase this with codec exclusions.** It was tried and reverted the
+same evening: `excludeAudioCodecs: ['eac3']` forces the AAC transcode, and AAC
+through the same path is silent, so the exclusion traded stuttering audio for
+none. A policy override states a device truth, and stating one at the wrong
+level narrows the choice into a worse branch which the chooser then defends —
+it is not fooled, it is obeying, and it will keep obeying.
+
+MPEG-TS segments fix all three rows at once and keep E-AC-3 5.1 with no
+re-encode. Three prerequisites, two of them ours:
+
+- [ ] Server able to emit `mpegts` HLS segments with streams copied. **Asked;
+  unanswered.** Everything below is dead until this is known — do not build
+  against it on spec.
+- [x] Host able to detect MPEG-TS support. Probed via `video/mp2t` rather than
+  inferred from HLS support, with a test pinning that the two packagings are
+  independent.
+- [ ] Host able to *prefer* MPEG-TS when it supports both. Needs a
+  `PlaybackPolicyOverrides` field in `@macha/core`; agreed shape, held
+  deliberately until the server answers. Note `segmentContainer()` returns
+  `fmp4` before it ever reads `hlsTs`, so the detection above does nothing on
+  its own — preference and detection have to land together.
+
+- [ ] Force a genuine **video transcode** of The Last of Us S02E07 on the set.
+  Its video has only ever been copied — `mode=transcode, video=copy` is
+  "transcode the audio only", not a contradiction — so the carriage
+  hypothesis is untested for it rather than confirmed. One attempt separates
+  carriage from source.
+- [ ] Get that episode's video/audio codecs, profile and bit depth from the
+  facts endpoint. Outstanding from the server all evening.
 
 ## P0 — Direct Play sometimes never starts: `<video>` element stuck at readyState 0 forever
 
@@ -185,6 +249,19 @@ Phases 0–5 are implemented and live-verified against a real 3-node cluster
 (repeated `systemctl stop`/`start` against real nodes, not synthetic
 failures). Remaining work, in priority order:
 
+- [ ] **Measure playback under live import load (requested 2026-09-07 by the
+  Macha server session; no deadline, the import runs for days).** Needs a
+  genuinely foregrounded Chrome window — see the occlusion confound in the
+  P0 above; numbers from an occluded tab are worthless. Measure both a
+  locally-written film (`/UAT/final/gbni-1/Jurassic.Park.1993...mp4`) and a
+  remote-written one (`/UAT/final/es-1/Idiocracy 2006 ... BONE.mkv`, the one
+  that matters — the es-1 WAN is saturated by the import, so this measures
+  whether viewer traffic is prioritised over bulk import traffic). For each:
+  (a) time to first frame, (b) 60 s of playback, stall-free or not, (c) a
+  seek to the middle of the file and how long until it plays again. Expect
+  the remote film to be worse; the useful answer is *how much*. Report
+  numbers back to that session. See also the >90 s mid-file segment stall
+  they measured server-side, under the hard-reactivation item below.
 - [ ] **Finish Phase 6 UAT.** Direct Play range-transfer failure is verified
   (silent mid-stream swap, no video reload, confirmed live with zero
   measured stall). Not yet *live-exercised*: HLS failure, and failure
@@ -280,15 +357,179 @@ failures). Remaining work, in priority order:
   hard-reactivation path may be attempting exactly that. This blocks the
   remaining Phase 6 boundaries above (pause/seek/option-change all force a
   real reactivation).
+  **Possible server-side component, 2026-09-07 — do not assume this is
+  purely a client bug before checking.** The Macha server session probing
+  `/api/v1/playback/sessions` on gbni-2 during the live import measured
+  transcode-mode segments generating at ~0.7 MB/s and **a mid-file segment
+  request that did not return within 90 s**, for both a locally-written and
+  a remote-written film. That is the same shape as this symptom (a seek to a
+  non-zero position that never produces bytes) arriving from the other side
+  of the wire, so the container/keyframe hypothesis above is no longer the
+  only candidate. Their probe was transcode mode; whether the real player's
+  direct/remux path (HEVC-capable client) hits the same wall is exactly what
+  the import-load playback UAT (first bullet of this section) should settle.
+  Measure that before spending more time on the client-side hypothesis.
 - [ ] **Phase 3 compatibility-path rationalisation** — explicitly deferred,
   not actionable yet: blocked on a minimum-supported-node-capability
   guarantee (immutable media profiles) that does not exist yet.
 
+## P1 — Surface server self-healing state (server 0.30.0–0.32.0)
+
+Requested 2026-09-06 by the Macha server session across three messages
+(disciplines 2–4 of its self-healing programme), rolling out gbni-1 →
+gbni-2 → es-1. Three related pieces of server state the client cannot show
+at all today; they share one prerequisite (the client does not read
+`diagnostics` from `/api/v1/status` anywhere yet), so do that once and hang
+all three off it rather than three times.
+
+Docs: `docs/management.md` "Parked publications" / "Metadata conflicts",
+`docs/configuration.md` "Retry budgets and parking", `docs/metadata.md`
+"What a snapshot carries, and what leaves it".
+
+### Prerequisite — model `diagnostics` in `ClusterStatusApi`
+
+- [ ] Add `diagnostics.filesystem` and `diagnostics.metadata` to the
+  `/api/v1/status` model and surface them on `StatusScreen`. Every field is
+  optional: a mixed-version cluster will have nodes below 0.30.0, and the
+  counters arrived across three separate server versions.
+  - `filesystem` (0.30.0): `parked_publications` (standing count — warn
+    badge when > 0, linking to the list), `publication_retries_backed_off`
+    (cumulative, informational).
+  - `filesystem` (0.31.0), all cumulative and informational — non-zero means
+    "read the WARN lines from the last boot", not an outage:
+    `journal_recovery_skipped_frames`,
+    `journal_recovery_quarantined_bytes`, `recovery_dropped_operations`,
+    `publications_abandoned`.
+  - `filesystem` (0.32.6): `mountpoint_immutable` (bool — the host
+    directory under the mount is immutable; expected `true` on every node
+    after that deploy) and `mountpoint_stray_entries` (int — files found on
+    the host disk *under* the mount path at startup; expected `0`).
+    **`mountpoint_stray_entries > 0` gets a red badge and makes the node
+    unhealthy in whatever health summary we show**, not merely a counter:
+    those files are hidden by the mount and are not in Macha at all. This
+    exists because an rsync starting 25 s after a daemon restart, before the
+    mount came up, wrote 52 GB into es-1's host root disk (finding #7 of the
+    import). Show both next to `parked_publications` in the node view.
+  - `rpc_transport` (0.32.7, not deployed yet): `peer_latency_ms` — node id
+    to smoothed control round trip in ms, the measure commits use to pick
+    the nearest replica.
+  - `metadata` (0.32.7, not deployed yet): `mutations`,
+    `mutation_retention_ms_total`, `mutation_retention_ms_max`,
+    `mutation_publish_ms_total`, `mutation_publish_ms_max`. Show retention
+    and publish *averages* (total ÷ `mutations`) next to the max, not the
+    raw totals — a running total is unreadable on its own.
+  - `metadata` (0.32.0): `conflicts` (standing total — badge when > 0,
+    linking to the list), `namespace_conflicts`, `catalogue_conflicts`,
+    `tombstones` (retirement tombstones in the snapshot), and the
+    process-lifetime counters `conflicts_superseded`, `conflicts_resolved`.
+    Label those last two **"since process start"** — they reset on every
+    restart, so a `0` is indistinguishable from "never ran" (confirmed with
+    the server session 2026-09-07; a persisted cluster-wide total is coming
+    in a later API change, at which point this label can go).
+
+Two presentation rules the server session asked for specifically, both
+derived from a real fault found during the 2026-09-07 import UAT below:
+
+- **Publication progress is `completed` vs `started`, and flat is a
+  warning.** `data_publications_started` rising while
+  `data_publications_completed` stays flat for minutes *and* spool bytes are
+  not falling is a stall, not slow progress. That exact pattern (114 started
+  / 0 completed on gbni-1) turned out to be every publication thread parked
+  behind a one-op-per-commit namespace queue. Worth a warning, not just a
+  number.
+- **`retained_memory.owners.publication` is the saturation signal on a
+  small node.** On gbni-1 (4 GB) it sitting near ~500 MB means the importer
+  is saturating retained memory and writes are being held back — 0.32.1
+  makes them wait rather than fail, so nothing else surfaces it. Watch
+  `shed_requests`, `cancelled_waits` and the `waits` counters alongside it.
+
+### Parked publications (0.30.0, commit `bb3697c`)
+
+A FUSE
+write whose publication keeps failing transiently is now retried with
+per-inode exponential backoff and then *parked*: the bytes stay in the
+spool/journal and it leaves the loader queue so everything else keeps
+publishing, but an operator must retry or abandon it. Parked data is
+invisible until someone reads the server docs.
+
+Wire contract (existing authenticated `/api/v1/manage` prefix):
+- `GET /api/v1/manage/filesystem/parked-publications` →
+  `{ parked: [{ inode: u64, path, error_code: int, error_message, attempts:
+  u64, failing_for_ms, parked_for_ms, pending_bytes }] }`; empty array when
+  nothing is parked.
+- `POST .../parked-publications/{inode}/retry` — resets the retry budget and
+  re-queues. 204 / 404 (not parked) / 400 (non-integer inode) / 405.
+- `POST .../parked-publications/{inode}/abandon` — **destructive**, discards
+  the unpublished generation from the spool. Same status codes. Must sit
+  behind an explicit confirmation step.
+- Existing `namespace_blocked_op` can now carry `error_code` `EAGAIN` /
+  "retry budget exhausted" — that keeps retrying at ceiling backoff, so
+  present it as "stuck, still retrying", not a hard failure.
+
+- [ ] Add the three management calls to `ManageApi`/`MachaManageApi` (+
+  `ClusterManageApi` passthrough) and a parked-publications view. Reuse the
+  unmatched-files pattern rather than duplicating it: `IngestScreen` already
+  does list → per-row retry → destructive delete against
+  `/api/v1/manage/unmatched`, which is the same shape.
+
+### Metadata conflicts (0.32.0)
+
+Two concurrent writers publishing duplicate media paths left 116 standing
+conflicts in the production namespace that nobody could see. 0.32.0 prunes
+the ones a later write already decided and exposes the rest.
+
+- `GET /api/v1/manage/metadata/conflicts` → `{ generation: u64, conflicts:
+  [{ id: sha256 hex, kind: "namespace_entry" | "catalogue_root", key (path,
+  or `"catalogue_root"`), left_head: hex, right_head: hex, base, left,
+  right }] }`. For `namespace_entry`, `base`/`left`/`right` are
+  `{ type: "file" | "directory", size: u64, mtime_ns: u64, version: u64,
+  extents: u64 }` or `null` (absent on that side); for `catalogue_root`
+  they are object-id strings or `null`. `503 metadata_unavailable` while the
+  node has no snapshot yet — a normal transient state, not an error screen.
+- `POST /api/v1/manage/metadata/conflicts/{id}/resolve?choice=left|right|base`
+  — installs that alternative and drops the conflict in one metadata commit.
+  204 / `409 not_standing` (superseded by a later write, or already
+  resolved) / `400 bad_choice` / 405.
+
+- [ ] Conflict list + side-by-side resolution view: show both alternatives
+  (size / mtime / extent count) before the operator picks, and label `base`
+  as "restore the common-ancestor value". A `409 not_standing` is expected
+  in normal use (the server resolved it first) — refresh the list and say
+  so, don't present it as a failure.
+- [ ] Verify live once each version is deployed (gbni-1 first).
+
+## P1 — Session create can be refused outright (429), by design
+
+Observed live 2026-09-07 while measuring transcode latency: `POST
+/api/v1/playback/sessions` answered `429` on gbni-2 while an earlier session
+of the same client was still open, and `201` immediately after that session
+was `DELETE`d. Confirmed with the server session as **admission control by
+design — handle it as a hard limit, not a queue.**
+
+- [ ] Do not retry a `429` from session create on a timer, and do not fail
+  over to another node for it (a second node would refuse it too, and the
+  candidate loop would burn every endpoint before surfacing anything). Treat
+  it as "too many streams open", say so, and make sure the client is not the
+  one leaking: a session that outlives its player is what turns this into a
+  user-visible dead end.
+
 ## P1 — Samsung deployment verification
 
-- [ ] Complete interactive UAT of the build installed on `10.44.1.183`:
-  confirm application boot, catalogue refresh, D-pad navigation and playback
-  controls on the Tizen 3 TV.
+Boot, catalogue, D-pad navigation and playback controls were exercised live
+on `10.44.1.183` on 2026-09-07 and the defects found are fixed (see
+`COMPLETED.md`). What remains is the one title that still does not work.
+
+- [ ] **Ratatouille (`tmdb:movie:2062`) on the Samsung.** Direct play breaks
+  decoding — the set advertises `hevc` and 10-bit but cannot handle this
+  file's Dolby Vision — and the transcode fallback plays silent. Both causes
+  are server-side and fixed in the server's 0.32.12 line: a real master
+  playlist carrying `CODECS` (verified from a real node: `CODECS=
+  "hvc1.2.4.L153.B0,mp4a.40.2"`), and a bit-depth/HDR gate that routes the
+  title to a transcode instead of a broken direct play. Blocked on that
+  reaching `gbni-1`, which is the Samsung build's only endpoint. Re-test when
+  it lands: negotiated mode, and whether sound plays.
+- [ ] Re-check the rest of the UI once that title works, since every pass so
+  far has been interrupted by it.
 
 ## P1 — Android hardware back button, device/emulator verification
 

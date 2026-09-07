@@ -1,5 +1,5 @@
 import { useState, type ChangeEvent, type FormEvent } from 'react';
-import { errorMessage } from '../utils/errors';
+import { errorMessage } from '@macha/core';
 
 export interface ConnectionFormProps {
   bootstrapEndpoints: readonly string[];

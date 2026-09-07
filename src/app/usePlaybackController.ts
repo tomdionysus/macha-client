@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import type { MediaApi } from '../api/MediaApi';
-import type { Platform } from '../platform/Platform';
-import type { PlaybackRuntime, PlaybackRuntimeSnapshot } from '../playback/PlaybackRuntime';
-import { pathForMedia, routes, type PlaybackRouteState } from '../routing';
-import { ContinueWatchingStore } from '../state/continueWatching';
-import { migrateEpisodeContext, needsEpisodeContextMigration } from '../state/continueWatchingMigration';
-import { PlaybackQueueStore, type PlaybackQueueState } from '../state/playbackQueue';
-import { VolumeStore } from '../state/volume';
-import type { Episode, MediaSummary, PlaybackProgress } from '../types';
+import type { MediaApi } from '@macha/core';
+import type { Platform } from '@macha/core';
+import type { PlaybackRuntime, PlaybackRuntimeSnapshot } from '@macha/core';
+import { pathForMedia, routes, type PlaybackRouteState } from '@macha/core';
+import { ContinueWatchingStore } from '@macha/core';
+import { migrateEpisodeContext, needsEpisodeContextMigration } from '@macha/core';
+import { PlaybackQueueStore, type PlaybackQueueState } from '@macha/core';
+import { VolumeStore } from '@macha/core';
+import type { Episode, MediaSummary, PlaybackProgress } from '@macha/core';
 import type { StartPlaybackOptions } from './useMusicController';
 import {
   playbackReturnTo,
@@ -16,7 +16,7 @@ import {
   playerRouteItemId,
   restoredPlaybackPosition,
   routePlaybackMedia,
-} from './playbackRoute';
+} from '@macha/core';
 
 export function usePlaybackController(options: {
   api: MediaApi;
@@ -102,18 +102,25 @@ export function usePlaybackController(options: {
       item,
     );
     explicitlyStartedItemIdRef.current = item.id;
-    void runtime.play({
-      media: item,
-      startPositionMs: startOptions.fromStart ? 0 : storedPosition,
-      returnTo,
-    });
     const state: PlaybackRouteState = {
       media: item,
       queue: persistedQueue.items,
       queueIndex: persistedQueue.currentIndex,
       returnTo,
     };
+    // Navigate first. Presentation is chosen by the route — `playerRouteActive`
+    // decides full versus mini — while visibility comes from the runtime, and
+    // the two do not land in the same render. Starting the runtime first opens
+    // a window where the player is visible but the route is not yet active, so
+    // it mounts as the mini bar at the bottom of the screen and then swaps to
+    // full. The reconstruction guard is already set above, so the route
+    // arriving first cannot trigger a second play.
     navigate(startOptions.fromStart ? routes.playerFromStart(item.id) : routes.player(item.id), { state });
+    void runtime.play({
+      media: item,
+      startPositionMs: startOptions.fromStart ? 0 : storedPosition,
+      returnTo,
+    });
   }, [activePlayback?.returnTo, location.pathname, location.search, navigate, playerRouteActive, progressStore, queueStore, runtime]);
 
   useEffect(() => {

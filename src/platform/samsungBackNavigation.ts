@@ -1,5 +1,5 @@
-import type { MediaApi } from '../api/MediaApi';
-import { routes } from '../routing';
+import type { MediaApi } from '@macha/core';
+import { routes } from '@macha/core';
 
 function decoded(match: RegExpMatchArray | null, index: number): string | undefined {
   const value = match?.[index];

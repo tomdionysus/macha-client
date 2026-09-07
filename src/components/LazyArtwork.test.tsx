@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import type { MediaApi } from '../api/MediaApi';
+import type { MediaApi } from '@macha/core';
 import { LazyArtwork } from './LazyArtwork';
 import { VISIBLE_ARTWORK_RECOVERY_DELAY_MS } from '../hooks/useViewportArtworkUrl';
 

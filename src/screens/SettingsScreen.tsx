@@ -1,9 +1,9 @@
 import { Link } from 'react-router-dom';
-import type { MediaApi } from '../api/MediaApi';
-import type { ServerApi, ServerStatus } from '../api/MachaServerApi';
+import type { MediaApi } from '@macha/core';
+import type { ServerApi, ServerStatus } from '@macha/core';
 import { machaLogoUrl as logoUrl } from '../uiAssets';
 import { useAsync } from '../hooks/useAsync';
-import { routes } from '../routing';
+import { routes } from '@macha/core';
 import { clientVersion } from '../version';
 import { ConnectionForm } from '../components/ConnectionForm';
 
@@ -110,6 +110,7 @@ export function SettingsScreen({ api, serverApi, bootstrapEndpoints, apiToken, c
             <div><dt>Version</dt><dd>{clientVersion}</dd></div>
           </dl>
         </article>
+
       </div>
 
       <div className="settings-connection">

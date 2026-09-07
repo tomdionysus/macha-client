@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import type { MediaApi } from '../api/MediaApi';
-import type { ArtworkRef } from '../types';
+import type { MediaApi } from '@macha/core';
+import type { ArtworkRef } from '@macha/core';
 import { fetchArtworkWithRetry } from './artworkRetry';
 
 export function useArtworkUrl(api: MediaApi, ref?: ArtworkRef): string | undefined {

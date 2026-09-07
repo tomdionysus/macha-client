@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { addDirectPlayReadAheadAlternative, buildDirectPlayReadAheadProxyUrl, directPlayReadAheadUrl } from './directPlayReadAhead';
-import type { PlaybackSource } from '../types';
+import type { PlaybackSource } from '@macha/core';
 
 function source(): PlaybackSource {
   return {
     mediaId: 'file:test',
     url: 'https://node.test/api/v1/playback/stream/session/cap/secret/file.mkv',
-    mimeType: 'video/x-matroska',
+    isManifest: false, mimeType: 'video/x-matroska',
     mode: 'direct',
     sizeBytes: 1024 * 1024 * 1024,
   };

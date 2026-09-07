@@ -1,4 +1,4 @@
-import type { PlaybackMode, PlaybackTimeRange } from '../types';
+import type { PlaybackMode, PlaybackTimeRange } from '@macha/core';
 
 export interface WebMediaTimelineSample {
   positionMs: number;

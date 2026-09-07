@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
-import type { MediaApi } from '../api/MediaApi';
-import type { ArtworkRef } from '../types';
+import type { MediaApi } from '@macha/core';
+import type { ArtworkRef } from '@macha/core';
 import { fetchArtworkWithRetry } from './artworkRetry';
 import { observeArtworkProximity } from './artworkViewport';
-import { createClientLogger } from '../diagnostics/ClientLog';
+import { createClientLogger } from '@macha/core';
 
 export const VISIBLE_ARTWORK_RECOVERY_DELAY_MS = 60_000;
 const log = createClientLogger('artwork.view');

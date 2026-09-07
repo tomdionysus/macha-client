@@ -1,6 +1,188 @@
 # Completed and tested
 
-Last updated: 2026-09-06
+Last updated: 2026-09-07
+
+## Samsung Tizen 3: the compatibility layer had silently stopped working
+
+Live UAT on the TV (`10.44.1.183`, Tizen 3 / Chromium 47) surfaced a cluster
+of defects with one cause. `vite.config.ts`'s `samsungCssCompatibility`
+rewrote `var()`, `:focus-visible` and 8-digit hex only in emitted `.css`
+assets — and with `renderModernChunks: false` the legacy build emits none:
+the whole stylesheet is inlined into the JS chunk. So **170 custom-property
+references and every `:focus-visible` shipped raw to an engine that supports
+neither**, and nobody noticed because it is invisible anywhere but a TV.
+
+- Downlevelling moved to a `transform` hook, which runs per stylesheet before
+  Vite decides where to put it. (Rewriting the minified chunk was tried first
+  and abandoned: `legacyRgba`'s `#abcd` pattern would corrupt a private field
+  or URL fragment, and the string literal does not parse the way the minified
+  output suggests.)
+- The reported symptom was "Play all is white on white": its only background
+  came from `var(--accent-surface-strong)`, so the declaration was dropped and
+  the button fell back to the UA default. Now ships `rgba(38,0,7,.76)`.
+- **Chromium 47 has neither CSS Grid nor flex `gap`.** All 119 `gap`
+  declarations are inert there and every grid collapses. Margin fallbacks
+  added for the status grids, player button row, option groups, volume
+  control, play actions and settings cards. The "focus border draws over its
+  neighbour" report was the same bug: zero gap puts focusable controls edge to
+  edge and a 1px outline lands on the next one.
+- Music artwork was centred twice — negative margins in the legacy sheet plus
+  the modern rule's `transform: translate(-50%, -50%)`, which still applied.
+- `min()` is Chrome 79+, so the search input's width was dropped whole and it
+  collapsed to its intrinsic size. Restated as full width for the TV.
+
+## Escaping a focused text field on a D-pad
+
+`useTvNavigation` blocked every command while a text input had focus, so the
+search box could not be left with up/down — and with no pointer, Back was the
+only way out, which exits the screen. `tvTextEditingOwnsCommand` now releases
+up/down for single-line inputs while keeping the caret keys and Enter;
+textarea, select and contenteditable keep everything, since they genuinely use
+vertical keys. Mirrors the existing `tvRangeOwnsDirection` precedent.
+
+## The client describes itself honestly to the server
+
+The server needed to know what a device can actually decode, because a codec
+list answers "which decoders exist", not "will this file play" — the Samsung
+advertises `hevc` and cannot handle a Dolby Vision title, which is the whole
+bug behind that title's broken direct play.
+
+- `WebMediaCapabilities` now also detects `videoBitDepth` (Main 10, VP9
+  profile 2, AV1 10-bit → 10; AV1/VP9 12-bit → 12; else 8), `hdrTransfers`
+  and `dolbyVision` profile numbers.
+- **HDR and Dolby Vision are claimed only with corroboration** — a deep
+  decoder *and* a presentation path (`matchMedia('(video-dynamic-range:
+  high)')`). A codec probe alone is not enough: a Dolby Vision fourCC embeds
+  an HEVC profile, so an engine can answer true having evaluated only the
+  base layer. Over-claiming is a black screen; under-claiming is a transcode
+  nobody needed, and that is the failure to prefer.
+- Surfaced on **Status → Client** (moved there from Settings) as a
+  `DeviceCapabilities` card, because a TV that cannot be inspected has no
+  other way to show what it believes about itself. That card is how the
+  Samsung's real capability set was obtained at all: no `sdb shell`, no
+  `dlog`, no inspector port, and console logging disabled on that build.
+- Live-read from the TV: `tizen`; video h264, hevc, vp9; audio aac, opus,
+  vorbis, ac3, eac3, mp3; containers mp4, webm, mp3, ogg; HLS fMP4 yes;
+  10-bit; HDR and Dolby Vision not advertised.
+
+## Playback sessions survived the app being suspended
+
+The client sent its keepalive `DELETE` only on `pagehide`, which a Tizen app
+never fires when the host suspends or replaces it — so a redeploy or a Home
+press orphaned the server session. `usePlaybackRuntime` now also tears down on
+`visibilitychange` → hidden, on platforms without pointer controls only (a
+backgrounded browser tab is still legitimately playing). It cannot cover the
+app being killed outright; the server reclaims an abandoned pipeline after 60s
+and the session after 30 minutes, so the residual cost is about a minute of
+`429` for the next viewer.
+
+## Deploying to the TV stopped being a coin flip
+
+`install-samsung.sh` hit two failures repeatedly. Installing over a *running*
+app leaves it resumed rather than stopped, so `tizen run` reports
+`resumed` / `Could not launch the null application` and foregrounds nothing —
+the deploy looks successful while the TV shows the old screen. And the first
+transfer intermittently fails with `Can not transfer package` while the device
+is plainly reachable. The script now checks the launch output and retries, and
+resets the sdb server (including the `TIME_WAIT` wait) and retries once on a
+failed transfer.
+
+Verified: `tsc --noEmit` clean on both projects; 166 tests pass; the Samsung
+package built and deployed to `10.44.1.183` repeatedly through the day, with
+each fix confirmed on the set by the operator.
+
+## The client core moved to `@macha/core`; this repo consumes it
+
+The platform-independent half of this client — server API families, cluster
+endpoint routing and health, playback resolution and coordination, persisted
+state — now lives in `/Users/tom/devroot/macha-ts` as the zero-dependency
+package `@macha/core`, so the React Native app can share it. Extracted by a
+separate session; this entry records **this** repo's side.
+
+- `package.json` gains `"@macha/core": "file:../macha-ts"`. The package
+  publishes built `dist`, and npm does not run a linked dependency's build,
+  so **`npm run build` in macha-ts is a prerequisite** for typechecking here.
+- 64 files now import `@macha/core`; ~90 modules and their tests were
+  deleted from `src/`. Test count here drops from 451 to 146 (the balance,
+  334 across 44 files, moved with the code and passes there).
+- Four web-specific bindings stayed behind, deliberately — each is the point
+  where a browser-only fact would otherwise have entered the package:
+  - `state/client.ts` — builds `MachaClientConfiguration` from
+    `import.meta.env.VITE_MACHA_SERVERS` and pins endpoints on the Samsung
+    build. Same exported functions as before, so no call site changed.
+  - `platform/traits.ts` — resolves `import.meta.env.MODE` to a
+    `PlatformTarget` and applies it, keeping `buildPlatformTraits` a constant
+    and `platformTraits(platform)` single-argument for the seven call sites.
+  - `diagnostics/console.ts` — `window.machaDiagnostics` and the Clipboard
+    `copy()`, which are browser affordances the core rightly refused.
+  - `cluster/useEndpointHealthMonitor.ts` and `app/useMachaServices.ts` —
+    React lifecycle bindings over the core's `EndpointHealthMonitor` class
+    and `createMachaServices` factory.
+- `main.tsx` calls `configureMachaHost({ origin: window.location.origin })`
+  once before any service is constructed. Storage, clock, ids and
+  `performance` auto-detect in a browser; the origin is what the API layer
+  resolves relative artwork and stream URLs against on a same-origin
+  deployment, and it now throws rather than silently yielding a relative path.
+- `serverConnection` no longer dispatches `CustomEvent` on `window`; it
+  publishes to a core event bus. `SERVER_UNREACHABLE_EVENT` /
+  `SERVER_REACHABLE_EVENT` are still exported for anything still listening.
+
+Verified: `npx tsc --noEmit` clean, `npm run build` succeeds (5.79s, 1,040 kB
+bundle), 30 files / 146 tests pass. `src/` was backed up to the session
+scratchpad before any deletion — much of this tree is uncommitted and some
+files are untracked, so a bad delete would not have been recoverable.
+
+**Not verified: nothing has been run against a real server since the move.**
+The dev server, the Samsung package and live playback are all untested on
+this arrangement. Do that before trusting it.
+
+## Endpoint choice measures throughput, not just round-trip time
+
+The registry ranked endpoints by probe latency and, failing that, by the
+order they happened to be listed in `VITE_MACHA_SERVERS`. Both are proxies
+for "which node should I read media from", and this cluster falsifies them
+routinely: `gbni-1` is wired, `gbni-2` is behind a knowingly flaky wireless
+hop, and `es-1` is across a WAN. A node one wireless hop away can answer a
+probe promptly and still be the worst possible choice to stream from — and
+after a failover, candidate order was literally the order someone typed the
+`.env` line in.
+
+- **`src/cluster/EndpointBandwidth.ts` (new).** Per-endpoint throughput in
+  bytes per second, smoothed (0.35) across transfers the client was making
+  anyway. Persisted to `localStorage` under `macha-client-bandwidth:<client>`
+  so a reload does not start blind, but a restored estimate re-enters as a
+  *single* sample and is dropped entirely after 6 hours — the link may be a
+  different link by then. Writes are throttled to one per 5s (this runs on
+  TVs) with the first sample always written and a `flush()` on teardown.
+  Storage failures are swallowed: a full quota must never break a request.
+- **Sampling is honest about what it measures.** Only transfers of at least
+  32 KB count; below that the number is round-trip time and server handler
+  cost wearing a throughput costume — exactly the mistake that made the
+  server's own `peer_latency_ms` read a 35 KB commit as network distance.
+  Timing wraps the *body read*, not the `fetch()`: a resolved fetch has
+  received headers and not one byte of payload. Byte counts come from
+  `Content-Length`; a chunked response simply contributes no sample.
+- **One instrumentation point, and it removed duplication.** `readJsonBody()`
+  in `httpCompat` replaced three copy-pasted `return await response.json() as
+  T` success paths (catalogue, manage, acquisition). The recorder is
+  installed by `App.tsx` via `setTransferRecorder()` rather than imported, so
+  the HTTP layer keeps no dependency on cluster bookkeeping; attribution is
+  by URL prefix, since an endpoint id *is* its normalized base URL.
+- **Selection now uses both facts.** `evaluatePreferredSwap()` (was
+  `evaluateLatencySwap()`) requires an advantage on one axis and no material
+  regression on the other: it will not hand authority to a link that
+  measurably cannot carry as much however promptly it pings, and it will move
+  for a materially fatter pipe even when the round trip is no better.
+  `candidates()` consults throughput ahead of configured order, so failover
+  order stops being a typing artifact. Health still outranks both — a failing
+  fast link sorts last.
+
+Verified: `npx tsc --noEmit` clean; 70 files / 451 tests pass, including 9 new
+`EndpointBandwidth` tests and 8 new registry tests covering ordering,
+thin evidence, the health precedence, both swap directions and the refusal
+cases. **Not yet live-verified** against the real cluster — the numbers that
+motivated it are real (measured 2026-09-07), but no session has yet watched
+this reorder a live failover. Worth doing during the pending playback UAT.
 
 ## Episode ancestry is produced by the API, not stitched on by callers
 

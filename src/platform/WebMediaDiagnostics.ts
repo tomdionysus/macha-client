@@ -1,4 +1,4 @@
-import type { ClientLogger } from '../diagnostics/ClientLog';
+import type { ClientLogger } from '@macha/core';
 import { directPlayReadAheadMetrics, setDirectPlayReadAheadMode } from '../playback/directPlayReadAhead';
 
 function ranges(value: TimeRanges): Array<{ start: number; end: number }> {

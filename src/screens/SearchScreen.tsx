@@ -1,6 +1,6 @@
 import { useEffect, useState, type ChangeEvent } from 'react';
-import type { MediaApi } from '../api/MediaApi';
-import type { MediaSummary } from '../types';
+import type { MediaApi } from '@macha/core';
+import type { MediaSummary } from '@macha/core';
 import { MediaCard } from '../components/MediaCard';
 import { MediaPageTitle } from '../components/MediaPageTitle';
 

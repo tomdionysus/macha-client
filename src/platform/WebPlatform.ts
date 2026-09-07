@@ -1,5 +1,6 @@
-import Hls from 'hls.js';
-import { createClientLogger } from '../diagnostics/ClientLog';
+import type Hls from 'hls.js';
+import { loadHls, managedHlsSupported, warmHls } from './hlsRuntime';
+import { createClientLogger } from '@macha/core';
 import {
   PlaybackSourceError,
   type Platform,
@@ -7,10 +8,10 @@ import {
   type PlaybackFailureListener,
   type PlaybackListener,
   type Player,
-} from './Platform';
-import type { MediaTechnicalProfile, PlaybackCapabilities, PlaybackEvent, PlaybackSource, PlaybackTimeRange } from '../types';
+} from '@macha/core';
+import type { MediaTechnicalProfile, PlaybackCapabilities, PlaybackEvent, PlaybackSource, PlaybackTimeRange } from '@macha/core';
 import { ManagedHlsMediaRecoveryBudget } from './ManagedHlsRecovery';
-import { detectWebMediaCodecCapabilities } from './WebMediaCapabilities';
+import { detectHlsTsSupport, detectWebMediaCodecCapabilities, hlsDeliveryProbe } from './WebMediaCapabilities';
 import { WebMediaTimeline } from './WebMediaTimeline';
 import {
   addDirectPlayReadAheadAlternative,
@@ -55,10 +56,6 @@ function cloneWebVttCue(cue: TextTrackCue): VTTCue | undefined {
   return clone;
 }
 
-function isHls(source: PlaybackSource): boolean {
-  return source.mimeType === 'application/vnd.apple.mpegurl' || /\.m3u8(?:$|[?#])/i.test(source.url);
-}
-
 function firstPlaylistUri(lines: readonly string[]): string | undefined {
   return lines.map((line) => line.trim()).find((line) => Boolean(line) && !line.startsWith('#'));
 }
@@ -100,7 +97,7 @@ export async function preflightWebHlsSource(
   fetchImpl: typeof fetch = fetch,
   timeoutMs = 5_000,
 ): Promise<boolean> {
-  if (!isHls(source)) return false;
+  if (!source.isManifest) return false;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -324,7 +321,7 @@ class WebPlayer implements Player {
       url: source.url,
       subtitleUrl: source.subtitleUrl,
       requestedPositionMs: positionMs,
-      hls: isHls(source),
+      hls: source.isManifest,
     });
     this.initialSeekCleanup?.();
     this.initialSeekCleanup = undefined;
@@ -386,9 +383,14 @@ class WebPlayer implements Player {
       this.log.warn('subtitle-initial-load-failed', { url: source.subtitleUrl, error: error instanceof Error ? error.message : String(error) });
     });
 
-    if (isHls(source)) {
-      if (shouldUseManagedHls(this.options.forceNativeHls, Hls.isSupported())) {
+    // Declared by the resolver, never sniffed: a native player handed an
+    // undeclared .m3u8 parses the playlist as media and reports a source error.
+    if (source.isManifest) {
+      if (shouldUseManagedHls(this.options.forceNativeHls, managedHlsSupported())) {
         this.log.info('hls-js-selected', { url: source.url });
+        // Usually already resolved: the capability probe warms it while the
+        // session is still being negotiated.
+        const hlsModule = await loadHls();
         if (existingVideo) {
           // hls.js manages the media element's source itself (a MediaSource
           // object URL) rather than a plain URL we assign, so it needs an
@@ -396,7 +398,7 @@ class WebPlayer implements Player {
           video.removeAttribute('src');
           video.load();
         }
-        this.attachHls(video, source.url, sourceGeneration);
+        this.attachHls(hlsModule, video, source.url, sourceGeneration);
       } else if (this.options.forceNativeHls || nativeHlsSupported(video)) {
         this.log.info('hls-native-selected', { url: source.url });
         video.src = source.url;
@@ -883,7 +885,7 @@ class WebPlayer implements Player {
     for (const listener of this.failureListeners) listener(error);
   }
 
-  private attachHls(video: HTMLVideoElement, url: string, sourceGeneration: number): void {
+  private attachHls(Hls: typeof import('hls.js').default, video: HTMLVideoElement, url: string, sourceGeneration: number): void {
     // hls.js's own startPosition seeks in raw source-local seconds and does not
     // know about mediaOriginMs; the initial-seek listener above is the sole
     // owner of the resume seek so hls.js and the app never race the same
@@ -1064,26 +1066,62 @@ export class WebPlatform implements Platform {
   async capabilities(): Promise<PlaybackCapabilities> {
     const video = document.createElement('video');
     const probe = (mime: string) => supportedMime(video, mime);
-    const { videoCodecs, audioCodecs, containers } = detectWebMediaCodecCapabilities(probe);
+    const mediaFeature = typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+      ? (query: string) => window.matchMedia(query).matches
+      : undefined;
+    // Whichever decoder will actually be handed the stream is the one whose
+    // opinion counts, and it is never the media element's progressive-file
+    // answer. hls.js means MediaSource; the native player means the engine's
+    // own view of the playlist type. Asking the wrong one is how a codec the
+    // element plays perfectly well arrives broken through HLS.
+    const managed = !this.playerOptions.forceNativeHls && managedHlsSupported();
+    const mseProbe = managed && typeof window !== 'undefined' && window.MediaSource?.isTypeSupported
+      ? (mime: string) => { try { return window.MediaSource.isTypeSupported(mime); } catch { return false; } }
+      : undefined;
+    const deliveryProbe = hlsDeliveryProbe(probe, mseProbe);
+    const { videoCodecs, hlsVideoCodecs, audioCodecs, hlsAudioCodecs, containers, videoBitDepth, hdrTransfers, dolbyVision } =
+      detectWebMediaCodecCapabilities(probe, mediaFeature, deliveryProbe);
 
     const capabilities: PlaybackCapabilities = {
       platform: 'web',
       videoCodecs,
       audioCodecs,
       containers,
-      hls: nativeHlsSupported(video) || Hls.isSupported(),
+      hlsFmp4: nativeHlsSupported(video) || managedHlsSupported(),
+      // Asked, not assumed. Supporting HLS says nothing about which segment
+      // packaging works: an older set can be solid on MPEG-TS and broken on
+      // fMP4, which is the difference between a stream that plays and one
+      // that black-screens.
+      hlsTs: detectHlsTsSupport(probe) || managedHlsSupported(),
       dash: false,
-      // Do not claim HDR profiles merely because the display is HDR-capable.
-      // The server needs a defined codec/profile contract before we advertise them.
-      hdr: [],
+      // Both of these gate what the server will hand over. Over-claiming is
+      // the dangerous direction: an over-claimed depth or transfer is a black
+      // screen, an under-claimed one is only a transcode nobody needed.
+      hdr: hdrTransfers,
+      videoBitDepth,
+      // What the delivery decoder will accept, which is not always what the
+      // media element accepts. Equal to the element's list unless the delivery
+      // probe disagreed, so a host with one decoder for both paths is
+      // unaffected. Sent only when they differ: an identical list is noise,
+      // and the chooser already falls back to the element's answer.
+      ...(hlsVideoCodecs.length !== videoCodecs.length ? { hlsVideoCodecs } : {}),
+      ...(hlsAudioCodecs.length !== audioCodecs.length ? { hlsAudioCodecs } : {}),
+      // Omitted when empty: absent and empty mean the same thing, and neither
+      // is ever read as "capable".
+      ...(dolbyVision.length > 0 ? { dolbyVision } : {}),
     };
+    // Only where hls.js would actually drive playback: the Samsung and
+    // Android builds force the native player, so they never fetch it at all.
+    if (managed) warmHls();
     this.log.info('detected', {
       platform: capabilities.platform,
       containers: capabilities.containers.join(', '),
       videoCodecs: capabilities.videoCodecs.join(', '),
       audioCodecs: capabilities.audioCodecs.join(', '),
-      hlsFmp4: capabilities.hls,
+      hlsFmp4: capabilities.hlsFmp4,
       decoderResolutionLimit: 'none',
+      videoBitDepth,
+      dolbyVision: dolbyVision.length > 0 ? dolbyVision.join(', ') : 'not-advertised',
       hdr: capabilities.hdr.length > 0 ? capabilities.hdr.join(', ') : 'not-advertised',
     });
     return capabilities;

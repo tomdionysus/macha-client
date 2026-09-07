@@ -5,18 +5,24 @@ import App from './App';
 import { runBootSplash } from './bootSplash';
 import {
   configureClientDiagnostics,
+  configureMachaHost,
   createClientLogger,
-  installClientDiagnosticsConsole,
-} from './diagnostics/ClientLog';
+} from '@macha/core';
+import { installClientDiagnosticsConsole } from './diagnostics/console';
 import { detectPlatform } from './platform';
 import { diagnosticsSettings } from './settings';
 import { installDirectPlayReadAheadDiagnostics, warmDirectPlayReadAhead } from './playback/directPlayReadAhead';
 import { installAbortControllerPolyfill } from './platform/AbortControllerPolyfill';
-import { buildPlatformTraits } from './platform/platformTraits';
+import { buildPlatformTraits } from './platform/traits';
 import './styles.css';
 
 const samsung = import.meta.env.MODE === 'samsung';
 installAbortControllerPolyfill(window);
+// Everything the core needs from a host. Storage, clock, id generation and
+// performance all auto-detect correctly in a browser; only the origin has to
+// be supplied, and it is what the API layer resolves relative artwork and
+// stream URLs against on a same-origin deployment.
+configureMachaHost({ origin: window.location.origin });
 configureClientDiagnostics({
   level: samsung ? 'warn' : diagnosticsSettings.playbackLogLevel,
   console: samsung ? false : diagnosticsSettings.playbackConsole,

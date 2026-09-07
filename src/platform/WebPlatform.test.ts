@@ -83,7 +83,7 @@ describe('Web player source reassignment', () => {
     const player = new WebPlatform().createPlayer();
     player.attach({ firstChild: null, appendChild: vi.fn() } as unknown as HTMLElement);
 
-    const source = { mediaId: 'm1', url: 'https://node.test/stream', mimeType: 'video/mp4', mode: 'direct' as const };
+    const source = { mediaId: 'm1', url: 'https://node.test/stream', isManifest: false, mimeType: 'video/mp4', mode: 'direct' as const };
     // Two plays share one reused <video> element (the second exercises the
     // "existingVideo" reset path). Assigning a new src already runs the media
     // element load algorithm; a redundant removeAttribute('src')/load() call
@@ -133,7 +133,7 @@ describe('Web HLS standby preflight', () => {
       .mockResolvedValueOnce(new Response(new Uint8Array([3, 4]), { status: 206 }));
     const source = {
       mediaId: 'macha:one', url: 'https://node-b.test/generation/index.m3u8',
-      mimeType: 'application/vnd.apple.mpegurl', mode: 'remux' as const,
+      isManifest: true, mimeType: 'application/vnd.apple.mpegurl', mode: 'remux' as const,
     };
 
     await expect(preflightWebHlsSource(source, fetchMock)).resolves.toBe(true);
@@ -154,7 +154,7 @@ describe('Web HLS standby preflight', () => {
     });
     const source = {
       mediaId: 'macha:one', url: 'https://node-b.test/generation/index.m3u8',
-      mimeType: 'application/vnd.apple.mpegurl', mode: 'remux' as const,
+      isManifest: true, mimeType: 'application/vnd.apple.mpegurl', mode: 'remux' as const,
     };
 
     await expect(preflightWebHlsSource(source, fetchMock, 1)).rejects.toMatchObject({ name: 'AbortError' });
@@ -167,7 +167,7 @@ describe('Web HLS standby preflight', () => {
       .mockResolvedValueOnce(new Response('unavailable', { status: 503 }));
     const source = {
       mediaId: 'macha:one', url: 'https://node-b.test/generation/index.m3u8',
-      mimeType: 'application/vnd.apple.mpegurl', mode: 'remux' as const,
+      isManifest: true, mimeType: 'application/vnd.apple.mpegurl', mode: 'remux' as const,
     };
 
     await expect(preflightWebHlsSource(source, fetchMock)).resolves.toBe(false);
@@ -201,14 +201,14 @@ describe('Web HLS buffer policy', () => {
 describe('Web local seek coverage', () => {
   it('exposes the whole Direct Play timeline without requiring buffered bytes', () => {
     expect(webLocalSeekCoverage({
-      mediaId: 'm1', url: '/direct', mimeType: 'video/mp4', mode: 'direct', durationMs: 600_000,
+      mediaId: 'm1', url: '/direct', isManifest: false, mimeType: 'video/mp4', mode: 'direct', durationMs: 600_000,
     }, [])).toEqual([{ startMs: 0, endMs: Number.POSITIVE_INFINITY }]);
   });
 
   it('exposes only resident ranges for transformed playback', () => {
     const buffered = [{ startMs: 5_000, endMs: 65_000 }];
     expect(webLocalSeekCoverage({
-      mediaId: 'm1', url: '/generation.m3u8', mimeType: 'application/vnd.apple.mpegurl', mode: 'transcode', durationMs: 600_000,
+      mediaId: 'm1', url: '/generation.m3u8', isManifest: true, mimeType: 'application/vnd.apple.mpegurl', mode: 'transcode', durationMs: 600_000,
     }, buffered)).toEqual(buffered);
   });
 });
@@ -270,7 +270,7 @@ describe('Managed Web HLS recovery', () => {
       details: 'bufferAppendError',
       fatal: true,
       sourceBufferName: 'video',
-      mimeType: 'video/mp4; codecs="avc1.640028"',
+      isManifest: false, mimeType: 'video/mp4; codecs="avc1.640028"',
       reason: 'appendBuffer failed',
       error: new Error('SourceBuffer append failed'),
     })).toMatchObject({

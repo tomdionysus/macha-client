@@ -1,8 +1,8 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import type { MediaApi } from '../api/MediaApi';
+import type { MediaApi } from '@macha/core';
 import { useViewportArtworkUrl, VISIBLE_ARTWORK_RECOVERY_DELAY_MS } from '../hooks/useViewportArtworkUrl';
-import type { ArtworkRef } from '../types';
-import { createClientLogger } from '../diagnostics/ClientLog';
+import type { ArtworkRef } from '@macha/core';
+import { createClientLogger } from '@macha/core';
 
 const log = createClientLogger('artwork.image');
 

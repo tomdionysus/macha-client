@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { samsungBackTarget } from './samsungBackNavigation';
-import type { MediaApi } from '../api/MediaApi';
+import type { MediaApi } from '@macha/core';
 
 const api = {
   details: vi.fn(async (id: string) => {

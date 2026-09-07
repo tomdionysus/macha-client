@@ -1,4 +1,4 @@
-import { routes } from '../routing';
+import { routes } from '@macha/core';
 import { SectionNav } from './SectionNav';
 
 const items = [

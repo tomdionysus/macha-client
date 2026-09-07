@@ -1,8 +1,8 @@
 import { useCallback, useState } from 'react';
-import type { MediaApi } from '../api/MediaApi';
-import { MusicPlaylistStore } from '../state/musicPlaylist';
-import { PlaybackQueueStore, type PlaybackQueueState } from '../state/playbackQueue';
-import type { MediaSummary } from '../types';
+import type { MediaApi } from '@macha/core';
+import { MusicPlaylistStore } from '@macha/core';
+import { PlaybackQueueStore, type PlaybackQueueState } from '@macha/core';
+import type { MediaSummary } from '@macha/core';
 
 export interface StartPlaybackOptions {
   fromStart?: boolean;

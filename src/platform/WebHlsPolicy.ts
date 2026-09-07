@@ -1,4 +1,14 @@
-import Hls from 'hls.js';
+/**
+ * hls.js's own error-type values, restated rather than imported.
+ *
+ * These are two short strings, and importing the library for them would pull
+ * 518 KB into the boot bundle for code that only runs during HLS playback —
+ * defeating the on-demand load entirely. `WebHlsPolicy.test.ts` imports the
+ * real library and asserts these still match, so a change upstream fails a
+ * test rather than silently misclassifying every error.
+ */
+const HLS_NETWORK_ERROR = 'networkError';
+const HLS_MEDIA_ERROR = 'mediaError';
 import type { ManagedHlsMediaRecoveryBudget, ManagedHlsMediaRecoveryDecision } from './ManagedHlsRecovery';
 
 export function webHlsBufferConfig(): Record<string, number | boolean> {
@@ -21,7 +31,7 @@ export type ManagedHlsErrorAction =
 
 /** Any HLS network error is early node-health evidence, even before it is fatal. */
 export function isHlsNetworkDegradation(data: { type?: unknown }): boolean {
-  return data.type === Hls.ErrorTypes.NETWORK_ERROR;
+  return data.type === HLS_NETWORK_ERROR;
 }
 
 export function managedHlsErrorAction(
@@ -30,7 +40,7 @@ export function managedHlsErrorAction(
   positionMs: number,
 ): ManagedHlsErrorAction {
   if (!data.fatal) return { action: 'nonfatal' };
-  if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+  if (data.type === HLS_NETWORK_ERROR) {
     const decision = recovery.fatalNetworkError();
     if (decision.action === 'restart') return { action: 'restart-network', attempt: decision.attempt };
     return {
@@ -39,7 +49,7 @@ export function managedHlsErrorAction(
       details: typeof data.details === 'string' ? data.details : 'networkError',
     };
   }
-  if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+  if (data.type === HLS_MEDIA_ERROR) {
     const decision = recovery.fatalMediaError(positionMs);
     if (decision.action === 'recover') return { action: 'recover-media', recovery: decision };
     return {

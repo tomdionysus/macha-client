@@ -1,20 +1,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent } from 'react';
-import type { MediaApi } from '../api/MediaApi';
+import type { MediaApi } from '@macha/core';
 import { PlayIcon, RestartIcon } from '../components/PlaybackIcons';
 import { Loading } from '../components/Status';
-import { createClientLogger } from '../diagnostics/ClientLog';
+import { createClientLogger } from '@macha/core';
 import { useArtworkUrl } from '../hooks/useArtworkUrl';
 import { requestTvDefaultFocus } from '../hooks/useTvNavigation';
-import type { Platform } from '../platform/Platform';
-import { platformTraits } from '../platform/platformTraits';
-import type { PlaybackUpdate } from '../playback/PlaybackResolver';
-import { isSubtitleOnlyPlaybackUpdate, type PlaybackCoordinatorSnapshot } from '../playback/PlaybackCoordinator';
-import { PlaybackRuntime, type PlaybackRuntimeRequest, type PlaybackRuntimeSnapshot } from '../playback/PlaybackRuntime';
+import type { Platform } from '@macha/core';
+import { platformTraits } from '../platform/traits';
+import type { PlaybackUpdate } from '@macha/core';
+import { isSubtitleOnlyPlaybackUpdate, type PlaybackCoordinatorSnapshot } from '@macha/core';
+import { PlaybackRuntime, type PlaybackRuntimeRequest, type PlaybackRuntimeSnapshot } from '@macha/core';
 import { uiSettings } from '../settings';
-import { describePlaybackSession } from '../playback/PlaybackStatus';
-import { bufferedTimelineSegments } from '../playback/BufferedTimeline';
-import type { MediaSummary, PlaybackEvent, PlaybackProgress } from '../types';
+import { describePlaybackSession } from '@macha/core';
+import { bufferedTimelineSegments } from '@macha/core';
+import type { MediaSummary, PlaybackEvent, PlaybackProgress } from '@macha/core';
 import { PlayerOptions } from './player/PlayerOptions';
+import { accelerateSeek, seekDirectionForKey, type SeekDirection, type SeekHold } from './player/seekAcceleration';
 import { samsungMediaCommand } from '../platform/SamsungMediaKeys';
 
 interface Props {
@@ -127,27 +128,53 @@ function shouldTrackProgress(media: MediaSummary): boolean {
   return media.kind === 'movie' || media.kind === 'episode';
 }
 
+/**
+ * The line under the title in the player bar.
+ *
+ * The catalogue supplies no subtitle for a movie, so that line sat empty
+ * where the year is the one piece of identifying context worth having —
+ * remakes and re-releases share titles freely. Everything else keeps the
+ * subtitle it already had, and a movie with no year still shows nothing
+ * rather than an empty separator.
+ */
+export function playerMediaSubtitle(media: MediaSummary): string | undefined {
+  if (media.kind === 'episode') {
+    return `${media.playbackContext?.series.title ?? ''} ${media.subtitle ?? ''}`.trim() || undefined;
+  }
+  if (media.kind === 'movie' && media.subtitle === undefined) {
+    return media.year !== undefined ? String(media.year) : undefined;
+  }
+  return media.subtitle;
+}
+
 export function webSeekDeltaForKey(key: string): number | undefined {
   if (key === 'ArrowLeft') return -10_000;
   if (key === 'ArrowRight') return 10_000;
   return undefined;
 }
 
-export function samsungSeekDeltaForKey(key: string, keyCode: number, controlsVisible: boolean): number | undefined {
-  // When the control bar is visible left/right remain spatial-navigation keys.
-  // With playback chrome hidden they are transport shortcuts, matching TV-player
-  // convention without making the control row impossible to navigate.
-  if (controlsVisible) return undefined;
-  if (key === 'ArrowLeft' || key === 'Left' || keyCode === 37) return -10_000;
-  if (key === 'ArrowRight' || key === 'Right' || keyCode === 39) return 10_000;
-  return undefined;
+/**
+ * Which way a transport shortcut seeks, or undefined when the keys belong to
+ * navigation instead.
+ *
+ * With the control bar up, left/right are spatial navigation for the control
+ * row. With the chrome hidden they are transport, matching TV-player
+ * convention. `transportActive` also stays true while the bar is up *because*
+ * a seek revealed it, so a gesture is not disarmed halfway through by the
+ * chrome it just summoned. Distance comes from the same accelerating ladder
+ * the scrubber uses.
+ */
+export function samsungTransportSeekDirection(
+  key: string,
+  keyCode: number,
+  transportActive: boolean,
+): SeekDirection | undefined {
+  return transportActive ? seekDirectionForKey(key, keyCode) : undefined;
 }
 
-export function samsungSliderSeekDeltaForKey(key: string, keyCode: number): number | undefined {
-  if (key === 'ArrowLeft' || key === 'Left' || keyCode === 37) return -10_000;
-  if (key === 'ArrowRight' || key === 'Right' || keyCode === 39) return 10_000;
-  return undefined;
-}
+// Scrubbing on the progress bar accelerates while the key is held rather than
+// moving a fixed distance per press: see `./player/seekAcceleration`. Direction
+// is all this screen decides; the distance comes from how long it is held.
 
 export function boundedPlayerSeekTarget(positionMs: number, deltaMs: number, durationMs: number): number {
   return Math.max(0, Math.min(Math.max(0, durationMs), positionMs + deltaMs));
@@ -191,6 +218,10 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
   const lastReportRef = useRef(0);
   const lastPositionPersistRef = useRef(0);
   const endedHandledRef = useRef(false);
+  /** The in-progress D-pad hold on the scrubber, if any. Cleared on release. */
+  const seekHoldRef = useRef<SeekHold | undefined>(undefined);
+  /** True while the control bar is up only because a transport seek revealed it. */
+  const seekRevealedControlsRef = useRef(false);
   const lastEventByMediaRef = useRef(new Map<string, PlaybackEvent>());
   const log = useMemo(() => createClientLogger('playback.screen', { mediaId: media.id }), [media.id]);
   const traits = platformTraits(platform);
@@ -309,6 +340,7 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
       hideTimerRef.current = undefined;
     }
     if (fatalError || hoveringChromeRef.current) return;
+    seekRevealedControlsRef.current = false;
     setControlsVisible(false);
     setOptionsVisible(false);
     const chrome = chromeRef.current;
@@ -431,12 +463,16 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
       armControlsHide();
       return;
     }
-    setControlsVisible(true);
+    // Only for a change to a stream that is already playing — a seek, a
+    // representation switch — where the bar is what tells the viewer their
+    // input registered. At startup there is no such input to acknowledge, and
+    // showing it flashes chrome across a title that is only just appearing.
+    if (playback.session) setControlsVisible(true);
     if (hideTimerRef.current !== undefined) {
       window.clearTimeout(hideTimerRef.current);
       hideTimerRef.current = undefined;
     }
-  }, [armControlsHide, playback.preparingSource]);
+  }, [armControlsHide, playback.preparingSource, playback.session]);
 
   useEffect(() => {
     const onFullscreenChange = () => {
@@ -520,11 +556,27 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
         return;
       }
       if (presentation === 'full' && samsungControls) {
-        const delta = samsungSeekDeltaForKey(keyEvent.key, keyEvent.keyCode, controlsVisible);
-        if (delta !== undefined) {
+        // Left/right are transport shortcuts only while the chrome is hidden,
+        // so that the control row stays navigable when it is up. Showing the
+        // bar on a seek would therefore disarm the next press mid-gesture:
+        // once it is up, left/right would become spatial navigation and
+        // seeking would stop after one step. While the bar is up *because of*
+        // seeking, keep treating them as transport.
+        const transportActive = !controlsVisible || seekRevealedControlsRef.current;
+        const direction = samsungTransportSeekDirection(keyEvent.key, keyEvent.keyCode, transportActive);
+        if (direction !== undefined) {
           keyEvent.preventDefault();
           keyEvent.stopPropagation();
-          seekBy(delta);
+          // Same ladder as the scrubber, and the same hold: a viewer holding
+          // right should not get a different distance depending on whether
+          // the bar happened to be up.
+          const { hold, deltaMs } = accelerateSeek(seekHoldRef.current, direction, Date.now());
+          seekHoldRef.current = hold;
+          seekBy(deltaMs);
+          // Show where the seek landed: a jump with no visible scrubber gives
+          // the viewer nothing to judge it by.
+          seekRevealedControlsRef.current = true;
+          showControls();
           return;
         }
       }
@@ -614,9 +666,7 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
   );
   const audio = media.kind === 'track';
   const streamStatus = describePlaybackSession(session, event.streamOrigin);
-  const mediaSubtitle = media.kind === 'episode'
-    ? `${media.playbackContext?.series.title ?? ''} ${media.subtitle ?? ''}`.trim()
-    : media.subtitle;
+  const mediaSubtitle = playerMediaSubtitle(media);
   const pausedForControl = playerControlShowsPlay(playback.intent.paused, Boolean(fatalError));
   const queueLabel = queuePosition && queuePosition.total > 1 ? `${queuePosition.index + 1} of ${queuePosition.total}` : undefined;
   const playerSubtitle = [mediaSubtitle, queueLabel].filter(Boolean).join(' · ');
@@ -706,7 +756,7 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
 
         {optionsVisible && (
           session ? (
-            <PlayerOptions session={session} pendingPreferences={playback.pendingPreferences} onApply={reconfigure} />
+            <PlayerOptions session={session} pendingPreferences={playback.pendingPreferences} instruction={runtimePlayback?.instruction} onApply={reconfigure} />
           ) : (
             <div className="player-options player-options-loading" aria-live="polite">
               Playback options are loading. Transport controls remain available.
@@ -735,22 +785,28 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
               }}
               onKeyDown={(keyEvent: ReactKeyboardEvent<HTMLInputElement>) => {
                 if (!samsungControls) return;
-                const delta = samsungSliderSeekDeltaForKey(keyEvent.key, keyEvent.keyCode);
-                if (delta === undefined) return;
+                const direction = seekDirectionForKey(keyEvent.key, keyEvent.keyCode);
+                if (direction === undefined) return;
                 keyEvent.preventDefault();
                 keyEvent.stopPropagation();
+                // Only the preview position moves here; the seek is committed
+                // once on release, so a long hold costs one request however
+                // far it travelled.
+                const { hold, deltaMs } = accelerateSeek(seekHoldRef.current, direction, Date.now());
+                seekHoldRef.current = hold;
                 const current = scrubValueRef.current ?? Math.min(duration, playback.intent.positionMs);
-                setScrubPosition(boundedPlayerSeekTarget(current, delta, duration));
+                setScrubPosition(boundedPlayerSeekTarget(current, deltaMs, duration));
                 armControlsHide();
               }}
               onKeyUp={(keyEvent: ReactKeyboardEvent<HTMLInputElement>) => {
-                const samsungDelta = samsungControls
-                  ? samsungSliderSeekDeltaForKey(keyEvent.key, keyEvent.keyCode)
+                const seekKey = samsungControls
+                  ? seekDirectionForKey(keyEvent.key, keyEvent.keyCode)
                   : undefined;
-                const commit = samsungDelta !== undefined || ['Home', 'End'].includes(keyEvent.key);
-                if (samsungDelta !== undefined) {
+                const commit = seekKey !== undefined || ['Home', 'End'].includes(keyEvent.key);
+                if (seekKey !== undefined) {
                   keyEvent.preventDefault();
                   keyEvent.stopPropagation();
+                  seekHoldRef.current = undefined;
                 }
                 const position = scrubValueRef.current;
                 if (position !== undefined && commit) seek(position);

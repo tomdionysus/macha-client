@@ -1,5 +1,5 @@
-import { createClientLogger } from '../diagnostics/ClientLog';
-import type { PlaybackSource } from '../types';
+import { createClientLogger } from '@macha/core';
+import type { PlaybackSource } from '@macha/core';
 
 export type DirectPlayReadAheadMode = 'bootstrap' | 'playing' | 'seeking' | 'paused';
 

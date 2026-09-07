@@ -1,5 +1,5 @@
-import type { PlaybackCapabilities } from '../types';
-import type { Platform, Player } from './Platform';
+import type { PlaybackCapabilities } from '@macha/core';
+import type { Platform, Player } from '@macha/core';
 import { WebPlatform } from './WebPlatform';
 
 /** Android TV shell backed by WebView's native HTML media pipeline. */

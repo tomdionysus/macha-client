@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { attachSpatialTvNavigation, isTextEditingElement, tvRangeOwnsDirection } from './useTvNavigation';
+import { attachSpatialTvNavigation, isTextEditingElement, tvRangeOwnsDirection, tvTextEditingOwnsCommand } from './useTvNavigation';
 
 function element(tagName: string, options: { contentEditable?: boolean; role?: string; type?: string } = {}) {
   return {
@@ -121,5 +121,32 @@ describe('attachSpatialTvNavigation', () => {
     detach = undefined;
     press('ArrowDown', 40);
     expect(middle.getAttribute('data-tv-selected')).toBeNull();
+  });
+
+  describe('escaping a focused text field', () => {
+    it('lets up and down leave a single-line input, so a search box is not a trap', () => {
+      // There is no pointer on a TV: an input that swallows vertical
+      // navigation can only be left with Back, which exits the screen.
+      expect(tvTextEditingOwnsCommand(element('input'), 'up')).toBe(false);
+      expect(tvTextEditingOwnsCommand(element('input'), 'down')).toBe(false);
+    });
+
+    it('still gives the input its caret keys and Enter', () => {
+      expect(tvTextEditingOwnsCommand(element('input'), 'left')).toBe(true);
+      expect(tvTextEditingOwnsCommand(element('input'), 'right')).toBe(true);
+      expect(tvTextEditingOwnsCommand(element('input'), 'activate')).toBe(true);
+    });
+
+    it('leaves multi-line and list editors owning every direction', () => {
+      for (const editor of [element('textarea'), element('select'), element('div', { contentEditable: true })]) {
+        expect(tvTextEditingOwnsCommand(editor, 'up')).toBe(true);
+        expect(tvTextEditingOwnsCommand(editor, 'down')).toBe(true);
+      }
+    });
+
+    it('claims nothing when focus is not in an editor at all', () => {
+      expect(tvTextEditingOwnsCommand(element('button'), 'up')).toBe(false);
+      expect(tvTextEditingOwnsCommand(undefined, 'down')).toBe(false);
+    });
   });
 });

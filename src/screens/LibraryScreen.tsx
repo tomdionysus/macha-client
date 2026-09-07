@@ -1,12 +1,12 @@
 import { useMemo } from 'react';
-import type { MediaApi } from '../api/MediaApi';
-import type { MediaSummary } from '../types';
+import type { MediaApi } from '@macha/core';
+import type { MediaSummary } from '@macha/core';
 import { useRefreshableAsync } from '../hooks/useRefreshableAsync';
 import { useAlphabetIndex } from '../hooks/useAlphabetIndex';
 import { ErrorMessage, Loading } from '../components/Status';
 import { MediaCard } from '../components/MediaCard';
 import { AlphabetIndex } from '../components/AlphabetIndex';
-import { sortMediaByIndexedTitle } from '../titleIndex';
+import { sortMediaByIndexedTitle } from '@macha/core';
 import { MediaPageTitle } from '../components/MediaPageTitle';
 
 interface Props {

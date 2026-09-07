@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { ConfirmModal, Modal } from '../components/Modal';
 import { FileIcon, FolderIcon, OpenIcon, RefreshIcon, UpIcon } from '../components/ManageIcons';
 import { AsyncIconButton } from '../components/AsyncIconButton';
-import type { CatalogueApi } from '../api/CatalogueApi';
+import type { CatalogueApi } from '@macha/core';
 import type {
   MachaDfsDirectory,
   MachaDfsEntry,
@@ -12,8 +12,8 @@ import type {
   MediaProbeCandidate,
   UnmatchedDetail,
   UnmatchedFile,
-} from '../api/ManageApi';
-import { errorMessage } from '../utils/errors';
+} from '@macha/core';
+import { errorMessage } from '@macha/core';
 
 export type ManageSection = 'unmatched' | 'files' | 'settings';
 

@@ -1,9 +1,9 @@
-import type { MediaApi } from '../api/MediaApi';
-import type { MediaSummary, PlaybackProgress } from '../types';
+import type { MediaApi } from '@macha/core';
+import type { MediaSummary, PlaybackProgress } from '@macha/core';
 import { useRefreshableAsync } from '../hooks/useRefreshableAsync';
 import { ErrorMessage, Loading } from '../components/Status';
 import { MediaRow } from '../components/MediaRow';
-import { newestCatalogueFirst } from '../recentMedia';
+import { newestCatalogueFirst } from '@macha/core';
 import { MediaPageTitle } from '../components/MediaPageTitle';
 
 interface Props {

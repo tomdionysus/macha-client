@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { SamsungDpadInput, type SamsungDpadCommand, type SamsungDpadDirection } from '../platform/SamsungDpadInput';
-import { buildPlatformTraits } from '../platform/platformTraits';
+import { buildPlatformTraits } from '../platform/traits';
 
 const SELECTOR = '[data-tv-focusable="true"]:not([disabled])';
 const SELECTED_ATTRIBUTE = 'data-tv-selected';
@@ -16,6 +16,25 @@ function isRangeInput(value: unknown): boolean {
 
 export function tvRangeOwnsDirection(value: unknown, direction: SamsungDpadDirection): boolean {
   return isRangeInput(value) && (direction === 'left' || direction === 'right');
+}
+
+/**
+ * Whether a focused editor should keep this command rather than let it move
+ * focus elsewhere.
+ *
+ * A single-line text input owns the caret keys and Enter, but must not swallow
+ * up and down: on a D-pad there is no other way out of it, and a focused search
+ * box that eats vertical navigation traps the viewer with no escape but Back.
+ * Multi-line and list editors — textarea, select, contenteditable — genuinely
+ * use up and down, so they keep everything.
+ */
+export function tvTextEditingOwnsCommand(value: unknown, command: SamsungDpadCommand): boolean {
+  if (!isTextEditingElement(value)) return false;
+  if (command !== 'up' && command !== 'down') return true;
+  const tagName = typeof (value as { tagName?: unknown }).tagName === 'string'
+    ? ((value as { tagName: string }).tagName).toUpperCase()
+    : '';
+  return tagName !== 'INPUT';
 }
 
 /** Editors own caret movement, selection controls and Enter while focused. */
@@ -121,7 +140,7 @@ export function attachSpatialTvNavigation(onBack?: () => boolean): () => void {
   };
 
   const onCommand = (command: SamsungDpadCommand): boolean => {
-    if (command !== 'back' && isTextEditingElement(document.activeElement)) return false;
+    if (command !== 'back' && tvTextEditingOwnsCommand(document.activeElement, command)) return false;
 
     const elements = tvElements();
     if (elements.length === 0) return false;

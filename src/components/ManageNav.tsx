@@ -1,4 +1,4 @@
-import { routes } from '../routing';
+import { routes } from '@macha/core';
 import { SectionNav, type SectionNavItem } from './SectionNav';
 
 const managementItems: readonly SectionNavItem[] = [

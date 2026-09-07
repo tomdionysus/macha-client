@@ -1,146 +1,29 @@
 import { useEffect } from 'react';
-import { DEFAULT_REQUEST_TIMEOUT_MS, fetchWithTimeout, mergeRequestHeaders } from '../api/httpCompat';
-import { NO_AUTH, type AuthenticatedFetch } from '../api/SessionManager';
-import type { ClusterStatusApi } from '../api/ClusterStatusApi';
-import type { EndpointRegistry, MachaEndpoint } from './EndpointRegistry';
-import { reportClusterReachable, reportClusterUnreachable } from '../api/serverConnection';
-import { getDiscoveredEndpoints, setDiscoveredEndpoints } from '../state/client';
-import { createClientLogger } from '../diagnostics/ClientLog';
-
-export const ENDPOINT_HEALTH_INTERVAL_MS = 10_000;
-
-const log = createClientLogger('cluster.health');
-
-interface ProbeResult {
-  status: 'healthy' | 'reachable' | 'unreachable';
-  /** Round-trip time for a genuinely successful response only. */
-  latencyMs?: number;
-}
-
-async function probeEndpoint(endpoint: MachaEndpoint, auth: AuthenticatedFetch): Promise<ProbeResult> {
-  const startedAt = performance.now();
-  try {
-    const response = await fetchWithTimeout(
-      (url, init) => auth.fetch(url, init),
-      `${endpoint.baseUrl}/api/v1/catalogue/status`,
-      { method: 'GET', headers: mergeRequestHeaders(undefined, { Accept: 'application/json' }), cache: 'no-store' },
-      DEFAULT_REQUEST_TIMEOUT_MS,
-    );
-    if (!response.ok) return { status: 'reachable' };
-    return { status: 'healthy', latencyMs: performance.now() - startedAt };
-  } catch {
-    return { status: 'unreachable' };
-  }
-}
+import { EndpointHealthMonitor, type AuthenticatedFetch, type ClusterStatusApi, type EndpointRegistry } from '@macha/core';
+import { clientConfiguration } from '../state/client';
 
 /**
- * A small, bounded set of endpoints this client has actually reached at some
- * point, but never configured — a reload's only fallback if the single
- * configured bootstrap endpoint happens to be down at that exact moment
- * (`EndpointRegistry` otherwise reseeds runtime-discovered membership from
- * nothing on every reload). Purely a resumable-history hint, per
- * `docs/principles-and-laws.md`: recomputed from live state every cycle, so
- * it always tracks what is *currently* confirmed rather than accumulating
- * unbounded discovery history, and is superseded the moment a fresh
- * `applyAdvertisement()` succeeds.
+ * Binds the core's health loop to a React lifecycle.
+ *
+ * The loop itself is plain and lives in `@macha/core`; only this binding is
+ * framework-specific. `stop()` is idempotent, so a double teardown in strict
+ * mode is safe.
  */
-export function persistConfirmedEndpoints(registry: EndpointRegistry, storage: Storage = localStorage): void {
-  const confirmed = registry.snapshot()
-    .filter(({ endpoint, health }) => endpoint.source === 'discovered' && health.lastSuccessAt !== undefined)
-    .map(({ endpoint }) => endpoint.baseUrl);
-  const current = getDiscoveredEndpoints(storage);
-  if (confirmed.length === current.length && confirmed.every((url, index) => url === current[index])) return;
-  setDiscoveredEndpoints(confirmed, storage);
-}
-
-/**
- * Learn live cluster membership from whichever known endpoint answers and
- * merge it into the registry. This is how failover candidates reach beyond
- * the single endpoint a user happens to have typed in: the cluster already
- * reports every online node's host/port on this same status call, so the
- * playback failover pool tracks real membership instead of staying frozen
- * at bootstrap configuration.
- */
-export async function discoverClusterEndpoints(
-  registry: EndpointRegistry,
-  clusterStatusApi: ClusterStatusApi,
-): Promise<void> {
-  try {
-    const { nodes } = await clusterStatusApi.status();
-    // `host`/`port` is the node's internal RPC bind address, not its HTTP API
-    // — using it here would guess at a port that is frequently wrong (a
-    // different service, or unreachable behind NAT). Only `api_host`/
-    // `api_port`, which the server advertises specifically for this purpose,
-    // are trustworthy; nodes not yet reporting it are simply not discovered.
-    const advertisements = nodes
-      .filter((node) => node.state === 'online' && node.api_host && node.api_port)
-      .map((node) => ({ nodeId: node.id, apiBaseUrls: [`http://${node.api_host}:${node.api_port}`] }));
-    if (advertisements.length > 0) registry.applyAdvertisement(advertisements);
-  } catch {
-    // Membership discovery is opportunistic. Health probing of already-known
-    // endpoints must keep working even when no endpoint can answer this yet.
-  }
-}
-
-/** Probe every currently known HTTP API endpoint once, in parallel. */
-export async function probeKnownEndpoints(
-  registry: EndpointRegistry,
-  auth: AuthenticatedFetch,
-  signal: AbortSignal,
-): Promise<number> {
-  const endpoints = registry.snapshot().map(({ endpoint }) => endpoint);
-  let reachable = 0;
-  await Promise.all(endpoints.map(async (endpoint) => {
-    // The lifecycle signal governs whether this result is still publishable;
-    // it must never be attached to the HTTP request. Cancelling one React
-    // consumer (or a playback request) is not evidence about node health.
-    const result = await probeEndpoint(endpoint, auth);
-    if (signal.aborted) return;
-    if (result.status !== 'unreachable') reachable += 1;
-    if (result.status === 'healthy') {
-      registry.recordProbeSuccess(endpoint.id);
-      if (result.latencyMs !== undefined) registry.recordLatency(endpoint.id, result.latencyMs);
-    } else {
-      registry.recordProbeFailure(endpoint.id);
-    }
-  }));
-  if (!signal.aborted) {
-    const swap = registry.evaluateLatencySwap();
-    if (swap) {
-      log.info('latency-preemptive-swap', swap);
-    }
-    log.debug('probe-cycle', { reachable, known: endpoints.length });
-  }
-  return reachable;
-}
-
-/** Application-wide, bounded health loop. It owns no server or playback state. */
 export function useEndpointHealthMonitor(
   registry: EndpointRegistry,
   clusterStatusApi: ClusterStatusApi,
-  auth: AuthenticatedFetch = NO_AUTH,
+  auth: AuthenticatedFetch | undefined,
   enabled: boolean,
 ): void {
   useEffect(() => {
     if (!enabled) return undefined;
-    const controller = new AbortController();
-    let timer: ReturnType<typeof setTimeout> | undefined;
-
-    const cycle = async () => {
-      await discoverClusterEndpoints(registry, clusterStatusApi);
-      if (controller.signal.aborted) return;
-      const reachable = await probeKnownEndpoints(registry, auth, controller.signal);
-      if (!controller.signal.aborted && registry.snapshot().length > 0) {
-        if (reachable > 0) reportClusterReachable(); else reportClusterUnreachable();
-      }
-      if (!controller.signal.aborted) persistConfirmedEndpoints(registry);
-      if (!controller.signal.aborted) timer = setTimeout(() => void cycle(), ENDPOINT_HEALTH_INTERVAL_MS);
-    };
-    void cycle();
-
-    return () => {
-      controller.abort();
-      if (timer !== undefined) clearTimeout(timer);
-    };
+    const monitor = new EndpointHealthMonitor({
+      registry,
+      clusterStatusApi,
+      auth,
+      configuration: clientConfiguration,
+    });
+    monitor.start();
+    return () => monitor.stop();
   }, [auth, clusterStatusApi, enabled, registry]);
 }

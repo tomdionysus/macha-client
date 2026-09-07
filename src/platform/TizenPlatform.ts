@@ -1,5 +1,5 @@
-import type { Platform, Player } from './Platform';
-import type { PlaybackCapabilities } from '../types';
+import type { Platform, Player } from '@macha/core';
+import type { PlaybackCapabilities } from '@macha/core';
 
 /** Future Samsung TV adapter. The .wgt host will supply this bridge using AVPlay. */
 export interface TizenBridge {

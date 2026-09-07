@@ -1,10 +1,12 @@
 import type {
+  PlaybackDecisionReason,
+  PlaybackInstructionReport,
   PlaybackPreferencesUpdate,
   PlaybackSession,
   PlaybackStreamInfo,
   PlaybackUpdate,
-} from '../../playback/PlaybackResolver';
-import type { PlaybackMode } from '../../types';
+} from '@macha/core';
+import type { PlaybackMode } from '@macha/core';
 
 function streamLabel(stream: PlaybackStreamInfo, fallback: string): string {
   const parts = [stream.language ? stream.language.toUpperCase() : fallback, stream.codec.toUpperCase()];
@@ -13,9 +15,62 @@ function streamLabel(stream: PlaybackStreamInfo, fallback: string): string {
   return parts.join(' · ');
 }
 
-export function PlayerOptions({ session, pendingPreferences, onApply }: {
+const REASON_TEXT: Record<PlaybackDecisionReason, string> = {
+  'source-plays-as-is': 'this device plays the file as it is',
+  'container-not-playable': 'this device cannot play the container',
+  'video-codec-not-playable': 'this device cannot decode the video',
+  'video-codec-not-deliverable-over-hls': 'the video cannot be delivered over HLS here',
+  'video-bit-depth-exceeds-client': 'the video is deeper than this device decodes',
+  'video-transfer-not-presentable': 'this device cannot present the colour transfer',
+  'video-dolby-vision-not-supported': 'this device does not support this Dolby Vision profile',
+  'audio-codec-not-playable': 'this device cannot decode the audio',
+  'audio-codec-not-deliverable-over-hls': 'the audio cannot be delivered over HLS here',
+  'host-policy-forbids-direct': 'this device is not trusted to play files directly',
+  'host-policy-excludes-container': 'this device is not trusted with the container',
+  'host-policy-excludes-codec': 'this device is not trusted with the codec',
+  'no-technical-facts': 'the server did not report what this file is',
+  'executor-refused-copy': 'this server refused to copy the streams',
+  'executor-cannot-direct': 'this server cannot serve the file directly',
+  'executor-cannot-copy-video': 'this server cannot repackage the video',
+  'executor-cannot-copy-audio': 'this server cannot repackage the audio',
+};
+
+/**
+ * Why this stream is being served the way it is.
+ *
+ * The chooser's worst failure has no symptom without this. When the facts
+ * lookup fails the coordinator falls back to transcode — the right answer,
+ * since it is the only instruction always performable — and the viewer sees a
+ * picture that works. So a client can quietly transcode a whole library that
+ * would have direct-played, on a cluster that looks healthy, and nothing ever
+ * prompts anyone to look. A television has no log a person will read; this is
+ * the only place the difference can show.
+ */
+function instructionNote(instruction: PlaybackInstructionReport | undefined): string | undefined {
+  if (!instruction) return undefined;
+  if (instruction.chosenByViewer) return 'Chosen by you.';
+  if (instruction.withoutFacts) return 'Chosen without facts — transcoding because nothing could be reasoned from.';
+  const reasons = instruction.reasons.map((reason) => REASON_TEXT[reason] ?? reason);
+  return reasons.length > 0 ? `Chosen automatically: ${reasons.join('; ')}.` : 'Chosen automatically.';
+}
+
+/**
+ * Inputs nobody supplied, named rather than left to a reasonable default.
+ *
+ * A reasonable default produces a plausible instruction, which is why three
+ * separate fields could be declared, consumed and populated by nobody without
+ * anything ever looking wrong. This client intends to wire all of them, so
+ * anything listed here is a defect and not a note.
+ */
+function assumptionNote(instruction: PlaybackInstructionReport | undefined): string | undefined {
+  if (!instruction || instruction.chosenByViewer || instruction.assumed.length === 0) return undefined;
+  return `Decided without: ${instruction.assumed.join(', ')}.`;
+}
+
+export function PlayerOptions({ session, pendingPreferences, instruction, onApply }: {
   session: PlaybackSession;
   pendingPreferences?: PlaybackPreferencesUpdate;
+  instruction?: PlaybackInstructionReport;
   onApply: (update: PlaybackUpdate) => void;
 }) {
   const effectivePreferences = { ...session.preferences, ...pendingPreferences };
@@ -23,7 +78,16 @@ export function PlayerOptions({ session, pendingPreferences, onApply }: {
   const selectedSubtitle = pendingPreferences?.subtitleStream === null
     ? -1
     : pendingPreferences?.subtitleStream ?? session.selected.subtitleStream;
-  const mode = (value: PlaybackMode | 'auto') => onApply({ preferences: { mode: value } });
+  // "Auto" is no longer a value the server understands — the client decides.
+  // `'choose'` is a core-side sentinel that never reaches the wire: the
+  // coordinator re-runs the instruction chooser against this media's facts and
+  // this platform's policy, then sends a concrete mode. Sending it on every
+  // press, rather than clearing the field, is what makes Auto mean the same
+  // thing mid-playback as it does at the start — an absent mode would leave
+  // the server on whatever it was already doing, and the control would
+  // highlight while changing nothing.
+  const mode = (value: PlaybackMode | 'choose') => onApply({ preferences: { mode: value } });
+  const chosenByViewer = effectivePreferences.mode !== undefined && effectivePreferences.mode !== 'choose';
   const preferences = (update: PlaybackPreferencesUpdate) => onApply({ preferences: update });
 
   return (
@@ -31,13 +95,19 @@ export function PlayerOptions({ session, pendingPreferences, onApply }: {
       <div className="player-option-group">
         <span>Mode</span>
         <div>
-          <button type="button" data-tv-focusable="true" className={effectivePreferences.mode === 'auto' ? 'selected' : undefined} onClick={() => mode('auto')}>Auto</button>
+          <button type="button" data-tv-focusable="true" className={chosenByViewer ? undefined : 'selected'} onClick={() => mode('choose')}>Auto</button>
           {session.options.modes.map((candidate) => (
             <button type="button" key={candidate} data-tv-focusable="true" className={effectivePreferences.mode === candidate ? 'selected' : undefined} onClick={() => mode(candidate)}>
               {candidate === 'direct' ? 'Direct' : candidate === 'remux' ? 'Remux' : 'Transcode'}
             </button>
           ))}
         </div>
+        {instructionNote(instruction) && <small className={instruction?.withoutFacts ? 'player-option-note player-option-warning' : 'player-option-note'}>
+          {instructionNote(instruction)}
+        </small>}
+        {assumptionNote(instruction) && <small className="player-option-note player-option-warning">
+          {assumptionNote(instruction)}
+        </small>}
       </div>
 
       {session.options.canChangeQuality && <div className="player-option-group">

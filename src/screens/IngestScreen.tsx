@@ -5,9 +5,9 @@ import type {
   AcquisitionSnapshot,
   IngestJob,
   TorrentJob,
-} from '../api/AcquisitionApi';
+} from '@macha/core';
 import { usePollingTask } from '../hooks/usePollingTask';
-import { errorMessage } from '../utils/errors';
+import { errorMessage } from '@macha/core';
 
 interface Props {
   api: AcquisitionApi;

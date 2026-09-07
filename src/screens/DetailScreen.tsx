@@ -1,13 +1,13 @@
-import type { MediaApi } from '../api/MediaApi';
-import type { CatalogueMediaProfile } from '../api/CatalogueApi';
+import type { MediaApi } from '@macha/core';
+import type { CatalogueMediaProfile } from '@macha/core';
 import { PlayIcon, RestartIcon } from '../components/PlaybackIcons';
-import type { MediaDetails, MediaSummary, PlaybackProgress } from '../types';
+import type { MediaDetails, MediaSummary, PlaybackProgress } from '@macha/core';
 import { useAsync } from '../hooks/useAsync';
 import { useRefreshableAsync } from '../hooks/useRefreshableAsync';
 import { ErrorMessage, Loading } from '../components/Status';
 import { useArtworkUrl } from '../hooks/useArtworkUrl';
 import { requestTvDefaultFocus } from '../hooks/useTvNavigation';
-import { buildPlatformTraits } from '../platform/platformTraits';
+import { buildPlatformTraits } from '../platform/traits';
 import { useEffect } from 'react';
 import { EditButton } from '../components/EditButton';
 import { MediaPageTitle } from '../components/MediaPageTitle';

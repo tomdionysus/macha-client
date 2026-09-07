@@ -1,9 +1,9 @@
-import type { MediaApi } from '../api/MediaApi';
+import type { MediaApi } from '@macha/core';
 import { MediaCard } from '../components/MediaCard';
 import { ErrorMessage, Loading } from '../components/Status';
 import { useArtworkUrl } from '../hooks/useArtworkUrl';
 import { useRefreshableAsync } from '../hooks/useRefreshableAsync';
-import type { SeasonSummary, ShowDetails } from '../types';
+import type { SeasonSummary, ShowDetails } from '@macha/core';
 import { EditButton } from '../components/EditButton';
 import { MediaPageTitle } from '../components/MediaPageTitle';
 

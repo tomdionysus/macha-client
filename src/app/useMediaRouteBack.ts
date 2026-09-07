@@ -1,8 +1,8 @@
 import { useCallback } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import type { MediaApi } from '../api/MediaApi';
+import type { MediaApi } from '@macha/core';
 import { samsungBackTarget } from '../platform/samsungBackNavigation';
-import { buildPlatformTraits } from '../platform/platformTraits';
+import { buildPlatformTraits } from '../platform/traits';
 
 export function useMediaRouteBack(api: MediaApi, webFallback?: string): () => void {
   const navigate = useNavigate();

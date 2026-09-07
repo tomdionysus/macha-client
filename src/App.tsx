@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Navigate, NavLink, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom';
-import type { CatalogueApi, CatalogueMediaProfile } from './api/CatalogueApi';
-import type { MediaApi } from './api/MediaApi';
+import type { CatalogueApi, CatalogueMediaProfile } from '@macha/core';
+import type { MediaApi } from '@macha/core';
 import { AppLogo } from './components/AppLogo';
 import { MusicNav } from './components/MusicNav';
 import { StatusNav } from './components/StatusNav';
@@ -10,15 +10,15 @@ import { machaLogoUrl as logoUrl } from './uiAssets';
 import { useTvNavigation } from './hooks/useTvNavigation';
 import { useEndpointHealthMonitor } from './cluster/useEndpointHealthMonitor';
 import { samsungBackTarget } from './platform/samsungBackNavigation';
-import type { Platform } from './platform/Platform';
-import { buildPlatformTraits } from './platform/platformTraits';
-import type { PlaybackResolver } from './playback/PlaybackResolver';
-import { reportClusterReachable, SERVER_REACHABLE_EVENT, SERVER_UNREACHABLE_EVENT, SERVER_UNREACHABLE_MESSAGE } from './api/serverConnection';
-import type { Episode, MediaSummary, PlaybackProgress, SeasonSummary } from './types';
-import { ContinueWatchingStore } from './state/continueWatching';
-import { PlaybackQueueStore } from './state/playbackQueue';
-import { MusicPlaylistStore } from './state/musicPlaylist';
-import { VolumeStore } from './state/volume';
+import type { Platform } from '@macha/core';
+import { buildPlatformTraits, isTvBuild } from './platform/traits';
+import type { PlaybackResolver } from '@macha/core';
+import { reportClusterReachable, SERVER_REACHABLE_EVENT, SERVER_UNREACHABLE_EVENT, SERVER_UNREACHABLE_MESSAGE } from '@macha/core';
+import type { Episode, MediaSummary, PlaybackProgress, SeasonSummary } from '@macha/core';
+import { ContinueWatchingStore } from '@macha/core';
+import { PlaybackQueueStore } from '@macha/core';
+import { MusicPlaylistStore } from '@macha/core';
+import { VolumeStore } from '@macha/core';
 import {
   getApiToken,
   getClientId,
@@ -44,19 +44,21 @@ import { MetadataEditorScreen } from './screens/MetadataEditorScreen';
 import { IngestScreen } from './screens/IngestScreen';
 import { ManageScreen } from './screens/ManageScreen';
 import { NodeStatusScreen, StatusScreen } from './screens/StatusScreen';
-import { pathForMedia, routes } from './routing';
-import { playerRouteItemId } from './app/playbackRoute';
+import { pathForMedia, routes } from '@macha/core';
+import { playerRouteItemId } from '@macha/core';
 import { useMachaServices } from './app/useMachaServices';
 import { useSession } from './app/useSession';
-import { EndpointRegistry, bootstrapEndpoints as bootstrapClusterEndpoints } from './cluster/EndpointRegistry';
+import { EndpointRegistry, bootstrapEndpoints as bootstrapClusterEndpoints } from '@macha/core';
+import { EndpointBandwidth } from '@macha/core';
+import { setTransferRecorder } from '@macha/core';
 import { Loading } from './components/Status';
 import { useMediaRouteBack } from './app/useMediaRouteBack';
 import { useMusicController } from './app/useMusicController';
 import { usePlaybackRuntime } from './app/usePlaybackRuntime';
 import { usePlaybackController } from './app/usePlaybackController';
-import { technicalProfileFromCatalogue } from './playback/MediaTechnicalProfile';
+import { technicalProfileFromCatalogue, type PlaybackPolicyOverrides } from '@macha/core';
 import { ConnectionGateScreen } from './screens/ConnectionGateScreen';
-import { checkEndpointConfiguration, initialConnectionGate, normalizeConnectionEndpoints, shouldEnterConnectionGate, type ConnectionGate } from './app/connectionConfiguration';
+import { checkEndpointConfiguration, initialConnectionGate, normalizeConnectionEndpoints, shouldEnterConnectionGate, type ConnectionGate } from '@macha/core';
 
 interface Props {
   platform: Platform;
@@ -242,6 +244,7 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
   const playlistStore = useMemo(() => new MusicPlaylistStore(clientId), [clientId]);
   const volumeStore = useMemo(() => new VolumeStore(clientId), [clientId]);
   const endpointKey = bootstrapEndpoints.join('\n');
+  const endpointBandwidth = useMemo(() => new EndpointBandwidth(clientId), [clientId]);
   const endpointRegistry = useMemo(
     () => new EndpointRegistry([
       ...bootstrapClusterEndpoints(bootstrapEndpoints),
@@ -252,9 +255,25 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
       // if the single configured endpoint happens to be down at that exact
       // moment; the next successful discovery cycle supersedes it either way.
       ...bootstrapClusterEndpoints(getDiscoveredEndpoints(), 'environment'),
-    ]),
-    [endpointKey],
+    ], Date.now, endpointBandwidth),
+    [endpointKey, endpointBandwidth],
   );
+  // Throughput evidence comes from responses the client was already fetching.
+  // Installed here, once, because the HTTP layer must not reach into cluster
+  // bookkeeping on its own; `endpointId` is the normalized base URL, so a
+  // response attributes to whichever configured endpoint prefixes its URL.
+  useEffect(() => {
+    setTransferRecorder((url, bytes, durationMs) => {
+      const endpoint = endpointRegistry.snapshot()
+        .find(({ endpoint: candidate }) => url.startsWith(candidate.baseUrl));
+      if (endpoint) endpointBandwidth.record(endpoint.endpoint.id, bytes, durationMs);
+    });
+    return () => {
+      setTransferRecorder(undefined);
+      // Persistence is throttled, so the last few samples are still in memory.
+      endpointBandwidth.flush();
+    };
+  }, [endpointBandwidth, endpointRegistry]);
   const { auth, ready: sessionReady } = useSession({
     connectionRequired,
     serverConfigured: bootstrapEndpoints.length > 0,
@@ -269,13 +288,28 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
     serverApi,
     clusterStatusApi,
     acquisitionApi,
+    playbackFactsApi,
     managementAvailable,
   } = useMachaServices({ endpointRegistry, auth, apiOverride, playbackOverride });
   useEndpointHealthMonitor(endpointRegistry, clusterStatusApi, auth, connectionRequired && bootstrapEndpoints.length > 0 && !effectiveConnectionGate);
   const metadataEditingAvailable = managementAvailable;
   const [unmatchedCount, setUnmatchedCount] = useState(0);
 
-  const { runtime: playbackRuntime, state: playbackRuntimeState } = usePlaybackRuntime(platform, playbackResolver);
+  // What the instruction chooser reasons from: the server's reported facts for
+  // the item about to play, and the platform truths no probe can discover.
+  const playbackRuntimeOptions = useMemo(() => ({
+    // The playback facts endpoint, not the catalogue profile: it carries the
+    // canonical container, real bit depth, colour transfer and Dolby Vision
+    // profile, and the node's `operations` — what this build will actually
+    // mux and copy, which no catalogue profile knows. It also answers for a
+    // mutable path identity that has no immutable catalogue profile at all.
+    // The cluster API resolves the preferred endpoint per call, so operations
+    // describe the node that will execute the instruction rather than whichever
+    // one happened to be preferred at boot.
+    facts: async (media: MediaSummary) => (await playbackFactsApi.facts({ itemId: media.id }))[0],
+    policyOverrides: (platform as { playbackPolicy?: PlaybackPolicyOverrides }).playbackPolicy,
+  }), [playbackFactsApi, platform]);
+  const { runtime: playbackRuntime, state: playbackRuntimeState } = usePlaybackRuntime(platform, playbackResolver, playbackRuntimeOptions);
   const preparePlaybackProfile = useCallback((profile: CatalogueMediaProfile) => {
     playbackRuntime.prepare(technicalProfileFromCatalogue(profile));
   }, [playbackRuntime]);
@@ -446,6 +480,11 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
         <nav aria-label="Main navigation">
           {navItems.map((item) => {
             if (item.to === routes.manage && !managementAvailable) return null;
+            // Importing media is a desk task: it wants a keyboard, a file
+            // browser and a person willing to type paths. None of that is
+            // reachable from a remote, so it does not earn a slot in a
+            // ten-foot navigation bar.
+            if (item.to === routes.ingest && isTvBuild) return null;
             return (
               <NavLink
                 key={item.to}
@@ -493,9 +532,9 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
           <Route path="/items/:itemId/edit" element={metadataEditingAvailable ? <MetadataEditorRoute api={catalogueApi} /> : <Navigate to={routes.home} replace />} />
           <Route path={routes.search} element={<SearchScreen api={api} onOpen={open} />} />
           <Route path={routes.ingest} element={<IngestScreen api={acquisitionApi} />} />
-          <Route path={routes.status} element={<StatusScreen api={clusterStatusApi} endpointRegistry={endpointRegistry} manageApi={managementAvailable ? manageApi : undefined} section="overview" auth={auth} />} />
-          <Route path={routes.statusClient} element={<StatusScreen api={clusterStatusApi} endpointRegistry={endpointRegistry} manageApi={managementAvailable ? manageApi : undefined} section="client" auth={auth} />} />
-          <Route path={routes.statusConnectivity} element={<StatusScreen api={clusterStatusApi} endpointRegistry={endpointRegistry} manageApi={managementAvailable ? manageApi : undefined} section="connectivity" auth={auth} />} />
+          <Route path={routes.status} element={<StatusScreen api={clusterStatusApi} endpointRegistry={endpointRegistry} platform={platform} manageApi={managementAvailable ? manageApi : undefined} section="overview" auth={auth} />} />
+          <Route path={routes.statusClient} element={<StatusScreen api={clusterStatusApi} endpointRegistry={endpointRegistry} platform={platform} manageApi={managementAvailable ? manageApi : undefined} section="client" auth={auth} />} />
+          <Route path={routes.statusConnectivity} element={<StatusScreen api={clusterStatusApi} endpointRegistry={endpointRegistry} platform={platform} manageApi={managementAvailable ? manageApi : undefined} section="connectivity" auth={auth} />} />
           <Route path="/status/nodes/:nodeId" element={<NodeStatusScreen api={clusterStatusApi} />} />
           <Route path={routes.manage} element={managementAvailable ? <ManageScreen api={manageApi} catalogueApi={catalogueApi} section="unmatched" settings={<SettingsScreen api={api} serverApi={serverApi} bootstrapEndpoints={bootstrapEndpoints} apiToken={apiToken} connectionNotice={connectionNotice} onSave={saveServer} />} onUnmatchedCountChange={setUnmatchedCount} /> : <Navigate to={routes.settings} replace />} />
           <Route path={routes.manageFiles} element={managementAvailable ? <ManageScreen api={manageApi} catalogueApi={catalogueApi} section="files" settings={<SettingsScreen api={api} serverApi={serverApi} bootstrapEndpoints={bootstrapEndpoints} apiToken={apiToken} connectionNotice={connectionNotice} onSave={saveServer} />} onUnmatchedCountChange={setUnmatchedCount} /> : <Navigate to={routes.settings} replace />} />

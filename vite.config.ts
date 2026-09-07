@@ -64,7 +64,7 @@ h2 { font-size: 24px; }
 .alphabet-index-button { font-size: 11px; }
 
 .poster-placeholder, .movie-detail-poster-placeholder, .episode-still-placeholder,
-.loading-overlay, .audio-player-placeholder, .player-fatal-error, .overflow-menu-trigger,
+.loading-overlay, .audio-player-placeholder, .overflow-menu-trigger,
 .episode-play-action, .player-button-row button, .media-control-button, .player-mini-controls button,
 .status-screen { display: flex; align-items: center; justify-content: center; }
 
@@ -92,6 +92,10 @@ h2 { font-size: 24px; }
 .player-volume-control { display: flex; align-items: center; }
 
 .settings { width: 900px; max-width: 100%; }
+/* min() is Chrome 79+, so the modern width is dropped whole here and the input
+   collapses to its intrinsic size. Full width rather than the desktop rule's
+   900px cap: at 1920 that cap is half the content area and reads as a bug. */
+.search-input, .settings input { width: 100%; box-sizing: border-box; }
 .settings-line { display: flex; }
 .settings-line > * { margin-right: 10px; }
 .settings-hero { display: flex; align-items: center; padding: 28px; }
@@ -125,6 +129,12 @@ h2 { font-size: 24px; }
 .sponsor-options article { flex: 1 1 0; margin-right: 16px; }
 
 .status-screen { min-height: 700px; flex-direction: column; text-align: center; }
+/* Laid out with grid and gap, both inert here, and min() drops its width
+   outright — so the message collapsed to its intrinsic size with its title and
+   detail run together. Stated as a block with margins instead. */
+.player-fatal-error { display: block; width: 680px; max-width: calc(100% - 48px); }
+.player-fatal-error > * { display: block; margin-bottom: 7px; }
+.player-fatal-error > *:last-child { margin-bottom: 0; }
 .player-page { position: fixed !important; }
 .player-page.player-presentation-full { top: 0 !important; right: 0 !important; bottom: 0 !important; left: 0 !important; width: 100% !important; height: 100% !important; }
 .player-presentation-full .player-host, .player-presentation-full .native-video { top: 0 !important; right: 0 !important; bottom: 0 !important; left: 0 !important; width: 100% !important; height: 100% !important; }
@@ -143,14 +153,58 @@ h2 { font-size: 24px; }
 .player-scrubber { flex: 1 1 auto; margin: 0 16px; }
 .player-scrubber-display { flex: 1 1 auto; height: 6px; margin: 0 16px; background: #28282c; overflow: hidden; }
 .player-scrubber-display > span { display: block; height: 100%; background: #9f1834; }
-.audio-player-art { width: 420px; height: 420px; margin-left: -210px; margin-top: -210px; }
+/* Centred by negative margins, because the modern rule sizes itself with
+   min()/aspect-ratio and Chromium 47 has neither. The transform that centres
+   it there must be cancelled or the artwork is pulled half its own width up
+   and to the left — centred twice, and so not centred at all. */
+.audio-player-art { width: 420px; height: 420px; margin-left: -210px; margin-top: -210px; transform: none !important; }
+.player-presentation-mini .audio-player-art { width: 76px !important; height: 76px !important; margin-left: 0 !important; margin-top: 0 !important; }
 .player-mini-copy { display: flex; align-items: center; }
 .player-mini-title, .player-mini-subtitle { display: block; }
 .player-mini-time { position: absolute; right: 14px; top: 14px; }
 .toast { max-width: 560px; }
 
+/* Chromium 47 has neither CSS Grid nor flex gap, so all 119 gap declarations
+   in the app stylesheet are inert here and every grid collapses to a block.
+   Spacing therefore has to be restated as margins. Beyond looking cramped, a
+   zero gap puts focusable controls edge to edge, and the 1px focus outline
+   then draws over its neighbour instead of around itself — on a D-pad UI that
+   makes the selected control genuinely hard to identify. Any new grid- or
+   gap-spaced container needs a rule here too. */
+.player-button-row { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; }
+.player-button-row > * { margin: 5px; }
+.player-option-group > div { display: flex; flex-wrap: wrap; }
+.player-option-group > div > * { margin: 0 7px 7px 0; }
+.player-option-group { margin-bottom: 10px; }
+.player-volume-control > * { margin-right: 8px; }
+
+.cluster-metric-grid, .cluster-capacity-grid, .cluster-connectivity-grid, .cluster-node-grid, .cluster-startup-grid { display: flex; flex-wrap: wrap; }
+.cluster-metric-grid > *, .cluster-capacity-grid > *, .cluster-connectivity-grid > *, .cluster-node-grid > *, .cluster-startup-grid > * { margin: 0 13px 13px 0; }
+.cluster-metric-grid > * { width: calc(25% - 13px); flex: 0 0 auto; }
+.cluster-capacity-grid > *, .cluster-node-grid > * { width: calc(50% - 13px); flex: 0 0 auto; }
+.cluster-connectivity-grid > * { width: calc(33.33% - 13px); flex: 0 0 auto; }
+.cluster-startup-grid > * { width: calc(25% - 13px); flex: 0 0 auto; }
+.client-endpoint-grid { display: flex; flex-wrap: wrap; }
+.client-endpoint-grid > * { width: calc(50% - 13px); flex: 0 0 auto; margin: 0 13px 13px 0; }
+.node-detail-card dl > div { display: flex; }
+.node-detail-card dl > div > dt { width: 150px; flex: 0 0 150px; }
+.cluster-conditions { display: flex; flex-wrap: wrap; }
+.cluster-conditions > * { margin: 0 8px 8px 0; }
+.cluster-status-heading > *, .cluster-nodes-heading > *, .cluster-startup-heading > *, .cluster-node-heading > * { margin-right: 16px; }
+.cluster-startup-heading > div > * { margin-right: 11px; }
+
+.settings-status-grid > * { margin-right: 16px; }
+.settings-status-card dl > div > dt { margin-right: 10px; }
+.play-actions > * { margin: 0 10px 10px 0; }
+
 /* Chromium 47: avoid expensive compositor effects and animation on the TV UI. */
 *, *::before, *::after { transition: none !important; animation: none !important; }
+/* ...except the progress indicators. A spinner that cannot turn is worse than
+   no spinner: it reads as a hung application, which is exactly the wrong thing
+   to show while something is legitimately loading. Class beats the universal
+   selector, so these win despite its !important. */
+.loading-spinner { animation: macha-loading-spin 700ms linear infinite !important; }
+.button-spinner { animation: button-spinner 700ms linear infinite !important; }
 .app-watermark, .player-backdrop { display: none !important; }
 .topbar, .section-nav-slot, .section-subnav, .media-card, .continue-card, .primary-button, .track-row,
 .player-presentation-mini, .settings-status-card, .ingest-submit-card, .overflow-menu-popover {
@@ -161,13 +215,23 @@ h2 { font-size: 24px; }
 h1, h2, .card-title, .episode-heading strong, .track-title, .player-titlebar strong { text-shadow: none !important; }
 .media-card:focus, .episode-still-link:focus { transform: none !important; }
 
+/* The one TV focus ring. It covers [data-tv-selected] as well as :focus
+   because D-pad navigation marks selection by attribute and real focus is not
+   always present, so anything added alongside this draws a second ring.
+   #620014 is near-black and disappears at sofa distance; #c8203c reads. */
 [data-tv-focusable="true"]:focus,
 [data-tv-focusable="true"][data-tv-selected="true"] {
   outline: none !important;
   border-radius: 8px !important;
   background-color: transparent !important;
-  box-shadow: 0 0 0 4px #620014 !important;
+  box-shadow: 0 0 0 4px #c8203c !important;
 }
+
+/* Hold the ring off the artwork by roughly its own width. Media cards already
+   have padding; the still and Continue Watching buttons have none, so their
+   ring sits directly on the image. Applied unconditionally so focus does not
+   resize anything. */
+.episode-still-link, .continue-card-open { padding: 4px !important; }
 `
 
 function legacyRgba(css: string): string {
@@ -183,6 +247,19 @@ function legacyRgba(css: string): string {
     const alpha = parseInt(value.slice(6, 8), 16) / 255;
     return `rgba(${r},${g},${b},${alpha.toFixed(3)})`;
   });
+}
+
+/**
+ * Everything Chromium 47 cannot parse, resolved ahead of time: custom
+ * properties (no `var()` support at all), `:focus-visible`, and `#RGBA`/
+ * `#RRGGBBAA` hex colours.
+ */
+function downlevelCss(css: string): string {
+  let result = css;
+  for (const name of Object.keys(samsungCssVariables)) {
+    result = result.replace(new RegExp(`var\\(--${name}\\)`, 'g'), samsungCssVariables[name]);
+  }
+  return legacyRgba(result.replace(/:focus-visible/g, ':focus'));
 }
 
 function samsungCssCompatibility(): Plugin {
@@ -209,16 +286,29 @@ function samsungCssCompatibility(): Plugin {
         },
       ];
     },
+    /**
+     * Downlevel every stylesheet as it is loaded, before Vite decides where it
+     * ends up.
+     *
+     * This used to run over emitted `.css` assets only, which silently stopped
+     * working: with `renderModernChunks: false` the legacy build produces no
+     * CSS asset at all — the whole stylesheet is inlined into the JS chunk as
+     * a `<style>` element's textContent. Every `var()` then reached Chromium
+     * 47, which has no custom properties, so any rule whose only background
+     * came from a variable rendered as an unstyled white box. Transforming at
+     * source is indifferent to that decision, and rewriting minified JS to
+     * reach the same text is not something to attempt.
+     */
+    transform(code, id) {
+      if (!id.split('?')[0].endsWith('.css')) return undefined;
+      return { code: downlevelCss(code), map: null };
+    },
     generateBundle(_options, bundle) {
+      // Belt and braces: a build that does emit a CSS asset is still covered.
       for (const fileName of Object.keys(bundle)) {
         const output = bundle[fileName];
         if (output.type !== 'asset' || !output.fileName.endsWith('.css')) continue;
-        let css = decodeAsset(output.source);
-        for (const name of Object.keys(samsungCssVariables)) {
-          css = css.replace(new RegExp(`var\\(--${name}\\)`, 'g'), samsungCssVariables[name]);
-        }
-        css = css.replace(/:focus-visible/g, ':focus');
-        output.source = legacyRgba(css);
+        output.source = downlevelCss(decodeAsset(output.source));
       }
       this.emitFile({
         type: 'asset',

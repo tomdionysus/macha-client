@@ -701,6 +701,8 @@ h2 { font-size: clamp(1.2rem, 2vw, 1.75rem); letter-spacing: -.01em; margin: 1.1
 .player-option-group > span { padding-top: .45rem; color: var(--text-faint); font-size: .78rem; text-transform: uppercase; letter-spacing: .08em; }
 .player-option-group > div { display: flex; flex-wrap: wrap; gap: .4rem; }
 .player-option-note { grid-column: 2; color: var(--text-faint); font-size: .75rem; line-height: 1.35; }
+/* A fallback instruction is the one case here worth reading, so it is the one case that is not faint. */
+.player-option-warning { color: var(--accent); }
 .player-options-loading { color: var(--text-faint); font-size: .82rem; }
 .player-option-group button {
   border: 1px solid #3a3a40;

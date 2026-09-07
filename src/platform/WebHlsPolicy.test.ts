@@ -1,4 +1,7 @@
 import Hls from 'hls.js';
+
+// The policy restates hls.js's error-type strings so the library stays out
+// of the boot bundle. If upstream ever changes them, this fails loudly.
 import { describe, expect, it } from 'vitest';
 import { ManagedHlsMediaRecoveryBudget } from './ManagedHlsRecovery';
 import { isHlsNetworkDegradation, managedHlsErrorAction } from './WebHlsPolicy';
@@ -39,5 +42,10 @@ describe('managed HLS error policy', () => {
       action: 'fail-terminal',
       details: 'internalException',
     });
+  });
+
+  it('keeps the restated hls.js error-type strings in step with the library', () => {
+    expect(Hls.ErrorTypes.NETWORK_ERROR).toBe('networkError');
+    expect(Hls.ErrorTypes.MEDIA_ERROR).toBe('mediaError');
   });
 });

@@ -2,9 +2,9 @@
 import { renderHook } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { useSession } from './useSession';
-import { SessionManager } from '../api/SessionManager';
-import { bootstrapEndpoints, EndpointRegistry } from '../cluster/EndpointRegistry';
-import * as SessionAuth from '../api/SessionAuth';
+import { SessionManager } from '@macha/core';
+import { bootstrapEndpoints, EndpointRegistry } from '@macha/core';
+import * as SessionAuth from '@macha/core';
 
 function renderSession(overrides: Partial<{
   connectionRequired: boolean;
