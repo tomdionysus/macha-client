@@ -2,6 +2,63 @@
 
 Last updated: 2026-09-07
 
+## Samsung Tizen 3: HLS playback fixed by MPEG-TS segments, nothing re-encoded
+
+Three titles failed differently on the QE55Q6FAM and all three now play, fast,
+with both streams copied. The fix is one policy line —
+`preferSegmentContainer: 'mpegts'` — on the native player, with **no codec
+exclusions**.
+
+Measured on the set, per stream, inside fMP4 segments:
+
+| stream | native player | hls.js / MediaSource |
+| --- | --- | --- |
+| h264, copied | plays | — |
+| HEVC, copied | black screen, time never advances | — |
+| E-AC-3, copied | ~0.2s of sound every 10–20s | rejected outright |
+| AAC, transcoded | no sound at all | plays |
+
+Note the first row. The diagnosis was written up mid-evening as "every stream
+delivered as fMP4 fails", and that was over-generalised from three data
+points: **h264 in fMP4 plays here perfectly well**. It is HEVC video and both
+audio codecs that fMP4 carriage breaks on this set, not the container
+wholesale. Worth keeping visible, because the over-broad version was recorded
+as established and passed to two other sessions before it was corrected.
+
+Consistent with the hardware either way: a 2017 Tizen 3 panel whose native HLS
+player was built for MPEG-TS, while fMP4 carriage of HEVC and the Dolby codecs
+is the newer arrangement in the HLS spec. The same streams direct-play and
+play progressively without complaint.
+
+**Do not chase this with codec exclusions.** Tried twice, once on each
+delivery path, and both times it moved the failure instead of removing it:
+`excludeAudioCodecs: ['eac3']` forces the AAC transcode, and AAC through the
+native fMP4 path is silent — stuttering audio traded for none. A policy
+override states a device truth, and stating one at the wrong level narrows the
+choice into a worse branch which the chooser then faithfully defends. It is
+not fooled, it is obeying, and it will keep obeying.
+
+**hls.js was tried and eliminated.** It fails both HLS titles outright, since
+MediaSource here rejects E-AC-3. The one arrangement that worked was hls.js
+with E-AC-3 excluded, forcing an AAC transcode — functional, but re-encoding
+audio *and* HEVC that need no re-encoding, on every title, to work around a
+carriage fault.
+
+Four dead fields in `@macha/core` fell out of the investigation, each
+declared, consumed, silently defaulted, and populated by nobody: `operations`,
+`hlsAudioCodecs`, `hlsTs` (also unreachable — `segmentContainer()` returned
+`fmp4` before ever reading it), and the chooser's illegal `remux` + `audio:
+transcode` pairing, which four existing tests had encoded as expected
+behaviour. Hosts now supply the first two: `hlsDeliveryProbe` narrows the
+element's codec lists by what the delivery path will actually accept, rather
+than assuming the two agree. Where an input is genuinely missing the
+instruction now says so, in `assumed`, and the player panel renders it.
+
+Also eliminated on the way: a real server fMP4 muxer fault (segment 0 carried
+20.812s while declaring 10.427s — fixed in 0.32.19, but not the cause); the
+`hvc1`/`hev1` sample-entry hypothesis (the init segment carries `hvc1`, no
+`hev1`); transcode-slot contention (none running).
+
 ## Samsung Tizen 3: the compatibility layer had silently stopped working
 
 Live UAT on the TV (`10.44.1.183`, Tizen 3 / Chromium 47) surfaced a cluster

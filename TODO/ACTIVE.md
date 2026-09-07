@@ -37,51 +37,25 @@ recently-live correctness problem in playback itself; P1 is important,
 scoped, and actionable now; P2 is real but either blocked on something
 outside this repo or needs groundwork before it can be started safely.
 
-## P0 — Samsung: every stream delivered as fMP4 HLS fails, in its own way
+## P1 — The MPEG-TS preference is asserted, not confirmed or gated
 
-Established 2026-09-07 by testing each combination on the QE55Q6FAM itself.
-The fault is the **segment carriage**, not any codec:
+Samsung HLS playback is fixed (see COMPLETED.md), but two loose ends remain
+around the preference that fixed it.
 
-| stream handed to the set as fMP4 | result |
-| --- | --- |
-| HEVC, copied | black screen, time never advances |
-| E-AC-3, copied | ~0.5s of sound every 10–20s |
-| AAC, transcoded | no sound at all |
-
-The same streams direct-play or play progressively without complaint, so the
-streams are fine. Consistent with the hardware: a 2017 Tizen 3 panel whose
-native HLS player was built for MPEG-TS, while fMP4 carriage of HEVC and the
-Dolby codecs is the newer arrangement in the HLS spec.
-
-**Do not chase this with codec exclusions.** It was tried and reverted the
-same evening: `excludeAudioCodecs: ['eac3']` forces the AAC transcode, and AAC
-through the same path is silent, so the exclusion traded stuttering audio for
-none. A policy override states a device truth, and stating one at the wrong
-level narrows the choice into a worse branch which the chooser then defends —
-it is not fooled, it is obeying, and it will keep obeying.
-
-MPEG-TS segments fix all three rows at once and keep E-AC-3 5.1 with no
-re-encode. Three prerequisites, two of them ours:
-
-- [ ] Server able to emit `mpegts` HLS segments with streams copied. **Asked;
-  unanswered.** Everything below is dead until this is known — do not build
-  against it on spec.
-- [x] Host able to detect MPEG-TS support. Probed via `video/mp2t` rather than
-  inferred from HLS support, with a test pinning that the two packagings are
-  independent.
-- [ ] Host able to *prefer* MPEG-TS when it supports both. Needs a
-  `PlaybackPolicyOverrides` field in `@macha/core`; agreed shape, held
-  deliberately until the server answers. Note `segmentContainer()` returns
-  `fmp4` before it ever reads `hlsTs`, so the detection above does nothing on
-  its own — preference and detection have to land together.
-
-- [ ] Force a genuine **video transcode** of The Last of Us S02E07 on the set.
-  Its video has only ever been copied — `mode=transcode, video=copy` is
-  "transcode the audio only", not a contradiction — so the carriage
-  hypothesis is untested for it rather than confirmed. One attempt separates
-  carriage from source.
-- [ ] Get that episode's video/audio codecs, profile and bit depth from the
-  facts endpoint. Outstanding from the server all evening.
+- [ ] **The resolved segment container is never reported back.**
+  `PlaybackPreferences` on the session carries mode, height, bitrate, streams
+  and languages — no container. So the client can request `mpegts` and never
+  see it confirmed, and the panel cannot show it. Asked of the server: echo
+  the resolved container alongside `transform`/`output`. Do **not** fill the
+  gap by displaying the request as though it were the result — the same
+  evening's permutation run found `remux` accepted for a re-encoded stream and
+  reported back as a transcode, which is exactly the failure mode that hides.
+- [ ] **The preference is not gated on a fact.** `operations` says what a node
+  can do — `copy_into_fmp4`, `transcode_video`, `transcode_audio` — and has no
+  `copy_into_mpegts`. A node that cannot emit TS answers the resulting
+  instruction with a 400 rather than the chooser declining to ask. Asked of
+  the server; until it lands the preference is an assumption about the whole
+  cluster taken from one node.
 
 ## P0 — Direct Play sometimes never starts: `<video>` element stuck at readyState 0 forever
 

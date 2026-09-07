@@ -14,12 +14,24 @@ export class SamsungWebPlatform implements Platform {
   private readonly web = new WebPlatform({
     directPlayReadAhead: false,
     legacyMediaElement: true,
-    // The native player stays. hls.js was tried to work around silent audio
-    // on transcoded streams and did fix it, but it moved every non-direct
-    // stream onto MediaSource, which on this set reports HEVC as supported
-    // and then fails to decode it. The native path handles what it is
-    // correctly given; the faults seen on it came from being handed streams
-    // the client had not asked for.
+    // The native player, paired with the MPEG-TS preference below. Measured on
+    // this set, per stream inside fMP4 segments:
+    //
+    //             native player          hls.js / MediaSource
+    //   h264      plays                  —
+    //   HEVC      black screen           —
+    //   E-AC-3    0.2s every ~20s        stream rejected outright
+    //   AAC       silent                 plays
+    //
+    // hls.js was tried and is worse: it fails both HLS titles outright, since
+    // MediaSource rejects E-AC-3 here. The one arrangement that worked was
+    // hls.js with E-AC-3 excluded, forcing an AAC transcode — functional, but
+    // re-encoding audio and HEVC that need no re-encoding, on every title.
+    //
+    // None of those faults are the container's fault in general: they are
+    // fMP4's. MPEG-TS is what this vintage of native HLS player was built for,
+    // and the server emits it with both streams copied. So the native path
+    // returns, and the segment preference below is what keeps it off fMP4.
     forceNativeHls: true,
   });
   private readonly log = createClientLogger('playback.capabilities.samsung');
@@ -44,17 +56,18 @@ export class SamsungWebPlatform implements Platform {
    */
   readonly playbackPolicy: PlaybackPolicyOverrides = {
     excludeContainers: ['webm'],
-    // Deliberately no audio codec exclusion here, though E-AC-3 through this
-    // set's fMP4 path gives about half a second of sound every ten to twenty
-    // seconds and it is tempting. Excluding it forces the AAC transcode, and
-    // AAC through the same path produces no sound at all — so the exclusion
-    // traded broken audio for silent audio.
+    // Segment as MPEG-TS, not fMP4. Every fault this set has shown on HLS is
+    // an fMP4 fault — see the table on `forceNativeHls` above — and none of
+    // the codecs involved are at fault anywhere else: the same HEVC direct
+    // plays, the same E-AC-3 plays progressively, and h264 in fMP4 is fine.
     //
-    // The codec was never the problem. HEVC copied into fMP4 black-screens,
-    // E-AC-3 copied into fMP4 stutters, AAC transcoded into fMP4 is silent:
-    // every stream this set is handed as fMP4 fails in its own way. It is a
-    // carriage fault, and the fix is MPEG-TS segments, not a list of codecs
-    // to avoid one at a time — see TODO/ACTIVE.md.
+    // Deliberately no codec exclusions to accompany this. Excluding E-AC-3 was
+    // tried twice tonight, once on each delivery path, and both times it moved
+    // the failure rather than removing it — a policy stated at the codec level
+    // against a fault at the container level narrows the choice into a worse
+    // branch, which the chooser then faithfully defends. TS carries both
+    // streams copied, so there is nothing left to exclude.
+    preferSegmentContainer: 'mpegts',
   };
 
   constructor() {

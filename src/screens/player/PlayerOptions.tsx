@@ -28,6 +28,7 @@ const REASON_TEXT: Record<PlaybackDecisionReason, string> = {
   'host-policy-forbids-direct': 'this device is not trusted to play files directly',
   'host-policy-excludes-container': 'this device is not trusted with the container',
   'host-policy-excludes-codec': 'this device is not trusted with the codec',
+  'host-policy-prefers-container': 'this device is served a segment format it handles better',
   'no-technical-facts': 'the server did not report what this file is',
   'executor-refused-copy': 'this server refused to copy the streams',
   'executor-cannot-direct': 'this server cannot serve the file directly',
