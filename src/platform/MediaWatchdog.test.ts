@@ -167,6 +167,8 @@ describe('media stall watchdog', () => {
     const watchdog = new MediaStallWatchdog(15_000, host.environment);
     watchdog.watch(stalled);
 
+    // Playing normally, then frozen. The first report is only a baseline.
+    watchdog.note(28_000, 44_000);
     watchdog.note(30_000, 45_000);
     host.advance(14_999);
     expect(stalled).not.toHaveBeenCalled();
@@ -219,6 +221,7 @@ describe('media stall watchdog', () => {
     const watchdog = new MediaStallWatchdog(15_000, host.environment);
     watchdog.watch(stalled);
 
+    watchdog.note(9_000, 19_000);
     watchdog.note(10_000, 20_000);
     host.advance(5_000);
     host.setVisible(false);
@@ -251,6 +254,26 @@ describe('media stall watchdog', () => {
     // A source still loading belongs to the start watchdog; judging it here
     // too would fail the same generation twice on different deadlines.
     host.advance(600_000);
+    expect(stalled).not.toHaveBeenCalled();
+  });
+
+  it('never judges a generation that has not started, however long it takes', () => {
+    const host = controllable();
+    const stalled = vi.fn();
+    const watchdog = new MediaStallWatchdog(15_000, host.environment);
+    watchdog.watch(stalled);
+
+    // A freshly promoted source reports position 0 with nothing buffered while
+    // the node builds the generation. Arming on that first sight killed every
+    // replacement after 15 s on a real Samsung set: recover onto a healthy
+    // node, kill it before it delivered a frame, recover again, and exhaust
+    // the cluster — "No untried Macha playback endpoint remains", with three
+    // working nodes. A source that never started has not stalled.
+    for (let tick = 0; tick < 40; tick += 1) {
+      watchdog.note(0, 0);
+      host.advance(1_000);
+    }
+
     expect(stalled).not.toHaveBeenCalled();
   });
 });

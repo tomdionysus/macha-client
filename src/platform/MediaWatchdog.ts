@@ -267,23 +267,39 @@ export class MediaStallWatchdog {
   /**
    * Report where playback is and how far the buffer reaches. Either advancing
    * restarts the countdown; neither advancing lets it run.
+   *
+   * **The first report only establishes a baseline — it must not start a
+   * countdown.** A generation that has never produced anything has not
+   * stalled, it has not started, and that is the start watchdog's business at
+   * its own deadline. Arming here on first sight made this watchdog kill every
+   * freshly promoted source after 15 s, which on a failover meant: recover
+   * onto a healthy node, kill it before it could deliver a frame, recover
+   * again, and exhaust the cluster — surfacing as "No untried Macha playback
+   * endpoint remains" with three working nodes. Observed on a Samsung set
+   * 2026-09-08, caused by this method.
    */
   note(positionMs: number, bufferedEndMs: number): void {
     if (!this.stalled) return;
-    const advanced = this.lastPositionMs === undefined
-      || positionMs > this.lastPositionMs
-      || bufferedEndMs > (this.lastBufferedEndMs ?? 0);
+    const first = this.lastPositionMs === undefined;
+    const advanced = !first
+      && (positionMs > this.lastPositionMs! || bufferedEndMs > (this.lastBufferedEndMs ?? 0));
     this.lastPositionMs = positionMs;
     this.lastBufferedEndMs = Math.max(bufferedEndMs, this.lastBufferedEndMs ?? 0);
-    if (!this.deadline.running) {
-      const stalled = this.stalled;
-      this.deadline.arm((visibleMs) => {
-        this.stop();
-        stalled({ visibleMs, positionMs: this.lastPositionMs ?? positionMs, bufferedEndMs: this.lastBufferedEndMs ?? bufferedEndMs });
-      });
+    if (first || !advanced) {
+      // Nothing has ever moved: leave the start watchdog to it. Once something
+      // has moved, a later report that has not moved is what the deadline is
+      // measuring, so an already-running countdown is deliberately left alone.
       return;
     }
-    if (advanced) this.deadline.restart();
+    if (this.deadline.running) {
+      this.deadline.restart();
+      return;
+    }
+    const stalled = this.stalled;
+    this.deadline.arm((visibleMs) => {
+      this.stop();
+      stalled({ visibleMs, positionMs: this.lastPositionMs ?? positionMs, bufferedEndMs: this.lastBufferedEndMs ?? bufferedEndMs });
+    });
   }
 
   /** Paused is not stalled: the viewer stopped it on purpose. */

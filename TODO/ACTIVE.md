@@ -557,6 +557,93 @@ the ones a later write already decided and exposes the rest.
   so, don't present it as a failure.
 - [ ] Verify live once each version is deployed (gbni-1 first).
 
+## P1 — An https deployment against http nodes breaks Direct Play entirely
+
+Not observed, derived from the mechanism 2026-09-09, and recorded because it
+is invisible in development and total in production.
+
+The read-ahead worker gates on `window.isSecureContext`. Today the dev client
+is `http://localhost:5173`: localhost *is* a secure context, so the worker
+registers — and the page is not https, so the worker fetching
+`http://10.44.1.50:7438` is not mixed content and goes through. Both halves
+happen to line up.
+
+Serve the same build over **https** against **http** nodes and they come
+apart. The worker still registers, but every fetch it makes is now active
+mixed content from a secure context and is blocked by the browser. And this
+does not merely cost the seamless failover: `directPlayReadAheadUrl()` has
+already put the proxy URL in `video.src`, so the element is pointed at a
+worker that can no longer fetch anything. **Direct Play breaks outright**, on
+453 of 748 titles, with no code change and nothing in the logs to explain it.
+
+- [ ] Decide the behaviour deliberately rather than discovering it. The cheap
+      guard is to treat "page is https and the node is http" as read-ahead
+      being unavailable — the same fall-back-to-the-native-URL path that
+      already exists when no Service Worker is present, which is correct and
+      already tested. Losing read-ahead there is a real cost; breaking Direct
+      Play is not a cost, it is an outage.
+- [ ] The real fix is TLS on the nodes, which is already in motion — haproxy
+      is installed on es-1 for TLS offload, and the server replaced
+      `api_host`/`api_port` with a scheme-carrying `api_endpoint` partly for
+      this reason. Until then the guard above is what keeps an https
+      deployment working at all.
+- [ ] Same constraint governs whether the seamless path could ever work in an
+      Android WebView: it needs a secure origin *and* https nodes, so it is
+      blocked on the same thing.
+
+## P0 — A ready standby is discarded 33 s before it is used
+
+Measured live 2026-09-08, web client, remux/HLS generation on gbni-2, node
+stopped mid-playback:
+
+```
+397973  source-degraded (fragLoadError)
+398240  alternate-ready -> gbni-1          <- rescue ready 267 ms in
+428241  alternate-recovery-window-expired  <- thrown away, unused
+461395  source-terminal-failure
+461548  source-failover-ready -> gbni-1    <- the same work, done again
+```
+
+**63.6 s of black screen where the replacement was ready in 267 ms.**
+
+Two budgets chosen independently, each defensible, whose product is a rescue
+that always goes stale. `ALTERNATE_RECOVERY_WINDOW_MS` holds a standby for
+**30 s**. hls.js's `errorRetry` is 6 attempts backing off 1/2/4/8/8/8 —
+about 31 s — and `managedHlsErrorAction` permits one `restart-network` per
+generation, which resets that budget, so the primary cannot go fatal for
+~63 s. `recoverFromSourceFailure` only runs on fatal. The window therefore
+expires before anything can ask for it, every time.
+
+A longer window is the wrong fix: it would make the rescue survive, but the
+viewer still waits for the fatal. Once an alternate is ready *and* the primary
+is still producing degradation evidence, there is nothing left to wait for —
+retrying a node already replaced is the whole 63 seconds.
+
+- [x] **`PlaybackCoordinator` is `@macha/core`'s.** Raised with that session
+      2026-09-08 with the trace, framed as: should continued degradation with a
+      ready alternate promote it, rather than only terminal failure doing so?
+      `prepareAlternate` already validates and preflights the alternate, so the
+      thing promoted is known good; the guard needed is the one `degrade()` and
+      `fail()` already use against an in-flight seek mutation. Landed in
+      `@macha/core` 0.6.1 as `promoteReadyAlternate`.
+- [ ] Re-measure after it lands. The bar is set by the path that works: the
+      silent Direct Play swap failed over in **17 ms** on the same cluster and
+      title, uninterrupted (`alternate-promoted-silently`).
+
+**Why this is P0 rather than a latency complaint:** the Samsung has no Service
+Worker and now `neverDirect`, so it can *only* take this path. Two live
+attempts to stop a node mid-film gave a long black screen and then an error,
+ending in "No untried Macha playback endpoint remains" with three healthy
+nodes. Not yet proven to be this same defect — `failedGenerationEndpoints` is
+cumulative across a generation lineage, so anything failing three replacements
+in a row exhausts the cluster regardless of cause — but the shapes match.
+
+Ruled out on the way, so nobody re-checks them: session admission is not
+refusing (all three nodes create sessions for one client token with another
+already open, tested directly); and the stall watchdog arming on a source's
+first report *was* a real bug of mine, killing freshly promoted generations
+before they could deliver a frame — fixed, and the TV symptom survived the fix.
+
 ## P1 — `levelLoadError` evicts a healthy node, with no server error behind it
 
 Observed twice on 2026-09-08, unprompted, on **wired gbni-1** during a Clerks
