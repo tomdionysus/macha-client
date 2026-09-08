@@ -1,6 +1,105 @@
 # Completed and tested
 
-Last updated: 2026-09-07
+Last updated: 2026-09-08
+
+## Four playback faults found by measuring the browser rather than reading it
+
+An evening of web-client work, in which every one of these was invisible from
+the code and obvious from an instrumented browser. Recorded together because
+the method is the transferable part.
+
+**The mini player flashed on every play, and the previous fix could not have
+worked.** Presentation is chosen by the route; visibility comes from the
+runtime; they were landing in different renders, so the player mounted as the
+mini bar and swapped to full. The earlier fix reordered the two calls, which
+achieves nothing: React Router publishes location changes inside
+`React.startTransition`, putting them in a lower-priority lane than an
+ordinary `setState`, so the runtime's update commits first whichever is called
+first. `AppRouter` now sets `useTransitions={false}`. Reproduced first as
+render pairs — `[false,false] → [true,FALSE] → [true,true]` with transitions,
+`[false,false] → [true,true]` without — and the regression test fails when the
+prop is removed, which was checked rather than assumed.
+
+**An episode resumed from Continue Watching had no next or previous.** It
+arrives with no queue, because no season screen was open to build one. The
+season is now fetched *after* playback starts — holding the picture for a
+round trip to populate two buttons pays for them with the thing the viewer
+asked for — and only the queue this client started is ever widened.
+
+**A stream Chrome could not parse retried for ever, silently.** hls.js answers
+an append against an ended MediaSource by rebuilding it and trying again; when
+the stream is unparseable that reaches the same wall every time. Measured: the
+same 2.4 MB segment refetched **58 times in 46 seconds**, behind an unchanging
+spinner, indefinitely, against a node that had to serve every one of them.
+"Non-fatal" is a claim about recoverability, and repetition with nothing
+buffered is the evidence against it, so non-fatal media errors raised while
+the element has buffered nothing are now bounded. Same URL after: three
+segment requests, then a stated failure. Network errors keep their own path —
+those recover by moving to another node, which this client can do.
+
+**The Direct and Remux controls could not work at all.** Pressing either
+returned a server error about a request the client had not made. Captured off
+the wire: the client sent `{"preferences":{"mode":"direct"}}` and nothing
+else; the server merged it over the `audio: transcode` stored at session
+creation and refused the combination it had assembled. Since the chooser's
+usual answer for this library is transcode-with-the-video-copied, every
+session began with an override in place, and the failed update tore the
+session down and returned the viewer to the browse screen. The client now
+states the whole transform on an explicit mode press rather than the shorthand
+for it. Verified against gbni-1: direct accepted and playing a Matroska whole,
+remux accepted. The merge itself was ruled a server defect and is being fixed
+there; the explicit form is right under either behaviour, which is why it
+stays.
+
+### The one that needed bytes
+
+Silo S03E01 would not play in Chrome at all. `isTypeSupported` returned true
+for every codec string in the file, so no capability probe could have
+predicted it. Bisecting the served `init.mp4` against a fresh MediaSource:
+
+| appended | result |
+| --- | --- |
+| muxed init, as served | `CHUNK_DEMUXER_ERROR_APPEND_FAILED` |
+| video track alone (HEVC, `hvcC` untouched) | parses, source stays open |
+| audio track alone | parse failure |
+
+Not the multiplexing and not HEVC — the AAC. Its `esds` carried a 26-byte
+AudioSpecificConfig with **channelConfiguration 0**, meaning the layout is in
+a Program Config Element, with the PCE inline and libavcodec's comment field
+(`Lavc61.19.101`) sitting in the middle of a decoder config. Chrome will not
+parse that; a normal 5.1 AAC-LC config is two bytes with channelConfiguration
+6. Cause, server-side: an encoder change that kept the source's channel layout
+rather than forcing stereo — right in principle — where E-AC-3 decodes to
+5.1(**side**), which AAC has no standard configuration for. Fixed in server
+0.33.3 and verified here independently of the server's own test, by reading
+what the muxer wrote rather than asking the encoder:
+
+```
+init bytes 3818            (was 3839)
+esds DecoderSpecificInfo   11 b0 56 e5 00     (was 26 bytes)
+decoded                    aot 2, freq_idx 3, channel_config 6
+playback                   currentTime 44 -> 48, audio decoded bytes
+                           2,129,430 -> 2,323,246, 1,149 video frames
+```
+
+Audio bytes climbing is the assertion worth making: not that the browser
+accepted the file, but that it decoded it.
+
+### Also in this pass
+
+- The served container (`output.container`, server 0.33.1) is on the player's
+  top line, absent rather than defaulted when the server names none — this is
+  the only place a segment container the client asked for and did not get can
+  show, and a default would read as an answer.
+- Samsung option rows centre their labels against their controls instead of a
+  hand-set padding calibrated for a grid row that does not exist on Chromium
+  47; the note takes its own line; the status lines got back the spacing their
+  inert `gap` was supposed to give them. Verified by rendering the generated
+  `samsung-tizen3.css` and measuring the offset: 0.0 px on all three rows.
+- The Android host no longer states a version of its own. `versionCode`,
+  `versionName` and the staged APK filename all derive from `package.json`; a
+  frozen `versionCode 801` had been shipping 0.10.7 code labelled 0.8.1, and
+  Android compares only that number.
 
 ## Samsung Tizen 3: HLS playback fixed by MPEG-TS segments, nothing re-encoded
 

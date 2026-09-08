@@ -1,6 +1,6 @@
 # Active tasks and concepts to explore
 
-Last updated: 2026-09-06
+Last updated: 2026-09-08
 
 This is the working backlog for the current session. Add new work here. When an
 item is implemented and its stated verification is complete, remove it from
@@ -37,25 +37,43 @@ recently-live correctness problem in playback itself; P1 is important,
 scoped, and actionable now; P2 is real but either blocked on something
 outside this repo or needs groundwork before it can be started safely.
 
-## P1 — The MPEG-TS preference is asserted, not confirmed or gated
+## P1 — `matroska` is missing from this client's advertised containers
 
-Samsung HLS playback is fixed (see COMPLETED.md), but two loose ends remain
-around the preference that fixed it.
+`WebMediaCapabilities.ts` advertises `mp4`, `webm`, `mp3`, `flac` and `ogg`.
+There is no `matroska` probe, so no .mkv can ever be cleared for direct play
+on the web or on either television, and every Matroska file in the library is
+remuxed or transcoded for devices that may well play it whole. It would look
+like correct behaviour from every angle.
 
-- [ ] **The resolved segment container is never reported back.**
-  `PlaybackPreferences` on the session carries mode, height, bitrate, streams
-  and languages — no container. So the client can request `mpegts` and never
-  see it confirmed, and the panel cannot show it. Asked of the server: echo
-  the resolved container alongside `transform`/`output`. Do **not** fill the
-  gap by displaying the request as though it were the result — the same
-  evening's permutation run found `remux` accepted for a re-encoded stream and
-  reported back as a transcode, which is exactly the failure mode that hides.
-- [ ] **The preference is not gated on a fact.** `operations` says what a node
-  can do — `copy_into_fmp4`, `transcode_video`, `transcode_audio` — and has no
-  `copy_into_mpegts`. A node that cannot emit TS answers the resulting
-  instruction with a 400 rather than the chooser declining to ask. Asked of
-  the server; until it lands the preference is an assumption about the whole
-  cluster taken from one node.
+Measured 2026-09-08, and this is the reason it is written down rather than
+wondered about: Chrome played a 2582×1080 HEVC Matroska **whole**, from a
+`mode=direct` session — `readyState 4`, `currentTime` advancing, 1,149 video
+frames decoded. The container is playable and the client says it is not.
+
+- [ ] Probe it honestly on both hosts (`video/x-matroska`, and the codec
+      strings inside it) rather than adding the string to the list. A
+      capability states what the device does; asserting one to obtain a
+      better instruction is the same mistake as excluding a codec to obtain a
+      worse one, in the other direction.
+- [ ] The audio is the catch, not the container: that direct session played
+      silently, because the E-AC-3 inside it has no decoder in Chrome
+      (`canPlayType` and `MediaSource.isTypeSupported` both refuse `ec-3` and
+      `ac-3`). So direct play of .mkv is right only where every stream in it
+      is playable, which is what the chooser already reasons about — it just
+      needs to be told the truth about the container.
+
+## P1 — The MPEG-TS preference is asserted, not gated
+
+Samsung HLS playback is fixed (see COMPLETED.md). The reporting half of this
+is now closed: server 0.33.1 states `output.container`, `@macha/core` maps it,
+and the player's top line shows the container actually served.
+
+- [ ] **The preference is still not gated on a fact from the node serving
+  it.** `copy_into_mpegts` exists on `operations` as of 0.33.1, and the
+  chooser asks about whichever carriage the instruction names — but the facts
+  are fetched from one node and the instruction may be performed by another.
+  A cluster is not uniform in what its builds can do, and nothing checks that
+  the node which answers can emit what the node which was asked said it could.
 
 ## P0 — Direct Play sometimes never starts: `<video>` element stuck at readyState 0 forever
 
@@ -504,6 +522,27 @@ on `10.44.1.183` on 2026-09-07 and the defects found are fixed (see
   it lands: negotiated mode, and whether sound plays.
 - [ ] Re-check the rest of the UI once that title works, since every pass so
   far has been interrupted by it.
+
+## P1 — Android/Google TV is a Chromium WebView and nothing has been run on it
+
+The set at `10.34.1.116` (ES-1, across the WAN) carried the 0.8.1-era client
+until 2026-09-07 and now carries 0.10.7. Its whole playback pipeline is a
+Chromium WebView, so every browser-side fault found on 2026-09-08 applies to
+it and none of them has been observed there.
+
+- [ ] Install the current APK. Built and waiting as of 2026-09-08 01:07; the
+      set was off the network that night (`es-1` beside it answered at 97 ms,
+      the television did not answer at all). `versionCode` is now derived from
+      `package.json`, so an upgrade presents a higher code than the copy
+      installed and no uninstall is needed unless the debug key has changed
+      again.
+- [ ] Play a 5.1 title on it. Server 0.33.3 fixed an AAC configuration that
+      Chrome's MP4 parser rejects outright (see COMPLETED.md); that fix is
+      verified on Chrome by two independent measurements and **is not
+      verified on this host**, which would have failed identically.
+- [ ] Confirm the bounded HLS recovery behaves there: the WebView is the same
+      engine, but it is across a WAN link, so the failure it protects against
+      is more expensive and slower to arrive.
 
 ## P1 — Android hardware back button, device/emulator verification
 

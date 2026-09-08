@@ -746,6 +746,11 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
             ) : (
               <>
                 {streamStatus?.endpoint && <small>{streamStatus.endpoint}</small>}
+                {/* The carriage, beside the node that served it. Absent rather
+                    than defaulted when the server named none: this is the one
+                    place a segment container the client asked for and did not
+                    get can show, and a default would read as an answer. */}
+                {streamStatus?.container && <small>{streamStatus.container}</small>}
                 {streamStatus?.video && <small>{streamStatus.video}</small>}
                 {streamStatus?.audio && <small>{streamStatus.audio}</small>}
                 {streamStatus?.subtitle && <small>{streamStatus.subtitle}</small>}

@@ -146,8 +146,22 @@ h2 { font-size: 24px; }
 .player-presentation-mini.audio-player .player-mini-chrome { left: 76px !important; }
 .player-chrome { position: absolute !important; top: auto !important; right: 0 !important; bottom: 0 !important; left: 0 !important; height: auto !important; min-height: 0 !important; z-index: 120 !important; }
 .player-stream-status, .player-options { display: block; }
-.player-option-group { display: flex; align-items: flex-start; }
-.player-option-group > span { width: 104px; flex: 0 0 104px; }
+/* The status lines are separated by a grid gap that does not exist here, so
+   they sat directly on top of one another; restated as a margin, per the note
+   further down about every gap-spaced container needing a rule. */
+.player-stream-status small { margin-bottom: 3px; }
+/* The label sits centred against its controls rather than nudged down by a
+   hand-set padding. The modern sheet's .45rem is calibrated against a grid row
+   whose height it knows; here the row is a flex line, and asking the line to
+   centre its own contents is the only version that stays true when the pill
+   metrics move. Two things have to hold for centring to mean what it says:
+   the pills need symmetric vertical margins (below), or the line's centre is
+   not the pills' centre — and the note has to be pushed onto its own line, or
+   the label centres itself against a paragraph instead of against the
+   controls it names. */
+.player-option-group { display: flex; flex-wrap: wrap; align-items: center; }
+.player-option-group > span { width: 104px; flex: 0 0 104px; padding-top: 0; }
+.player-option-group > .player-option-note { flex: 0 0 100%; margin-left: 104px; }
 .player-scrubber-row { display: flex; align-items: center; }
 .player-scrubber-row > :first-child, .player-scrubber-row > :last-child { width: 72px; flex: 0 0 72px; }
 .player-scrubber { flex: 1 1 auto; margin: 0 16px; }
@@ -174,7 +188,7 @@ h2 { font-size: 24px; }
 .player-button-row { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; }
 .player-button-row > * { margin: 5px; }
 .player-option-group > div { display: flex; flex-wrap: wrap; }
-.player-option-group > div > * { margin: 0 7px 7px 0; }
+.player-option-group > div > * { margin: 4px 7px 4px 0; }
 .player-option-group { margin-bottom: 10px; }
 .player-volume-control > * { margin-right: 8px; }
 

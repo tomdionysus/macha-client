@@ -915,6 +915,7 @@ class WebPlayer implements Player {
     hls.on(Hls.Events.FRAG_LOADED, (_event, data) => this.log.debug('hls-fragment-loaded', hlsEventSummary(data)));
     hls.on(Hls.Events.FRAG_BUFFERED, (_event, data) => {
       this.log.debug('hls-fragment-buffered', { data: hlsEventSummary(data), state: videoState(video) });
+      mediaRecovery.observeBufferedContent();
       this.publish(video);
     });
     hls.on(Hls.Events.BUFFER_FLUSHED, () => this.publish(video));
@@ -931,9 +932,25 @@ class WebPlayer implements Player {
       // Sample the normalized generation-local clock before the recovery policy
       // decides whether another media-pipeline recovery is permitted.
       if (data.fatal && data.type === Hls.ErrorTypes.MEDIA_ERROR) this.publish(video);
-      const action = managedHlsErrorAction(data, mediaRecovery, this.lastPublishedEvent?.positionMs ?? 0);
+      const action = managedHlsErrorAction(
+        data,
+        mediaRecovery,
+        this.lastPublishedEvent?.positionMs ?? 0,
+        video.buffered.length > 0,
+      );
       if (action.action === 'nonfatal') {
         this.log.warn('hls-error-nonfatal', payload);
+        return;
+      }
+      if (action.action === 'fail-unbuffered') {
+        this.failSourceGeneration(
+          sourceGeneration,
+          new PlaybackSourceError(
+            `Web HLS playback failed: this browser could not decode any of the stream it was sent (${action.details}).`,
+            'media',
+          ),
+          { ...payload, occurrences: action.occurrences },
+        );
         return;
       }
       this.log.error('hls-error-fatal', payload);

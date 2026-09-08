@@ -23,6 +23,7 @@ export function webHlsBufferConfig(): Record<string, number | boolean> {
 
 export type ManagedHlsErrorAction =
   | { action: 'nonfatal' }
+  | { action: 'fail-unbuffered'; occurrences: number; details: string }
   | { action: 'restart-network'; attempt: number }
   | { action: 'fail-network'; attempts: number; details: string }
   | { action: 'recover-media'; recovery: ManagedHlsMediaRecoveryDecision }
@@ -38,8 +39,27 @@ export function managedHlsErrorAction(
   data: { fatal?: boolean; type?: unknown; details?: unknown },
   recovery: ManagedHlsMediaRecoveryBudget,
   positionMs: number,
+  buffered = true,
 ): ManagedHlsErrorAction {
-  if (!data.fatal) return { action: 'nonfatal' };
+  if (!data.fatal) {
+    // A non-fatal media error while nothing has ever buffered is only
+    // non-fatal in hls.js's sense: it will keep retrying, and it recovers some
+    // of these without consulting us at all. Nothing buffered after several is
+    // a stream this browser cannot take, and continuing costs the node a full
+    // segment per attempt. Network errors keep their own path — those recover
+    // by moving to another node, and this client can do that.
+    if (data.type === HLS_MEDIA_ERROR && !buffered) {
+      const decision = recovery.unbufferedMediaError();
+      if (decision.action === 'fail') {
+        return {
+          action: 'fail-unbuffered',
+          occurrences: decision.occurrences,
+          details: typeof data.details === 'string' ? data.details : 'mediaError',
+        };
+      }
+    }
+    return { action: 'nonfatal' };
+  }
   if (data.type === HLS_NETWORK_ERROR) {
     const decision = recovery.fatalNetworkError();
     if (decision.action === 'restart') return { action: 'restart-network', attempt: decision.attempt };

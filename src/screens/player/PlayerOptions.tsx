@@ -15,6 +15,13 @@ function streamLabel(stream: PlaybackStreamInfo, fallback: string): string {
   return parts.join(' · ');
 }
 
+/** What each mode means per stream, in the server's own terms. */
+const MODE_TRANSFORMS: Record<PlaybackMode, { video: 'copy' | 'transcode'; audio: 'copy' | 'transcode' }> = {
+  direct: { video: 'copy', audio: 'copy' },
+  remux: { video: 'copy', audio: 'copy' },
+  transcode: { video: 'transcode', audio: 'transcode' },
+};
+
 const REASON_TEXT: Record<PlaybackDecisionReason, string> = {
   'source-plays-as-is': 'this device plays the file as it is',
   'container-not-playable': 'this device cannot play the container',
@@ -87,7 +94,21 @@ export function PlayerOptions({ session, pendingPreferences, instruction, onAppl
   // thing mid-playback as it does at the start — an absent mode would leave
   // the server on whatever it was already doing, and the control would
   // highlight while changing nothing.
-  const mode = (value: PlaybackMode | 'choose') => onApply({ preferences: { mode: value } });
+  // A mode press states the whole transform, not the shorthand for it.
+  //
+  // The session being amended already carries per-stream transforms from
+  // whatever instruction created it — Auto's usual answer for this library is
+  // transcode with the video copied — and naming only the mode leaves those in
+  // place. The server then reads the result as a contradiction and refuses the
+  // whole update: "direct serves the source file untouched and copies every
+  // stream". The viewer pressed one button and got an error about a request
+  // they did not make. Direct and remux copy both streams by definition, and
+  // transcode as a viewer's explicit choice means re-encode, not re-encode
+  // whatever the last instruction left alone; saying so outright leaves
+  // nothing to be merged with, and nothing to disagree about.
+  const mode = (value: PlaybackMode | 'choose') => onApply({
+    preferences: value === 'choose' ? { mode: value } : { mode: value, ...MODE_TRANSFORMS[value] },
+  });
   const chosenByViewer = effectivePreferences.mode !== undefined && effectivePreferences.mode !== 'choose';
   const preferences = (update: PlaybackPreferencesUpdate) => onApply({ preferences: update });
 

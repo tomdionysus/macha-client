@@ -88,6 +88,37 @@ export function usePlaybackController(options: {
     setContinueWatching(progressStore.clear(item.id));
   }, [progressStore]);
 
+  /**
+   * Widen a lone episode into the season it belongs to, once it is playing.
+   *
+   * An episode reached from Continue Watching or from its own detail page
+   * arrives on its own: no season screen was open, so no queue came with it,
+   * and the transport showed no next or previous for something that plainly
+   * has both. The rest of the season is one request away — but holding the
+   * picture for a round trip to populate two buttons would be paying for them
+   * with the thing the viewer actually asked for, so playback starts on the
+   * single item and the siblings land behind it.
+   */
+  const widenToSeason = useCallback(async (episode: MediaSummary) => {
+    const seasonId = episode.kind === 'episode' ? episode.playbackContext?.season.id : undefined;
+    if (!seasonId) return;
+    const season = await api.details(seasonId);
+    if (season.kind !== 'season' || !('episodes' in season) || season.episodes.length < 2) return;
+    const index = season.episodes.findIndex((candidate) => candidate.id === episode.id);
+    if (index < 0) return;
+    // Only the queue this call started may be widened. Anything else — another
+    // title, a music queue built while the season was in flight — is something
+    // the viewer chose after this, and replacing it would be rearranging their
+    // playback to finish an errand they have already moved on from.
+    const current = queueStore.load();
+    if (current?.items.length !== 1 || current.items[0]?.id !== episode.id) return;
+    const widened = queueStore.replace(season.episodes, index);
+    // `replace` starts a queue at zero, which is right for a new one and wrong
+    // here: this episode is already playing, and dropping its position would
+    // restart it on a reload.
+    setQueueState(current.positionMs > 0 ? queueStore.updatePosition(current.positionMs) ?? widened : widened);
+  }, [api, queueStore]);
+
   const startPlayback = useCallback((item: MediaSummary, startOptions: StartPlaybackOptions = {}) => {
     const queue = startOptions.queue?.length ? startOptions.queue : [item];
     const requestedIndex = startOptions.queueIndex ?? queue.findIndex((candidate) => candidate.id === item.id);
@@ -108,20 +139,25 @@ export function usePlaybackController(options: {
       queueIndex: persistedQueue.currentIndex,
       returnTo,
     };
-    // Navigate first. Presentation is chosen by the route — `playerRouteActive`
-    // decides full versus mini — while visibility comes from the runtime, and
-    // the two do not land in the same render. Starting the runtime first opens
-    // a window where the player is visible but the route is not yet active, so
-    // it mounts as the mini bar at the bottom of the screen and then swaps to
-    // full. The reconstruction guard is already set above, so the route
-    // arriving first cannot trigger a second play.
+    // Navigate, then start: presentation is chosen by the route
+    // (`playerRouteActive` decides full versus mini) while visibility comes
+    // from the runtime, and both have to reach React in one render or the
+    // player mounts as the mini bar before swapping to full. What makes them
+    // one render is `AppRouter`'s `useTransitions={false}` — with the router's
+    // default lane, ordering these two calls achieves nothing, because the
+    // lower-priority location update commits second whichever is called first.
+    // The reconstruction guard is set above, so the route arriving in the same
+    // render as the request cannot trigger a second play.
     navigate(startOptions.fromStart ? routes.playerFromStart(item.id) : routes.player(item.id), { state });
     void runtime.play({
       media: item,
       startPositionMs: startOptions.fromStart ? 0 : storedPosition,
       returnTo,
     });
-  }, [activePlayback?.returnTo, location.pathname, location.search, navigate, playerRouteActive, progressStore, queueStore, runtime]);
+    if (persistedQueue.items.length === 1) {
+      void widenToSeason(item).catch((error) => console.warn('[macha] unable to load the rest of the season', error));
+    }
+  }, [activePlayback?.returnTo, location.pathname, location.search, navigate, playerRouteActive, progressStore, queueStore, runtime, widenToSeason]);
 
   useEffect(() => {
     if (runtimeState.phase === 'stopping') return undefined;
@@ -185,9 +221,12 @@ export function usePlaybackController(options: {
         }),
         returnTo: routeState?.returnTo ?? pathForMedia(media),
       });
+      // Deep-linking or reloading into an episode reconstructs the same lone
+      // queue startPlayback would have, and needs the same widening.
+      if (nextQueue.items.length === 1) await widenToSeason(media);
     })().catch((error) => console.error('[macha] unable to reconstruct playback route', error));
     return () => { cancelled = true; };
-  }, [activePlayback?.media.id, api, location.search, location.state, playerItemId, progressStore, queueStore, runtime, runtimeState.phase]);
+  }, [activePlayback?.media.id, api, location.search, location.state, playerItemId, progressStore, queueStore, runtime, runtimeState.phase, widenToSeason]);
 
   const persistPlaybackPosition = useCallback((media: MediaSummary, positionMs: number) => {
     const persisted = queueStore.load();

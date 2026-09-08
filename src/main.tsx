@@ -1,7 +1,7 @@
 import ReactDOM from 'react-dom/client';
-import { BrowserRouter, HashRouter } from 'react-router-dom';
 import '@fontsource-variable/roboto/wght.css';
 import App from './App';
+import { AppRouter } from './app/AppRouter';
 import { runBootSplash } from './bootSplash';
 import {
   configureClientDiagnostics,
@@ -13,7 +13,6 @@ import { detectPlatform } from './platform';
 import { diagnosticsSettings } from './settings';
 import { installDirectPlayReadAheadDiagnostics, warmDirectPlayReadAhead } from './playback/directPlayReadAhead';
 import { installAbortControllerPolyfill } from './platform/AbortControllerPolyfill';
-import { buildPlatformTraits } from './platform/traits';
 import './styles.css';
 
 const samsung = import.meta.env.MODE === 'samsung';
@@ -31,7 +30,6 @@ configureClientDiagnostics({
 installClientDiagnosticsConsole();
 if (!samsung) installDirectPlayReadAheadDiagnostics();
 const log = createClientLogger('app.boot');
-const Router = buildPlatformTraits.usesHashRouting ? HashRouter : BrowserRouter;
 
 function describeError(error: unknown): string {
   if (error instanceof Error) return error.stack || error.message;
@@ -78,9 +76,9 @@ async function boot(): Promise<void> {
   log.info('platform-detected', { platform: platform.name });
   if (platform.name === 'web') warmDirectPlayReadAhead();
   ReactDOM.createRoot(rootElement).render(
-    <Router>
+    <AppRouter>
       <App platform={platform} />
-    </Router>,
+    </AppRouter>,
   );
   log.info('react-mounted');
 }

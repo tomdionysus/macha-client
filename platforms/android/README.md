@@ -10,7 +10,7 @@ From the repository root:
 npm run build-android
 ```
 
-The deployment artifact is written to `artifacts/Macha-Android-TV-0.8.1-debug.apk`. It is debug-signed and ready for ADB installation. The application ID is `media.macha.client`.
+The deployment artifact is written to `artifacts/Macha-Android-TV-<version>-debug.apk`, where the version is the client's own from `package.json` — the host has no version of its own, and states none. The `versionName` and `versionCode` in the manifest come from the same place, the code as `major * 10000 + minor * 100 + patch` (0.10.7 is 1007), so an upgrade always presents Android with a higher number than the copy it replaces. It is debug-signed and ready for ADB installation. The application ID is `media.macha.client`.
 
 ## Deploy
 
@@ -18,8 +18,14 @@ With network debugging enabled on the television:
 
 ```sh
 adb connect TV_ADDRESS:5555
-adb -s TV_ADDRESS:5555 install -r artifacts/Macha-Android-TV-0.8.1-debug.apk
+adb -s TV_ADDRESS:5555 install -r artifacts/Macha-Android-TV-<version>-debug.apk
 adb -s TV_ADDRESS:5555 shell am start -n media.macha.client/.MainActivity
 ```
+
+An install that fails with `INSTALL_FAILED_UPDATE_INCOMPATIBLE` means the copy on
+the television was signed with a different debug key. There is no flag around a
+signature change: the package has to be uninstalled first, and that takes the
+WebView's local storage with it — the API token, Continue Watching and the
+playback queue on that set.
 
 The current host deliberately uses WebView's media pipeline. The planned Media3 bridge can replace playback later without duplicating catalogue or navigation logic.

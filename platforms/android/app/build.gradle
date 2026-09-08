@@ -1,6 +1,22 @@
+import groovy.json.JsonSlurper
+
 plugins {
     id 'com.android.application'
 }
+
+// The client's package.json is the single version of record. This host packages
+// that client and has nothing of its own to version, so stating a number here
+// only creates one that can disagree — and it did: an 0.8.1 label shipped 0.10.7
+// code to the television. A frozen version code is worse than a wrong label,
+// since Android compares only that, and an unchanged one makes every new build
+// look like a reinstall of the one already there. (Below the plugins block
+// because Gradle allows no statement above it.)
+def clientVersion = new JsonSlurper().parseText(file('../../../package.json').text).version
+def (clientMajor, clientMinor, clientPatch) = clientVersion.tokenize('.').collect { it.toInteger() }
+// Two decimal digits each for minor and patch, so the code reads as the version
+// does — 0.8.1 is 801, 0.10.7 is 1007 — and rises with it. Android only compares
+// the integer, so this holds until a minor or patch reaches 100.
+def clientVersionCode = clientMajor * 10000 + clientMinor * 100 + clientPatch
 
 android {
     namespace 'media.macha.client'
@@ -10,8 +26,8 @@ android {
         applicationId 'media.macha.client'
         minSdk 26
         targetSdk 36
-        versionCode 801
-        versionName '0.8.1'
+        versionCode clientVersionCode
+        versionName clientVersion
     }
 
     sourceSets {
@@ -32,5 +48,5 @@ tasks.register('stageDeploymentApk', Copy) {
     dependsOn 'assembleDebug'
     from layout.buildDirectory.file('outputs/apk/debug/app-debug.apk')
     into file('../../../artifacts')
-    rename { 'Macha-Android-TV-0.8.1-debug.apk' }
+    rename { "Macha-Android-TV-${clientVersion}-debug.apk" }
 }

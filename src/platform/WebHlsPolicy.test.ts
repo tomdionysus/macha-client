@@ -37,6 +37,48 @@ describe('managed HLS error policy', () => {
     });
   });
 
+  it('fails a stream that keeps raising nonfatal media errors without ever buffering', () => {
+    // hls.js recovers from an append against an ended MediaSource on its own,
+    // by rebuilding the MediaSource, and calls the error nonfatal. When the
+    // browser cannot parse the stream at all, that recovery reaches the same
+    // wall forever: a real title refetched the same 2.4 MB segment 58 times in
+    // 46 seconds behind an unchanging spinner. Repetition with nothing
+    // buffered is the evidence that "nonfatal" is wrong.
+    const recovery = new ManagedHlsMediaRecoveryBudget();
+    const error = { fatal: false, type: Hls.ErrorTypes.MEDIA_ERROR, details: 'bufferAppendingError' };
+    for (let attempt = 1; attempt < 6; attempt += 1) {
+      expect(managedHlsErrorAction(error, recovery, 0, false)).toEqual({ action: 'nonfatal' });
+    }
+    expect(managedHlsErrorAction(error, recovery, 0, false)).toEqual({
+      action: 'fail-unbuffered',
+      occurrences: 6,
+      details: 'bufferAppendingError',
+    });
+  });
+
+  it('keeps tolerating nonfatal media errors on a stream that is playing', () => {
+    const recovery = new ManagedHlsMediaRecoveryBudget();
+    const error = { fatal: false, type: Hls.ErrorTypes.MEDIA_ERROR, details: 'bufferStalledError' };
+    // Buffered content: the pipeline works, so these are the transient errors
+    // hls.js says they are, however many arrive.
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      expect(managedHlsErrorAction(error, recovery, 0, true)).toEqual({ action: 'nonfatal' });
+    }
+    // And a stream that buffers after a bad patch clears the streak, rather
+    // than failing later on the strength of errors it recovered from.
+    for (let attempt = 0; attempt < 5; attempt += 1) managedHlsErrorAction(error, recovery, 0, false);
+    recovery.observeBufferedContent();
+    expect(managedHlsErrorAction(error, recovery, 0, false)).toEqual({ action: 'nonfatal' });
+  });
+
+  it('leaves nonfatal network errors alone, since another node can answer them', () => {
+    const recovery = new ManagedHlsMediaRecoveryBudget();
+    const error = { fatal: false, type: Hls.ErrorTypes.NETWORK_ERROR, details: 'fragLoadError' };
+    for (let attempt = 0; attempt < 12; attempt += 1) {
+      expect(managedHlsErrorAction(error, recovery, 0, false)).toEqual({ action: 'nonfatal' });
+    }
+  });
+
   it('describes unrecoverable error classes without losing details', () => {
     expect(managedHlsErrorAction({ fatal: true, type: 'muxError', details: 'internalException' }, new ManagedHlsMediaRecoveryBudget(), 0)).toEqual({
       action: 'fail-terminal',
