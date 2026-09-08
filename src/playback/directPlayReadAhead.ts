@@ -14,6 +14,12 @@ export interface DirectPlayReadAheadMetrics {
   activeFetches: number;
   peakFetches: number;
   lastFetchMbps: number;
+  /**
+   * Cumulative milliseconds spent actually transferring, across every fetch
+   * this worker has made for the source. Paired with `fetchedBytes` it gives a
+   * throughput figure that excludes idle time, which wall-clock cannot.
+   */
+  fetchActiveMs: number;
   demandWaitCount: number;
   demandWaitMs: number;
   demandFetches: number;
@@ -47,6 +53,9 @@ const metricsBySource = new Map<string, DirectPlayReadAheadMetrics>();
 const keyBySource = new Map<string, string>();
 const sourceByKey = new Map<string, string>();
 const failureListenersBySource = new Map<string, Set<(error: Error) => void>>();
+/** Last counters seen per source, so each message contributes only new bytes. */
+const lastTransferBySource = new Map<string, { fetchedBytes: number; fetchActiveMs: number }>();
+let transferListener: DirectPlayTransferListener | undefined;
 let registrationPromise: Promise<ServiceWorkerRegistration | undefined> | undefined;
 let messageListenerInstalled = false;
 
@@ -95,6 +104,7 @@ function validMetrics(value: unknown): value is DirectPlayReadAheadMetrics {
     candidate.prefetchBytes,
     candidate.prefetchAbortsForDemand,
     candidate.generation,
+    candidate.fetchActiveMs,
   ];
   return numbers.every((number) => typeof number === 'number' && Number.isFinite(number) && number >= 0)
     && typeof candidate.sourceOrigin === 'string'
@@ -121,8 +131,46 @@ function installMessageListener(): void {
     const sourceUrl = sourceByKey.get(message.sourceKey);
     if (!sourceUrl) return;
     metricsBySource.set(sourceUrl, message.metrics);
+    reportTransfer(sourceUrl, message.metrics);
     log.debug('metrics', { sourceUrl, ...message.metrics });
   });
+}
+
+/** Real media bytes moved by the worker, and the node that served them. */
+export type DirectPlayTransferListener = (origin: string, bytes: number, durationMs: number) => void;
+
+/**
+ * Report media throughput to whoever ranks endpoints.
+ *
+ * This is the only place the client measures the traffic that actually
+ * matters. `EndpointBandwidth` is otherwise fed exclusively from JSON response
+ * bodies, so its record describes catalogue payloads — the one kind of
+ * transfer whose speed nobody cares about — while byte-range media, which is
+ * every byte a viewer waits on, contributed nothing. A node that only ever
+ * served media therefore had no throughput evidence at all, and endpoint
+ * ranking had nothing to prefer it or reject it with.
+ *
+ * Injected rather than imported for the same reason the HTTP layer's recorder
+ * is: playback has no business reaching into cluster bookkeeping.
+ */
+export function setDirectPlayTransferListener(listener: DirectPlayTransferListener | undefined): void {
+  transferListener = listener;
+  if (!listener) lastTransferBySource.clear();
+}
+
+function reportTransfer(sourceUrl: string, metrics: DirectPlayReadAheadMetrics): void {
+  const previous = lastTransferBySource.get(sourceUrl);
+  lastTransferBySource.set(sourceUrl, { fetchedBytes: metrics.fetchedBytes, fetchActiveMs: metrics.fetchActiveMs });
+  if (!transferListener || !metrics.sourceOrigin || !previous) return;
+  const bytes = metrics.fetchedBytes - previous.fetchedBytes;
+  const durationMs = metrics.fetchActiveMs - previous.fetchActiveMs;
+  // Non-positive covers three cases at once and needs no separate handling: an
+  // idle window that moved nothing, and a counter reset when the worker
+  // reconfigures a source — which makes both deltas negative, never a negative
+  // transfer. The baseline above has already advanced either way, so the next
+  // message measures from the new generation.
+  if (bytes <= 0 || durationMs <= 0) return;
+  transferListener(metrics.sourceOrigin, bytes, durationMs);
 }
 
 export function subscribeDirectPlayReadAheadFailure(sourceUrl: string, listener: (error: Error) => void): () => void {
@@ -278,6 +326,7 @@ export function releaseDirectPlayReadAhead(sourceUrl: string | undefined): void 
   if (!sourceUrl) return;
   metricsBySource.delete(sourceUrl);
   failureListenersBySource.delete(sourceUrl);
+  lastTransferBySource.delete(sourceUrl);
   const sourceKey = keyBySource.get(sourceUrl);
   if (!sourceKey) return;
   keyBySource.delete(sourceUrl);

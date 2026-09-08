@@ -2,6 +2,277 @@
 
 Last updated: 2026-09-08
 
+## Samsung stops direct-playing files, and the last broken title plays
+
+The set had no way to read ahead of a progressive file and never did: the
+Service Worker byte-range proxy that does that job on the web cannot register
+from a Tizen widget's `file://` origin, and MediaSource on Chromium 47 takes
+fMP4 and WebM rather than an arbitrary MP4 or Matroska — which is the reason
+the proxy exists rather than an MSE pipeline. Both doors shut, so direct play
+there meant handing a television a 20 GB file and hoping its media element
+buffered well.
+
+`neverDirect: true` on `SamsungWebPlatform`'s policy hands it segments instead,
+which is what a native HLS player is built to buffer. Across the library that
+moves **540 titles from direct play into remux**: 847 of 890 now remux with
+**both streams copied** into the MPEG-TS carriage this set already preferred —
+a container rewrite, no re-encode, no quality lost. The 43 that transcode
+needed to before.
+
+Verified on the set (`10.44.1.183`, 0.11.0, operator at the screen):
+
+- An ordinary previously-direct title plays, with a **fast** start.
+- The player's top line reads `MPEG-TS : http://10.44.1.50:7438` with `REMUX`
+  on both stream lines — carriage preference honoured, streams copied, and the
+  endpoint rendered as a real URL.
+- Two to three minutes unattended: **no stalls, no stutter**. This was the
+  whole bet — whether the native player buffers a playlist better than the
+  element buffered a file — and it does.
+- **Seeking is near instant**, which was the predicted regression and did not
+  materialise. Every seek past the buffer is now a `seekMs` PATCH and a new
+  generation, and it still beat the byte-range path it replaced.
+- **Ratatouille (`tmdb:movie:2062`) plays**, video transcoded and audio copied,
+  slower to start but well within tolerance. That closes the last open Samsung
+  title, and confirms the re-attribution made earlier the same day: the silent
+  transcode was the server's 0.33.3 AAC defect, not an fMP4 carriage fault.
+
+**Failover on this set is visible, and `neverDirect` did not cost that.** The
+only silent path in the client is `promoteSilentDirectAlternate`, gated on
+`mode === 'direct'` *and* on `addDirectSourceAlternative()` returning true —
+which routes to the read-ahead worker and returns false without a Service
+Worker. So it was already unreachable on Samsung for the same `file://` reason.
+What the set does get is the reactive standby: an alternate generation created
+and preflighted ahead of time, promoted by `play()` on an already-negotiated
+session, resuming at position. A brief re-buffer, not a splice. Making it
+seamless needs a second decoder, which the failover plan rejects for TVs that
+have exactly one.
+
+Still not settled, and deliberately: the "AAC transcoded, silent" row of the
+fMP4 table. Ratatouille exercised E-AC-3 *copied into MPEG-TS*, not AAC
+transcoded into fMP4, so that row needs a deliberate `preferSegmentContainer`
+flip to test and nothing depends on it.
+
+## Media bytes finally count toward endpoint throughput
+
+`EndpointBandwidth` was fed exclusively by `readJsonBody()`, so its record
+described catalogue payloads — the one kind of transfer whose speed nobody
+cares about — while byte-range media, which is every byte a viewer waits on,
+contributed nothing. Combined with `ClusterEndpointRouter` sending real work
+only to the preferred endpoint, a node that served nothing but media had no
+throughput evidence at all. That is how this client spent an afternoon
+streaming from gbni-2, the deliberately flaky wireless node, at 0.31–0.58 MB/s
+against gbni-1's 3.31 MB/s — and produced a whole set of "the transcode is
+slow" measurements that were really "we picked the worst node".
+
+- The Direct Play read-ahead worker already knew the answer. It tracks
+  `fetchedBytes` and the origin it fetched from; it now also accumulates
+  `fetchActiveMs`, the time spent *inside* fetches, opened on the 0 → 1
+  active-fetch transition and closed on 1 → 0 so concurrent fetches count the
+  period once rather than once each.
+- **Transfer time, not wall time**, and that is the whole design. Dividing real
+  bytes by wall clock would charge a fast link for every idle stretch — paused
+  playback, a full cache — and report it as slow. The regression pins it: 8 MB
+  arriving in one second after two minutes of quiet is 8 MB/s, not 0.07.
+- The page reports deltas between messages, so each message contributes only
+  new bytes and the first establishes a baseline. `setDirectPlayTransferListener`
+  is injected from `App.tsx` next to the existing HTTP recorder — playback has
+  no business reaching into cluster bookkeeping — and both share the same
+  prefix attribution, since an endpoint id is its normalized base URL.
+- A counter reset (the worker reconfiguring a source) needs no special case:
+  it makes both deltas negative, and non-positive is already the "nothing to
+  report" condition. An explicit reset guard was written first, then deleted
+  when no test could distinguish it.
+
+Covers Direct Play — 453 of 748 titles here. HLS segments are fetched inside
+hls.js and remain out of reach. Note this only ever produces evidence for the
+node being streamed *from*; comparing alternates is the core-side latency
+change, which is what actually prevents a repeat.
+
+Verified: `tsc --noEmit` clean, 34 files / 209 tests, 5 of them new.
+
+## A held segment is no longer read as a failing node
+
+Server change landing (implemented, deploy sequenced behind this): a fragment
+or `init.mp4` that exists in the plan but has not been produced yet answers
+`500 segment_not_ready` — the node working at the production frontier. A broken
+generation is `503 stream_failed`. Without this, every hold was node evidence:
+`isHlsNetworkDegradation()` was `data.type === 'networkError'` with no regard
+to `fatal` or status, so a held fragment reached `PlaybackCoordinator.degrade()`
+and prepared a standby session on another node — and `@macha/core`'s default is
+against us, since a `'stream'` failure *is* endpoint evidence, so failing to
+classify is what causes the failover.
+
+- Discriminated on the **HTTP status**, not the JSON error code, because the
+  code is unreachable: hls.js's XHR loader (the default) reports a bad status
+  as `{ code: xhr.status, text: xhr.statusText }` with `data.response.data`
+  undefined, so the `{error:{code}}` body never reaches the error event. It
+  exists only behind `data.networkDetails`, which is loader-specific and
+  breaks under `FetchLoader`. The server adopted a status split for this
+  reason — the discriminator had to be a field every loader populates alike.
+- `isHlsSegmentHold()` (new) is true only for a `networkError` carrying 500.
+  `isHlsNetworkDegradation()` now excludes it, so a hold prepares no standby.
+
+**The status assignment is deliberately counter-intuitive, and the reasoning
+is in the constant's comment so nobody "corrects" it back.** The obvious
+reading is 503 for a hold — it is literally "temporarily unavailable" — and it
+was specified that way, built that way here, and reversed before deploy. The
+two mistakes are not the same size. 503 is what every proxy, gateway and load
+balancer emits when a service is genuinely down, and none of them will ever
+emit `segment_not_ready`; a client taught that 503 means "hold, stay on this
+node" reads a dead node as a healthy one and never fails over — silent, not
+self-correcting, and worst precisely where an intermediary makes it most
+likely. Reading an infrastructure 500 as a hold costs one pointless retry.
+Given that asymmetry the recoverable fault is the one to take, so the node
+speaks the counter-intuitive dialect and intermediaries keep the intuitive
+one. Not hypothetical: haproxy is installed and running on the WAN-facing
+node, one configuration change from fronting it.
+- A *fatal* network failure that was only ever holds reports the new core kind
+  `'not-ready'` rather than `'stream'`, so the coordinator neither prepares a
+  standby nor fails over — a replacement node would begin its own generation
+  from nothing, which is slower than the one already being produced. The
+  viewer still gets a stated failure rather than an endless spinner.
+- The kind literal is guarded by the compiler (`PlaybackFailureKind` is a
+  union), so no test is needed to catch a typo there.
+
+**Telling a hold from a broken generation, live, from client data alone.** Both
+arrive as `fragLoadError`; the status separates them and so does the timing,
+and the timing is the check that needs no server access:
+
+- A **not-ready refusal** arrives as **500**. It answers *immediately* when the
+  request is beyond the hold window, and after the server's `segment_timeout_ms`
+  (6000 ms as deployed) when it was genuinely held and expired. So timing
+  separates those two, but **only the status separates not-ready from broken** —
+  an early guess that "a hold is always slow" was wrong, and the first live
+  500s observed came back in ~98 ms.
+- A **broken generation** answers immediately — sub-100 ms — and arrives as
+  **503**.
+
+Read it off the retry cadence: hls.js's `errorRetry` backoff is 1s, 2s, 4s, 8s,
+8s, so the interval between successive `hls-error-nonfatal` entries is that
+backoff *plus* the response time. On 2026-09-08 a live incident showed
+intervals of 1033, 2100, 4100, 8103 and 8094 ms — response times of 33–103 ms,
+so nothing was ever held, and the 503 was a genuinely dead generation (an
+unavailable extent had killed the libav pipeline mid-title). A hold would have
+shown intervals above 7000 ms. That arithmetic was available before the wrong
+hypothesis was sent, and checking it would have prevented the whole exchange.
+
+Verified: `tsc --noEmit` clean, 33 files / 204 tests. The behaviour test
+("keeps a hold out of node-health evidence while every other network error
+stays in") was confirmed to fail against the pre-fix predicate. A second test
+pins the reversal itself — an intermediary 503 stays node evidence — since
+that is the property the whole assignment exists to protect and the one a
+well-meaning future edit would break.
+
+### Two hls.js facts established on the way, both correcting a plan
+
+Read out of `node_modules/hls.js/dist/hls.js` at 1.6.18, because the
+documented default is not the effective one:
+
+- **The governing fragment deadline is `fragLoadPolicy.default
+  .maxTimeToFirstByteMs: 10000`, not `fragLoadingTimeOut: 20000`.** The latter
+  is deprecated and inert — the migration block only converts it when a *user
+  config* sets it, and we set neither. The server had chosen a 12 s hold to sit
+  "under hls.js's 20 s timeout"; at 12 s the hold answers two seconds after the
+  client has already aborted, and converts into a `timeoutRetry` storm at 0 ms
+  delay that never receives the 503 at all — strictly worse than what it
+  replaced. Server hold is now 8000 ms.
+- **`Retry-After` is inert on the fragment path.** hls.js reads that header in
+  exactly one place: the content-steering manifest loader, on 429.
+
+Also worth keeping: the XHR loader retries a bad status *internally* before
+surfacing anything, so with `errorRetry` at 6 attempts and backoff capped at
+8 s (`2^n * 1000`), a hold needs ~31 s of backoff plus six refusals before a
+`fragLoadError` reaches the adapter. An earlier claim of mine that the degrade
+bug would "fire constantly" was wrong and was corrected to both sessions.
+
+## A source that never delivers a byte is now bounded, and says which side went quiet
+
+The `readyState 0` P0 (see `ACTIVE.md`) is still open on cause. This is the
+half that needed no cause: whatever was wrong, the client's *response* was to
+wait forever.
+
+Every deadline in the playback stack covered a server *request* — session POST
+and PATCH, endpoint deadlines, the API layer's 8s bound, the HLS standby
+preflight. The only timer in the whole web player was the preflight fetch for a
+*standby*. Once `video.src` was assigned nothing watched the element, because
+every failure and degradation channel is driven by something the element
+*emits*: a `MediaError`, an hls.js error, a read-ahead worker failure. An
+element sitting silently at `HAVE_NOTHING` emits none of those. So this fault
+shape walked straight past the entire cluster-failover apparatus that exists
+precisely for "this node is not delivering bytes" — failover was never broken,
+nothing ever told it anything had happened. An unbounded wait, which
+`docs/principles-and-laws.md` forbids outright.
+
+- `src/platform/MediaStartWatchdog.ts` (new). Triggers on **zero bytes ever**,
+  never on "slow": a media element fires `progress` as data arrives, well
+  before `readyState` leaves `HAVE_NOTHING`, so a merely bad link — and one
+  node here is deliberately across a saturated WAN — cancels the watch on its
+  first few bytes and is never judged.
+- **Only visible time counts.** Chromium throttles media loading in a
+  backgrounded or occluded tab; a tab not loading because nobody is looking at
+  it is the browser working correctly, not a node failing. That is the exact
+  confound that invalidated the earlier investigation of this bug, so it is
+  encoded rather than remembered. It also stops the client burning every
+  candidate node to reach a fatal error screen on a tab the viewer had simply
+  switched away from.
+- Reported as a `'stream'` `PlaybackSourceError`, which
+  `isEndpointRetryablePlaybackFailure` accepts, so the coordinator fails over
+  onto another node. Deliberately a failure and not a degradation: a
+  degradation prepares a standby, which for Direct Play resolves to a silent
+  swap *inside* the read-ahead worker, and swapping bytes underneath an element
+  that has not asked for any changes nothing. Only a fresh `play()` re-runs the
+  media load algorithm.
+- Watches only where the element owns the transfer (direct, native HLS). With
+  hls.js driving, the element is fed an open MediaSource and hls.js owns its
+  own already-bounded error channel.
+- **It records the distinction that cost an evening.** On firing,
+  `source-start-starved` carries a `dispatch` field read from the read-ahead
+  worker's own counters: `renderer-never-dispatched` (the browser never asked)
+  versus `dispatched-node-sent-nothing` (the node never answered). Those have
+  nothing in common but the symptom, and page Resource Timing cannot tell them
+  apart — it records only completed transfers, and never sees a Service
+  Worker's cross-origin fetches at all.
+
+Verified: `tsc --noEmit` clean, 33 files / 201 tests (from 32 / 191). The main
+regression was confirmed to fail against the pre-fix code, not assumed to.
+Live against gbni-1 with `document.visibilityState` confirmed `visible`
+throughout: **15 real Direct Play playbacks, zero watchdog fires, zero stalls**,
+time-to-first-frame flat at 1.3–2.4s — the false-positive risk is the one that
+mattered, since a misfiring watchdog would be worse than the bug. Backgrounding
+a playing tab for 35s produced no failover, degradation or stall.
+
+**Not live-proven: the visibility guard itself.** Every live playback got bytes
+promptly, so the watchdog was always disarmed before the tab could be hidden;
+exercising that path needs a source that accepts a connection and sends
+nothing, which cannot be manufactured against a healthy node. It rests on unit
+coverage ("does not count time while the page is hidden").
+
+## A baseline of which titles exercise which playback instruction
+
+`scripts/playback-baseline.mjs` runs the real `choosePlaybackInstruction` over
+the real facts endpoint for every catalogue item, so the buckets are what this
+client would genuinely ask for rather than what a reimplementation guesses.
+Capabilities are an input (`--caps`), as is host policy (`--policy samsung`),
+so the same library can be bucketed for Chrome, for the Samsung's narrower
+profile, or for a hypothetical device.
+
+Against gbni-1 with live Chrome 151 capabilities, 748 of 770 items probed:
+
+| instruction | count | representative |
+| --- | --- | --- |
+| `direct` copy/copy | 453 | A Clockwork Orange `tmdb:movie:185` (mp4, h264, aac) |
+| `remux` copy/copy | 173 | Aliens `tmdb:movie:679` (matroska, hevc, aac) |
+| `transcode` video copy / audio transcode | 115 | Django Unchained `tmdb:movie:68718` (matroska, h264, dts) |
+| `transcode` video transcode / audio copy | **1** | Full Metal Jacket `tmdb:movie:600` (matroska, hevc 10-bit, aac) |
+| `transcode` transcode/transcode | 6 | Ratatouille `tmdb:movie:2062` (matroska, hevc 10-bit, eac3) |
+
+All four copy/transcode permutations exist in the library, so every branch of
+the chooser has a real title behind it. Two are worth naming: the
+video-transcode/audio-copy branch has exactly **one** title in 748, reached via
+`video-transfer-not-presentable` (an HDR transfer Chrome will not present), so
+it is the only test case for that path and should not be lost. And Ratatouille,
+the open Samsung P1, is transcode/transcode here too.
+
 ## Four playback faults found by measuring the browser rather than reading it
 
 An evening of web-client work, in which every one of these was invisible from
@@ -117,12 +388,29 @@ Measured on the set, per stream, inside fMP4 segments:
 | E-AC-3, copied | ~0.2s of sound every 10–20s | rejected outright |
 | AAC, transcoded | no sound at all | plays |
 
-Note the first row. The diagnosis was written up mid-evening as "every stream
-delivered as fMP4 fails", and that was over-generalised from three data
-points: **h264 in fMP4 plays here perfectly well**. It is HEVC video and both
-audio codecs that fMP4 carriage breaks on this set, not the container
-wholesale. Worth keeping visible, because the over-broad version was recorded
-as established and passed to two other sessions before it was corrected.
+**Amended 2026-09-08: the last row is probably not an fMP4 fault at all.**
+These measurements were taken on 2026-09-07 (client 0.10.7, `d03786a`); the
+server's 0.33.3 AAC fix was verified here a release later, in 0.11.0. So the
+AAC transcode measured on this set was produced by the server *while it was
+still emitting* the `channelConfiguration 0` esds with an inline PCE (see
+"The one that needed bytes" above). Those titles carry 5.1 E-AC-3, so the
+transcode exercised is exactly the path 0.33.3 fixed, and silence is a
+plausible outcome of it. Filed here originally as carriage; more likely a
+codec defect that has since been fixed. Not yet re-tested — the set's only
+endpoint is `gbni-1`, which needs the server build first.
+
+The rest of the table stands, and the container finding survives on it: HEVC
+and E-AC-3 are **copied**, so no encoder runs and no encoder defect can
+explain them.
+
+Note the first row too. The diagnosis was written up mid-evening as "every
+stream delivered as fMP4 fails", and that was over-generalised from three data
+points: **h264 in fMP4 plays here perfectly well**. On the amendment above it
+narrows once more, to HEVC video and copied E-AC-3. Worth keeping visible,
+because the over-broad version was recorded as established and passed to two
+other sessions before it was corrected — and the AAC row is the same mistake
+caught a second time, by an operator who asked why a server audio fix and a
+client audio symptom were being treated as unrelated.
 
 Consistent with the hardware either way: a 2017 Tizen 3 panel whose native HLS
 player was built for MPEG-TS, while fMP4 carriage of HEVC and the Dolby codecs

@@ -11,6 +11,7 @@ import {
 } from '@macha/core';
 import type { MediaTechnicalProfile, PlaybackCapabilities, PlaybackEvent, PlaybackSource, PlaybackTimeRange } from '@macha/core';
 import { ManagedHlsMediaRecoveryBudget } from './ManagedHlsRecovery';
+import { MediaStallWatchdog, MediaStartWatchdog } from './MediaWatchdog';
 import { detectHlsTsSupport, detectWebMediaCodecCapabilities, hlsDeliveryProbe } from './WebMediaCapabilities';
 import { WebMediaTimeline } from './WebMediaTimeline';
 import {
@@ -22,7 +23,7 @@ import {
   subscribeDirectPlayReadAheadFailure,
 } from '../playback/directPlayReadAhead';
 import { hlsEventSummary, videoState, WebMediaDiagnostics } from './WebMediaDiagnostics';
-import { isHlsNetworkDegradation, managedHlsErrorAction, webHlsBufferConfig } from './WebHlsPolicy';
+import { isHlsNetworkDegradation, isHlsSegmentHold, managedHlsErrorAction, webHlsBufferConfig } from './WebHlsPolicy';
 import {
   isLegacyWebVtt,
   subtitleSegmentAt,
@@ -203,6 +204,8 @@ class WebPlayer implements Player {
   private hlsMediaRecovery?: ManagedHlsMediaRecoveryBudget;
   private mediaTimeline?: WebMediaTimeline;
   private lastPublishedEvent?: PlaybackEvent;
+  private readonly startWatchdog = new MediaStartWatchdog();
+  private readonly stallWatchdog = new MediaStallWatchdog();
 
   constructor(private readonly options: WebPlayerOptions = {}) {}
 
@@ -282,6 +285,15 @@ class WebPlayer implements Player {
       const failure = webMediaElementFailure(video.error);
       this.failSourceGeneration(this.sourceGeneration, failure, videoState(video));
     });
+    // Evidence that bytes actually reached the element, ending the start
+    // watchdog. `progress` is the one that matters — it fires as media data
+    // arrives, long before readyState leaves HAVE_NOTHING, which is what lets
+    // the watchdog distinguish a slow source from a silent one. The rest are
+    // belt and braces for an engine that reaches readiness without one, and
+    // `error` hands the failure to the element's own channel instead.
+    for (const name of ['progress', 'loadedmetadata', 'loadeddata', 'canplay', 'playing', 'error'] as const) {
+      video.addEventListener(name, () => this.startWatchdog.noteProgress());
+    }
     const resumeWhenReady = () => {
       if (!this.wantsPlayback || !video.paused) return;
       this.requestPlay(video, 'media-ready');
@@ -332,6 +344,8 @@ class WebPlayer implements Player {
     this.hls?.destroy();
     this.hls = undefined;
     this.hlsMediaRecovery = undefined;
+    this.startWatchdog.stop();
+    this.stallWatchdog.stop();
 
     const existingVideo = this.video;
     const video = this.ensureMediaElement();
@@ -383,6 +397,13 @@ class WebPlayer implements Player {
       this.log.warn('subtitle-initial-load-failed', { url: source.subtitleUrl, error: error instanceof Error ? error.message : String(error) });
     });
 
+    // Whether the media element itself performs the transfer. It does for a
+    // plain URL, direct or native-HLS; it does not when hls.js drives, because
+    // there the element is fed an already-open MediaSource and hls.js owns
+    // both the fetching and its own (bounded) error channel. Only the former
+    // can starve silently, so only the former is watched.
+    let elementOwnsFetch = false;
+
     // Declared by the resolver, never sniffed: a native player handed an
     // undeclared .m3u8 parses the playlist as media and reports a source error.
     if (source.isManifest) {
@@ -402,6 +423,7 @@ class WebPlayer implements Player {
       } else if (this.options.forceNativeHls || nativeHlsSupported(video)) {
         this.log.info('hls-native-selected', { url: source.url });
         video.src = source.url;
+        elementOwnsFetch = true;
       } else {
         this.log.error('hls-unsupported', { url: source.url });
         throw new Error('This browser cannot play fragmented-MP4 HLS.');
@@ -434,9 +456,12 @@ class WebPlayer implements Player {
       // read-ahead Service Worker was controlling the page — the redundant
       // reset raced the reassignment rather than the two ever combining safely.
       video.src = directUrl;
+      elementOwnsFetch = true;
     }
 
     if (sourceGeneration !== this.sourceGeneration || this.failedSourceGeneration === sourceGeneration) return false;
+    if (elementOwnsFetch) this.watchForStarvedStart(video, source, sourceGeneration);
+    this.watchForStall(video, source, sourceGeneration);
     const playStarted = performance.now();
     if (startPaused) {
       setDirectPlayReadAheadMode(this.directReadAheadSourceUrl, 'paused');
@@ -829,6 +854,8 @@ class WebPlayer implements Player {
     this.mediaTimeline = undefined;
     this.lastPublishedEvent = undefined;
     this.log.debug('stop', this.video ? videoState(this.video) : undefined);
+    this.startWatchdog.stop();
+    this.stallWatchdog.stop();
     this.hls?.destroy();
     this.hls = undefined;
     this.hlsMediaRecovery = undefined;
@@ -862,6 +889,89 @@ class WebPlayer implements Player {
   subscribeDegradation(listener: PlaybackDegradationListener): () => void {
     this.degradationListeners.add(listener);
     return () => this.degradationListeners.delete(listener);
+  }
+
+  /**
+   * Bound a source that the element accepted and then never got a byte from.
+   *
+   * Reported as a `'stream'` failure because that is exactly what it is —
+   * evidence about this node's delivery, not about the media or the decoder —
+   * and because `isEndpointRetryablePlaybackFailure` accepts that kind, so the
+   * coordinator recovers onto another node instead of showing a dead end.
+   * Failing over rather than degrading is deliberate: a degradation prepares a
+   * standby, which for Direct Play resolves to a silent swap inside the
+   * read-ahead worker, and swapping the bytes underneath an element that has
+   * not asked for any would change nothing. Only a fresh `play()` re-runs the
+   * media load algorithm, which is what actually breaks this deadlock.
+   */
+  private watchForStarvedStart(video: HTMLVideoElement, source: PlaybackSource, sourceGeneration: number): void {
+    this.startWatchdog.start((visibleMs) => {
+      if (sourceGeneration !== this.sourceGeneration || video !== this.video) return;
+      const readAhead = directPlayReadAheadMetrics(this.directReadAheadSourceUrl);
+      // The distinction that cost an evening of live debugging to make by
+      // hand, recorded here automatically. When the read-ahead worker is in
+      // the path it sees every request the renderer actually dispatched, so
+      // it separates "the browser never asked" from "the node never
+      // answered" — and those have nothing in common but the symptom.
+      const dispatch = readAhead === undefined
+        ? 'unknown-no-read-ahead-worker'
+        : readAhead.demandFetches === 0
+          ? 'renderer-never-dispatched'
+          : readAhead.fetchedBytes === 0
+            ? 'dispatched-node-sent-nothing'
+            : 'bytes-reached-worker-not-element';
+      const detail = {
+        ...videoState(video),
+        visibleMs,
+        dispatch,
+        visibilityState: typeof document === 'undefined' ? 'unknown' : document.visibilityState,
+        mode: source.mode,
+        url: source.url,
+        readAhead,
+      };
+      this.log.error('source-start-starved', detail);
+      this.failSourceGeneration(
+        sourceGeneration,
+        new PlaybackSourceError(
+          `The stream delivered no data in ${Math.round(visibleMs / 1000)}s.`,
+          'stream',
+        ),
+        detail,
+      );
+    });
+  }
+
+  /**
+   * Bound a generation whose picture has frozen with nothing arriving.
+   *
+   * Reported as `'stream'`, the same kind the element's own `error` event
+   * produces, so it reaches the failover the coordinator already performs. On
+   * a platform whose player reports nothing this is the only thing that will
+   * ever say so: a Samsung set held a frozen frame for thirty seconds with
+   * every recovery mechanism intact and idle, because its native HLS player
+   * swallowed the failure and never raised `MediaError`.
+   */
+  private watchForStall(video: HTMLVideoElement, source: PlaybackSource, sourceGeneration: number): void {
+    this.stallWatchdog.watch(({ visibleMs, positionMs, bufferedEndMs }) => {
+      if (sourceGeneration !== this.sourceGeneration || video !== this.video) return;
+      const detail = {
+        ...videoState(video),
+        visibleMs,
+        stalledAtMs: Math.round(positionMs),
+        bufferedEndMs: Math.round(bufferedEndMs),
+        mode: source.mode,
+        url: source.url,
+      };
+      this.log.error('source-stalled', detail);
+      this.failSourceGeneration(
+        sourceGeneration,
+        new PlaybackSourceError(
+          `Playback stopped and nothing arrived for ${Math.round(visibleMs / 1000)}s.`,
+          'stream',
+        ),
+        detail,
+      );
+    });
   }
 
   private degradeSourceGeneration(sourceGeneration: number, error: Error, detail?: unknown): void {
@@ -960,11 +1070,21 @@ class WebPlayer implements Player {
         return;
       }
       if (action.action === 'fail-network') {
+        // A generation that only ever answered "not produced yet" has not
+        // given us evidence against the node, however many times it said it.
+        // Reported as `not-ready` so the core neither prepares a standby nor
+        // fails over: a replacement node would begin its own generation from
+        // nothing, which is slower than the one already being produced. The
+        // viewer still gets a stated failure rather than an endless spinner,
+        // which is the part that must not be given up.
+        const held = isHlsSegmentHold(data);
         this.failSourceGeneration(
           sourceGeneration,
           new PlaybackSourceError(
-            `Web HLS playback failed after bounded network recovery (${action.details}).`,
-            'stream',
+            held
+              ? `Web HLS playback failed: this node is still producing the stream (${action.details}).`
+              : `Web HLS playback failed after bounded network recovery (${action.details}).`,
+            held ? 'not-ready' : 'stream',
           ),
           { ...payload, attempts: action.attempts },
         );
@@ -1014,6 +1134,14 @@ class WebPlayer implements Player {
     // timestamp origin. Suppress those ambiguous observations rather than
     // interpreting them on the wrong generation timeline.
     if (!normalized) return;
+
+    // Playing versus arriving. `note()` judges nothing on its own — it needs
+    // both, because a node producing below realtime freezes the picture while
+    // the buffer keeps filling, and that is a slow node rather than a dead one.
+    if (!video.paused) {
+      const bufferedEndMs = normalized.bufferedRangesMs.reduce((end, range) => Math.max(end, range.endMs), 0);
+      this.stallWatchdog.note(normalized.positionMs, bufferedEndMs);
+    }
 
     const duration = Number.isFinite(video.duration) ? video.duration * 1000 : 0;
     const currentMs = normalized.positionMs;

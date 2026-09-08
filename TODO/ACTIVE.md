@@ -62,6 +62,17 @@ frames decoded. The container is playable and the client says it is not.
       is playable, which is what the chooser already reasons about — it just
       needs to be told the truth about the container.
 
+**Sized 2026-09-08 — this is 23% of the library, not a corner case.**
+`scripts/playback-baseline.mjs` bucketed 748 items against gbni-1 with live
+Chrome capabilities: **173 titles are remuxed for `container-not-playable`
+with both streams already `copy`** (Aliens, Casino, 28 Years Later, …). Those
+are exactly the ones that would become direct play if the container claim were
+honest, since nothing else objects to them. A further 115 Matroska titles
+would *stay* transformed regardless — they carry E-AC-3, TrueHD or DTS, which
+Chrome cannot decode at all — so the honest claim wins 173 titles, not 288,
+and the audio caveat above is what accounts for the difference. Re-run that
+script after any capability change to re-measure rather than re-estimate.
+
 ## P1 — The MPEG-TS preference is asserted, not gated
 
 Samsung HLS playback is fixed (see COMPLETED.md). The reporting half of this
@@ -233,6 +244,38 @@ backgrounded.
 Do not re-do the ruled-out checks above without new evidence prompting it —
 the point of this entry is to skip straight to the untested leads.
 
+**2026-09-08: the symptom is now bounded, and did not reproduce.** The client
+no longer waits forever on a source that never delivers — see the start
+watchdog in `COMPLETED.md`, which fails the generation over to another node
+and records whether the *browser* never dispatched or the *node* never
+answered. That does not close this entry; it closes the unbounded wait.
+
+Reproduction attempt, `document.visibilityState` confirmed `visible`
+throughout (dev server, Chrome 151, gbni-1, The Boondock Saints, Direct Play,
+DevTools docked in-window so it could not occlude): **15 consecutive clean
+playbacks** — 12 of them play→stop→play inside one long-lived page, which is
+the condition the connection-exhaustion lead requires. Zero hangs, zero
+stalls, zero watchdog fires, time-to-first-frame flat at 1.3–2.4s with **no
+upward trend**. With the 5 clean cycles of 2026-09-05 that is 20 confirmed-
+visible attempts without a failure, against a failure history taken entirely
+under unconfirmed (and probably occluded) conditions.
+
+That weakens per-origin connection exhaustion considerably but does not kill
+it: a flat first-frame time is what a healthy pool looks like, and the
+original report spanned an evening with far more concurrent activity.
+
+- **Connection exhaustion cannot be measured from JS — stop trying.**
+  Confirmed this session: cross-origin Resource Timing to the node is opaque
+  (no `Timing-Allow-Origin`, so `requestStart`/`connectStart` are zeroed), and
+  the media bytes travel through the Service Worker, whose cross-origin
+  fetches never appear in page Resource Timing at all. 63 requests to gbni-1
+  were recorded with no usable timing on any of them. The DevTools Network
+  panel really is the only route, and it is only informative *during* a hang —
+  so it needs a reproduction first, not a watch.
+- The next genuinely new evidence will most likely arrive on its own, from
+  `source-start-starved`'s `dispatch` field, the next time a real viewer hits
+  this. That is now a better instrument than another scripted evening.
+
 ## P0 — Any-node client and seamless playback failover
 
 Detailed plan, phase-by-phase status, and dated live-verification evidence:
@@ -349,6 +392,30 @@ failures). Remaining work, in priority order:
   hard-reactivation path may be attempting exactly that. This blocks the
   remaining Phase 6 boundaries above (pause/seek/option-change all force a
   real reactivation).
+  **A candidate raised and then disproved, 2026-09-08 — recorded so nobody
+  re-raises it.** Transformed playlists are served as
+  `#EXT-X-PLAYLIST-TYPE:EVENT` with no `#EXT-X-ENDLIST` (verified off the wire
+  on 0.36.0, remux and transcode alike), so `video.duration` and
+  `video.seekable` only ever reach the generated frontier — Clerks' element
+  read 8.05 s for a 92-minute film. That was reported as the cause of this
+  entry and **it is not**. Two live checks killed it:
+  - The scrubber does not use `video.duration`. `PlaybackCoordinator` prefers
+    `session.durationMs` (`durationMs: session?.durationMs || next.durationMs`),
+    and the UI for that same Clerks session correctly showed **1:31:46** with
+    the scrubber max at 5,506,272 ms.
+  - A seek past the frontier works. Driven with real key input on a live
+    transcode buffered to 426 s with the frontier at 462 s: presses inside
+    coverage logged `seek-local`, presses beyond it logged
+    `seek-needs-generation`, coalesced into **one** `session-update` PATCH, and
+    `generation-update-ready` → `source-activate` had it playing again at
+    10:38 after 7,275 ms.
+  So the client already implements the server's stated contract (timeline from
+  the session, `PATCH seek_ms` for anything past the frontier), and the
+  EVENT playlist is a deliberate 0.32.14 fix for the 98 s black screen this
+  project itself measured — proposing a VOD list was proposing to revert it.
+  Also disproved on the way: `localSeekCoverage()` does **not** over-report for
+  transformed playback; it returns buffered ranges, which is honest.
+  Still open and genuinely unexplained: the `levelLoadError` below.
   **Possible server-side component, 2026-09-07 — do not assume this is
   purely a client bug before checking.** The Macha server session probing
   `/api/v1/playback/sessions` on gbni-2 during the live import measured
@@ -490,6 +557,338 @@ the ones a later write already decided and exposes the rest.
   so, don't present it as a failure.
 - [ ] Verify live once each version is deployed (gbni-1 first).
 
+## P1 — `levelLoadError` evicts a healthy node, with no server error behind it
+
+Observed twice on 2026-09-08, unprompted, on **wired gbni-1** during a Clerks
+transcode. Full sequence the first time:
+
+```
+10020  source-degraded          Web HLS network degradation (levelLoadError)
+13057  hls-error-fatal          bounded network recovery starts
+16102  source-terminal-failure  failed after bounded recovery (levelLoadError)
+16107  source-failover-start    → promoted to es-1 (the WAN node)
+```
+
+The client's own behaviour is correct given the evidence it had. What is not
+explained is the evidence.
+
+- **The server returned no errors.** The Macha server session grepped gbni-1's
+  journal for the whole day: zero `not_ready` (404), zero `stream_failed`
+  (503); every `media.m3u8` request was answered, and it can see this session's
+  playlist growing normally to 53 segments. Independently confirmed here by
+  hooking XHR/fetch in the page: **every playlist poll captured returned 200.**
+- **A timeout was proposed and disproved — do not re-raise it.** The first
+  degradation fired at 10,020 ms against hls.js's default `levelLoadingTimeOut`
+  of 10,000 ms, which looked conclusive. It is not: hls.js reports a expired
+  deadline as `levelLoadTimeOut` and a genuine load failure as
+  `levelLoadError`, two distinct `ErrorDetails` values (confirmed in the
+  installed `hls.js/dist/hls.d.ts`, lines 1117–1118). Our log says
+  **`levelLoadError`**, so the deadline did not expire. The 10 s coincidence is
+  unexplained and may just be hls.js's internal retry schedule.
+- So: an error that produced no HTTP status on either side. Most likely a
+  transport-level failure that never became a response — a reset or a dropped
+  connection — which neither the server's journal nor a captured `load` event
+  would record.
+- [ ] Capture the failing poll at the moment it fires. The XHR+fetch hook
+  records `error`/`timeout`/`abort` as well as `load`, so an armed hook should
+  catch it; it simply has not coincided with a failure yet. Log
+  `data.details` and `data.response` from the hls.js error alongside it.
+- [ ] Separately, weigh whether a `levelLoadError` should carry the same
+  node-health weight as a segment failure at all. Since 0.32.14 the playlist is
+  an EVENT list polled for the life of the session, so this evidence arrives
+  hundreds of times per session where a VOD playlist produced it once. The
+  server session has recorded the same trade-off on their side and neither
+  wants to decide it unilaterally. `@macha/core`'s owner asked for a timeline
+  from any failover off a node that was demonstrably fine — the one above is
+  exactly that, and should be sent.
+
+## P1 — The endpoint registry routes media to a node it has never measured
+
+Found 2026-09-08 while chasing "the video is very choppy". The client had
+settled on **gbni-2 — the deliberately flaky wireless node — for playback**,
+and its own persisted throughput table explains why:
+
+```
+macha-client-bandwidth:<client>
+  http://10.44.1.50:7438   3,312,869 B/s   (gbni-1, 2 samples)
+  http://10.34.1.50:7438     315,489 B/s   (es-1,   1 sample)
+  http://10.44.1.51:7438   — no entry at all —   (gbni-2)
+```
+
+`EndpointBandwidth` is fed from `readJsonBody()` in `httpCompat`, so it only
+ever samples catalogue/manage/acquisition **JSON** transfers of ≥32 KB. Media
+never feeds it: byte-range streaming and HLS segments go nowhere near that
+path. gbni-2 arrives by runtime discovery and mostly serves media, so it
+accumulates no sample — and `candidates()`, which consults throughput ahead of
+configured order, has nothing to deprioritise it with. The node that carries
+the most bytes is the one we measure least.
+
+Measured cost, raw byte reads of a direct-play source, three different titles:
+
+| node | read rate |
+| --- | --- |
+| gbni-1 (wired) | 3.31 MB/s (client's own estimate) |
+| gbni-2 (wireless) | **0.31–0.58 MB/s** across Inglourious, Aliens and Jurassic Park |
+
+Identical across titles, so it is the node and not extent placement. And it is
+enough to explain the transcode throughput results directly: Inglourious
+Basterds is 21.1 GB over 153 min, so realtime needs ~2.3 MB/s of source reads.
+On gbni-2 that ceiling is ~0.55 MB/s, and the title measured **0.46×
+realtime** there — while the same title on the same day reached 1.00× when it
+landed on gbni-1. The "sub-realtime transcode" investigation was largely
+measuring our own endpoint choice.
+
+**The deeper half: only the node we already use can ever be measured.** Three
+mechanisms compose into that, and each is individually reasonable:
+
+1. `readJsonBody()` is the *only* feed into the recorder, so just the
+   catalogue/manage/acquisition JSON paths sample anything at all.
+2. `ClusterEndpointRouter` sends real work to the **preferred** endpoint. So
+   those samples only ever accrue for one node.
+3. The health monitor does contact every known endpoint every ~10 s — but with
+   `GET /api/v1/catalogue/status`, a tiny body, far under the 32 KB floor. It
+   calls `fetchWithTimeout` directly and never touches `readJsonBody`, so it
+   cannot sample even in principle.
+
+So the client talks to every node in the cluster six times a minute and learns
+nothing about any of them except the one it is already using. And
+`compareThroughput` needs *both* sides to have evidence, so the moment
+authority moves the comparison goes silent exactly when it is needed to move
+it back. `THROUGHPUT_MIN_SAMPLES = 2` also leaves es-1 unmeasured on 1 sample.
+There is no good reason for the client not to hold two or more samples for
+every node; the machinery to get them is already running on a bounded cadence.
+
+**Do not fabricate traffic to measure the link — estimate better instead.** A
+throughput probe against every node is speculative work competing with viewer
+traffic, which `docs/principles-and-laws.md` forbids outright, and it is
+self-defeating on the wireless node where the probe consumes the capacity it
+is measuring. Restricting it to endpoints lacking evidence does not save it: a
+cold client lacks evidence for all of them.
+
+**The signal is already arriving.** `/api/v1/status` — which the client
+already fetches — carries per-node telemetry for *every* node, and nothing in
+endpoint selection reads any of it. Measured 2026-09-08 while the client was
+routing playback to the worst node:
+
+| node | `runtime.load1` | `runtime.process_cpu_percent` | freshness |
+| --- | --- | --- | --- |
+| gbni-1 (wired) | 1.01 | **25.2%** | live |
+| gbni-2 (wireless) | 1.18 | **62.0%** | live |
+| es-1 (WAN) | 2.67 | **104.5%** | live |
+
+Load alone would have kept authority on gbni-1, for free. Also present and
+unread: `storage.available` and free/used bytes, `cache` pressure (all three
+nodes report the 4 GiB cache entirely full — `free_bytes: 0`), `phase`, `state`,
+`live_age_ms`, `telemetry_freshness`, and `diagnostics.rpc_transport
+.peer_latency_ms`.
+
+**The one thing that telemetry cannot see is the link.** CPU and load describe
+a node's capacity to *serve*; they say nothing about the path between this
+client and it. gbni-2 is a healthy, lightly-loaded node behind a bad wireless
+hop — no server-side metric would ever reveal that, and a naive
+least-loaded estimator would be blind to exactly the case that caused this
+entry. Client-measured latency is the complement: it is the only signal we
+hold about the *path*, and we already collect it for every node.
+
+**Owned by the `@macha/core` session as of 2026-09-08** — cluster routing is
+their half of the boundary, and the change is theirs to make. Asked for:
+capacity captured off the existing status fetch, ranking given more than one
+axis, and an interface this client can read back (per-endpoint latency,
+throughput with sample count, reported load, and **which axis actually
+decided**). That last is the lesson of the day: the client could not say why
+it was on gbni-2, so the answer had to be reverse-engineered from a
+localStorage table and a comparator read.
+
+Client-side work that remains here:
+
+- [x] **Feed real media throughput into `EndpointBandwidth`** — done
+      2026-09-08, see `COMPLETED.md`. Direct Play only (453 of 748 titles);
+      HLS segments are fetched inside hls.js and remain out of reach.
+
+- [ ] Surface it on **Status → Nodes** — per endpoint, latency, throughput
+      estimate with sample count, reported load, and the deciding axis.
+      Endpoint selection is currently the least legible thing in the client,
+      and that screen exists precisely to make the cluster legible. Shares the
+      `/api/v1/status` `diagnostics` prerequisite with the self-healing item
+      below; do that modelling once.
+- [ ] **Show `cpu_cores` per node on Status → Nodes** once the server sends it
+      (asked of macha-a4 2026-09-08; blocked until then). Without it `load1`
+      and `process_cpu_percent` are unreadable on a screen as well as
+      uncomparable in code — 2.67 and 104.5% mean nothing to an operator who
+      cannot see the machine size, and this cluster is deliberately non-uniform
+      hardware. Show the raw figure beside the normalised one rather than
+      replacing it: the raw value is what the node reported, and the
+      normalisation is ours.
+
+**Everything ranks. Operator's decision, 2026-09-08: "It's all ranking."**
+One estimator, every signal an axis in it — capacity, latency, throughput.
+A capacity *gate* was floated and rejected; do not re-propose it.
+
+Two things ranking has to get right, both solvable with patterns the registry
+already has:
+
+- **Damping.** Capacity moves in response to our own routing — send work, CPU
+  rises, work leaves, CPU falls — so the capacity axis needs a minimum relative
+  difference before it changes any decision, the way throughput already has
+  `THROUGHPUT_MIN_RELATIVE_DIFFERENCE`. The swap cooldown and the
+  consecutive-cycle streak in `evaluatePreferredSwap` are the other half of
+  that vocabulary and apply unchanged.
+- **Normalisation.** `load1: 2.67` is saturated on two cores and comfortable on
+  eight, and `process_cpu_percent: 104.5` exceeds 100 because cores are not
+  divided out. Asked macha-a4 for `cpu_cores` on 2026-09-08 — a constant, cheap
+  to add. Until it lands, normalise capacity by something stated rather than
+  comparing raw values across a cluster that is deliberately non-uniform
+  hardware.
+
+Design notes handed over with it:
+
+- [ ] **Build one estimator from the three free signals, and rank on it.**
+      Server-reported *capacity* (`load1`, `process_cpu_percent`,
+      `storage.available`, cache pressure, `phase`/`state`) says whether a node
+      can serve; client-measured *latency* says whether the path to it is any
+      good; opportunistically sampled *throughput* refines both where real
+      bytes happened to flow. None of the three costs a byte more than the
+      client already spends. Weight capacity and latency so that neither a
+      busy-but-close node nor an idle-but-distant one wins on one axis alone —
+      the failure here was ranking on a single axis that happened to abstain.
+- [ ] **`candidates()` must actually read them.** Today its sort is readiness →
+      preferred → `retryAt` → `consecutiveFailures` → throughput →
+      `left.order - right.order`, so when throughput abstains it falls to the
+      order the endpoints were typed into `.env`, and no telemetry or latency
+      is consulted at any point. Note latency is already recorded for every
+      endpoint (5-sample rolling, from the 10 s probe cycle) and is used *only*
+      in `evaluatePreferredSwap`, never in candidate ordering.
+- [ ] **Model `/api/v1/status` node telemetry into the registry.** This shares
+      the prerequisite with the "Surface server self-healing state" item below,
+      which also needs `diagnostics` read for the first time — do it once.
+- [ ] **Sample the transfers already happening**, as refinement rather than
+      foundation: HLS segments and byte ranges are megabytes attributed to
+      whichever node served them, and artwork Blobs route *advisory* across
+      alternates, so they are the natural evidence for nodes not currently
+      preferred. `setTransferRecorder` is already injected, so this is call
+      sites rather than new machinery.
+- [ ] `return 0` for unmeasured throughput stops being load-bearing once
+      ranking has other axes, which is the right outcome — no clever answer to
+      "what does unmeasured mean" is needed, because it is no longer the only
+      question being asked.
+- [ ] Re-run the transcode throughput table pinned per node afterwards. Every
+      figure sent to the server session on 2026-09-08 conflates node choice
+      with encoder speed, and the corrections are already with them.
+
+## P1 — Status calls a node's RPC socket its "Endpoint"
+
+`StatusScreen` renders `node.host:node.port` under the label **Endpoint**
+(line 510), and falls back to `node.host` as the node's display name (line 56).
+That is the node's internal **RPC bind address**, not its HTTP API — core's own
+comment in `discoverClusterEndpoints` says so explicitly, and refuses to build
+a URL from it for exactly that reason: "using it here would guess at a port
+that is frequently wrong".
+
+On this cluster it looks plausible and is wrong: RPC is `:7437`, the API is
+`:7438`. So the Status screen tells an operator the node lives one port away
+from where anything can actually reach it — a number that reads as an address
+and is not one.
+
+- [ ] Relabel, or better, show the real thing. The server is replacing
+      `api_host`/`api_port` with a single `api_endpoint` URL (raised with
+      macha-a4 2026-09-08, may carry a scheme and a path so a node behind a
+      proxy is expressible). That is the first value this field could honestly
+      display. Hold the change until the shape lands rather than relabelling
+      twice — but do not leave "Endpoint" pointing at the RPC socket
+      indefinitely on the strength of that.
+- [ ] Not a display concern, and worth confirming before the server's cut:
+      `resetNodeIdentityAssociation(nodeId, host, port, reason)` is a
+      **mutation** keyed on host and port, fed from `node.host`/`node.port`.
+      If `host`/`port` survive as the RPC address, nothing changes. If they are
+      tidied away alongside the `api_`-prefixed pair, identity reset loses its
+      arguments and fails silently. Confirmed by the `@macha/core` session
+      2026-09-08: `port` is optional through `ManageApi`, `MachaManageApi` and
+      `ClusterManageApi` alike, so a payload that stopped carrying it would
+      neither fail to compile nor throw here — it would send a **destructive
+      identity reset with the port missing**, against whatever the server makes
+      of that. Everything else in this wire change fails closed; this is the
+      one path that does not, which is why it was raised with macha-a4 as an
+      explicit ask rather than left as an assumption.
+
+This client reads no `api_host`/`api_port` anywhere (verified 2026-09-08), so
+the server's replacement of those two is safe here; discovery is core's alone.
+
+## P1 — Music playlist refactors onto the RN client's store
+
+Tom's decision, relayed 2026-09-08: the React Native client's playlist store is
+being abstracted into `@macha/core` and this client refactors onto it. Theirs is
+a collection of **named** playlists (create/rename/delete, versioned and
+validated at file and playlist level, `getSnapshot`/`subscribe` for
+`useSyncExternalStore`); core's current `MusicPlaylistStore` is a single unnamed
+array. Both use the same `MusicPlaylistEntry` shape, which is what let two
+sessions compare entries, agree, and miss that the *stores* differ entirely —
+had the port gone ahead, a viewer with five named playlists would have got one
+and lost the rest on first write.
+
+**Settled with the RN session, 2026-09-08.** Core's single-list
+`MusicPlaylistStore` is **deleted**, not renamed — a collection subsumes it,
+and a degenerate one-list store sitting beside a collection store is the kind
+of thing that survives for years because nobody wants to decide. `replace` does
+**not** come into the collection API: its existence is an artefact of there
+being exactly one list, and "discard every playlist and substitute this album"
+has no legitimate caller. `create(name, items)` covers the honest version.
+
+- **No migration needed here: there is no live data.** `localStorage` in the
+  running client has never written `macha.musicPlaylist.v1.*`, consistent with
+  the music library being empty on this cluster. Treat the web client as
+  greenfield. The port will adopt any single unnamed list it finds under a
+  default name anyway, so a TV install holding one is covered.
+- [ ] **`playAlbumAll` must stop calling `playlistStore.replace(tracks)` and
+  set the queue instead.** Pressing "play all" on an album currently *discards
+  the whole playlist* and substitutes that album — defensible when there is one
+  unnamed scratch list, data loss with a friendly label once playlists are
+  named. It is queue behaviour writing to the wrong store: `PlaybackQueueStore`
+  is already the queue, and `playNext`/`playLater` correctly use it.
+- [ ] **Build the UI for named playlists, in this client's existing idiom.**
+  Named playlists are useless without a way to make and pick one, and the
+  refactor is the moment to add it rather than shipping a store with no surface.
+  Use what is already here rather than inventing: `Modal`/`ConfirmModal` for
+  create, rename and the destructive delete — `docs/architecture.md` forbids
+  browser `alert`/`confirm`/`prompt` outright, and every destructive action in
+  Manage and Status already goes through the shared focus-managed modal;
+  `AsyncIconButton` for anything with a request behind it, so the control
+  disables and swaps to a spinner for the whole lifetime; and the `MusicNav`
+  secondary row is the established place for switching within the Music
+  section, styled and focused like the primary nav. Every control needs
+  `data-tv-focusable="true"` — this screen is reachable on both televisions,
+  where there is no pointer to fall back on.
+- [ ] Move `useMusicController` from `useState` reassigned by every mutation to
+  a real subscription. Today exactly one component owns the list, so nothing
+  else can observe it and two consumers would silently diverge. Note the RN
+  session's scar when doing it: subscribing to a revision counter and then
+  calling `list()` freezes, because the memo is keyed on a store whose identity
+  never changes — the snapshot must *be* the value the caller renders.
+  **Note this may be decided above us:** core currently has two subscription
+  idioms — the coordinator and runtime return stable snapshots, the four state
+  stores do not — and the `@macha/core` session has put the question of fixing
+  all four to Tom, citing this controller as the live evidence. Wait for that
+  answer rather than fixing the playlist store alone.
+
+## P1 — Seek acceleration is Samsung-only and should work everywhere
+
+`PlayerScreen`'s scrubber `onKeyDown` returns immediately unless
+`samsungControls`, so `accelerateSeek`/`seekAcceleration.ts` — the
+hold-to-travel-further behaviour — never runs on web or Android. Web gets
+`webSeekDeltaForKey`, a flat ±10 s per press.
+
+Confirmed live 2026-09-08 rather than read: moving ~200 s through a film on
+web took **20 discrete ArrowRight presses**, each a separate 10 s step. On a
+long title that is unusable, and it is the same remote-shaped interaction on
+Android, which has a D-pad and no acceleration either.
+
+- [ ] Make the accelerating hold the shared behaviour for every platform with
+  key-driven seeking, not a Samsung special case. The existing pieces are
+  already platform-independent — `accelerateSeek` is a pure function with its
+  own tests, and the commit-on-release/one-request-per-hold property is the
+  part worth preserving everywhere.
+- [ ] Keep pointer dragging on web working exactly as it does now; this is
+  about the keyboard/D-pad path only.
+
 ## P1 — Session create can be refused outright (429), by design
 
 Observed live 2026-09-07 while measuring transcode latency: `POST
@@ -504,24 +903,6 @@ design — handle it as a hard limit, not a queue.**
   it as "too many streams open", say so, and make sure the client is not the
   one leaking: a session that outlives its player is what turns this into a
   user-visible dead end.
-
-## P1 — Samsung deployment verification
-
-Boot, catalogue, D-pad navigation and playback controls were exercised live
-on `10.44.1.183` on 2026-09-07 and the defects found are fixed (see
-`COMPLETED.md`). What remains is the one title that still does not work.
-
-- [ ] **Ratatouille (`tmdb:movie:2062`) on the Samsung.** Direct play breaks
-  decoding — the set advertises `hevc` and 10-bit but cannot handle this
-  file's Dolby Vision — and the transcode fallback plays silent. Both causes
-  are server-side and fixed in the server's 0.32.12 line: a real master
-  playlist carrying `CODECS` (verified from a real node: `CODECS=
-  "hvc1.2.4.L153.B0,mp4a.40.2"`), and a bit-depth/HDR gate that routes the
-  title to a transcode instead of a broken direct play. Blocked on that
-  reaching `gbni-1`, which is the Samsung build's only endpoint. Re-test when
-  it lands: negotiated mode, and whether sound plays.
-- [ ] Re-check the rest of the UI once that title works, since every pass so
-  far has been interrupted by it.
 
 ## P1 — Android/Google TV is a Chromium WebView and nothing has been run on it
 

@@ -30,9 +30,66 @@ export type ManagedHlsErrorAction =
   | { action: 'fail-media'; recovery: ManagedHlsMediaRecoveryDecision; details: string }
   | { action: 'fail-terminal'; details: string };
 
-/** Any HLS network error is early node-health evidence, even before it is fatal. */
-export function isHlsNetworkDegradation(data: { type?: unknown }): boolean {
-  return data.type === HLS_NETWORK_ERROR;
+/**
+ * The status a node answers when a segment exists in the plan but has not been
+ * produced yet — "come back", not "I am broken".
+ *
+ * **500, and deliberately not 503, which reads backwards on purpose.** The
+ * obvious assignment is the other way round: 503 is "temporarily unavailable",
+ * which is precisely what a hold is. It was specified that way and reversed
+ * before deploying, because the two mistakes are not the same size.
+ *
+ * 503 is what every intermediary — proxy, gateway, load balancer — emits when
+ * a service is genuinely down, and none of them will ever emit
+ * `segment_not_ready`. A client taught that 503 means "hold, stay on this
+ * node" therefore reads a dead node as a healthy one and never fails over:
+ * silent, not self-correcting, and worst exactly where a proxy makes it most
+ * likely. The inverse mistake — reading an infrastructure 500 as a hold —
+ * costs one pointless retry and then behaves. Given an asymmetry like that,
+ * the recoverable fault is the one to take, so the node speaks the
+ * counter-intuitive dialect and the intermediaries keep the intuitive one.
+ * (Not hypothetical: haproxy is installed and running on the WAN-facing node,
+ * one configuration change from fronting it.)
+ *
+ * Server contract: `500` carries `segment_not_ready`; a broken generation is
+ * `503` (`stream_failed`) and does fail over. Both are 5xx deliberately, so
+ * hls.js keeps retrying each — `retryForHttpStatus()` refuses only 4xx and
+ * status 0.
+ *
+ * Discriminated on the HTTP status rather than the JSON error code because the
+ * code is not reachable. hls.js's XHR loader reports a bad status as
+ * `{ code: xhr.status, text: xhr.statusText }` with `data.response.data`
+ * undefined, so the body never reaches the error event; it exists only behind
+ * `networkDetails`, which is loader-specific and undocumented. The status is
+ * the one field every loader populates the same way.
+ */
+const SEGMENT_NOT_READY_STATUS = 500;
+
+type HlsErrorShape = { type?: unknown; response?: { code?: unknown } | null };
+
+/**
+ * A held segment: the node is working, and this is the frontier, not a fault.
+ *
+ * Kept separate from failure classification because it is the *absence* of
+ * evidence rather than a kind of it. Failing over here would be actively
+ * harmful: a replacement node would start its own generation from nothing,
+ * which is strictly slower than waiting for the one already being produced.
+ */
+export function isHlsSegmentHold(data: HlsErrorShape): boolean {
+  return data.type === HLS_NETWORK_ERROR && data.response?.code === SEGMENT_NOT_READY_STATUS;
+}
+
+/**
+ * Any HLS network error is early node-health evidence, even before it is
+ * fatal — except a held segment, which says nothing about the node at all.
+ *
+ * Note what the default costs if this is wrong in the permissive direction:
+ * `@macha/core` treats a `'stream'` failure as endpoint evidence, so an
+ * unclassified hold prepares a standby elsewhere and can escalate to failover
+ * off a node that was working correctly.
+ */
+export function isHlsNetworkDegradation(data: HlsErrorShape): boolean {
+  return data.type === HLS_NETWORK_ERROR && !isHlsSegmentHold(data);
 }
 
 export function managedHlsErrorAction(

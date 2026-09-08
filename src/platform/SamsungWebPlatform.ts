@@ -55,6 +55,28 @@ export class SamsungWebPlatform implements Platform {
    * workaround outlives its reason.
    */
   readonly playbackPolicy: PlaybackPolicyOverrides = {
+    // Never hand this set a whole file, however playable its streams are.
+    //
+    // Not a statement about decoding — it decodes these titles fine — but
+    // about buffering. Direct play leaves read-ahead entirely to the media
+    // element, and the Service Worker byte-range proxy that does that job on
+    // the web cannot exist here: a Tizen widget is served from `file://`, and
+    // Service Workers require a secure http(s) origin, so registration is
+    // refused. Nor can MediaSource stand in — Chromium 47 takes fMP4 and WebM,
+    // not an arbitrary progressive MP4 or Matroska, which is the very reason
+    // the proxy was built rather than an MSE pipeline. Both doors are shut, so
+    // on this platform there is no way to read ahead of a file.
+    //
+    // Segments are the way out, and the way every television player already
+    // works: the native HLS player buffers a playlist properly, which is what
+    // it was built to do. Remux copies both streams into MPEG-TS carriage
+    // (see `preferSegmentContainer` below), so the cost is a container
+    // rewrite — no re-encode, no quality lost, no decoder asked anything new.
+    //
+    // Stated as policy rather than by narrowing `containers`, for the same
+    // reason as `webm` below: the capability describes what the hardware
+    // decodes, the policy describes what we will ask for.
+    neverDirect: true,
     excludeContainers: ['webm'],
     // Segment as MPEG-TS, not fMP4. Every fault this set has shown on HLS is
     // an fMP4 fault — see the table on `forceNativeHls` above — and none of

@@ -11,6 +11,7 @@ import {
   WebPlatform,
 } from './WebPlatform';
 import { ManagedHlsMediaRecoveryBudget } from './ManagedHlsRecovery';
+import { PlaybackSourceError } from '@macha/core';
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -58,6 +59,8 @@ describe('Web player source reassignment', () => {
       setAttribute: vi.fn(),
       load: vi.fn(),
       pause: vi.fn(),
+      // Teardown clears any subtitle <track> children through this.
+      querySelectorAll: vi.fn(() => [] as unknown as NodeListOf<Element>),
       canPlayType: vi.fn(() => ''),
       parentNode: null,
       paused: true,
@@ -95,6 +98,99 @@ describe('Web player source reassignment', () => {
     expect(video.removeAttribute).not.toHaveBeenCalled();
     expect(video.load).not.toHaveBeenCalled();
     expect(video.src).toBe(source.url);
+  });
+
+  /**
+   * The gap these close: every failure channel on this player is driven by
+   * something the element emits, so an element that accepted a source and then
+   * received nothing emitted nothing, and playback waited on it forever with
+   * no error and no failover. Reported live as an unchanging spinner watched
+   * for four minutes.
+   */
+  describe('a source that never delivers a byte', () => {
+    const directSource = {
+      mediaId: 'm1',
+      url: 'https://node.test/stream',
+      isManifest: false,
+      mimeType: 'video/mp4',
+      mode: 'direct' as const,
+    };
+
+    function attachedPlayer(video: HTMLVideoElement) {
+      vi.stubGlobal('document', { createElement: vi.fn(() => video) });
+      const player = new WebPlatform().createPlayer();
+      player.attach({ firstChild: null, appendChild: vi.fn() } as unknown as HTMLElement);
+      return player;
+    }
+
+    /** Fire an event on the fake element by replaying its captured handlers. */
+    function emit(video: HTMLVideoElement, event: string): void {
+      const registered = (video.addEventListener as unknown as { mock: { calls: [string, () => void][] } }).mock.calls;
+      for (const [name, handler] of registered) if (name === event) handler();
+    }
+
+    it('surfaces a retryable stream failure so the coordinator can fail over', async () => {
+      vi.useFakeTimers();
+      try {
+        const video = fakeVideo();
+        const player = attachedPlayer(video);
+        const failures: Error[] = [];
+        player.subscribeFailure?.((error) => failures.push(error));
+
+        await player.play(directSource, 0, true);
+        vi.advanceTimersByTime(19_000);
+        expect(failures).toHaveLength(0);
+        vi.advanceTimersByTime(1_000);
+
+        expect(failures).toHaveLength(1);
+        // 'stream' is what `isEndpointRetryablePlaybackFailure` accepts, which
+        // is what routes this to another node instead of a dead end. A
+        // decoder-flavoured kind here would strand the viewer.
+        expect(failures[0]).toBeInstanceOf(PlaybackSourceError);
+        expect((failures[0] as PlaybackSourceError).kind).toBe('stream');
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('stands down as soon as any media data arrives', async () => {
+      vi.useFakeTimers();
+      try {
+        const video = fakeVideo();
+        const player = attachedPlayer(video);
+        const failures: Error[] = [];
+        player.subscribeFailure?.((error) => failures.push(error));
+
+        await player.play(directSource, 0, true);
+        vi.advanceTimersByTime(5_000);
+        // Bytes arriving, long before readyState leaves HAVE_NOTHING. A slow
+        // node must never be judged by this, only a silent one.
+        emit(video, 'progress');
+        vi.advanceTimersByTime(600_000);
+
+        expect(failures).toHaveLength(0);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('is released by an explicit stop rather than firing after teardown', async () => {
+      vi.useFakeTimers();
+      try {
+        const video = fakeVideo();
+        const player = attachedPlayer(video);
+        const failures: Error[] = [];
+        player.subscribeFailure?.((error) => failures.push(error));
+
+        await player.play(directSource, 0, true);
+        player.stop();
+        vi.advanceTimersByTime(600_000);
+
+        expect(failures).toHaveLength(0);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 
 });

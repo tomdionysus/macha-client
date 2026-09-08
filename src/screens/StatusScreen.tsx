@@ -507,7 +507,15 @@ export function NodeStatusScreen({ api }: { api: ClusterStatusApi }) {
         <article className="node-detail-card"><h2>Overview</h2><dl>
           <DetailItem label="Node ID"><code>{node.id}</code></DetailItem>
           <DetailItem label="Version">{node.version || '—'}</DetailItem>
-          <DetailItem label="Endpoint">{node.host ? `${node.host}:${node.port}` : '—'}</DetailItem>
+          {/* The URL a client actually dials. Until server 0.36.4 this line
+              showed `host:port`, which is the node's internal RPC bind address
+              — one port away from the API on this cluster (7437 against 7438),
+              close enough to look right and wrong enough to send an operator
+              somewhere with nothing listening. Both are shown now, each under
+              its own name, because the RPC pair is still what an identity
+              reset is keyed on and an operator reading this card may need it. */}
+          <DetailItem label="API endpoint">{node.api_endpoint || '—'}</DetailItem>
+          <DetailItem label="RPC address">{node.host ? `${node.host}:${node.port}` : '—'}</DetailItem>
           <DetailItem label="Failure domain">{node.failure_domain || '—'}</DetailItem>
           <DetailItem label="Roles">{node.roles.join(', ') || '—'}</DetailItem>
           <DetailItem label="Telemetry">{freshnessLabel(node)}</DetailItem>

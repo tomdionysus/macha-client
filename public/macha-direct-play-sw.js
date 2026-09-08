@@ -54,6 +54,7 @@ function newMetrics() {
     activeFetches: 0,
     peakFetches: 0,
     lastFetchMbps: 0,
+    fetchActiveMs: 0,
     demandWaitCount: 0,
     demandWaitMs: 0,
     demandFetches: 0,
@@ -159,12 +160,23 @@ function pruneIdleSources() {
 }
 
 function activeFetchStarted(cache) {
+  // Time spent transferring, not wall time. The page turns deltas of
+  // `fetchedBytes` over deltas of this into a throughput estimate for the node
+  // that served them, and wall time would divide real bytes by long idle
+  // stretches — paused playback, a full cache — and report a fast link as slow.
+  // Only the 0 -> 1 transition opens the window, so concurrent fetches count
+  // the period once rather than once each.
+  if (cache.metrics.activeFetches === 0) cache.fetchWindowStartedAt = now();
   cache.metrics.activeFetches += 1;
   cache.metrics.peakFetches = Math.max(cache.metrics.peakFetches, cache.metrics.activeFetches);
 }
 
 function activeFetchFinished(cache) {
   cache.metrics.activeFetches = Math.max(0, cache.metrics.activeFetches - 1);
+  if (cache.metrics.activeFetches === 0 && cache.fetchWindowStartedAt !== undefined) {
+    cache.metrics.fetchActiveMs = rounded(cache.metrics.fetchActiveMs + Math.max(0, now() - cache.fetchWindowStartedAt), 1);
+    cache.fetchWindowStartedAt = undefined;
+  }
   void postMetrics(cache, true);
 }
 

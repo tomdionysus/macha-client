@@ -51,6 +51,7 @@ import { useSession } from './app/useSession';
 import { EndpointRegistry, bootstrapEndpoints as bootstrapClusterEndpoints } from '@macha/core';
 import { EndpointBandwidth } from '@macha/core';
 import { setTransferRecorder } from '@macha/core';
+import { setDirectPlayTransferListener } from './playback/directPlayReadAhead';
 import { Loading } from './components/Status';
 import { useMediaRouteBack } from './app/useMediaRouteBack';
 import { useMusicController } from './app/useMusicController';
@@ -263,13 +264,22 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
   // bookkeeping on its own; `endpointId` is the normalized base URL, so a
   // response attributes to whichever configured endpoint prefixes its URL.
   useEffect(() => {
-    setTransferRecorder((url, bytes, durationMs) => {
+    const record = (url: string, bytes: number, durationMs: number) => {
       const endpoint = endpointRegistry.snapshot()
         .find(({ endpoint: candidate }) => url.startsWith(candidate.baseUrl));
       if (endpoint) endpointBandwidth.record(endpoint.endpoint.id, bytes, durationMs);
-    });
+    };
+    setTransferRecorder(record);
+    // Media is where the bytes are. Without this the bandwidth record only ever
+    // described JSON, so a node that served nothing but media had no throughput
+    // evidence and endpoint ranking had nothing to judge it on — which is how
+    // this client spent an afternoon streaming from the slowest node it had.
+    // The worker reports a query-free origin, and an endpoint id is its
+    // normalized base URL, so the same prefix attribution works for both.
+    setDirectPlayTransferListener(record);
     return () => {
       setTransferRecorder(undefined);
+      setDirectPlayTransferListener(undefined);
       // Persistence is throttled, so the last few samples are still in memory.
       endpointBandwidth.flush();
     };

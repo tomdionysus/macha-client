@@ -745,12 +745,17 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
               <small>Preparing new stream…</small>
             ) : (
               <>
-                {streamStatus?.endpoint && <small>{streamStatus.endpoint}</small>}
-                {/* The carriage, beside the node that served it. Absent rather
-                    than defaulted when the server named none: this is the one
-                    place a segment container the client asked for and did not
-                    get can show, and a default would read as an answer. */}
-                {streamStatus?.container && <small>{streamStatus.container}</small>}
+                {/* The carriage and the node that served it, on one line as
+                    `CONTAINER : endpoint`. They are read together — "what was
+                    I served, and by whom" is a single question — and two lines
+                    spent on it pushed the per-stream transforms down the
+                    panel. Either half is omitted rather than defaulted when
+                    absent: this is the one place a segment container the
+                    client asked for and did not get can show, and a default
+                    would read as an answer. */}
+                {(streamStatus?.container || streamStatus?.endpoint) && (
+                  <small>{[streamStatus?.container, streamStatus?.endpoint].filter(Boolean).join(' : ')}</small>
+                )}
                 {streamStatus?.video && <small>{streamStatus.video}</small>}
                 {streamStatus?.audio && <small>{streamStatus.audio}</small>}
                 {streamStatus?.subtitle && <small>{streamStatus.subtitle}</small>}

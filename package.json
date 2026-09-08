@@ -1,6 +1,6 @@
 {
   "name": "macha-client",
-  "version": "0.11.0",
+  "version": "0.11.1",
   "private": true,
   "type": "module",
   "scripts": {
@@ -12,7 +12,8 @@
     "install-samsung": "bash install-samsung.sh",
     "typecheck": "tsc --noEmit -p tsconfig.app.json --pretty false && tsc --noEmit -p tsconfig.node.json --pretty false",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "pretest": "cd ../macha-ts && npm run dist:check"
   },
   "dependencies": {
     "@fontsource-variable/roboto": "^5.3.0",

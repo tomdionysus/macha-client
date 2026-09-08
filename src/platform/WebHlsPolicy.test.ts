@@ -4,13 +4,50 @@ import Hls from 'hls.js';
 // of the boot bundle. If upstream ever changes them, this fails loudly.
 import { describe, expect, it } from 'vitest';
 import { ManagedHlsMediaRecoveryBudget } from './ManagedHlsRecovery';
-import { isHlsNetworkDegradation, managedHlsErrorAction } from './WebHlsPolicy';
+import { isHlsNetworkDegradation, isHlsSegmentHold, managedHlsErrorAction } from './WebHlsPolicy';
 
 describe('managed HLS error policy', () => {
   it('treats even nonfatal network errors as early failover evidence', () => {
     expect(isHlsNetworkDegradation({ type: Hls.ErrorTypes.NETWORK_ERROR })).toBe(true);
     expect(isHlsNetworkDegradation({ type: Hls.ErrorTypes.MEDIA_ERROR })).toBe(false);
     expect(isHlsNetworkDegradation({})).toBe(false);
+  });
+
+  describe('a held segment is not evidence about the node', () => {
+    // Server contract: **500** means the fragment exists in the plan and has
+    // not been produced yet; a broken generation is 503 and does fail over.
+    // That is the reverse of the intuitive reading, deliberately — see the
+    // constant's comment. Discriminated on the HTTP status because hls.js
+    // never surfaces the JSON error code: its loader reports
+    // `{ code: xhr.status, text: xhr.statusText }` with the body dropped.
+    const held = { type: Hls.ErrorTypes.NETWORK_ERROR, response: { code: 500 } };
+    const broken = { type: Hls.ErrorTypes.NETWORK_ERROR, response: { code: 503 } };
+
+    it('recognises a 500 network error as a hold and nothing else', () => {
+      expect(isHlsSegmentHold(held)).toBe(true);
+      expect(isHlsSegmentHold(broken)).toBe(false);
+      // A media error that happens to carry 500 is not a transport hold.
+      expect(isHlsSegmentHold({ type: Hls.ErrorTypes.MEDIA_ERROR, response: { code: 500 } })).toBe(false);
+      expect(isHlsSegmentHold({ type: Hls.ErrorTypes.NETWORK_ERROR })).toBe(false);
+    });
+
+    it('keeps an intermediary 503 as node evidence, which is the whole reason for the reversal', () => {
+      // A proxy or gateway emitting 503 for a genuinely dead node must still
+      // fail over. Reading that as a hold would strand the viewer on a node
+      // that is gone, silently and without self-correction.
+      expect(isHlsSegmentHold(broken)).toBe(false);
+      expect(isHlsNetworkDegradation(broken)).toBe(true);
+    });
+
+    it('keeps a hold out of node-health evidence while every other network error stays in', () => {
+      // The whole point: an unclassified hold prepares a standby elsewhere and
+      // can escalate to failover off a node that was working correctly.
+      expect(isHlsNetworkDegradation(held)).toBe(false);
+      expect(isHlsNetworkDegradation(broken)).toBe(true);
+      expect(isHlsNetworkDegradation({ type: Hls.ErrorTypes.NETWORK_ERROR, response: null })).toBe(true);
+      expect(isHlsNetworkDegradation({ type: Hls.ErrorTypes.NETWORK_ERROR, response: { code: 404 } })).toBe(true);
+      expect(isHlsNetworkDegradation({ type: Hls.ErrorTypes.NETWORK_ERROR, response: { code: 502 } })).toBe(true);
+    });
   });
 
   it('bounds fatal network restart before exposing source failure for node failover', () => {
