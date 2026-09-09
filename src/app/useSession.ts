@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import { fixedBearerToken, sessionManager, type AuthenticatedFetch, type SessionManager } from '@macha/core';
+import { useEffect, useState } from 'react';
+import { sessionManager, type AuthenticatedFetch, type SessionManager } from '@macha/core';
 import type { EndpointRegistry } from '@macha/core';
 
 export interface Session {
@@ -23,27 +23,24 @@ export interface Session {
 export function useSession(options: {
   connectionRequired: boolean;
   serverConfigured: boolean;
-  manualToken: string;
   endpointRegistry: EndpointRegistry;
 }, manager: SessionManager = sessionManager): Session {
-  const { connectionRequired, serverConfigured, manualToken, endpointRegistry } = options;
+  const { connectionRequired, serverConfigured, endpointRegistry } = options;
   const [managerReady, setManagerReady] = useState(manager.isReady);
 
   useEffect(() => manager.subscribe(() => setManagerReady(manager.isReady)), [manager]);
 
   useEffect(() => {
-    if (manualToken || !connectionRequired || !serverConfigured) {
+    if (!connectionRequired || !serverConfigured) {
       manager.stop();
       return undefined;
     }
     manager.start(endpointRegistry);
     return () => manager.stop();
-  }, [connectionRequired, endpointRegistry, manager, manualToken, serverConfigured]);
-
-  const fixedAuth = useMemo(() => manualToken ? fixedBearerToken(manualToken) : undefined, [manualToken]);
+  }, [connectionRequired, endpointRegistry, manager, serverConfigured]);
 
   return {
-    auth: fixedAuth ?? manager,
-    ready: Boolean(fixedAuth) || !connectionRequired || !serverConfigured || managerReady,
+    auth: manager,
+    ready: !connectionRequired || !serverConfigured || managerReady,
   };
 }

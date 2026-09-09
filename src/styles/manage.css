@@ -51,9 +51,17 @@
 .manage-review > section + section, .manage-review > .manage-actions { margin-top: 1rem; }
 .manage-label { margin: 0 0 .55rem; color: var(--text-faint); text-transform: uppercase; letter-spacing: .09em; font-size: .72rem; }
 .manage-probe-list, .manage-match-list { display: grid; gap: .5rem; }
-.manage-probe { display: grid; gap: .15rem; padding: .7rem .8rem; border-radius: .55rem; background: #ffffff07; }
-.manage-probe strong { overflow-wrap: anywhere; }
-.manage-probe span { color: var(--text-dim); font-size: .82rem; }
+/* A button now, not a panel: choosing one seeds the manual metadata form. */
+.manage-probe {
+  display: block; width: 100%; padding: .7rem .8rem;
+  border: 1px solid transparent; border-radius: .55rem; background: #ffffff07;
+  color: inherit; font: inherit; text-align: left; cursor: pointer;
+}
+.manage-probe:hover:not(:disabled) { background: #ffffff0f; }
+.manage-probe.chosen { border-color: #a8324a; background: #ffffff12; }
+.manage-probe:disabled { cursor: default; opacity: .6; }
+.manage-probe strong { display: block; overflow-wrap: anywhere; }
+.manage-probe span { display: block; margin-top: .15rem; color: var(--text-dim); font-size: .82rem; }
 .manage-match-section { padding-top: .2rem; }
 .manage-search-row { display: flex; gap: .55rem; margin-bottom: .7rem; }
 .manage-search-row input, .manage-fs-operation input,

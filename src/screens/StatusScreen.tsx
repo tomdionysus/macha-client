@@ -72,6 +72,39 @@ function nodeName(node: ClusterNodeStatus): string {
   return node.host || node.id.slice(0, 12);
 }
 
+/**
+ * When telemetry stopped being current, as a severity rather than a number.
+ *
+ * The figures beside it are honest measurements of the sending process — just
+ * old — so a screenful of entirely plausible numbers can be half an hour out
+ * of date with nothing on the page saying so. Colour is what makes the age
+ * impossible to read past; the number alone was there before and was missed.
+ *
+ * No severity without an age, and none for `unavailable`. A node that has
+ * never been heard from is not an old reading, and colouring an absence would
+ * invent evidence where the honest answer is an em dash.
+ */
+export const TELEMETRY_AGEING_MS = 60_000;
+export const TELEMETRY_STALE_MS = 300_000;
+
+export type TelemetryAge = 'ageing' | 'stale';
+
+export function telemetryAge(
+  node: Pick<ClusterNodeStatus, 'live_age_ms' | 'telemetry_freshness'>,
+): TelemetryAge | undefined {
+  if (node.telemetry_freshness === 'unavailable') return undefined;
+  const ageMs = node.live_age_ms;
+  if (ageMs == null || !Number.isFinite(ageMs)) return undefined;
+  if (ageMs > TELEMETRY_STALE_MS) return 'stale';
+  if (ageMs > TELEMETRY_AGEING_MS) return 'ageing';
+  return undefined;
+}
+
+function telemetryAgeClassName(node: ClusterNodeStatus): string | undefined {
+  const age = telemetryAge(node);
+  return age ? `telemetry-age ${age}` : undefined;
+}
+
 function freshnessLabel(node: ClusterNodeStatus): string {
   if (node.telemetry_freshness === 'live') return 'Live';
   if (node.telemetry_freshness === 'stale') return `Stale · ${formatDuration(node.live_age_ms)}`;
@@ -257,7 +290,7 @@ function NodeCard({ node, canManage, resetting, onReset }: { node: ClusterNodeSt
         </div>
         <div className="cluster-node-meta">
           <span>{node.roles.length ? node.roles.join(' · ') : 'node'}</span>
-          <span>{freshnessLabel(node)}</span>
+          <span className={telemetryAgeClassName(node)}>{freshnessLabel(node)}</span>
         </div>
         <dl className="cluster-node-stats">
           <div><dt>Storage</dt><dd>{formatBytes(node.storage.used_bytes)} / {formatBytes(node.storage.capacity_bytes)}</dd></div>
@@ -542,7 +575,7 @@ export function NodeStatusScreen({ api }: { api: ClusterStatusApi }) {
           <DetailItem label="RPC address">{node.host ? `${node.host}:${node.port}` : '—'}</DetailItem>
           <DetailItem label="Failure domain">{node.failure_domain || '—'}</DetailItem>
           <DetailItem label="Roles">{node.roles.join(', ') || '—'}</DetailItem>
-          <DetailItem label="Telemetry">{freshnessLabel(node)}</DetailItem>
+          <DetailItem label="Telemetry"><span className={telemetryAgeClassName(node)}>{freshnessLabel(node)}</span></DetailItem>
           <DetailItem label="Uptime">{runtime.uptime_ms != null ? formatDuration(runtime.uptime_ms) : '—'}</DetailItem>
         </dl></article>
         <article className="node-detail-card"><h2>Storage</h2><dl>
@@ -570,7 +603,7 @@ export function NodeStatusScreen({ api }: { api: ClusterStatusApi }) {
           <DetailItem label="Generation">{node.metadata_generation}</DetailItem>
           <DetailItem label="Voter">{node.roles.includes('metadata-voter') ? 'Yes' : 'No'}</DetailItem>
           <DetailItem label="Observed">{node.observed_at_unix_ms ? new Date(node.observed_at_unix_ms).toLocaleString() : '—'}</DetailItem>
-          <DetailItem label="Live age">{node.live_age_ms != null ? formatDuration(node.live_age_ms) : '—'}</DetailItem>
+          <DetailItem label="Live age"><span className={telemetryAgeClassName(node)}>{node.live_age_ms != null ? formatDuration(node.live_age_ms) : '—'}</span></DetailItem>
           {node.identity_association_reset && <>
             <DetailItem label="Last identity reset">{new Date(node.identity_association_reset.reset_at_unix_ms).toLocaleString()}</DetailItem>
             <DetailItem label="Reset epoch">{node.identity_association_reset.epoch}</DetailItem>

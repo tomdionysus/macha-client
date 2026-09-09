@@ -101,3 +101,14 @@
   .cluster-node-meta span:last-child, .cluster-capacity-card strong { text-align: left; }
   .cluster-node-stats { grid-template-columns: 1fr; }
 }
+
+/* Telemetry that has aged out, in the two colours the cluster health pill
+   already uses, so "getting old" and "no longer trustworthy" read the same way
+   wherever they appear. Only ever applied where there is a real age to judge:
+   an absent reading stays the ordinary em dash. */
+.telemetry-age.ageing { color: #dfc08c; }
+/* Not `--red-400`: the accent palette is a near-black crimson built for
+   surfaces, and as text on a dark page it is barely legible. #ffb4b4 is the
+   colour this app already uses for error text, and it pairs with the amber
+   above at the same weight. */
+.telemetry-age.stale { color: #ffb4b4; }

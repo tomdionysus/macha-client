@@ -3,15 +3,13 @@ import { errorMessage } from '@macha/core';
 
 export interface ConnectionFormProps {
   bootstrapEndpoints: readonly string[];
-  apiToken: string;
-  onSave: (urls: readonly string[], token: string) => Promise<string | undefined>;
+  onSave: (urls: readonly string[]) => Promise<string | undefined>;
   submitLabel?: string;
   notice?: string;
 }
 
-export function ConnectionForm({ bootstrapEndpoints, apiToken, onSave, submitLabel = 'Check and save', notice }: ConnectionFormProps) {
+export function ConnectionForm({ bootstrapEndpoints, onSave, submitLabel = 'Check and save', notice }: ConnectionFormProps) {
   const [urls, setUrls] = useState(bootstrapEndpoints.join('\n'));
-  const [token, setToken] = useState(apiToken);
   const [checking, setChecking] = useState(false);
   const [error, setError] = useState<string>();
 
@@ -21,7 +19,7 @@ export function ConnectionForm({ bootstrapEndpoints, apiToken, onSave, submitLab
     setChecking(true);
     setError(undefined);
     try {
-      setError(await onSave(urls.split(/[\n,]/), token));
+      setError(await onSave(urls.split(/[\n,]/)));
     } catch (cause) {
       setError(errorMessage(cause));
     } finally {
@@ -38,16 +36,6 @@ export function ConnectionForm({ bootstrapEndpoints, apiToken, onSave, submitLab
       rows={Math.max(3, bootstrapEndpoints.length)}
       onChange={(event: ChangeEvent<HTMLTextAreaElement>) => setUrls(event.target.value)}
       placeholder="One endpoint per line, for example http://macha-node:7438"
-      spellCheck={false}
-      disabled={checking}
-    />
-    <label htmlFor="api-token">Bearer token <span className="muted">(optional)</span></label>
-    <input
-      id="api-token"
-      data-tv-focusable="true"
-      type="password"
-      value={token}
-      onChange={(event: ChangeEvent<HTMLInputElement>) => setToken(event.target.value)}
       spellCheck={false}
       disabled={checking}
     />

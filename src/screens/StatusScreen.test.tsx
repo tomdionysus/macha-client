@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { EndpointCandidate } from '@macha/core';
 import type { ClusterNodeStatus, ClusterStatusSnapshot } from '@macha/core';
 import type { IdentityAssociationResetResult, ManageApi } from '@macha/core';
-import { acceptNodeIdentityAssociationReset, clientEndpointHealth, identityResetAcceptanceMessage, nodeNotYetReady, nodeStatusLabel, StatusHeader, statusSectionVisibility, systemMemoryBytes, withoutRetiredNodeIdentity } from './StatusScreen';
+import { acceptNodeIdentityAssociationReset, clientEndpointHealth, identityResetAcceptanceMessage, nodeNotYetReady, nodeStatusLabel, StatusHeader, statusSectionVisibility, systemMemoryBytes, TELEMETRY_AGEING_MS, TELEMETRY_STALE_MS, telemetryAge, withoutRetiredNodeIdentity } from './StatusScreen';
 
 function candidate(health: EndpointCandidate['health']): EndpointCandidate {
   return {
@@ -108,6 +108,27 @@ describe('asynchronous node identity reset', () => {
     finishRefresh();
     await expect(workflow).resolves.toBe(queued);
     expect(refresh).toHaveBeenCalledOnce();
+  });
+});
+
+describe('telemetry age, coloured rather than merely printed', () => {
+  const aged = (live_age_ms: number | null, telemetry_freshness = 'stale' as const) =>
+    telemetryAge({ live_age_ms, telemetry_freshness });
+
+  it('stays quiet until a reading is genuinely old, then escalates', () => {
+    expect(aged(0)).toBeUndefined();
+    expect(aged(TELEMETRY_AGEING_MS)).toBeUndefined();
+    expect(aged(TELEMETRY_AGEING_MS + 1)).toBe('ageing');
+    expect(aged(TELEMETRY_STALE_MS)).toBe('ageing');
+    expect(aged(TELEMETRY_STALE_MS + 1)).toBe('stale');
+  });
+
+  it('never colours an absence, which would invent evidence rather than age it', () => {
+    // A node never heard from is not an old reading. Both of these render an
+    // em dash, and an em dash is not a warning.
+    expect(aged(null)).toBeUndefined();
+    expect(aged(Number.NaN)).toBeUndefined();
+    expect(aged(600_000, 'unavailable' as never)).toBeUndefined();
   });
 });
 

@@ -9,18 +9,15 @@ import * as SessionAuth from '@macha/core';
 function renderSession(overrides: Partial<{
   connectionRequired: boolean;
   serverConfigured: boolean;
-  manualToken: string;
 }> = {}) {
   const manager = new SessionManager();
   const endpointRegistry = new EndpointRegistry(bootstrapEndpoints(['http://a']));
   const result = renderHook(
-    (props: { manualToken: string }) => useSession({
+    () => useSession({
       connectionRequired: overrides.connectionRequired ?? true,
       serverConfigured: overrides.serverConfigured ?? true,
-      manualToken: props.manualToken,
       endpointRegistry,
     }, manager),
-    { initialProps: { manualToken: overrides.manualToken ?? '' } },
   );
   return { manager, ...result };
 }
@@ -36,15 +33,6 @@ describe('useSession', () => {
 
     expect(result.current.ready).toBe(false);
     await vi.waitFor(() => expect(result.current.ready).toBe(true));
-  });
-
-  it('never starts the manager, and is immediately ready, with a manual token', () => {
-    const mint = vi.spyOn(SessionAuth, 'mintAnonymousSessionAnyNode');
-    const { result, manager } = renderSession({ manualToken: 'manually-typed-token' });
-
-    expect(result.current.ready).toBe(true);
-    expect(manager.isReady).toBe(false);
-    expect(mint).not.toHaveBeenCalled();
   });
 
   it('is immediately ready when no connection is required (override mode)', () => {

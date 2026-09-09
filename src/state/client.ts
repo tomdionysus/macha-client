@@ -50,10 +50,3 @@ export function setDiscoveredEndpoints(urls: readonly string[]): void {
   clientConfiguration.setDiscoveredEndpoints(urls);
 }
 
-export function getApiToken(): string {
-  return clientConfiguration.apiToken();
-}
-
-export function setApiToken(token: string): void {
-  clientConfiguration.setApiToken(token);
-}

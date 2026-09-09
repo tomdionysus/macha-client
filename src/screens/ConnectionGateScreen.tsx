@@ -1,7 +1,7 @@
 import { ConnectionForm, type ConnectionFormProps } from '../components/ConnectionForm';
 import { machaLogoUrl as logoUrl } from '../uiAssets';
 
-interface Props extends Pick<ConnectionFormProps, 'bootstrapEndpoints' | 'apiToken' | 'onSave'> {
+interface Props extends Pick<ConnectionFormProps, 'bootstrapEndpoints' | 'onSave'> {
   welcome: boolean;
   notice?: string;
 }

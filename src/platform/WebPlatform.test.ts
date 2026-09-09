@@ -12,7 +12,6 @@ import {
   WebPlatform,
 } from './WebPlatform';
 import { ManagedHlsMediaRecoveryBudget } from './ManagedHlsRecovery';
-import { MEDIA_START_STARVATION_MS } from './MediaWatchdog';
 import { PlaybackSourceError } from '@macha/core';
 
 afterEach(() => vi.unstubAllGlobals());
@@ -106,45 +105,6 @@ describe('Web player source reassignment', () => {
     expect(video.removeAttribute).not.toHaveBeenCalled();
     expect(video.load).not.toHaveBeenCalled();
     expect(video.src).toBe(source.url);
-  });
-
-  /**
-   * Measured on a Samsung set: after the serving node stopped, both
-   * replacement generations were attached to the reused element and sat at
-   * `readyState: HAVE_NOTHING` for the full starvation budget without
-   * fetching a byte, while the nodes themselves served the same fragments on
-   * demand. A failed element does not take another source.
-   */
-  it('discards a media element that failed, and keeps one that merely changed source', async () => {
-    vi.useFakeTimers();
-    try {
-      const first = fakeVideo();
-      const second = fakeVideo();
-      const created = [first, second];
-      vi.stubGlobal('document', { createElement: vi.fn(() => created.shift() ?? fakeVideo()) });
-      const player = new WebPlatform().createPlayer();
-      player.attach({ firstChild: null, appendChild: vi.fn() } as unknown as HTMLElement);
-      const source = { mediaId: 'm1', url: 'https://node.test/stream', isManifest: false, mimeType: 'video/mp4', mode: 'direct' as const };
-
-      // An ordinary seek generation: nothing failed, so the element is kept.
-      await player.play(source, 0, true);
-      await player.play(source, 5_000, true);
-      expect(second.src).toBe('');
-
-      // Now starve it, the way a node going away does.
-      await player.play(source, 0, false);
-      vi.advanceTimersByTime(MEDIA_START_STARVATION_MS + 1_000);
-      await player.play({ ...source, url: 'https://node-b.test/stream' }, 0, true);
-
-      // The failed element was emptied and let go; the replacement took the
-      // source. Before this, the same element was handed the new URL and
-      // never fetched a byte of it.
-      expect(first.removeAttribute).toHaveBeenCalledWith('src');
-      expect(first.src).not.toBe('https://node-b.test/stream');
-      expect(second.src).toBe('https://node-b.test/stream');
-    } finally {
-      vi.useRealTimers();
-    }
   });
 
   /**

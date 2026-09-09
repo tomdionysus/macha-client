@@ -479,25 +479,6 @@ class WebPlayer implements Player {
 
   async play(source: PlaybackSource, positionMs = 0, startPaused = false): Promise<boolean> {
     if (!this.host) throw new Error('Player must be attached before playback');
-    // A media element that has already failed does not reliably accept
-    // another source. Measured on a Samsung set 2026-09-09: after the serving
-    // node was stopped, both replacement generations were attached to the
-    // reused element and sat at `readyState: HAVE_NOTHING` for the full 20 s
-    // starvation budget without fetching a byte — while a plain `fetch` of
-    // the very same generation's first fragment, issued moments earlier by
-    // the readiness gate, was served immediately. The nodes were fine; the
-    // element was wedged, and every failover charged a healthy node for it
-    // until the cluster ran out.
-    //
-    // Recreating costs the playback DOM and element-scoped state such as
-    // fullscreen, which is why the element is otherwise kept across source
-    // generations. So it is discarded only where something actually broke —
-    // never on an ordinary seek, which is the case that reuse exists for and
-    // the case that has always worked.
-    if (this.failedSourceGeneration !== undefined) {
-      this.log.info('media-element-discarded-after-failure', this.video ? videoState(this.video) : undefined);
-      this.discardMediaElement();
-    }
     const playRequestGeneration = ++this.playRequestGeneration;
     const sourceGeneration = ++this.sourceGeneration;
     this.failedSourceGeneration = undefined;
@@ -1077,11 +1058,6 @@ class WebPlayer implements Player {
     this.unsubscribeDirectDegradation = undefined;
     releaseDirectPlayReadAhead(this.directReadAheadSourceUrl);
     this.directReadAheadSourceUrl = undefined;
-    this.discardMediaElement();
-  }
-
-  /** Final teardown of the element itself, leaving the presentation host bound. */
-  private discardMediaElement(): void {
     const video = this.video;
     if (!video) return;
     this.clearSubtitleTracks(video);

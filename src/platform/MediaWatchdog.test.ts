@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { MediaStallWatchdog, MediaStartWatchdog, type MediaWatchdogEnvironment } from './MediaWatchdog';
+import { MEDIA_STALL_TIMEOUT_MS, MediaStallWatchdog, MediaStartWatchdog, type MediaWatchdogEnvironment } from './MediaWatchdog';
 
 /**
  * A fully driven environment: no real timers and no DOM, so every test states
@@ -255,6 +255,14 @@ describe('media stall watchdog', () => {
     // too would fail the same generation twice on different deadlines.
     host.advance(600_000);
     expect(stalled).not.toHaveBeenCalled();
+  });
+
+  it('moves off a node that has gone quiet before the viewer has to notice', () => {
+    // The budget is what a viewer stares at a frozen frame for on a platform
+    // whose player reports nothing, so it is set by what a viewer will wait
+    // through, not by what a node deserves. A node delivering in bursts seven
+    // seconds apart (measured 2026-09-08) is one to leave, not to protect.
+    expect(MEDIA_STALL_TIMEOUT_MS).toBeLessThanOrEqual(5_000);
   });
 
   it('never judges a generation that has not started, however long it takes', () => {

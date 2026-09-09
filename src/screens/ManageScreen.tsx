@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { ConfirmModal, Modal } from '../components/Modal';
 import { FileIcon, FolderIcon, OpenIcon, RefreshIcon, UpIcon } from '../components/ManageIcons';
 import { AsyncIconButton } from '../components/AsyncIconButton';
@@ -87,6 +87,42 @@ function candidateSummary(candidate: MediaProbeCandidate): string {
   return [candidate.artist, candidate.album, candidate.title].filter(Boolean).join(' · ');
 }
 
+/**
+ * Whether an inferred candidate is already in the catalogue, and so has no
+ * business being offered as something to type in by hand.
+ *
+ * The two lists on this screen answer different questions — "what do we think
+ * this file is" and "what already exists that it could be" — and where they
+ * overlap the first one is dead weight: the same identity appears twice, once
+ * with a working "Use match" button and once without. The inferred list is
+ * only useful for identities the catalogue does not have yet.
+ *
+ * Deliberately conservative. A field is only allowed to rule a candidate *out*
+ * when both sides state it, so a match missing a year does not keep a probe
+ * alive on a difference neither side actually claimed.
+ */
+function comparableTitle(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+function sameStatedNumber(left: number | null, right: number | null): boolean {
+  return left == null || right == null || left === right;
+}
+
+export function candidateAlreadyCatalogued(
+  candidate: MediaProbeCandidate,
+  matches: readonly ManageCatalogueMatch[],
+): boolean {
+  const title = comparableTitle(candidate.title);
+  if (!title) return false;
+  return matches.some((match) => match.kind === candidate.kind
+    && comparableTitle(match.title) === title
+    && sameStatedNumber(match.year, candidate.year)
+    && sameStatedNumber(match.season_number, candidate.season_number)
+    && sameStatedNumber(match.episode_number, candidate.episode_number)
+    && sameStatedNumber(match.track_number, candidate.track_number));
+}
+
 function matchSubtitle(match: ManageCatalogueMatch): string {
   const parts: string[] = [match.kind];
   if (match.year != null) parts.push(String(match.year));
@@ -102,13 +138,14 @@ function numberOrUndefined(value: string): number | undefined {
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
-function ManualMetadataForm({ detail, api, catalogueApi, onResolved }: {
+function ManualMetadataForm({ detail, probe, api, catalogueApi, onResolved }: {
   detail: UnmatchedDetail;
+  /** The inferred candidate to seed from. The best-scoring one unless the reader picked another. */
+  probe?: MediaProbeCandidate;
   api: ManageApi;
   catalogueApi: CatalogueApi;
   onResolved: () => void;
 }) {
-  const probe = detail.probes[0];
   const initialKind = probe?.kind ?? (detail.item.provider === 'tv' ? 'episode' : detail.item.provider === 'music' ? 'track' : 'movie');
   const [kind, setKind] = useState<'movie' | 'episode' | 'track'>(initialKind);
   const [title, setTitle] = useState(probe?.title ?? '');
@@ -232,7 +269,13 @@ function UnmatchedReview({ item, api, catalogueApi, onResolved, onDeleteRequest 
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [manualOpen, setManualOpen] = useState(false);
+  const [manualProbeIndex, setManualProbeIndex] = useState(0);
   const [error, setError] = useState<string>();
+  const manualFormRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (manualOpen) manualFormRef.current?.scrollIntoView({ block: 'nearest' });
+  }, [manualOpen, manualProbeIndex]);
 
   const loadMatches = useCallback(async (search?: string) => {
     const result = await api.prospectiveMatches(item.id, search?.trim() || undefined);
@@ -268,22 +311,38 @@ function UnmatchedReview({ item, api, catalogueApi, onResolved, onDeleteRequest 
     }
   }, [onResolved]);
 
+  // Indices are kept alongside, because the manual form is seeded by index
+  // into the unfiltered probe list.
+  const newCandidates = (detail?.probes ?? [])
+    .map((candidate, index) => ({ candidate, index }))
+    .filter(({ candidate }) => !candidateAlreadyCatalogued(candidate, matches))
+    .slice(0, 4);
+
   if (loading) return <div className="manage-review"><p>Loading match details…</p></div>;
 
   return (
     <div className="manage-review">
       {error && <p className="manage-error">{error}</p>}
-      {detail?.probes?.length ? (
+      {detail?.probes?.length === 0 && <p>No usable metadata could be inferred from the file.</p>}
+      {newCandidates.length > 0 && (
         <div className="manage-probe-list">
-          <span className="manage-label">Inferred from file</span>
-          {detail.probes.slice(0, 4).map((candidate, index) => (
-            <div key={`${candidate.generator}-${index}`} className="manage-probe">
+          <span className="manage-label">Not in the catalogue · choose one to create it</span>
+          {newCandidates.map(({ candidate, index }) => (
+            <button
+              key={`${candidate.generator}-${index}`}
+              type="button"
+              className={`manage-probe ${manualOpen && manualProbeIndex === index ? 'chosen' : ''}`}
+              data-tv-focusable="true"
+              aria-pressed={manualOpen && manualProbeIndex === index}
+              disabled={busy}
+              onClick={() => { setManualProbeIndex(index); setManualOpen(true); }}
+            >
               <strong>{candidateSummary(candidate)}</strong>
               <span>{candidate.generator} · score {candidate.score}</span>
-            </div>
+            </button>
           ))}
         </div>
-      ) : <p>No usable metadata could be inferred from the file.</p>}
+      )}
 
       <section className="manage-match-section">
         <h3>Prospective matches</h3>
@@ -309,7 +368,23 @@ function UnmatchedReview({ item, api, catalogueApi, onResolved, onDeleteRequest 
         <button className="secondary-button manage-danger" type="button" disabled={busy} onClick={onDeleteRequest} data-tv-focusable="true">Delete media file</button>
       </div>
 
-      {manualOpen && detail && <ManualMetadataForm detail={detail} api={api} catalogueApi={catalogueApi} onResolved={onResolved} />}
+      {manualOpen && detail && (
+        // Keyed on the candidate: the form seeds its fields from it once, at
+        // mount, so choosing another has to build a new form rather than leave
+        // the first one's values sitting in it. Scrolled to on open because it
+        // renders at the foot of a tall panel — choosing a candidate at the top
+        // and seeing nothing move reads as a button that does nothing.
+        <div ref={manualFormRef}>
+          <ManualMetadataForm
+            key={`manual-${manualProbeIndex}`}
+            detail={detail}
+            probe={detail.probes[manualProbeIndex]}
+            api={api}
+            catalogueApi={catalogueApi}
+            onResolved={onResolved}
+          />
+        </div>
+      )}
     </div>
   );
 }

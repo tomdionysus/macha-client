@@ -209,14 +209,25 @@ export class MediaStartWatchdog {
  * How long a picture may sit frozen with nothing arriving before the source is
  * called dead.
  *
- * Set against a measurement rather than a feeling: on 2026-09-08 a node that
- * was working — merely producing a transcode slower than realtime — delivered
- * in bursts separated by **seven seconds** of no progress at all. A threshold
- * near that would evict healthy nodes under load. This is comfortably clear of
- * it, and still far short of the thirty seconds an operator sat through
- * watching a frozen frame with nothing detecting it.
+ * Five seconds, and the seven-second measurement below is the reason for it
+ * rather than an argument against it.
+ *
+ * On 2026-09-08 a node that was working — producing a transcode below realtime
+ * — delivered in bursts separated by **seven seconds** of no progress at all.
+ * That was first read as a floor to stay above, so as not to blame a healthy
+ * node. Wrong frame: whether the node deserves blame is not the question this
+ * budget answers. A node that goes quiet for seven seconds is making the
+ * viewer wait seven seconds, and the client has somewhere better to be. Slow
+ * for any reason is a reason to move.
+ *
+ * The cost of moving is bounded and the cost of staying is not: a replacement
+ * generation is a session POST and a first fragment, while a node delivering
+ * in bursts goes on doing it for the length of the film. And on a set whose
+ * native player raises no `MediaError` this budget is the *whole* of failover
+ * detection — the picture is simply frozen for all of it before anything is
+ * told.
  */
-export const MEDIA_STALL_TIMEOUT_MS = 15_000;
+export const MEDIA_STALL_TIMEOUT_MS = 5_000;
 
 /**
  * The stall watchdog: playback stopped and nothing is arriving to restart it.

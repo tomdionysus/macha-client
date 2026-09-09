@@ -13,6 +13,7 @@ import { PlaybackRuntime, type PlaybackRuntimeRequest, type PlaybackRuntimeSnaps
 import { uiSettings } from '../settings';
 import { describePlaybackSession } from '@macha/core';
 import { playbackFailureTrail, type PlaybackFailureTrailEntry } from './player/failureTrail';
+import { failureTrailEnabled } from '../diagnostics/failureTrailSetting';
 import { bufferedTimelineSegments } from '@macha/core';
 import type { MediaSummary, PlaybackEvent, PlaybackProgress } from '@macha/core';
 import { PlayerOptions } from './player/PlayerOptions';
@@ -457,7 +458,7 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
   // list the viewer is in the middle of reading.
   const [failureTrail, setFailureTrail] = useState<PlaybackFailureTrailEntry[]>([]);
   useEffect(() => {
-    setFailureTrail(fatalError ? playbackFailureTrail() : []);
+    setFailureTrail(fatalError && failureTrailEnabled() ? playbackFailureTrail() : []);
   }, [fatalError]);
 
   useEffect(() => {

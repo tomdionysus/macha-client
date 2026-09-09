@@ -22,19 +22,21 @@ export function tvRangeOwnsDirection(value: unknown, direction: SamsungDpadDirec
  * Whether a focused editor should keep this command rather than let it move
  * focus elsewhere.
  *
- * A single-line text input owns the caret keys and Enter, but must not swallow
- * up and down: on a D-pad there is no other way out of it, and a focused search
- * box that eats vertical navigation traps the viewer with no escape but Back.
- * Multi-line and list editors — textarea, select, contenteditable — genuinely
- * use up and down, so they keep everything.
+ * Editors own the caret keys and Enter. **No editor owns up and down**, and
+ * that includes the multi-line ones. On a D-pad, up and down are the only way
+ * between controls, so an editor that keeps them is an editor the viewer
+ * cannot leave except by pressing Back and losing the form.
+ *
+ * Textarea used to be excepted here, on the grounds that it genuinely uses up
+ * and down to move between lines. True, and beside the point: the endpoints
+ * box is a textarea, and on the television it was a trap. Caret movement
+ * within a line is what left and right are for; moving between controls is
+ * what up and down are for, and a viewer who cannot reach the Save button has
+ * lost more than a viewer who cannot reach line two.
  */
 export function tvTextEditingOwnsCommand(value: unknown, command: SamsungDpadCommand): boolean {
   if (!isTextEditingElement(value)) return false;
-  if (command !== 'up' && command !== 'down') return true;
-  const tagName = typeof (value as { tagName?: unknown }).tagName === 'string'
-    ? ((value as { tagName: string }).tagName).toUpperCase()
-    : '';
-  return tagName !== 'INPUT';
+  return command !== 'up' && command !== 'down';
 }
 
 /** Editors own caret movement, selection controls and Enter while focused. */

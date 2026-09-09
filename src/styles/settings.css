@@ -40,6 +40,55 @@
 .settings-status-error { margin: .9rem 0 0 !important; color: #ffb4b4 !important; font-size: .86rem; }
 .settings-connection { width: 100%; }
 .settings-connection h2 { margin-top: 0; }
+/* Its own bottom margin, matching the status grid's: these sections carry
+   their own rhythm rather than sitting in a gapped container, and `h2`'s
+   margin-top is zeroed below, so without this the Connection heading lands
+   directly on the switch. */
+.settings-diagnostics { width: 100%; margin-bottom: 2.2rem; }
+.settings-diagnostics h2 { margin-top: 0; margin-bottom: .9rem; }
+/* One row: a switch and what it does. Written in flexbox with pixel offsets
+   and longhand positioning throughout, because the Samsung build runs
+   Chromium 47 — no grid, no flex `gap`, no `inset` shorthand. `inset: 0` was
+   the first attempt and it left the input with no box at all there, which made
+   the switch both invisible and, since D-pad navigation skips anything with a
+   zero-sized rect, unreachable. */
+/* Scoped under `.settings` to outrank `.settings label { display: block }`,
+   which is more specific than a bare class and was quietly flattening this
+   row: the label stopped being a flex container, its children stopped being
+   flex items, and the switch — a span with no `display` of its own — fell
+   back to inline, where width and height mean nothing. The track then filled
+   the panel as a two-pixel line and the thumb landed on the text. */
+.settings .settings-toggle { display: flex; align-items: center; cursor: pointer; }
+/* Its own `display`, rather than relying on a flex parent to blockify it. */
+.settings-switch { display: inline-block; position: relative; flex: 0 0 auto; width: 44px; height: 24px; margin-right: .75rem; }
+/* The checkbox carries the state, the keyboard and the D-pad's activation, so
+   it stays in the layout and in the focus order — transparent and laid over
+   the track rather than removed with `display: none`. */
+.settings-switch input {
+  position: absolute; top: 0; right: 0; bottom: 0; left: 0;
+  width: 100%; height: 100%; margin: 0; padding: 0;
+  opacity: 0; cursor: pointer;
+}
+.settings-switch-track {
+  display: block; width: 100%; height: 100%; border-radius: 99px;
+  border: 1px solid #ffffff1f; background: #ffffff12;
+  transition: background 140ms ease, border-color 140ms ease;
+}
+.settings-switch-track::after {
+  content: ''; position: absolute; top: 3px; left: 3px;
+  width: 18px; height: 18px; border-radius: 99px;
+  background: #d6d6dc; box-shadow: 0 1px 3px #0006;
+  transition: transform 140ms ease, background 140ms ease;
+}
+.settings-switch input:checked + .settings-switch-track { background: #7c1a2c; border-color: #a8324a; }
+.settings-switch input:checked + .settings-switch-track::after { transform: translateX(20px); background: #ffe9ea; }
+.settings-switch input:focus-visible + .settings-switch-track { outline: 2px solid #ffb4b4; outline-offset: 2px; }
+/* The television draws its one focus ring as a box-shadow on whatever holds
+   `data-tv-selected`, and here that is the transparent input — an invisible
+   ring on an invisible box. The track wears it instead, in the TV ring's own
+   colour so focus reads the same across the screen. */
+.settings-switch input[data-tv-selected="true"] + .settings-switch-track { outline: 3px solid #c8203c; outline-offset: 2px; }
+.settings-toggle-label { line-height: 1.3; }
 .connection-form { display: grid; gap: .7rem; }
 .connection-form label { display: block; margin: .25rem 0 0; color: var(--text-dim); }
 .connection-form input, .connection-form textarea {

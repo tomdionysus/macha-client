@@ -20,11 +20,9 @@ import { PlaybackQueueStore } from '@macha/core';
 import { MusicPlaylistStore } from '@macha/core';
 import { VolumeStore } from '@macha/core';
 import {
-  getApiToken,
   getClientId,
   getBootstrapEndpoints,
   getDiscoveredEndpoints,
-  setApiToken as persistApiToken,
   setBootstrapEndpoints as persistBootstrapEndpoints,
 } from './state/client';
 import { HomeScreen } from './screens/HomeScreen';
@@ -232,7 +230,6 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
   const connectionRequired = !apiOverride;
 
   const [bootstrapEndpoints, setBootstrapEndpoints] = useState(() => getBootstrapEndpoints());
-  const [apiToken, setApiToken] = useState(() => getApiToken());
   const [connectionNotice, setConnectionNotice] = useState<string>();
   const [clusterUnreachable, setClusterUnreachable] = useState(false);
   const [connectionGate, setConnectionGate] = useState<ConnectionGate | undefined>(() =>
@@ -287,7 +284,6 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
   const { auth, ready: sessionReady } = useSession({
     connectionRequired,
     serverConfigured: bootstrapEndpoints.length > 0,
-    manualToken: apiToken,
     endpointRegistry,
   });
   const {
@@ -404,10 +400,11 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
     onQueueChange: playback.setQueueState,
   });
 
-  const saveServer = useCallback(async (urls: readonly string[], token: string): Promise<string | undefined> => {
+  const saveServer = useCallback(async (urls: readonly string[]): Promise<string | undefined> => {
     const normalizedEndpoints = normalizeConnectionEndpoints(urls);
-    const normalizedToken = token.trim();
-    const check = await checkEndpointConfiguration(normalizedEndpoints, normalizedToken);
+    // No bearer token anywhere in this path: sessions are minted anonymously,
+    // and as of @macha/core 0.6.4 the reachability check no longer takes one.
+    const check = await checkEndpointConfiguration(normalizedEndpoints);
     if (check.available.length === 0) {
       const message = check.message ?? SERVER_UNREACHABLE_MESSAGE;
       setConnectionNotice(message);
@@ -418,11 +415,9 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
     // Close the old session first, then make the new server authoritative.
     await playbackRuntime.stop();
     persistBootstrapEndpoints(normalizedEndpoints);
-    persistApiToken(token);
     reportClusterReachable();
     setClusterUnreachable(false);
     setBootstrapEndpoints(normalizedEndpoints);
-    setApiToken(normalizedToken);
     setConnectionGate(undefined);
     navigate(routes.home, { replace: true });
     return undefined;
@@ -459,7 +454,7 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
       welcome={effectiveConnectionGate === 'welcome'}
       notice={connectionNotice}
       bootstrapEndpoints={bootstrapEndpoints}
-      apiToken={apiToken}
+     
       onSave={saveServer}
     />
     {playerHost}
@@ -546,10 +541,10 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
           <Route path={routes.statusClient} element={<StatusScreen api={clusterStatusApi} endpointRegistry={endpointRegistry} platform={platform} manageApi={managementAvailable ? manageApi : undefined} section="client" auth={auth} />} />
           <Route path={routes.statusConnectivity} element={<StatusScreen api={clusterStatusApi} endpointRegistry={endpointRegistry} platform={platform} manageApi={managementAvailable ? manageApi : undefined} section="connectivity" auth={auth} />} />
           <Route path="/status/nodes/:nodeId" element={<NodeStatusScreen api={clusterStatusApi} />} />
-          <Route path={routes.manage} element={managementAvailable ? <ManageScreen api={manageApi} catalogueApi={catalogueApi} section="unmatched" settings={<SettingsScreen api={api} serverApi={serverApi} bootstrapEndpoints={bootstrapEndpoints} apiToken={apiToken} connectionNotice={connectionNotice} onSave={saveServer} />} onUnmatchedCountChange={setUnmatchedCount} /> : <Navigate to={routes.settings} replace />} />
-          <Route path={routes.manageFiles} element={managementAvailable ? <ManageScreen api={manageApi} catalogueApi={catalogueApi} section="files" settings={<SettingsScreen api={api} serverApi={serverApi} bootstrapEndpoints={bootstrapEndpoints} apiToken={apiToken} connectionNotice={connectionNotice} onSave={saveServer} />} onUnmatchedCountChange={setUnmatchedCount} /> : <Navigate to={routes.settings} replace />} />
-          <Route path={routes.settings} element={<ManageScreen api={manageApi} catalogueApi={catalogueApi} section="settings" settings={<SettingsScreen api={api} serverApi={serverApi} bootstrapEndpoints={bootstrapEndpoints} apiToken={apiToken} connectionNotice={connectionNotice} onSave={saveServer} />} />} />
-          <Route path={routes.connection} element={<ManageScreen api={manageApi} catalogueApi={catalogueApi} section="settings" settings={<SettingsScreen api={api} serverApi={serverApi} bootstrapEndpoints={bootstrapEndpoints} apiToken={apiToken} connectionNotice={connectionNotice} onSave={saveServer} />} />} />
+          <Route path={routes.manage} element={managementAvailable ? <ManageScreen api={manageApi} catalogueApi={catalogueApi} section="unmatched" settings={<SettingsScreen api={api} serverApi={serverApi} bootstrapEndpoints={bootstrapEndpoints} connectionNotice={connectionNotice} onSave={saveServer} />} onUnmatchedCountChange={setUnmatchedCount} /> : <Navigate to={routes.settings} replace />} />
+          <Route path={routes.manageFiles} element={managementAvailable ? <ManageScreen api={manageApi} catalogueApi={catalogueApi} section="files" settings={<SettingsScreen api={api} serverApi={serverApi} bootstrapEndpoints={bootstrapEndpoints} connectionNotice={connectionNotice} onSave={saveServer} />} onUnmatchedCountChange={setUnmatchedCount} /> : <Navigate to={routes.settings} replace />} />
+          <Route path={routes.settings} element={<ManageScreen api={manageApi} catalogueApi={catalogueApi} section="settings" settings={<SettingsScreen api={api} serverApi={serverApi} bootstrapEndpoints={bootstrapEndpoints} connectionNotice={connectionNotice} onSave={saveServer} />} />} />
+          <Route path={routes.connection} element={<ManageScreen api={manageApi} catalogueApi={catalogueApi} section="settings" settings={<SettingsScreen api={api} serverApi={serverApi} bootstrapEndpoints={bootstrapEndpoints} connectionNotice={connectionNotice} onSave={saveServer} />} />} />
           <Route path="/settings" element={<Navigate to={routes.settings} replace />} />
           <Route path={routes.sponsor} element={<SponsorScreen />} />
           <Route path="*" element={<Navigate to={routes.home} replace />} />

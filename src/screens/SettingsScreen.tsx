@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { MediaApi } from '@macha/core';
 import type { ServerApi, ServerStatus } from '@macha/core';
@@ -6,14 +7,14 @@ import { useAsync } from '../hooks/useAsync';
 import { routes } from '@macha/core';
 import { clientVersion } from '../version';
 import { ConnectionForm } from '../components/ConnectionForm';
+import { failureTrailEnabled, setFailureTrailEnabled } from '../diagnostics/failureTrailSetting';
 
 interface Props {
   api: MediaApi;
   serverApi: ServerApi;
   bootstrapEndpoints: readonly string[];
-  apiToken: string;
   connectionNotice?: string;
-  onSave: (urls: readonly string[], token: string) => Promise<string | undefined>;
+  onSave: (urls: readonly string[]) => Promise<string | undefined>;
 }
 
 function booleanField(status: ServerStatus | undefined, name: string): boolean | undefined {
@@ -34,7 +35,8 @@ function formatLastSync(unixMs: number): string {
   return new Date(unixMs).toLocaleString();
 }
 
-export function SettingsScreen({ api, serverApi, bootstrapEndpoints, apiToken, connectionNotice, onSave }: Props) {
+export function SettingsScreen({ api, serverApi, bootstrapEndpoints, connectionNotice, onSave }: Props) {
+  const [failureTrail, setFailureTrail] = useState(failureTrailEnabled);
   const server = useAsync(() => serverApi.status(), [serverApi]);
   const catalogue = useAsync(() => api.status(), [api]);
 
@@ -113,9 +115,29 @@ export function SettingsScreen({ api, serverApi, bootstrapEndpoints, apiToken, c
 
       </div>
 
+      <div className="settings-diagnostics">
+        <h2>Diagnostics</h2>
+        <label className="settings-toggle">
+          <span className="settings-switch">
+            <input
+              type="checkbox"
+              role="switch"
+              data-tv-focusable="true"
+              checked={failureTrail}
+              onChange={(event) => {
+                setFailureTrailEnabled(event.target.checked);
+                setFailureTrail(event.target.checked);
+              }}
+            />
+            <span className="settings-switch-track" aria-hidden="true" />
+          </span>
+          <span className="settings-toggle-label">Show extended playback logging on errors</span>
+        </label>
+      </div>
+
       <div className="settings-connection">
         <h2>Connection</h2>
-        <ConnectionForm bootstrapEndpoints={bootstrapEndpoints} apiToken={apiToken} onSave={onSave} notice={connectionNotice} />
+        <ConnectionForm bootstrapEndpoints={bootstrapEndpoints} onSave={onSave} notice={connectionNotice} />
       </div>
     </section>
   );
