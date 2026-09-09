@@ -766,6 +766,27 @@ h2 { font-size: clamp(1.2rem, 2vw, 1.75rem); letter-spacing: -.01em; margin: 1.1
 }
 .player-fatal-error strong { color: #dedee2; font-size: 1.05rem; }
 .player-fatal-error span { color: #ffb4b4; overflow-wrap: anywhere; }
+/* The evidence behind the failure, in the failure's own words. Quieter than
+   the message itself and left-aligned: it is read line by line, and centring
+   a list of timings makes the column of numbers unfollowable. */
+.player-failure-trail {
+  margin: .35rem 0 0;
+  padding: .55rem .7rem;
+  list-style: none;
+  display: grid;
+  gap: .3rem;
+  max-height: 40vh;
+  overflow-y: auto;
+  border-radius: .45rem;
+  background: #ffffff08;
+  text-align: left;
+  font-size: .78rem;
+  line-height: 1.35;
+}
+.player-failure-trail li { display: grid; grid-template-columns: 3.4rem 1fr; gap: 0 .5rem; }
+.player-failure-trail span { color: #b9b9c2; }
+.player-failure-trail span:first-child { color: #7f7f8a; font-variant-numeric: tabular-nums; }
+.player-failure-trail span:last-child:not(:nth-child(2)) { grid-column: 2; color: #8d8d97; overflow-wrap: anywhere; }
 .player-failed .player-chrome { transition: none; }
 .player-mini-chrome { display: none; }
 .player-presentation-mini {

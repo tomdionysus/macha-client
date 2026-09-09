@@ -63,7 +63,7 @@ export type ManagedHlsErrorAction =
  * `networkDetails`, which is loader-specific and undocumented. The status is
  * the one field every loader populates the same way.
  */
-const SEGMENT_NOT_READY_STATUS = 500;
+export const SEGMENT_NOT_READY_STATUS = 500;
 
 type HlsErrorShape = { type?: unknown; response?: { code?: unknown } | null };
 

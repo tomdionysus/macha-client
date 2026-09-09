@@ -6,11 +6,13 @@ import {
   webLocalSeekCoverage,
   webPlaybackEventsEqual,
   webMediaElementFailure,
+  awaitNativeHlsFirstFragment,
   preflightWebHlsSource,
   webHlsPreflightTargets,
   WebPlatform,
 } from './WebPlatform';
 import { ManagedHlsMediaRecoveryBudget } from './ManagedHlsRecovery';
+import { MEDIA_START_STARVATION_MS } from './MediaWatchdog';
 import { PlaybackSourceError } from '@macha/core';
 
 afterEach(() => vi.unstubAllGlobals());
@@ -80,6 +82,12 @@ describe('Web player source reassignment', () => {
     } as unknown as HTMLVideoElement;
   }
 
+  /** Fire an event on the fake element by replaying its captured handlers. */
+  function emit(video: HTMLVideoElement, event: string): void {
+    const registered = (video.addEventListener as unknown as { mock: { calls: [string, () => void][] } }).mock.calls;
+    for (const [name, handler] of registered) if (name === event) handler();
+  }
+
   it('does not reset the reused media element via removeAttribute/load before assigning a new direct-play source', async () => {
     const video = fakeVideo();
     vi.stubGlobal('document', { createElement: vi.fn(() => video) });
@@ -98,6 +106,121 @@ describe('Web player source reassignment', () => {
     expect(video.removeAttribute).not.toHaveBeenCalled();
     expect(video.load).not.toHaveBeenCalled();
     expect(video.src).toBe(source.url);
+  });
+
+  /**
+   * Measured on a Samsung set: after the serving node stopped, both
+   * replacement generations were attached to the reused element and sat at
+   * `readyState: HAVE_NOTHING` for the full starvation budget without
+   * fetching a byte, while the nodes themselves served the same fragments on
+   * demand. A failed element does not take another source.
+   */
+  it('discards a media element that failed, and keeps one that merely changed source', async () => {
+    vi.useFakeTimers();
+    try {
+      const first = fakeVideo();
+      const second = fakeVideo();
+      const created = [first, second];
+      vi.stubGlobal('document', { createElement: vi.fn(() => created.shift() ?? fakeVideo()) });
+      const player = new WebPlatform().createPlayer();
+      player.attach({ firstChild: null, appendChild: vi.fn() } as unknown as HTMLElement);
+      const source = { mediaId: 'm1', url: 'https://node.test/stream', isManifest: false, mimeType: 'video/mp4', mode: 'direct' as const };
+
+      // An ordinary seek generation: nothing failed, so the element is kept.
+      await player.play(source, 0, true);
+      await player.play(source, 5_000, true);
+      expect(second.src).toBe('');
+
+      // Now starve it, the way a node going away does.
+      await player.play(source, 0, false);
+      vi.advanceTimersByTime(MEDIA_START_STARVATION_MS + 1_000);
+      await player.play({ ...source, url: 'https://node-b.test/stream' }, 0, true);
+
+      // The failed element was emptied and let go; the replacement took the
+      // source. Before this, the same element was handed the new URL and
+      // never fetched a byte of it.
+      expect(first.removeAttribute).toHaveBeenCalledWith('src');
+      expect(first.src).not.toBe('https://node-b.test/stream');
+      expect(second.src).toBe('https://node-b.test/stream');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  /**
+   * A native player has no retry policy this client can reach, so a fragment
+   * the node is still producing reaches the coordinator as the node having
+   * failed — and three of those exhaust a healthy cluster. The element is
+   * therefore not given the URL until the node will serve it.
+   */
+  describe('a native HLS source whose first fragment is still being produced', () => {
+    const hlsSource = {
+      mediaId: 'm1',
+      url: 'https://node.test/g/media.m3u8',
+      isManifest: true,
+      mimeType: 'application/vnd.apple.mpegurl',
+      mode: 'remux' as const,
+    };
+
+    function nativePlayer(video: HTMLVideoElement) {
+      vi.stubGlobal('document', { createElement: vi.fn(() => video) });
+      const player = new WebPlatform({ forceNativeHls: true }).createPlayer();
+      player.attach({ firstChild: null, appendChild: vi.fn() } as unknown as HTMLElement);
+      return player;
+    }
+
+    it('holds the URL back until the node serves it, then attaches', async () => {
+      const video = fakeVideo();
+      const playlist = '#EXTM3U\n#EXTINF:6,\nsegment-0.ts';
+      vi.stubGlobal('fetch', vi.fn()
+        .mockResolvedValueOnce(new Response(playlist, { status: 200 }))
+        .mockResolvedValueOnce(new Response('', { status: 500, headers: { 'Retry-After': '0' } }))
+        .mockResolvedValueOnce(new Response(playlist, { status: 200 }))
+        .mockResolvedValueOnce(new Response(new Uint8Array([1]), { status: 206 })));
+
+      await nativePlayer(video).play(hlsSource, 0, true);
+
+      expect(video.src).toBe(hlsSource.url);
+    });
+
+    it('never charges the waiting node for a failure from the generation it is replacing', async () => {
+      const video = fakeVideo();
+      const player = nativePlayer(video);
+      const failures: Error[] = [];
+      player.subscribeFailure?.((error) => failures.push(error));
+      let serveFragment = (_: Response) => {};
+      vi.stubGlobal('fetch', vi.fn()
+        .mockResolvedValueOnce(new Response('#EXTM3U\n#EXTINF:6,\nsegment-0.ts', { status: 200 }))
+        .mockReturnValueOnce(new Promise<Response>((resolve) => { serveFragment = resolve; })));
+
+      const playing = player.play(hlsSource, 0, true);
+      await Promise.resolve();
+      // The element is still holding the source of the node that just died,
+      // and it says so while the replacement is being waited on.
+      (video as { error: MediaError | null }).error = { code: 2, message: 'connection lost' } as MediaError;
+      emit(video, 'error');
+      expect(failures).toEqual([]);
+
+      serveFragment(new Response(new Uint8Array([1]), { status: 206 }));
+      await playing;
+      expect(video.src).toBe(hlsSource.url);
+    });
+
+    it('reports a node that will not serve it as stream evidence, without ever attaching', async () => {
+      const video = fakeVideo();
+      const player = nativePlayer(video);
+      const failures: Error[] = [];
+      player.subscribeFailure?.((error) => failures.push(error));
+      vi.stubGlobal('fetch', vi.fn()
+        .mockResolvedValueOnce(new Response('#EXTM3U\n#EXTINF:6,\nsegment-0.ts', { status: 200 }))
+        .mockResolvedValueOnce(new Response('', { status: 503 })));
+
+      await expect(player.play(hlsSource, 0, true)).resolves.toBe(false);
+
+      expect(video.src).toBe('');
+      expect(failures).toHaveLength(1);
+      expect(failures[0]).toMatchObject({ kind: 'stream' });
+    });
   });
 
   /**
@@ -121,12 +244,6 @@ describe('Web player source reassignment', () => {
       const player = new WebPlatform().createPlayer();
       player.attach({ firstChild: null, appendChild: vi.fn() } as unknown as HTMLElement);
       return player;
-    }
-
-    /** Fire an event on the fake element by replaying its captured handlers. */
-    function emit(video: HTMLVideoElement, event: string): void {
-      const registered = (video.addEventListener as unknown as { mock: { calls: [string, () => void][] } }).mock.calls;
-      for (const [name, handler] of registered) if (name === event) handler();
     }
 
     it('surfaces a retryable stream failure so the coordinator can fail over', async () => {
@@ -257,6 +374,27 @@ describe('Web HLS standby preflight', () => {
     expect(observedSignal?.aborted).toBe(true);
   });
 
+  it('reads the initial media bytes on a browser with no response streams', async () => {
+    // Chromium 47 (Tizen 3) has fetch and no `response.body`. Reading that as
+    // "no bytes arrived" rejected every standby the Samsung ever prepared,
+    // leaving the one set that most needs a warm alternate without any.
+    const unstreamed = (bytes: number[]) => ({
+      ok: true,
+      status: 206,
+      body: undefined,
+      arrayBuffer: async () => new Uint8Array(bytes).buffer,
+    }) as unknown as Response;
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response('#EXTM3U\n#EXTINF:4,\nfirst.m4s', { status: 200 }))
+      .mockResolvedValueOnce(unstreamed([1, 2]));
+    const source = {
+      mediaId: 'macha:one', url: 'https://node-b.test/generation/index.m3u8',
+      isManifest: true, mimeType: 'application/vnd.apple.mpegurl', mode: 'remux' as const,
+    };
+
+    await expect(preflightWebHlsSource(source, fetchMock)).resolves.toBe(true);
+  });
+
   it('rejects a standby whose initial media data is unavailable', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response('#EXTM3U\n#EXT-X-MAP:URI="init.mp4"\n#EXTINF:4,\nfirst.m4s', { status: 200 }))
@@ -268,6 +406,87 @@ describe('Web HLS standby preflight', () => {
 
     await expect(preflightWebHlsSource(source, fetchMock)).resolves.toBe(false);
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('native HLS first-fragment readiness', () => {
+  const manifest = '#EXTM3U\n#EXT-X-PLAYLIST-TYPE:EVENT\n#EXTINF:6,\nsegment-0.ts';
+  const controllable = () => {
+    const slept: number[] = [];
+    let clock = 0;
+    return {
+      slept,
+      options: {
+        now: () => clock,
+        sleep: async (ms: number) => { slept.push(ms); clock += ms; },
+      },
+    };
+  };
+
+  it('waits out a held fragment for as long as the node keeps saying it is producing one', async () => {
+    const held = () => new Response('{"code":"segment_not_ready"}', { status: 500, headers: { 'Retry-After': '1' } });
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(new Response(manifest, { status: 200 }))
+      .mockResolvedValueOnce(held())
+      .mockResolvedValueOnce(new Response(manifest, { status: 200 }))
+      .mockResolvedValueOnce(held())
+      .mockResolvedValueOnce(new Response(manifest, { status: 200 }))
+      .mockResolvedValueOnce(new Response(new Uint8Array([7]), { status: 206 }));
+    const host = controllable();
+
+    await expect(awaitNativeHlsFirstFragment('https://node-b.test/g/media.m3u8', { fetchImpl, ...host.options }))
+      .resolves.toMatchObject({ ready: true, attempts: 3 });
+    // The node stated one second twice, and was believed both times.
+    expect(host.slept).toEqual([1_000, 1_000]);
+    expect(new Headers(fetchImpl.mock.calls[1][1]?.headers).get('range')).toBe('bytes=0-0');
+  });
+
+  it('never waits on a broken generation, which is the one thing that is node evidence', async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(new Response(manifest, { status: 200 }))
+      .mockResolvedValueOnce(new Response('{"code":"stream_failed"}', { status: 503 }));
+    const host = controllable();
+
+    await expect(awaitNativeHlsFirstFragment('https://node-b.test/g/media.m3u8', { fetchImpl, ...host.options }))
+      .resolves.toMatchObject({ ready: false, reason: 'fragment answered 503', attempts: 1 });
+    expect(host.slept).toEqual([]);
+  });
+
+  it('gives up on a node that holds the fragment past the budget, rather than holding the viewer forever', async () => {
+    const fetchImpl = vi.fn().mockImplementation((url: string) => Promise.resolve(
+      String(url).endsWith('.m3u8')
+        ? new Response(manifest, { status: 200 })
+        : new Response('', { status: 500, headers: { 'Retry-After': '1' } }),
+    ));
+    const host = controllable();
+
+    const readiness = await awaitNativeHlsFirstFragment('https://node-b.test/g/media.m3u8', {
+      fetchImpl,
+      timeoutMs: 4_000,
+      ...host.options,
+    });
+    expect(readiness.ready).toBe(false);
+    expect(readiness.reason).toContain('for 3s');
+    expect(host.slept).toEqual([1_000, 1_000, 1_000]);
+  });
+
+  it('treats a transfer that never became a response as the node, not the fragment', async () => {
+    const fetchImpl = vi.fn().mockRejectedValue(new TypeError('Failed to fetch'));
+    const host = controllable();
+
+    await expect(awaitNativeHlsFirstFragment('https://node-b.test/g/media.m3u8', { fetchImpl, ...host.options }))
+      .resolves.toMatchObject({ ready: false, reason: 'Failed to fetch', attempts: 1 });
+    expect(host.slept).toEqual([]);
+  });
+
+  it('abandons the wait the moment a later generation takes over', async () => {
+    const fetchImpl = vi.fn();
+    const readiness = await awaitNativeHlsFirstFragment('https://node-b.test/g/media.m3u8', {
+      fetchImpl,
+      superseded: () => true,
+    });
+    expect(readiness).toMatchObject({ ready: false, attempts: 0 });
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 });
 

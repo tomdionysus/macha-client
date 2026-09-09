@@ -7,6 +7,7 @@ import type {
   ClusterStatusApi,
   ClusterStatusSnapshot,
   ConnectivityCheck,
+  NodeRuntimeStatus,
   PublicConnectivityStatus,
 } from '@macha/core';
 import { startupPhaseLabel, startupReadyCount, startupSubsystems } from '@macha/core';
@@ -45,6 +46,21 @@ function formatDuration(ms?: number | null): string {
   if (hours < 48) return `${hours}h ${minutes % 60}m`;
   const days = Math.floor(hours / 24);
   return `${days}d ${hours % 24}h`;
+}
+
+/**
+ * Physical RAM on the machine, distinct from `runtime.rss_bytes`, which is the
+ * node process's own resident set and answers a different question entirely —
+ * a few hundred MB on a 64 GB box.
+ *
+ * Absent from every node until the server reports it, and absent from older
+ * nodes forever, which is the honest answer and renders as an em dash. Zero is
+ * treated the same way: a node that cannot determine its own RAM should say
+ * nothing rather than claim it has none.
+ */
+export function systemMemoryBytes(runtime: NodeRuntimeStatus): number | undefined {
+  const reported = runtime.memory_total_bytes;
+  return reported != null && Number.isFinite(reported) && reported > 0 ? reported : undefined;
 }
 
 function percentage(used: number, capacity: number): string {
@@ -231,6 +247,7 @@ function PublicConnectivity({ connectivity }: { connectivity: PublicConnectivity
 
 function NodeCard({ node, canManage, resetting, onReset }: { node: ClusterNodeStatus; canManage: boolean; resetting: boolean; onReset: (node: ClusterNodeStatus) => void }) {
   const canReset = canManage && Boolean(node.host && node.port);
+  const memory = systemMemoryBytes(node.runtime);
   return (
     <article className={`cluster-node-card ${nodeStatusClassName(node)}`}>
       <Link className="cluster-node-card-link" to={routes.statusNode(node.id)} data-tv-focusable="true">
@@ -246,6 +263,12 @@ function NodeCard({ node, canManage, resetting, onReset }: { node: ClusterNodeSt
           <div><dt>Storage</dt><dd>{formatBytes(node.storage.used_bytes)} / {formatBytes(node.storage.capacity_bytes)}</dd></div>
           <div><dt>Cache</dt><dd>{node.cache.capacity_bytes ? `${formatBytes(node.cache.used_bytes)} / ${formatBytes(node.cache.capacity_bytes)}` : '—'}</dd></div>
           <div><dt>Load</dt><dd>{node.runtime.load1 != null ? node.runtime.load1.toFixed(2) : '—'}</dd></div>
+          {/* Cores sits beside Load deliberately: load1 is a per-core queue
+              depth, so the two are only readable together across a cluster of
+              non-uniform machines. Memory is the machine's RAM, not the
+              node's footprint — see systemMemoryBytes. */}
+          <div><dt>Cores</dt><dd>{node.runtime.cpu_cores ?? '—'}</dd></div>
+          <div><dt>Memory</dt><dd>{memory != null ? formatBytes(memory) : '—'}</dd></div>
           <div><dt>Peers</dt><dd>{node.runtime.peers_active != null ? `${node.runtime.peers_active}/${node.runtime.peers_known ?? node.runtime.peers_active}` : '—'}</dd></div>
         </dl>
       </Link>
@@ -495,6 +518,7 @@ export function NodeStatusScreen({ api }: { api: ClusterStatusApi }) {
   if (!node) return <section className="cluster-status-screen node-status-screen error-status"><StatusHeader eyebrow="Cluster node" title="Node unavailable" refreshing={refreshing} onRefresh={() => void refreshPage()} /><p>{error}</p><Link to={routes.status}>← Overview</Link></section>;
 
   const runtime = node.runtime;
+  const memory = systemMemoryBytes(runtime);
   const connectivity = check?.results[0];
   return (
     <section className="cluster-status-screen node-status-screen">
@@ -531,8 +555,13 @@ export function NodeStatusScreen({ api }: { api: ClusterStatusApi }) {
         </dl></article>
         <article className="node-detail-card"><h2>Runtime</h2><dl>
           <DetailItem label="CPU">{runtime.process_cpu_percent != null ? `${runtime.process_cpu_percent.toFixed(1)}%` : '—'}</DetailItem>
+          <DetailItem label="Cores">{runtime.cpu_cores ?? '—'}</DetailItem>
           <DetailItem label="Load (1m)">{runtime.load1 != null ? runtime.load1.toFixed(2) : '—'}</DetailItem>
-          <DetailItem label="RSS">{runtime.rss_bytes != null ? formatBytes(runtime.rss_bytes) : '—'}</DetailItem>
+          <DetailItem label="System memory">{memory != null ? formatBytes(memory) : '—'}</DetailItem>
+          {/* Named "Process RSS" rather than "RSS" now that machine memory sits
+              directly above it: two byte counts an order of magnitude apart,
+              and the shorter label left the reader to know which was which. */}
+          <DetailItem label="Process RSS">{runtime.rss_bytes != null ? formatBytes(runtime.rss_bytes) : '—'}</DetailItem>
           <DetailItem label="Peers">{runtime.peers_active != null ? `${runtime.peers_active}/${runtime.peers_known ?? runtime.peers_active} active` : '—'}</DetailItem>
           <DetailItem label="RPC reused">{runtime.rpc_connections_reused ?? '—'}</DetailItem>
           <DetailItem label="RPC canonical">{runtime.rpc_connections_canonical ?? '—'}</DetailItem>

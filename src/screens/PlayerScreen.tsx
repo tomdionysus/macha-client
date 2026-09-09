@@ -12,6 +12,7 @@ import { isSubtitleOnlyPlaybackUpdate, type PlaybackCoordinatorSnapshot } from '
 import { PlaybackRuntime, type PlaybackRuntimeRequest, type PlaybackRuntimeSnapshot } from '@macha/core';
 import { uiSettings } from '../settings';
 import { describePlaybackSession } from '@macha/core';
+import { playbackFailureTrail, type PlaybackFailureTrailEntry } from './player/failureTrail';
 import { bufferedTimelineSegments } from '@macha/core';
 import type { MediaSummary, PlaybackEvent, PlaybackProgress } from '@macha/core';
 import { PlayerOptions } from './player/PlayerOptions';
@@ -451,6 +452,14 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
     };
   }, [interactionControlled, presentation]);
 
+  // Read once, when the failure lands: the buffer keeps filling afterwards
+  // (session teardown, endpoint probes) and would push the evidence off a
+  // list the viewer is in the middle of reading.
+  const [failureTrail, setFailureTrail] = useState<PlaybackFailureTrailEntry[]>([]);
+  useEffect(() => {
+    setFailureTrail(fatalError ? playbackFailureTrail() : []);
+  }, [fatalError]);
+
   useEffect(() => {
     if (!fatalError) return;
     setControlsVisible(true);
@@ -712,6 +721,17 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
         <div className="player-fatal-error" role="alert">
           <strong>Playback failed</strong>
           <span>{fatalError.message}</span>
+          {failureTrail.length > 0 && (
+            <ol className="player-failure-trail">
+              {failureTrail.map((entry) => (
+                <li key={`${entry.atMs}-${entry.event}`}>
+                  <span>{(entry.atMs / 1_000).toFixed(1)}s</span>
+                  <span>{entry.event}</span>
+                  {entry.detail && <span>{entry.detail}</span>}
+                </li>
+              ))}
+            </ol>
+          )}
         </div>
       )}
 
@@ -742,7 +762,14 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
             {playbackNotice ? (
               <small>{playbackNotice}</small>
             ) : playback.preparingSource ? (
-              <small>Preparing new stream…</small>
+              // Named rather than anonymous: this is the one moment the client
+              // is moving between nodes, and "which node" is the only question
+              // worth asking about it. The endpoint shown is the one currently
+              // held — the node being replaced during a failover, the node
+              // doing the work during a seek — and it flips to the replacement
+              // the moment that generation activates, so watching this line
+              // through a failover shows how far round the cluster it has got.
+              <small>{streamStatus?.endpoint ? `Preparing new stream on ${streamStatus.endpoint}…` : 'Preparing new stream…'}</small>
             ) : (
               <>
                 {/* The carriage and the node that served it, on one line as

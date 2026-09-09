@@ -644,6 +644,114 @@ already open, tested directly); and the stall watchdog arming on a source's
 first report *was* a real bug of mine, killing freshly promoted generations
 before they could deliver a frame — fixed, and the TV symptom survived the fix.
 
+**Cause found 2026-09-09: failover asks for the wrong segment container.**
+
+`container` is not among a session's confirmed preferences, and failover
+rebuilds a generation from exactly those (`completePreferences` →
+`currentPreferences`). So a Samsung set that asked for MPEG-TS was handed
+**fMP4 by every replacement node** — the one carriage it cannot play. The PATCH
+path already restated the container, with a comment naming this very failure
+("a device handed fragmented MP4 where it asked for MPEG-TS shows a black
+picture and reports nothing"); the create path never got it. That asymmetry is
+the whole fault, and it is what the decisive observation was pointing at all
+along: after the error, selecting Auto — a PATCH — **resumes instantly from the
+same node that had just starved**.
+
+- [x] `withRestatedSegmentContainer` in `@macha/core`, shared by the update
+      path and `currentPreferences`, so failover and standby preparation ask
+      for the carriage the generation was created with. Regression test
+      confirmed to fail against the pre-fix code.
+
+**Two earlier theories of mine, both wrong, kept so nobody re-raises them.**
+
+*Segment holds.* The trail carries no `hls-native-first-fragment-held` line, so
+no fragment was ever held: the nodes answered the readiness probe at once. The
+gate below still earns its place as the elimination — it is how "the node is
+not serving" was ruled out — but it fixed nothing.
+
+*A wedged media element.* The measured trace read:
+
+```
+139.4  source-start-starved     10.44.1.51  readyState HAVE_NOTHING, no data in 20s
+139.4  source-failover-start    -> 10.34.1.50
+160.4  source-start-starved     10.34.1.50  readyState HAVE_NOTHING, no data in 20s
+160.4  source-failover-exhausted / fatal
+```
+
+Zero bytes on a reused element looked like the element. It was the *carriage*:
+a native player handed fMP4 it cannot decode fetches nothing and says nothing,
+which is indistinguishable from a wedged element from the outside. Discarding
+a failed element shipped on that theory and did **not** fix the fault — it is
+still in `WebPlayer.play()`, gated on failure so the seek path is untouched,
+but it is unproven and should come out unless something turns up to justify it.
+
+**Superseded — the media-element theory, for the record.**
+Measured on the set with the failure trail now shown on the failure screen:
+
+```
+139.4  source-start-starved     10.44.1.51  readyState HAVE_NOTHING, no data in 20s
+139.4  source-failover-start    -> 10.34.1.50
+143.6  media-stalled            readyState HAVE_NOTHING
+160.4  source-start-starved     10.34.1.50  readyState HAVE_NOTHING, no data in 20s
+160.4  source-failover-exhausted / fatal
+```
+
+Both replacements were attached to the **reused** `<video>` element and sat at
+`HAVE_NOTHING` for the full 20 s starvation budget without fetching a byte —
+while a plain `fetch` of each generation's own first fragment, issued moments
+earlier by the readiness gate below, was served immediately. The nodes were
+serving; the element was wedged, and each starvation was charged to a healthy
+node until the candidate list was empty. Reuse has always worked for a seek,
+where nothing failed first; it does not survive a generation that failed.
+
+- [x] `WebPlayer.play()` discards a media element whose previous generation
+      failed, rather than reusing it. Gated on failure specifically, so the
+      seek path — the case reuse exists for — is untouched.
+
+**The segment-hold theory below was wrong, and is kept because the work it
+produced is still right.** The trail carries no `hls-native-first-fragment-held`
+line, so no fragment was ever held: the nodes answered the readiness probe at
+once. What the gate bought was the elimination — it is how "the node is not
+serving" was ruled out and the fault localised to the element.
+
+**Superseded — the segment-hold theory, for the record.** A native HLS
+player has no retry policy this client can reach. Failover creates a fresh
+generation mid-file; the playlist is complete from the moment the plan exists
+(the server moved its readiness gate off `media.m3u8` deliberately), so the
+wait now lands on the *first fragment*, which the node holds and then answers
+`500 segment_not_ready` with `Retry-After`. hls.js rides that out —
+`isHlsSegmentHold` exists for exactly this — but the native player sees one
+`MEDIA_ERR_NETWORK`, immediately and permanently. That reaches the coordinator
+as `'stream'`, which is legitimate endpoint evidence, so a healthy node is
+charged and the next one is tried; it cold-starts its own generation and
+answers identically. Three of those and `failedGenerationEndpoints` covers the
+cluster, which is why the message is *"No untried Macha playback endpoint
+remains"* — that string is only produced when the candidate list is **empty**,
+never when creates failed. It also explains the recovery Tom found: selecting
+Auto PATCHes the session still alive on the last node, whose pipeline has been
+producing for half a minute by then, so it plays at once.
+
+- [x] `WebPlayer.play()` asks the node for one byte of the first fragment
+      before handing the element a native-HLS URL, through the same admission
+      and hold path the player itself would use: it waits while the node says
+      it is producing (honouring `Retry-After`, 30 s budget = five server-side
+      holds), and stops immediately on `503`/transport, which *is* node
+      evidence. `awaitNativeHlsFirstFragment` in `WebPlatform.ts`.
+- [x] The element is emptied before that wait, so a failure still arriving
+      from the generation being replaced cannot be billed to its replacement.
+      The native branch was the only one of the three doing neither this nor
+      the direct path's documented refusal to.
+- [x] `readFirstResponseBytes` no longer requires `response.body`. Chromium 47
+      has `fetch` and not response streams, so **every warm standby the
+      Samsung ever prepared failed its own preflight and was discarded** —
+      the set least able to afford a cold failover was the one guaranteed
+      never to have an alternate ready.
+- [ ] Live-verify on the TV: stop the serving node mid-film with all three up.
+      Expect one wait, not three failures. A wait that actually happened logs
+      `hls-native-first-fragment-held` at `warn` with its duration and attempt
+      count, so the Samsung build's `warn`-and-above buffer captures it
+      without raising the level for the run.
+
 ## P1 — `levelLoadError` evicts a healthy node, with no server error behind it
 
 Observed twice on 2026-09-08, unprompted, on **wired gbni-1** during a Clerks

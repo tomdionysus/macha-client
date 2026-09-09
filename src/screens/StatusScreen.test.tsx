@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { EndpointCandidate } from '@macha/core';
 import type { ClusterNodeStatus, ClusterStatusSnapshot } from '@macha/core';
 import type { IdentityAssociationResetResult, ManageApi } from '@macha/core';
-import { acceptNodeIdentityAssociationReset, clientEndpointHealth, identityResetAcceptanceMessage, nodeNotYetReady, nodeStatusLabel, StatusHeader, statusSectionVisibility, withoutRetiredNodeIdentity } from './StatusScreen';
+import { acceptNodeIdentityAssociationReset, clientEndpointHealth, identityResetAcceptanceMessage, nodeNotYetReady, nodeStatusLabel, StatusHeader, statusSectionVisibility, systemMemoryBytes, withoutRetiredNodeIdentity } from './StatusScreen';
 
 function candidate(health: EndpointCandidate['health']): EndpointCandidate {
   return {
@@ -108,5 +108,25 @@ describe('asynchronous node identity reset', () => {
     finishRefresh();
     await expect(workflow).resolves.toBe(queued);
     expect(refresh).toHaveBeenCalledOnce();
+  });
+});
+
+describe('machine memory reported separately from the node process footprint', () => {
+  it('never answers with the process resident set, and says nothing rather than nothing-at-all', () => {
+    // The whole reason this helper exists. `rss_bytes` is the only byte count
+    // the server sent for most of this project's life, and it is the node's
+    // own footprint — a few hundred MB on a machine with 64 GB. Rendering it
+    // under "Memory" would be wrong by two orders of magnitude and look
+    // entirely plausible.
+    expect(systemMemoryBytes({ rss_bytes: 402_653_184 })).toBeUndefined();
+
+    expect(systemMemoryBytes({ memory_total_bytes: 68_719_476_736, rss_bytes: 402_653_184 }))
+      .toBe(68_719_476_736);
+
+    // A node that cannot determine its own RAM reports nothing; the server
+    // guards on nonzero for exactly this reason. Should one ever send a zero
+    // anyway, "—" is the truth and "0 B" is a claim it has no memory.
+    expect(systemMemoryBytes({ memory_total_bytes: 0 })).toBeUndefined();
+    expect(systemMemoryBytes({})).toBeUndefined();
   });
 });

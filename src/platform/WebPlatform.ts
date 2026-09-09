@@ -23,7 +23,13 @@ import {
   subscribeDirectPlayReadAheadFailure,
 } from '../playback/directPlayReadAhead';
 import { hlsEventSummary, videoState, WebMediaDiagnostics } from './WebMediaDiagnostics';
-import { isHlsNetworkDegradation, isHlsSegmentHold, managedHlsErrorAction, webHlsBufferConfig } from './WebHlsPolicy';
+import {
+  isHlsNetworkDegradation,
+  isHlsSegmentHold,
+  managedHlsErrorAction,
+  SEGMENT_NOT_READY_STATUS,
+  webHlsBufferConfig,
+} from './WebHlsPolicy';
 import {
   isLegacyWebVtt,
   subtitleSegmentAt,
@@ -82,7 +88,14 @@ export function webHlsPreflightTargets(manifest: string, manifestUrl: string): {
 }
 
 async function readFirstResponseBytes(response: Response): Promise<boolean> {
-  if (!response.ok || !response.body) return false;
+  if (!response.ok) return false;
+  // Chromium 47 (Tizen 3) has `fetch` but not response streams, so `body` is
+  // undefined there. Reading that as "no bytes arrived" made every warm
+  // standby the Samsung ever prepared fail its own validation and be thrown
+  // away, leaving the set with only the slow path it is least able to take.
+  // The buffered read costs the bytes the caller's Range header has already
+  // bounded.
+  if (!response.body) return (await response.arrayBuffer()).byteLength > 0;
   const reader = response.body.getReader();
   try {
     const first = await reader.read();
@@ -127,6 +140,143 @@ export async function preflightWebHlsSource(
   } finally {
     clearTimeout(timeout);
   }
+}
+
+/**
+ * How long a node is given to produce the first fragment of a fresh
+ * generation before the wait becomes evidence against it.
+ *
+ * Generous deliberately. `500 segment_not_ready` is the node stating that it
+ * is working on a fragment it has already promised, and abandoning it costs
+ * more than waiting does: the replacement starts its own generation from
+ * nothing, so the viewer waits out a cold start instead of the tail of a warm
+ * one. Thirty seconds is five of the server's own six-second holds.
+ */
+export const NATIVE_HLS_FIRST_FRAGMENT_TIMEOUT_MS = 30_000;
+
+/** Only reached where the node did not say; a held fragment carries `Retry-After`. */
+const NATIVE_HLS_HOLD_RETRY_MS = 500;
+
+/** Longest a single stated `Retry-After` is honoured, so one bad header cannot park playback. */
+const NATIVE_HLS_MAX_RETRY_MS = 5_000;
+
+export interface NativeHlsReadiness {
+  ready: boolean;
+  /** Why not, in the terms the node stated it. */
+  reason?: string;
+  waitedMs: number;
+  attempts: number;
+}
+
+type FragmentProbe =
+  | { ready: true }
+  | { ready: false; hold: boolean; reason: string; retryMs?: number };
+
+function statedRetryMs(response: Response): number | undefined {
+  const stated = response.headers.get('Retry-After');
+  if (!stated) return undefined;
+  const seconds = Number(stated);
+  if (!Number.isFinite(seconds) || seconds < 0) return undefined;
+  return Math.min(seconds * 1_000, NATIVE_HLS_MAX_RETRY_MS);
+}
+
+function refusal(response: Response, what: string): FragmentProbe {
+  return {
+    ready: false,
+    hold: response.status === SEGMENT_NOT_READY_STATUS,
+    reason: `${what} answered ${response.status}`,
+    retryMs: statedRetryMs(response),
+  };
+}
+
+async function probeFirstFragment(manifestUrl: string, fetchImpl: typeof fetch): Promise<FragmentProbe> {
+  let url = manifestUrl;
+  for (let depth = 0; depth < 2; depth += 1) {
+    const response = await fetchImpl(url, { method: 'GET', cache: 'no-store' });
+    if (!response.ok) return refusal(response, 'playlist');
+    const targets = webHlsPreflightTargets(await response.text(), url);
+    if (targets.variantUrl) {
+      url = targets.variantUrl;
+      continue;
+    }
+    if (targets.mediaUrls.length === 0) return { ready: false, hold: false, reason: 'playlist names no fragment' };
+    for (const mediaUrl of targets.mediaUrls) {
+      // One byte is the whole question. The node admits and holds this request
+      // through the same path as the player's own fragment fetch, so a
+      // fragment still being produced answers it exactly as it would answer
+      // the player — and a Range this small cannot cost a segment's traffic.
+      const media = await fetchImpl(mediaUrl, {
+        method: 'GET',
+        headers: { Range: 'bytes=0-0' },
+        cache: 'no-store',
+      });
+      if (!media.ok) return refusal(media, 'fragment');
+    }
+    return { ready: true };
+  }
+  return { ready: false, hold: false, reason: 'playlist nests variants past one level' };
+}
+
+/**
+ * Hold a native HLS source until the node will actually serve its first
+ * fragment.
+ *
+ * A native player has no retry policy this client can reach: hand it a
+ * playlist whose first fragment is still being produced and it reports a
+ * network failure immediately and permanently. The coordinator can only read
+ * that as the node having failed, so it moves to the next one — which
+ * cold-starts its own generation and answers the same way. Three of those
+ * exhaust a healthy cluster in seconds, which is exactly what the Samsung set
+ * does on every failover.
+ *
+ * hls.js needs none of this because it retries fragments itself and
+ * `isHlsSegmentHold` already teaches it that a 500 is not node evidence. This
+ * is that same contract honoured on the one path that cannot honour it from
+ * inside the player, so it is asked before the element is ever given the URL.
+ */
+export async function awaitNativeHlsFirstFragment(
+  manifestUrl: string,
+  options: {
+    fetchImpl?: typeof fetch;
+    now?: () => number;
+    sleep?: (ms: number) => Promise<void>;
+    timeoutMs?: number;
+    /** Abandons the wait when a later generation has taken over. */
+    superseded?: () => boolean;
+  } = {},
+): Promise<NativeHlsReadiness> {
+  const {
+    fetchImpl = fetch,
+    now = () => Date.now(),
+    sleep = (ms: number) => new Promise<void>((resolve) => { setTimeout(resolve, ms); }),
+    timeoutMs = NATIVE_HLS_FIRST_FRAGMENT_TIMEOUT_MS,
+    superseded = () => false,
+  } = options;
+  const started = now();
+  const deadline = started + timeoutMs;
+  let attempts = 0;
+  let reason = 'superseded before the node was asked';
+  while (!superseded()) {
+    attempts += 1;
+    let probe: FragmentProbe;
+    try {
+      probe = await probeFirstFragment(manifestUrl, fetchImpl);
+    } catch (error) {
+      // A transfer that never became a response is evidence about the node,
+      // never about the fragment, so it is not something to wait out.
+      probe = { ready: false, hold: false, reason: error instanceof Error ? error.message : String(error) };
+    }
+    if (probe.ready) return { ready: true, waitedMs: now() - started, attempts };
+    reason = probe.reason;
+    if (!probe.hold) break;
+    const retryMs = probe.retryMs ?? NATIVE_HLS_HOLD_RETRY_MS;
+    if (now() + retryMs >= deadline) {
+      reason = `${reason} for ${Math.round((now() - started) / 1_000)}s`;
+      break;
+    }
+    await sleep(retryMs);
+  }
+  return { ready: false, reason, waitedMs: now() - started, attempts };
 }
 
 function nativeHlsSupported(video: HTMLVideoElement): boolean {
@@ -198,6 +348,19 @@ class WebPlayer implements Player {
   private playRequestGeneration = 0;
   private activeSource?: PlaybackSource;
   private sourceGeneration = 0;
+  /**
+   * The generation whose source the element is actually holding, which is not
+   * the current generation while one is being waited on.
+   *
+   * The element's own `error` event is the one failure channel that cannot
+   * carry a generation: it is registered once, on the element, so it reports
+   * whatever `sourceGeneration` happens to be when it fires. A native HLS
+   * source is now waited on before it is attached, which opens a real window
+   * where the element still holds the dying generation while the counter has
+   * already moved — and an error arriving in that window would be charged to
+   * a node that has not been given a URL yet.
+   */
+  private attachedSourceGeneration?: number;
   private failedSourceGeneration?: number;
   private degradedSourceGeneration?: number;
   private unsubscribeDirectDegradation?: () => void;
@@ -282,6 +445,7 @@ class WebPlayer implements Player {
       // Teardown deliberately clears activeSource before removing src; do not
       // turn those media-element events into a generation failure.
       if (!this.activeSource || video !== this.video) return;
+      if (this.attachedSourceGeneration !== this.sourceGeneration) return;
       const failure = webMediaElementFailure(video.error);
       this.failSourceGeneration(this.sourceGeneration, failure, videoState(video));
     });
@@ -315,6 +479,25 @@ class WebPlayer implements Player {
 
   async play(source: PlaybackSource, positionMs = 0, startPaused = false): Promise<boolean> {
     if (!this.host) throw new Error('Player must be attached before playback');
+    // A media element that has already failed does not reliably accept
+    // another source. Measured on a Samsung set 2026-09-09: after the serving
+    // node was stopped, both replacement generations were attached to the
+    // reused element and sat at `readyState: HAVE_NOTHING` for the full 20 s
+    // starvation budget without fetching a byte — while a plain `fetch` of
+    // the very same generation's first fragment, issued moments earlier by
+    // the readiness gate, was served immediately. The nodes were fine; the
+    // element was wedged, and every failover charged a healthy node for it
+    // until the cluster ran out.
+    //
+    // Recreating costs the playback DOM and element-scoped state such as
+    // fullscreen, which is why the element is otherwise kept across source
+    // generations. So it is discarded only where something actually broke —
+    // never on an ordinary seek, which is the case that reuse exists for and
+    // the case that has always worked.
+    if (this.failedSourceGeneration !== undefined) {
+      this.log.info('media-element-discarded-after-failure', this.video ? videoState(this.video) : undefined);
+      this.discardMediaElement();
+    }
     const playRequestGeneration = ++this.playRequestGeneration;
     const sourceGeneration = ++this.sourceGeneration;
     this.failedSourceGeneration = undefined;
@@ -324,6 +507,7 @@ class WebPlayer implements Player {
     // generation timeline must not observe or learn an origin from old buffer
     // residency on the reused <video> element.
     this.activeSource = undefined;
+    this.attachedSourceGeneration = undefined;
     this.mediaTimeline = undefined;
     this.lastPublishedEvent = undefined;
     this.log.info('source-load-begin', {
@@ -420,9 +604,36 @@ class WebPlayer implements Player {
           video.load();
         }
         this.attachHls(hlsModule, video, source.url, sourceGeneration);
+        this.attachedSourceGeneration = sourceGeneration;
       } else if (this.options.forceNativeHls || nativeHlsSupported(video)) {
         this.log.info('hls-native-selected', { url: source.url });
+        // No removeAttribute('src')/load() reset here, for the reason the
+        // direct path below records: it was observed live to leave the element
+        // at readyState 0 forever, no request issued and no error raised. What
+        // that reset was for — a failure from the generation being replaced
+        // being charged to its replacement — is handled by
+        // `attachedSourceGeneration` instead, which costs the element nothing.
+        const readiness = await awaitNativeHlsFirstFragment(source.url, {
+          superseded: () => sourceGeneration !== this.sourceGeneration,
+        });
+        if (sourceGeneration !== this.sourceGeneration || video !== this.video) return false;
+        // Warned rather than logged when it actually had to wait: a wait is
+        // the node at its production frontier and worth seeing, and the
+        // Samsung build keeps `warn` and above, which is the one target that
+        // cannot be watched any other way.
+        const waited = { url: source.url, ...readiness };
+        if (readiness.attempts > 1) this.log.warn('hls-native-first-fragment-held', waited);
+        else this.log.info('hls-native-first-fragment', waited);
+        if (!readiness.ready) {
+          this.failSourceGeneration(
+            sourceGeneration,
+            new PlaybackSourceError(`The node did not serve the first fragment: ${readiness.reason}.`, 'stream'),
+            readiness,
+          );
+          return false;
+        }
         video.src = source.url;
+        this.attachedSourceGeneration = sourceGeneration;
         elementOwnsFetch = true;
       } else {
         this.log.error('hls-unsupported', { url: source.url });
@@ -456,6 +667,7 @@ class WebPlayer implements Player {
       // read-ahead Service Worker was controlling the page — the redundant
       // reset raced the reassignment rather than the two ever combining safely.
       video.src = directUrl;
+      this.attachedSourceGeneration = sourceGeneration;
       elementOwnsFetch = true;
     }
 
@@ -865,11 +1077,17 @@ class WebPlayer implements Player {
     this.unsubscribeDirectDegradation = undefined;
     releaseDirectPlayReadAhead(this.directReadAheadSourceUrl);
     this.directReadAheadSourceUrl = undefined;
+    this.discardMediaElement();
+  }
+
+  /** Final teardown of the element itself, leaving the presentation host bound. */
+  private discardMediaElement(): void {
     const video = this.video;
     if (!video) return;
     this.clearSubtitleTracks(video);
     this.subtitleTextTrack = undefined;
     video.pause();
+    this.attachedSourceGeneration = undefined;
     video.removeAttribute('src');
     video.load();
     video.parentNode?.removeChild(video);
