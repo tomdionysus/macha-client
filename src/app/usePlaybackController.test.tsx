@@ -2,13 +2,13 @@
 import { act, renderHook } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
-import type { MediaApi } from '@macha/core';
-import type { Platform } from '@macha/core';
-import type { PlaybackRuntime, PlaybackRuntimeSnapshot } from '@macha/core';
-import { ContinueWatchingStore } from '@macha/core';
-import { PlaybackQueueStore } from '@macha/core';
-import { VolumeStore } from '@macha/core';
-import type { Episode, MediaSummary, SeasonDetails } from '@macha/core';
+import type { MediaApi } from '@machafoundation/core';
+import type { Platform } from '@machafoundation/core';
+import type { PlaybackRuntime, PlaybackRuntimeSnapshot } from '@machafoundation/core';
+import { ContinueWatchingStore } from '@machafoundation/core';
+import { PlaybackQueueStore } from '@machafoundation/core';
+import { VolumeStore } from '@machafoundation/core';
+import type { Episode, MediaSummary, SeasonDetails } from '@machafoundation/core';
 import { usePlaybackController } from './usePlaybackController';
 
 function movie(id: string): MediaSummary {

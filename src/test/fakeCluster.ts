@@ -1,8 +1,8 @@
 import { vi } from 'vitest';
-import { normalizeBaseUrl } from '@macha/core';
-import { bootstrapEndpoints, EndpointRegistry, type MachaEndpoint } from '@macha/core';
-import { ClusterPlaybackResolver } from '@macha/core';
-import type { PlaybackMode } from '@macha/core';
+import { normalizeBaseUrl } from '@machafoundation/core';
+import { bootstrapEndpoints, EndpointRegistry, type MachaEndpoint } from '@machafoundation/core';
+import { ClusterPlaybackResolver } from '@machafoundation/core';
+import type { PlaybackMode } from '@machafoundation/core';
 
 export interface WireSessionOverrides {
   mode?: PlaybackMode;

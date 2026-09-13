@@ -1,5 +1,5 @@
 import { afterEach } from 'vitest';
-import { configureClientDiagnostics } from '@macha/core';
+import { configureClientDiagnostics } from '@machafoundation/core';
 
 // Expected playback failure/recovery tests exercise verbose diagnostics. Keep
 // collecting those entries while reserving test stdout/stderr for assertions

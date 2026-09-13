@@ -17,7 +17,7 @@ import {
   MachaCatalogueApi,
   MachaPlaybackFactsApi,
   mintAnonymousSession,
-} from '@macha/core';
+} from '@machafoundation/core';
 import { readFileSync } from 'node:fs';
 
 function arg(name, fallback) {

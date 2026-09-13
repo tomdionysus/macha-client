@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom';
-import type { MediaApi } from '@macha/core';
-import { routes } from '@macha/core';
-import type { MediaSummary } from '@macha/core';
+import type { MediaApi } from '@machafoundation/core';
+import { routes } from '@machafoundation/core';
+import type { MediaSummary } from '@machafoundation/core';
 import { CardCloseButton } from './CardCloseButton';
 import { LazyArtwork } from './LazyArtwork';
 import { OverflowMenu, type OverflowMenuAction } from './OverflowMenu';

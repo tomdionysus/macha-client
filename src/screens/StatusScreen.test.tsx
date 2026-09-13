@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import type { EndpointCandidate } from '@macha/core';
-import type { ClusterNodeStatus, ClusterStatusSnapshot } from '@macha/core';
-import type { IdentityAssociationResetResult, ManageApi } from '@macha/core';
+import type { EndpointCandidate } from '@machafoundation/core';
+import type { ClusterNodeStatus, ClusterStatusSnapshot } from '@machafoundation/core';
+import type { IdentityAssociationResetResult, ManageApi } from '@machafoundation/core';
 import { acceptNodeIdentityAssociationReset, clientEndpointHealth, identityResetAcceptanceMessage, nodeNotYetReady, nodeStatusLabel, StatusHeader, statusSectionVisibility, systemMemoryBytes, TELEMETRY_AGEING_MS, TELEMETRY_STALE_MS, telemetryAge, withoutRetiredNodeIdentity } from './StatusScreen';
 
 function candidate(health: EndpointCandidate['health']): EndpointCandidate {

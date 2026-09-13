@@ -1,4 +1,4 @@
-import type { Platform } from '@macha/core';
+import type { Platform } from '@machafoundation/core';
 import { useAsync } from '../hooks/useAsync';
 
 /** Probe results read back on-screen, so "none detected" is distinguishable from "not checked yet". */

@@ -1,6 +1,6 @@
 # Macha server integration
 
-The client matches Macha's current catalogue HTTP API. The exact wire types live in `src/api/CatalogueApi.ts`; `MachaCatalogueApi.ts` is the HTTP adapter. Screens do not parse Macha JSON directly.
+The client matches Macha's current catalogue HTTP API. **The wire types and every HTTP adapter live in `@machafoundation/core`** (`macha-ts/src/api/`), not in this repo: `CatalogueApi.ts` is the contract, `MachaCatalogueApi.ts` the adapter, and the `Cluster*Api` classes route the same calls across endpoints. React screens consume the higher-level `MediaApi` facade and never parse Macha JSON directly.
 
 ## Current endpoints
 
@@ -139,7 +139,7 @@ Continue Watching is intentionally not a server API. It is local client state:
 - item is removed at 92% completion;
 - no account or user identity;
 - no progress upload.
-## Playback (Macha 0.9.1)
+## Playback
 
 The player uses the server playback-session API rather than constructing media URLs itself:
 

@@ -12,7 +12,7 @@ import {
   WebPlatform,
 } from './WebPlatform';
 import { ManagedHlsMediaRecoveryBudget } from './ManagedHlsRecovery';
-import { PlaybackSourceError } from '@macha/core';
+import { PlaybackSourceError } from '@machafoundation/core';
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -105,6 +105,27 @@ describe('Web player source reassignment', () => {
     expect(video.removeAttribute).not.toHaveBeenCalled();
     expect(video.load).not.toHaveBeenCalled();
     expect(video.src).toBe(source.url);
+  });
+
+  it('registers a Direct Play alternative without touching the media element', async () => {
+    // The seamless swap's whole value is that the element never reloads: the
+    // read-ahead worker changes the bytes underneath it and the viewer sees
+    // nothing (measured at 17 ms, `alternate-promoted-silently`). Registration
+    // is a `postMessage` today, so this cannot fail as written — it is here to
+    // stop a later change quietly adding a reload to this path, which would
+    // turn an invisible swap into a visible one with nothing to catch it.
+    const video = fakeVideo();
+    vi.stubGlobal('document', { createElement: vi.fn(() => video) });
+    const player = new WebPlatform().createPlayer();
+    player.attach({ firstChild: null, appendChild: vi.fn() } as unknown as HTMLElement);
+    const source = { mediaId: 'm1', url: 'https://node-a.test/stream', isManifest: false, mimeType: 'video/mp4', mode: 'direct' as const };
+    await player.play(source, 0, true);
+
+    player.addDirectSourceAlternative?.(source, { ...source, url: 'https://node-b.test/stream' });
+
+    expect(video.src).toBe(source.url);
+    expect(video.load).not.toHaveBeenCalled();
+    expect(video.removeAttribute).not.toHaveBeenCalled();
   });
 
   /**

@@ -1,5 +1,119 @@
 # Changelog
 
+## Unreleased
+
+- **artwork fails over between nodes instead of vanishing**: a poster whose signed capability URL will not load now tries the same capability on the next node immediately, and then the authenticated fetch, rather than showing a blank card for sixty seconds. An artwork capability is a cluster credential — its signature covers the artwork id and expiry, never the host — and artwork is content-addressed, so any node serves the same bytes; an expired one is offered once, in case the browser still has the image cached under it, and to no other node;
+- open a torrent's detail pane by clicking it on the Import screen: transfer and share ratio, info hash and owning node, age and last change, the linked import job's files and destinations, and the cataloguing outcome the server has reported since 0.28.1 and this client ignored;
+- move `MediaStartWatchdog`/`MediaStallWatchdog` into `@machafoundation/core` (0.7.0) and keep only `src/platform/mediaWatchdogEnvironment.ts` here, which is the whole of the DOM in that mechanism;
+- stop forcing native HLS on Android TV: WebView 151 has MediaSource, and hls.js gives that target the degradation channel the native path never had;
+- detect audio that has stopped decoding while video continues, from `webkitAudioDecodedByteCount`/`webkitVideoDecodedByteCount`;
+- flatten object console arguments to JSON on the Android build so logcat stops printing `[object Object]`;
+- hold `AUDIOFOCUS_GAIN` and set `FLAG_KEEP_SCREEN_ON` in the Android WebView shell, yielding on focus loss by pausing the page's media;
+- take `formatPlaybackTime` from `@machafoundation/core` and delete this client's copy;
+- state what the scrubber's duration must be instead of relying on `||`, which skipped `NaN` only because `NaN` is falsy and let `Infinity` through to the formatter;
+- record what Tizen 3 actually provides, measured on the set rather than inferred (`TODO/ACTIVE.md`).
+
+## 0.12.2
+
+- move failover off a stalled node in 7 s rather than 15 s, calibrated to outlast the server's own 6000 ms segment hold rather than picked independently;
+- remove the manual bearer token from every interface; the anonymous session is the only auth path;
+- stop text fields trapping D-pad focus — up and down leave the editor for the previous or next control;
+- make inferred metadata candidates selectable, and hide candidates already in the catalogue;
+- add a Settings switch for extended playback logging on the error screen, default off;
+- colour-code telemetry age on the node cards and node detail (amber past a minute, red past five).
+
+## 0.12.1
+
+- **Samsung failover plays**: a replacement generation now restates the segment container it was created with, so a recovery node no longer serves fMP4 to a set that asked for MPEG-TS (`@machafoundation/core` 0.6.3);
+- name the endpoint in the "Preparing stream" message so a failing recovery says which node it is waiting on;
+- report cores and system memory on the node cards.
+
+## 0.12.0
+
+- take a baseline before judging: a source that has never started has not stalled. Arming the stall watchdog on a freshly promoted generation's first report killed every replacement and exhausted the cluster with healthy nodes in it.
+
+## 0.11.1
+
+- bound playback that never starts and playback that silently stalls;
+- serve Samsung segments rather than files;
+- stop a held segment counting as node failure;
+- feed media bytes into endpoint throughput.
+
+## 0.11.0
+
+- turn router transitions off so presentation and playback land together;
+- queue the season for a lone episode;
+- bound HLS recovery;
+- state the whole transform on a mode press.
+
+## 0.10.7
+
+- **Samsung HLS fixed by MPEG-TS segments**: prefer TS carriage on Tizen 3, where fMP4 breaks HEVC and all audio, and render the segment-container reason.
+
+## 0.10.6
+
+- **the client negotiates playback**: the chooser moves to `@machafoundation/core`, fed by server facts and operations;
+- probe HLS delivery codecs;
+- move the API layer to `@machafoundation/core`.
+
+## 0.10.5
+
+- resolve episode ancestry in the API;
+- hold the session fetch for a mint and retry on 401;
+- drop the call-site `sessionReady` gates.
+
+## 0.10.4
+
+- bound the initial session POST;
+- stop a failed seek pinning the scrubber.
+
+## 0.10.3
+
+- remove demo mode and its sample-mp4 asset.
+
+## 0.10.2
+
+- bound fetch timeouts;
+- fix a seek race in `fail()`;
+- give the endpoint registry reload memory.
+
+## 0.10.1
+
+- persist and validate the anonymous session across reloads instead of re-minting;
+- fix a deep-link session race and early-401 session clobbering.
+
+## 0.10.0
+
+- migrate the session/auth REST contract: anonymous session lifecycle, legacy viewer/idempotency headers dropped;
+- any-node failover fixes.
+
+## 0.9.1
+
+- stop a redundant transcode session being created alongside a restarting seek.
+
+## 0.9.0
+
+- **any-node failover**: cluster discovery, seamless mid-stream swap, endpoint health fixes.
+
+## 0.8.3
+
+- artwork capability URL fixes;
+- node phase status UI;
+- further any-node failover work.
+
+## 0.8.2
+
+- move to the standard React testing framework; test hooks and effects.
+
+## 0.8.1
+
+- media info precache and reuse;
+- rollup of in-flight fixes, and the first Android target.
+
+## 0.8.0
+
+- alternate sources; API and media hot-swapping.
+
 ## 0.7.7
 
 - preload the single canonical logo asset while keeping the application modules eagerly bundled, and harden intermittent poster loading with longer bounded transient retries, invalid-response rejection and browser decode recovery;

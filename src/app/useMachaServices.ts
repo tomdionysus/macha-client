@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { createMachaServices, type MachaServices, type MachaServicesOptions } from '@macha/core';
+import { createMachaServices, type MachaServices, type MachaServicesOptions } from '@machafoundation/core';
 
 /**
  * Memoizes the core's service factory for React.

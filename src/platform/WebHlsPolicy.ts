@@ -84,7 +84,7 @@ export function isHlsSegmentHold(data: HlsErrorShape): boolean {
  * fatal — except a held segment, which says nothing about the node at all.
  *
  * Note what the default costs if this is wrong in the permissive direction:
- * `@macha/core` treats a `'stream'` failure as endpoint evidence, so an
+ * `@machafoundation/core` treats a `'stream'` failure as endpoint evidence, so an
  * unclassified hold prepares a standby elsewhere and can escalate to failover
  * off a node that was working correctly.
  */

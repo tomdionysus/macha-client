@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { configureMachaHost, type StorageLike } from '@macha/core';
+import { configureMachaHost, type StorageLike } from '@machafoundation/core';
 import { failureTrailEnabled, setFailureTrailEnabled } from './failureTrailSetting';
 
 function memoryStorage(): StorageLike & { entries: Map<string, string> } {

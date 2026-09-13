@@ -1,9 +1,9 @@
-import type { MediaApi } from '@macha/core';
+import type { MediaApi } from '@machafoundation/core';
 import { OverflowMenu, type OverflowMenuAction } from '../components/OverflowMenu';
 import { ErrorMessage, Loading } from '../components/Status';
 import { useArtworkUrl } from '../hooks/useArtworkUrl';
 import { useRefreshableAsync } from '../hooks/useRefreshableAsync';
-import type { AlbumDetails, MediaSummary } from '@macha/core';
+import type { AlbumDetails, MediaSummary } from '@machafoundation/core';
 import { EditButton } from '../components/EditButton';
 import { MediaPageTitle } from '../components/MediaPageTitle';
 

@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import type { MediaApi } from '@macha/core';
-import type { Platform } from '@macha/core';
-import type { PlaybackRuntime, PlaybackRuntimeSnapshot } from '@macha/core';
-import { pathForMedia, routes, type PlaybackRouteState } from '@macha/core';
-import { ContinueWatchingStore } from '@macha/core';
-import { migrateEpisodeContext, needsEpisodeContextMigration } from '@macha/core';
-import { PlaybackQueueStore, type PlaybackQueueState } from '@macha/core';
-import { VolumeStore } from '@macha/core';
-import type { Episode, MediaSummary, PlaybackProgress } from '@macha/core';
+import type { MediaApi } from '@machafoundation/core';
+import type { Platform } from '@machafoundation/core';
+import type { PlaybackRuntime, PlaybackRuntimeSnapshot } from '@machafoundation/core';
+import { pathForMedia, routes, type PlaybackRouteState } from '@machafoundation/core';
+import { ContinueWatchingStore } from '@machafoundation/core';
+import { migrateEpisodeContext, needsEpisodeContextMigration } from '@machafoundation/core';
+import { PlaybackQueueStore, type PlaybackQueueState } from '@machafoundation/core';
+import { VolumeStore } from '@machafoundation/core';
+import type { Episode, MediaSummary, PlaybackProgress } from '@machafoundation/core';
 import type { StartPlaybackOptions } from './useMusicController';
 import {
   playbackReturnTo,
@@ -16,7 +16,7 @@ import {
   playerRouteItemId,
   restoredPlaybackPosition,
   routePlaybackMedia,
-} from '@macha/core';
+} from '@machafoundation/core';
 
 export function usePlaybackController(options: {
   api: MediaApi;

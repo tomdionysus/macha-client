@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useRef } from 'react';
-import type { MediaSummary } from '@macha/core';
-import { alphabetIndexKey, availableAlphabetKeys, type AlphabetIndexKey } from '@macha/core';
+import type { MediaSummary } from '@machafoundation/core';
+import { alphabetIndexKey, availableAlphabetKeys, type AlphabetIndexKey } from '@machafoundation/core';
 
 export function useAlphabetIndex(items: MediaSummary[]) {
   const targets = useRef(new Map<string, HTMLElement>());

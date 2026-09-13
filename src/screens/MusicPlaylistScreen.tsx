@@ -1,7 +1,7 @@
 import { useRef, type DragEvent, type KeyboardEvent } from 'react';
-import type { MediaApi } from '@macha/core';
+import type { MediaApi } from '@machafoundation/core';
 import { LazyArtwork } from '../components/LazyArtwork';
-import type { MusicPlaylistEntry } from '@macha/core';
+import type { MusicPlaylistEntry } from '@machafoundation/core';
 
 interface Props {
   api: MediaApi;

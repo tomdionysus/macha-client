@@ -1,16 +1,21 @@
-import { routes } from '@macha/core';
+import { routes } from '@machafoundation/core';
 import { SectionNav, type SectionNavItem } from './SectionNav';
 
-const managementItems: readonly SectionNavItem[] = [
-  { to: routes.manage, label: 'Unmatched', end: true },
-  { to: routes.manageFiles, label: 'Files' },
-  { to: routes.settings, label: 'Settings' },
-];
+const unmatched: SectionNavItem = { to: routes.manage, label: 'Unmatched', end: true };
+const files: SectionNavItem = { to: routes.manageFiles, label: 'Files' };
+const users: SectionNavItem = { to: routes.manageUsers, label: 'Users' };
 
-const settingsOnly: readonly SectionNavItem[] = [
-  { to: routes.settings, label: 'Settings' },
-];
-
-export function ManageNav({ managementAvailable }: { managementAvailable: boolean }) {
-  return <SectionNav ariaLabel="Management navigation" items={managementAvailable ? managementItems : settingsOnly} />;
+/**
+ * Only what the signed-in user can actually manage.
+ *
+ * Settings is deliberately absent: it is client-local configuration reaching
+ * no server route, so grouping it under a privileged section meant hiding it
+ * from the people most likely to need it — anyone who cannot reach a node has
+ * no roles either, and the endpoint list is the one thing that would fix that.
+ */
+export function ManageNav({ managementAvailable, usersAvailable }: { managementAvailable: boolean; usersAvailable: boolean }) {
+  return <SectionNav
+    ariaLabel="Management navigation"
+    items={[...(managementAvailable ? [unmatched, files] : []), ...(usersAvailable ? [users] : [])]}
+  />;
 }

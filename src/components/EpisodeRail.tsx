@@ -1,8 +1,8 @@
 import { useRef, type MouseEvent, type PointerEvent, type WheelEvent } from 'react';
-import type { MediaApi } from '@macha/core';
+import type { MediaApi } from '@machafoundation/core';
 import { LazyArtwork } from './LazyArtwork';
 import { PlayIcon, RestartIcon } from './PlaybackIcons';
-import type { Episode, PlaybackProgress } from '@macha/core';
+import type { Episode, PlaybackProgress } from '@machafoundation/core';
 
 interface Props {
   api: MediaApi;

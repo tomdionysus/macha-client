@@ -1,6 +1,6 @@
 # Active tasks and concepts to explore
 
-Last updated: 2026-09-08
+Last updated: 2026-09-10
 
 This is the working backlog for the current session. Add new work here. When an
 item is implemented and its stated verification is complete, remove it from
@@ -36,6 +36,73 @@ Priority reflects active-breakage/user-impact, not effort: P0 is a live or
 recently-live correctness problem in playback itself; P1 is important,
 scoped, and actionable now; P2 is real but either blocked on something
 outside this repo or needs groundwork before it can be started safely.
+
+## P1 — What Tizen 3 actually provides, and one build behind
+
+Measured on the set 2026-09-10, not inferred: a separate signed widget
+carrying this app's own `polyfills-legacy` chunk, installed alongside Macha,
+run, and uninstalled. UA `Tizen 3.0 / AppleWebKit 538.1`. Prompted by
+`@machafoundation/core`'s new `types/platform-neutral.d.ts`, which states the platform
+surface core is allowed to assume — a gate that proves core does not
+*reference* anything outside the list, and cannot prove a host *provides* it.
+
+**`AbortController` does not exist on Chromium 47 at all**, and the legacy
+polyfill chunk does not supply one (core-js has none). It works here only
+because `src/platform/AbortControllerPolyfill.ts` installs one from
+`main.tsx:25` before anything else runs. So core's declared surface is met on
+this platform by a **consumer-supplied shim**, not by the host. That shim is
+load-bearing for every bounded request in the app: delete it, or let anything
+run before it, and `fetchWithTimeout` throws on its first call.
+
+**Two real gaps, both silent:**
+
+- **`RequestInit.cache` is not merely unsupported — the property does not
+  exist.** `'cache' in new Request(url, {cache:'no-store'})` is `false`, so
+  `no-store` evaporates with no fallback. A cached `/api/v1/catalogue/status`
+  would let a dead node answer 200 and stay top of the endpoint ranking.
+  Fixed in core 0.7.0, which appends `?_=<ms>` to the probe URL — the only
+  mechanism all three hosts honour, and the only one that also defeats an
+  intermediary cache on a WAN path like es-1.
+- **`keepalive` is absent**, so the teardown `DELETE` does not survive
+  navigation on this set. Best-effort session close is lost there and nothing
+  else.
+
+**`{ once: true }` is ignored by Tizen's native `addEventListener`** — the
+options-object probe returns `false` and a `once` listener on `window` fires
+twice. It does not bite core, but only because the one signal core uses
+`once` on is our own `LegacyAbortSignal`, which honours the flag itself. It is
+correct here by accident of the shim, not because the host obeys.
+
+**Present and behaving**, verified against a live 401 rather than a
+constructed object: `fetch` (native), `Response.url` populated,
+`ok`/`status`/`statusText`/`headers`, and `json()`/`text()`/`blob()`;
+`Headers` with `get`/`set`/`forEach` (which does iterate, lower-casing names);
+`new Response(body, {status, statusText, headers})`; native `URL` with
+`origin`; `Blob` size/type; `DOMException` constructible as `(message, name)`;
+`crypto.getRandomValues`. `crypto.randomUUID` is absent.
+
+**Not measured, and worth knowing before relying on it:** whether Chromium 47
+honours `init.signal` at all. It almost certainly does not — `signal`
+postdates this engine — which would mean `fetchWithTimeout` still rejects on
+time (the race is in JS) while the underlying request runs to completion. The
+probe's abort test never ran, because it was gated on a native
+`AbortController` that turned out not to exist.
+
+- [ ] **Deploy a post-0.7.0 build to the Samsung.** The wgt currently on the
+      set was built at 00:53 and `c8b1bb8` landed at 01:09; the shipped bundle
+      has zero occurrences of the cache-busted probe URL. The one platform
+      where `no-store` vanishes without a fallback is the one still missing
+      the fix. Awaiting Tom — an unrequested action on that television is what
+      broke it in the first place.
+- [ ] **Re-verify failover on the Samsung while there.** That set has never
+      run the 0.6.3 container fix and the 7 s stall budget together, and that
+      combination is the one nobody has seen work.
+
+**If anyone repeats the probe:** installing and then uninstalling a second
+widget left `macha00001.Macha` installed but unlaunchable ("Could not launch
+the null application", three attempts, with the app still in `applist`). A
+reinstall of the wgt fixed it. Budget a redeploy as part of the exercise
+rather than discovering it afterwards.
 
 ## P1 — `matroska` is missing from this client's advertised containers
 
@@ -76,7 +143,7 @@ script after any capability change to re-measure rather than re-estimate.
 ## P1 — The MPEG-TS preference is asserted, not gated
 
 Samsung HLS playback is fixed (see COMPLETED.md). The reporting half of this
-is now closed: server 0.33.1 states `output.container`, `@macha/core` maps it,
+is now closed: server 0.33.1 states `output.container`, `@machafoundation/core` maps it,
 and the player's top line shows the container actually served.
 
 - [ ] **The preference is still not gated on a fact from the node serving
@@ -619,138 +686,200 @@ viewer still waits for the fatal. Once an alternate is ready *and* the primary
 is still producing degradation evidence, there is nothing left to wait for —
 retrying a node already replaced is the whole 63 seconds.
 
-- [x] **`PlaybackCoordinator` is `@macha/core`'s.** Raised with that session
-      2026-09-08 with the trace, framed as: should continued degradation with a
-      ready alternate promote it, rather than only terminal failure doing so?
-      `prepareAlternate` already validates and preflights the alternate, so the
-      thing promoted is known good; the guard needed is the one `degrade()` and
-      `fail()` already use against an in-flight seek mutation. Landed in
-      `@macha/core` 0.6.1 as `promoteReadyAlternate`.
-- [ ] Re-measure after it lands. The bar is set by the path that works: the
-      silent Direct Play swap failed over in **17 ms** on the same cluster and
-      title, uninterrupted (`alternate-promoted-silently`).
+`promoteReadyAlternate` landed in `@machafoundation/core` 0.6.1 and answers that.
 
-**Why this is P0 rather than a latency complaint:** the Samsung has no Service
-Worker and now `neverDirect`, so it can *only* take this path. Two live
-attempts to stop a node mid-film gave a long black screen and then an error,
-ending in "No untried Macha playback endpoint remains" with three healthy
-nodes. Not yet proven to be this same defect — `failedGenerationEndpoints` is
-cumulative across a generation lineage, so anything failing three replacements
-in a row exhausts the cluster regardless of cause — but the shapes match.
+- [ ] **Re-measure. This is the only thing left in this entry.** The bar is
+      set by the path that works: the silent Direct Play swap failed over in
+      **17 ms** on the same cluster and title, uninterrupted
+      (`alternate-promoted-silently`). Nobody has watched the managed-HLS path
+      since the fix, so the 63.6 s figure above is still the last measurement
+      taken.
 
-Ruled out on the way, so nobody re-checks them: session admission is not
-refusing (all three nodes create sessions for one client token with another
-already open, tested directly); and the stall watchdog arming on a source's
-first report *was* a real bug of mine, killing freshly promoted generations
-before they could deliver a frame — fixed, and the TV symptom survived the fix.
+**The Samsung half of this entry is closed** — the cluster-exhaustion symptom
+that shared this section turned out to be a different defect entirely
+(failover asked for the wrong segment container) and is now in `COMPLETED.md`
+under *"Samsung failover plays: a replacement asks for the carriage its
+generation was created with"*, together with the two wrong theories it
+produced and the first-fragment gate that was built to test one of them.
 
-**Cause found 2026-09-09: failover asks for the wrong segment container.**
+## P1 — Android TV plays 5.1 titles without downmixing them
 
-`container` is not among a session's confirmed preferences, and failover
-rebuilds a generation from exactly those (`completePreferences` →
-`currentPreferences`). So a Samsung set that asked for MPEG-TS was handed
-**fMP4 by every replacement node** — the one carriage it cannot play. The PATCH
-path already restated the container, with a comment naming this very failure
-("a device handed fragmented MP4 where it asked for MPEG-TS shows a black
-picture and reports nothing"); the create path never got it. That asymmetry is
-the whole fault, and it is what the decisive observation was pointing at all
-along: after the error, selecting Auto — a PATCH — **resumes instantly from the
-same node that had just starved**.
+**Superseded 2026-09-10, and the heading was the symptom.** Tom: *"The 2 min
+gap was observation noise."* Nothing about this fault is time-dependent.
+**Stereo titles play correctly. Every 5.1 title plays with a broken downmix,
+from the first second, permanently.** Everything from "Reported 2026-09-09"
+down to the next heading was written to explain a fade that never happened.
+It is kept rather than deleted because the audio-focus reasoning in it is
+sound and the shell change it produced is correct citizenship on its own
+merits — but none of it explains this fault, and the D-pad discriminator it
+proposes now has no symptom to discriminate. Do not run it.
 
-- [x] `withRestatedSegmentContainer` in `@macha/core`, shared by the update
-      path and `currentPreferences`, so failover and standby preparation ask
-      for the carriage the generation was created with. Regression test
-      confirmed to fail against the pre-fix code.
+**What the measurement actually says.** `dumpsys media.audio_flinger` shows
+our app's track carrying `Chn mask 8000003F` on a stereo output. That is
+`AUDIO_CHANNEL_INDEX_MASK_6`: the `2 << 30` prefix marks an *index*
+representation, which numbers six channels without saying where any of them
+sits. AudioFlinger's downmixer folds *positional* masks; an index mask has no
+positions to fold, so the centre channel — the dialogue — is not mixed into
+the stereo pair.
 
-**Two earlier theories of mine, both wrong, kept so nobody re-raises them.**
+**The server is innocent, and this was checked rather than assumed.** The
+init segment's AAC `AudioSpecificConfig` is `11b056e500` —
+`channelConfiguration=6`, which *is* positional 5.1. The server states the
+layout correctly and the client loses it afterwards.
 
-*Segment holds.* The trail carries no `hls-native-first-fragment-held` line, so
-no fragment was ever held: the nodes answered the readiness probe at once. The
-gate below still earns its place as the elimination — it is how "the node is
-not serving" was ruled out — but it fixed nothing.
+**Why the transcode happens at all.** The set carries
+`OMX.realtek.audio.dolby.eac3.decoder`, but Chromium ships no AC-3/E-AC-3
+decoder, so an E-AC-3 source can never take the direct path in a WebView
+however capable the hardware is. It is forced to AAC 5.1, and Chromium's
+decode path then presents the result to AudioFlinger index-masked. This also
+explains why Direct Play is unaffected: nothing re-presents the channels.
 
-*A wedged media element.* The measured trace read:
+- [ ] **Decision, Tom's, not taken.** Server-side stereo transcode was
+      proposed and rejected. What remains: a native player host on Android
+      (~2–4 days; `Platform` is 5 members, `Player` ~12, and presentation
+      coupling is a single `player-host` div plus `runtime.attach(host)` —
+      the risk is compositing a transparent WebView over a SurfaceView), or a
+      channel-count preference negotiated like every other transform, which
+      touches all three repos. No client work should start on either without
+      that decision.
 
-```
-139.4  source-start-starved     10.44.1.51  readyState HAVE_NOTHING, no data in 20s
-139.4  source-failover-start    -> 10.34.1.50
-160.4  source-start-starved     10.34.1.50  readyState HAVE_NOTHING, no data in 20s
-160.4  source-failover-exhausted / fatal
-```
+---
 
-Zero bytes on a reused element looked like the element. It was the *carriage*:
-a native player handed fMP4 it cannot decode fetches nothing and says nothing,
-which is indistinguishable from a wedged element from the outside. Discarding
-a failed element shipped on that theory and did **not** fix the fault — it is
-still in `WebPlayer.play()`, gated on failure so the seek path is untouched,
-but it is unproven and should come out unless something turns up to justify it.
+Reported 2026-09-09: the Android TV app plays, and then the **sound** stops
+roughly two minutes in, on all titles, with video continuing. Not yet observed
+here — the set is at 10.34.1.115 and adb on :5555 is unreachable from the LAN
+— so what follows is from the shell's source, not from a capture.
 
-**Superseded — the media-element theory, for the record.**
-Measured on the set with the failure trail now shown on the failure screen:
+**The Android shell requests audio focus nowhere.** `grep` for
+`requestAudioFocus`, `AudioManager`, `keepScreenOn`, `FLAG_KEEP_SCREEN_ON` and
+`WAKE_LOCK` across `platforms/android` returns nothing outside build output.
+`MainActivity` is a bare `Activity` holding a `WebView`. On Android TV an app
+that never holds focus is at the mercy of anything that asks for it — the
+Leanback launcher's background previews, a system sound, a screensaver warming
+up — and when focus is taken the platform silences this app and nothing here
+ever asks for it back. Video keeps decoding because video is not focus-managed.
+That is the reported symptom exactly: sound gone, permanent, picture fine.
 
-```
-139.4  source-start-starved     10.44.1.51  readyState HAVE_NOTHING, no data in 20s
-139.4  source-failover-start    -> 10.34.1.50
-143.6  media-stalled            readyState HAVE_NOTHING
-160.4  source-start-starved     10.34.1.50  readyState HAVE_NOTHING, no data in 20s
-160.4  source-failover-exhausted / fatal
-```
+**"All titles" is the load-bearing detail.** Different titles carry different
+audio codecs, so a decoder fault would not strike all of them at the same
+two-minute mark. A wall-clock system event would. Equally it rules out the
+client: nothing on the native path has a two-minute characteristic, and the
+same code plays whole films on the Samsung.
 
-Both replacements were attached to the **reused** `<video>` element and sat at
-`HAVE_NOTHING` for the full 20 s starvation budget without fetching a byte —
-while a plain `fetch` of each generation's own first fragment, issued moments
-earlier by the readiness gate below, was served immediately. The nodes were
-serving; the element was wedged, and each starvation was charged to a healthy
-node until the candidate list was empty. Reuse has always worked for a seek,
-where nothing failed first; it does not survive a generation that failed.
+**Kept because the work was right regardless of the cause, 2026-09-09, on
+Tom's steer.** `MainActivity` now adds `FLAG_KEEP_SCREEN_ON` and holds
+`AUDIOFOCUS_GAIN` for as long as it is in front, yielding on loss by pausing
+the page's media rather than playing over whoever took it. Focus is
+per-activity, not per-generation, because there is no bridge to hold it
+per-generation with — `BridgeContract.kt` is a design stub and nothing in the
+page can call in. Deployed and running on the set since 2026-09-09.
 
-- [x] `WebPlayer.play()` discards a media element whose previous generation
-      failed, rather than reusing it. Gated on failure specifically, so the
-      seek path — the case reuse exists for — is untouched.
+**Correction, from the RN session: focus on Android is cooperative.** The
+system does not hard-mute an app that ignores `AUDIOFOCUS_LOSS`; it expects
+that app to stop, and the only automatic enforcement is ducking. So "the shell
+requests focus nowhere" does not explain permanent silence, and the mechanism
+my hypothesis rested on does not hold.
 
-**The segment-hold theory below was wrong, and is kept because the work it
-produced is still right.** The trail carries no `hls-native-first-fragment-held`
-line, so no fragment was ever held: the nodes answered the readiness probe at
-once. What the gate bought was the elimination — it is how "the node is not
-serving" was ruled out and the fault localised to the element.
+**What does produce quiet-but-playing, found in expo-video's
+`AudioFocusManager.kt`:** on `AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK` it runs
+`player.volume /= 2f`, and restores `userVolume` only on an explicit
+`AUDIOFOCUS_GAIN` callback. A *relative* operation where an absolute one was
+meant: ducks compound (two is a quarter, seven is about one percent) and a
+`GAIN` that never arrives never restores. Picture running, sound gone, nothing
+paused, no recovery, with nothing actually broken. That is the shape to look
+for in Chromium's WebView media session, which handles focus internally.
 
-**Superseded — the segment-hold theory, for the record.** A native HLS
-player has no retry policy this client can reach. Failover creates a fresh
-generation mid-file; the playlist is complete from the moment the plan exists
-(the server moved its readiness gate off `media.m3u8` deliberately), so the
-wait now lands on the *first fragment*, which the node holds and then answers
-`500 segment_not_ready` with `Retry-After`. hls.js rides that out —
-`isHlsSegmentHold` exists for exactly this — but the native player sees one
-`MEDIA_ERR_NETWORK`, immediately and permanently. That reaches the coordinator
-as `'stream'`, which is legitimate endpoint evidence, so a healthy node is
-charged and the next one is tried; it cold-starts its own generation and
-answers identically. Three of those and `failedGenerationEndpoints` covers the
-cluster, which is why the message is *"No untried Macha playback endpoint
-remains"* — that string is only produced when the candidate list is **empty**,
-never when creates failed. It also explains the recovery Tom found: selecting
-Auto PATCHes the session still alive on the last node, whose pipeline has been
-producing for half a minute by then, so it plays at once.
+**The two-requesters risk I raised was unfounded, and the reason matters more
+than the risk did.** Android WebView **does not request audio focus at all**
+for HTML5 media — Chromium issue 429192, filed 2014, still described as
+current in 2024–2025 write-ups of WebView-wrapped media apps. So there is no
+second requester to displace, and requesting focus in the embedding activity
+is the standard pattern rather than a conflict. The change stands as written.
 
-- [x] `WebPlayer.play()` asks the node for one byte of the first fragment
-      before handing the element a native-HLS URL, through the same admission
-      and hold path the player itself would use: it waits while the node says
-      it is producing (honouring `Retry-After`, 30 s budget = five server-side
-      holds), and stops immediately on `503`/transport, which *is* node
-      evidence. `awaitNativeHlsFirstFragment` in `WebPlatform.ts`.
-- [x] The element is emptied before that wait, so a failure still arriving
-      from the generation being replaced cannot be billed to its replacement.
-      The native branch was the only one of the three doing neither this nor
-      the direct path's documented refusal to.
-- [x] `readFirstResponseBytes` no longer requires `response.body`. Chromium 47
-      has `fetch` and not response streams, so **every warm standby the
-      Samsung ever prepared failed its own preflight and was discarded** —
-      the set least able to afford a cold failover was the one guaranteed
-      never to have an alternate ready.
-- [ ] Live-verify on the TV: stop the serving node mid-film with all three up.
-      Expect one wait, not three failures. A wait that actually happened logs
-      `hls-native-first-fragment-held` at `warn` with its duration and attempt
-      count, so the Samsung build's `warn`-and-above buffer captures it
-      without raising the level for the run.
+**But the same fact makes focus an unlikely cause of the silence.** WebView
+ignores focus in *both* directions: it does not request it, so it is not
+listening for its loss either, and an app that holds no focus is not what the
+system's automatic ducking acts on. Nothing outside can silence it by taking
+focus. The two-minute silence therefore needs a different explanation, and the
+shell change is correct citizenship rather than a fix.
+
+Note it does add a pause path that did not exist: the activity now holds focus
+and pauses the page's media on loss, which is the only way this app can yield
+the audio device at all. It has since run on the set without anyone reporting a
+spurious pause, but nobody has deliberately provoked a focus loss to test it.
+
+
+## P1 — One open question on the 7 s stall budget
+
+Raised 2026-09-09 by `@machafoundation/core`'s owner after 0.12.2 shortened the budget
+from 15 s. **Question 2 is answered — core 0.7.0 took the watchdogs (see
+below). Question 1 is still open, still not a defect, and still Tom's.**
+
+The budget is now **7 s**, not the 5 s this section was written against: Tom
+set 5 s, observed it was too short in practice, and settled on 7 s. Core's
+guard test pins the *relationship* rather than the number — `> 6_000` because
+it must outlast the server's hold, `<= 10_000` because it is still what a
+viewer stares at a frozen frame for — so the reasoning below survives the
+change of value.
+
+**1. The budget sits under the server's own hold.** `streaming.segment_timeout`
+is **6000 ms** (`config.hpp:433`): a node asked for a fragment it has not
+produced holds the request for up to six seconds before answering `500
+segment_not_ready`. The stall watchdog restarts on *either* position or buffer
+advance, so an ordinary hold is invisible while anything is buffered ahead —
+the picture keeps moving. The exposure is the frontier case only: the playhead
+has caught up, nothing is buffered ahead, and the node is legitimately still
+producing. Then nothing advances for the length of the hold and a 5 s budget
+expires inside it.
+
+That is the below-realtime transcode again, and the argument is genuinely
+two-sided: a node at its frontier *is* making the viewer wait, which is why
+the budget was shortened; but the replacement starts its own generation from
+nothing, so moving off a node that was seconds from delivering can cost more
+than staying. Now that failover actually works (0.6.3), this is no longer
+theoretical — it will move. Worth measuring before changing: what it costs to
+be moved off a producing node, against what it costs to wait.
+
+**Constraint on both, from Tom 2026-09-09: none of this may change the
+seamless Web failover.** The bar is measured and named — the silent Direct
+Play swap promoted in **17 ms**, uninterrupted, with zero measured stall
+(`alternate-promoted-silently`). That path is byte-level: the read-ahead
+worker swaps the source underneath an element that never reloads. A
+coordinator-level detector feeding `degrade()` is a *second* degradation
+source on the one platform that already has one, and `degrade()` promotes a
+stored alternate on second evidence — which activates a session and reloads
+the element. Turning a 17 ms invisible swap into a visible reload would be a
+regression that no test currently catches. Measure before and after, on the
+same cluster and title.
+
+**2. Stall detection may belong in `@machafoundation/core`, not here. — Done, core
+0.7.0.** `MediaStartWatchdog`/`MediaStallWatchdog` now live in core with the
+environment injected as the first constructor argument and
+`note(positionMs, bufferedEndMs?)` taking buffering as *optional*, because
+`expo-video` publishes a position and nothing trustworthy about buffered
+ranges and a fabricated zero would read as evidence about the node. This
+client keeps only `src/platform/mediaWatchdogEnvironment.ts`, which is the
+whole of the DOM in that mechanism. Each host wires the watchdogs itself;
+they are deliberately not wired into `PlaybackCoordinator`. The original
+argument, kept because it is the reason the move was right:
+
+`prepareAlternate`
+is reachable only from `degrade()`, and `degrade()` only from the player's
+optional `subscribeDegradation`. Samsung has no such channel — native HLS, and
+`neverDirect` — so no standby is ever prepared there, silently, with nothing
+reporting the absence. RN is the same: `expo-video` reports `PlayerError
+{ message }` with no status or code.
+
+Core's argument, and it is a good one: `player.subscribe` is **required** and
+every event already carries `positionMs`, `paused`, `buffering` and `ended`, so
+the coordinator can derive "the picture has stopped" unaided on every platform.
+The signal it cannot get for itself — an error code, an HTTP status — is the
+one it demands from the adapter; the one it can derive, it does not. The result
+is that the platforms with the least introspection get the least recovery.
+Moving `MediaStartWatchdog`/`MediaStallWatchdog` into the coordinator would
+give every platform a standby, with `degrade()`'s existing guards unchanged.
+The bound would have to be stated against `segment_timeout_ms` rather than
+picked separately — see the question above.
 
 ## P1 — `levelLoadError` evicts a healthy node, with no server error behind it
 
@@ -793,7 +922,7 @@ explained is the evidence.
   an EVENT list polled for the life of the session, so this evidence arrives
   hundreds of times per session where a VOD playlist produced it once. The
   server session has recorded the same trade-off on their side and neither
-  wants to decide it unilaterally. `@macha/core`'s owner asked for a timeline
+  wants to decide it unilaterally. `@machafoundation/core`'s owner asked for a timeline
   from any failover off a node that was demonstrably fine — the one above is
   exactly that, and should be sent.
 
@@ -885,7 +1014,7 @@ least-loaded estimator would be blind to exactly the case that caused this
 entry. Client-measured latency is the complement: it is the only signal we
 hold about the *path*, and we already collect it for every node.
 
-**Owned by the `@macha/core` session as of 2026-09-08** — cluster routing is
+**Owned by the `@machafoundation/core` session as of 2026-09-08** — cluster routing is
 their half of the boundary, and the change is theirs to make. Asked for:
 capacity captured off the existing status fetch, ranking given more than one
 axis, and an interface this client can read back (per-endpoint latency,
@@ -896,9 +1025,9 @@ localStorage table and a comparator read.
 
 Client-side work that remains here:
 
-- [x] **Feed real media throughput into `EndpointBandwidth`** — done
-      2026-09-08, see `COMPLETED.md`. Direct Play only (453 of 748 titles);
-      HLS segments are fetched inside hls.js and remain out of reach.
+Real media throughput already feeds `EndpointBandwidth` (2026-09-08, see
+`COMPLETED.md`) — Direct Play only, 453 of 748 titles; HLS segments are
+fetched inside hls.js and remain out of reach. What remains:
 
 - [ ] Surface it on **Status → Nodes** — per endpoint, latency, throughput
       estimate with sample count, reported load, and the deciding axis.
@@ -996,7 +1125,7 @@ and is not one.
       **mutation** keyed on host and port, fed from `node.host`/`node.port`.
       If `host`/`port` survive as the RPC address, nothing changes. If they are
       tidied away alongside the `api_`-prefixed pair, identity reset loses its
-      arguments and fails silently. Confirmed by the `@macha/core` session
+      arguments and fails silently. Confirmed by the `@machafoundation/core` session
       2026-09-08: `port` is optional through `ManageApi`, `MachaManageApi` and
       `ClusterManageApi` alike, so a payload that stopped carrying it would
       neither fail to compile nor throw here — it would send a **destructive
@@ -1011,7 +1140,7 @@ the server's replacement of those two is safe here; discovery is core's alone.
 ## P1 — Music playlist refactors onto the RN client's store
 
 Tom's decision, relayed 2026-09-08: the React Native client's playlist store is
-being abstracted into `@macha/core` and this client refactors onto it. Theirs is
+being abstracted into `@machafoundation/core` and this client refactors onto it. Theirs is
 a collection of **named** playlists (create/rename/delete, versioned and
 validated at file and playlist level, `getSnapshot`/`subscribe` for
 `useSyncExternalStore`); core's current `MusicPlaylistStore` is a single unnamed
@@ -1060,7 +1189,7 @@ has no legitimate caller. `create(name, items)` covers the honest version.
   never changes — the snapshot must *be* the value the caller renders.
   **Note this may be decided above us:** core currently has two subscription
   idioms — the coordinator and runtime return stable snapshots, the four state
-  stores do not — and the `@macha/core` session has put the question of fixing
+  stores do not — and the `@machafoundation/core` session has put the question of fixing
   all four to Tom, citing this controller as the live evidence. Wait for that
   answer rather than fixing the playlist store alone.
 
@@ -1099,47 +1228,38 @@ design — handle it as a hard limit, not a queue.**
   one leaking: a session that outlives its player is what turns this into a
   user-visible dead end.
 
-## P1 — Android/Google TV is a Chromium WebView and nothing has been run on it
+## P1 — Android TV: what is still unverified on the set
 
-The set at `10.34.1.116` (ES-1, across the WAN) carried the 0.8.1-era client
-until 2026-09-07 and now carries 0.10.7. Its whole playback pipeline is a
-Chromium WebView, so every browser-side fault found on 2026-09-08 applies to
-it and none of them has been observed there.
+**The set itself is no longer unverified** — see `COMPLETED.md`. Launch,
+catalogue browsing, D-pad navigation and playback were all confirmed on the
+TCL on 2026-09-09. This entry is now only what that session did *not*
+exercise, and each item says why it matters rather than merely that it is
+untried.
 
-- [ ] Install the current APK. Built and waiting as of 2026-09-08 01:07; the
-      set was off the network that night (`es-1` beside it answered at 97 ms,
-      the television did not answer at all). `versionCode` is now derived from
-      `package.json`, so an upgrade presents a higher code than the copy
-      installed and no uninstall is needed unless the debug key has changed
-      again.
-- [ ] Play a 5.1 title on it. Server 0.33.3 fixed an AAC configuration that
-      Chrome's MP4 parser rejects outright (see COMPLETED.md); that fix is
-      verified on Chrome by two independent measurements and **is not
-      verified on this host**, which would have failed identically.
-- [ ] Confirm the bounded HLS recovery behaves there: the WebView is the same
-      engine, but it is across a WAN link, so the failure it protects against
-      is more expensive and slower to arrive.
-
-## P1 — Android hardware back button, device/emulator verification
-
-The mini-player-removal work (see `COMPLETED.md`) added a JS↔native bridge
-so Android's hardware back button closes the player instead of silently
-leaving it running off-screen: `MainActivity.onBackPressed()` now calls
-`window.__machaHandleBack()` via `evaluateJavascript` before falling back to
-`WebView.goBack()`/`finish()`. This was verified by reading the native
-source and reasoning through the call sequence, and the JS side was
-live-verified on Samsung (same `onStop()` code path) — but **never run on
-real Android hardware or an emulator**, since none was available in this
-session. `AndroidWebPlatform`'s dev-in-browser Escape/Backspace path was
-exercised live and works; the actual native bridge call was not.
-
-- [ ] Build and install on an Android device or emulator (`npm run
-  build-android`) and confirm: pressing the hardware/on-screen back button
-  while the full player is showing closes playback and returns to the
-  previous screen (no silent mini-player-via-WebView-history-pop, no
-  restart-from-zero), and that back navigation on every other screen is
-  completely unaffected (the hook is absent outside the player, so
-  `MainActivity` should fall through to its original behavior there).
+- [ ] **The bounded HLS recovery has never run there.** Until 2026-09-09 that
+      target forced native HLS, so the managed path — and every degradation
+      signal, standby and recovery that depends on it — was unreachable by
+      construction. It is now the default there and has not been exercised
+      once. The link is a WAN hop, so the failure it protects against is both
+      likelier and slower to arrive than on the bench.
+- [ ] **The management and metadata screens have never been opened on it.**
+      Playback, browsing and navigation were used; Manage, Ingest and the
+      metadata editor were not.
+- [ ] **The hardware back button's native bridge has never fired on real
+      hardware.** The mini-player-removal work (see `COMPLETED.md`) added a
+      JS↔native hook: `MainActivity.onBackPressed()` calls
+      `window.__machaHandleBack()` via `evaluateJavascript` before falling
+      back to `WebView.goBack()`/`finish()`. It was verified by reading the
+      native source and reasoning through the call sequence, and the JS half
+      was live-verified on Samsung (same `onStop()` code path);
+      `AndroidWebPlatform`'s dev-in-browser Escape/Backspace path works. The
+      `evaluateJavascript` call itself has never been observed. Confirm on the
+      device that pressing back while the full player is showing closes
+      playback and returns to the previous screen — no silent
+      mini-player-via-WebView-history-pop, no restart-from-zero — and that
+      back navigation on every other screen is completely unaffected, since
+      the hook is absent outside the player and `MainActivity` should fall
+      through to its original behaviour there.
 
 ## P2 — TV spatial navigation redesign
 

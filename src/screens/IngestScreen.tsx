@@ -1,13 +1,13 @@
-import { useCallback, useMemo, useState, type ChangeEvent, type FormEvent } from 'react';
+import { useCallback, useMemo, useState, type ChangeEvent, type FormEvent, type ReactNode } from 'react';
 import { CardCloseButton } from '../components/CardCloseButton';
 import type {
   AcquisitionApi,
   AcquisitionSnapshot,
   IngestJob,
   TorrentJob,
-} from '@macha/core';
+} from '@machafoundation/core';
 import { usePollingTask } from '../hooks/usePollingTask';
-import { errorMessage } from '@macha/core';
+import { errorMessage } from '@machafoundation/core';
 
 interface Props {
   api: AcquisitionApi;
@@ -52,6 +52,24 @@ function percent(progress: number | null, completed: number, total: number): num
   if (progress !== null && Number.isFinite(progress)) return Math.max(0, Math.min(100, progress * 100));
   if (total > 0) return Math.max(0, Math.min(100, (completed / total) * 100));
   return null;
+}
+
+function formatTimestamp(value: number): string {
+  return value > 0 ? new Date(value).toLocaleString() : '—';
+}
+
+// Elapsed time, floored: an ETA rounds up because it promises no earlier than
+// it says, while an age counts what has actually gone by. Sharing formatEta
+// here reported a job created 3600.4s ago as "1h 1m old".
+function formatAge(value: number, now: number): string {
+  if (!value) return '—';
+  const seconds = Math.floor((now - value) / 1000);
+  if (seconds < 60) return 'just now';
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+  const hours = Math.floor(seconds / 3600);
+  if (hours >= 48) return `${Math.floor(hours / 24)}d ago`;
+  const minutes = Math.floor((seconds % 3600) / 60);
+  return minutes ? `${hours}h ${minutes}m ago` : `${hours}h ago`;
 }
 
 function stateLabel(state: string): string {
@@ -174,17 +192,90 @@ function IngestJobCard({ job, busyAction, confirmRemove, onAction, onConfirmRemo
   );
 }
 
-function TorrentJobCard({ job, linkedIngest, busyAction, confirmRemove, onAction, onConfirmRemove }: {
+function DetailRow({ label, children }: { label: string; children: ReactNode }) {
+  return <div><dt>{label}</dt><dd>{children}</dd></div>;
+}
+
+function DetailGroup({ title, children }: { title: string; children: ReactNode }) {
+  return <section className="ingest-detail-group"><h4>{title}</h4><dl>{children}</dl></section>;
+}
+
+/**
+ * Share ratio against what this node actually received, not against the
+ * torrent's advertised size: a job that has fetched a tenth of the payload and
+ * uploaded the same amount has served its peers a full ratio of what it holds.
+ */
+function shareRatio(job: TorrentJob): string {
+  return job.bytes_completed > 0 ? (job.uploaded_total / job.bytes_completed).toFixed(2) : '—';
+}
+
+/**
+ * Everything the server reports about one torrent, laid out for the question
+ * "why is this not finished". The card above says what state the job is in;
+ * this says what that state is made of -- who it is talking to, what it has
+ * moved, where the payload went, and whether cataloguing recognised any of it.
+ */
+function TorrentDetail({ id, job, linkedIngest }: { id: string; job: TorrentJob; linkedIngest?: IngestJob }) {
+  const now = Date.now();
+  const catalogue = job.catalogue;
+  return (
+    <div className="ingest-job-detail" id={id}>
+      <DetailGroup title="Transfer">
+        <DetailRow label="Received">{formatBytes(job.bytes_completed)} / {formatBytes(job.bytes_total)}</DetailRow>
+        <DetailRow label="Down">{formatRate(job.download_rate)}</DetailRow>
+        <DetailRow label="Up">{formatRate(job.upload_rate)}</DetailRow>
+        <DetailRow label="Uploaded">{formatBytes(job.uploaded_total)}</DetailRow>
+        <DetailRow label="Ratio">{shareRatio(job)}</DetailRow>
+        <DetailRow label="Peers">{job.peers}</DetailRow>
+        <DetailRow label="Seeds">{job.seeds}</DetailRow>
+        <DetailRow label="ETA">{formatEta(job.eta_seconds)}</DetailRow>
+      </DetailGroup>
+      <DetailGroup title="Torrent">
+        <DetailRow label="Info hash"><code>{job.info_hash || 'Not yet known'}</code></DetailRow>
+        {job.node_id && <DetailRow label="Node">{job.node_id}</DetailRow>}
+        <DetailRow label="Added">{formatTimestamp(job.created_unix_ms)}</DetailRow>
+        <DetailRow label="Age">{formatAge(job.created_unix_ms, now)}</DetailRow>
+        <DetailRow label="Last change">{formatAge(job.updated_unix_ms, now)}</DetailRow>
+        <DetailRow label="Job">{job.id}</DetailRow>
+      </DetailGroup>
+      {linkedIngest && (
+        <DetailGroup title="Import job">
+          <DetailRow label="State">{stateLabel(linkedIngest.state)}</DetailRow>
+          <DetailRow label="Copied">{formatBytes(linkedIngest.bytes_completed)} / {formatBytes(linkedIngest.bytes_total)}</DetailRow>
+          <DetailRow label="Files">{linkedIngest.files_completed} / {linkedIngest.files_total}</DetailRow>
+          <DetailRow label="Rate">{formatRate(linkedIngest.rate_bytes_per_second)}</DetailRow>
+          <DetailRow label="Staged at">{linkedIngest.source_path}</DetailRow>
+          {linkedIngest.current_file && <DetailRow label="Current file">{linkedIngest.current_file}</DetailRow>}
+          {linkedIngest.current_destination && <DetailRow label="Destination">{linkedIngest.current_destination}</DetailRow>}
+        </DetailGroup>
+      )}
+      {catalogue && (catalogue.total > 0 || catalogue.state !== 'waiting') && (
+        <DetailGroup title="Catalogue">
+          <DetailRow label="State">{stateLabel(catalogue.state)}</DetailRow>
+          <DetailRow label="Catalogued">{catalogue.catalogued} / {catalogue.total}</DetailRow>
+          <DetailRow label="Pending">{catalogue.pending}</DetailRow>
+          <DetailRow label="No match">{catalogue.no_match}</DetailRow>
+          <DetailRow label="Failed">{catalogue.failed}</DetailRow>
+        </DetailGroup>
+      )}
+    </div>
+  );
+}
+
+function TorrentJobCard({ job, linkedIngest, busyAction, confirmRemove, expanded, onAction, onConfirmRemove, onToggleDetail }: {
   job: TorrentJob;
   linkedIngest?: IngestJob;
   busyAction: JobAction | undefined;
   confirmRemove: boolean;
+  expanded: boolean;
   onAction: (kind: JobKind, id: string, state: string, action: JobAction) => void;
   onConfirmRemove: (key: string | undefined) => void;
+  onToggleDetail: (id: string) => void;
 }) {
   const progress = percent(job.progress, job.bytes_completed, job.bytes_total);
   const displayState = linkedIngest?.state ?? job.state;
   const displayError = job.error || linkedIngest?.error;
+  const detailId = `torrent-detail-${job.id}`;
   return (
     <article className={`ingest-job-card state-${displayState}`}>
       <CardCloseButton
@@ -195,14 +286,25 @@ function TorrentJobCard({ job, linkedIngest, busyAction, confirmRemove, onAction
           ? onAction('torrent', job.id, job.state, 'remove')
           : onConfirmRemove(jobKey('torrent', job.id))}
       />
-      <div className="ingest-job-heading">
-        <div>
-          <span className="ingest-state">{stateLabel(displayState)}</span>
-          <h3>{job.name || 'Torrent'}</h3>
-          {job.info_hash && <p className="ingest-source">{job.info_hash}</p>}
+      <button
+        type="button"
+        className="ingest-job-open"
+        data-tv-focusable="true"
+        aria-expanded={expanded}
+        aria-controls={detailId}
+        aria-label={`${job.name || 'Torrent'} details`}
+        onClick={() => onToggleDetail(job.id)}
+      >
+        <div className="ingest-job-heading">
+          <div>
+            <span className="ingest-state">{stateLabel(displayState)}</span>
+            <h3>{job.name || 'Torrent'}</h3>
+            {job.info_hash && <p className="ingest-source">{job.info_hash}</p>}
+          </div>
+          <strong className="ingest-percent">{progress === null ? '—' : `${Math.round(progress)}%`}</strong>
+          <span className="ingest-disclosure" aria-hidden="true">{expanded ? '▴' : '▾'}</span>
         </div>
-        <strong className="ingest-percent">{progress === null ? '—' : `${Math.round(progress)}%`}</strong>
-      </div>
+      </button>
       <Progress value={progress} />
       {job.ingest_job_id ? (
         <>
@@ -224,6 +326,7 @@ function TorrentJobCard({ job, linkedIngest, busyAction, confirmRemove, onAction
         </dl>
       )}
       {displayError && <p className="ingest-job-error">{displayError}</p>}
+      {expanded && <TorrentDetail id={detailId} job={job} linkedIngest={linkedIngest} />}
       <JobControls
         kind="torrent"
         id={job.id}
@@ -248,6 +351,7 @@ export function IngestScreen({ api }: Props) {
   const [error, setError] = useState<string>();
   const [notice, setNotice] = useState<string>();
   const [confirmRemove, setConfirmRemove] = useState<string>();
+  const [openTorrent, setOpenTorrent] = useState<string>();
 
   const refresh = useCallback(async () => {
     const value = await api.snapshot();
@@ -426,8 +530,10 @@ export function IngestScreen({ api }: Props) {
               linkedIngest={job.ingest_job_id ? snapshot?.ingestJobs.find((candidate) => candidate.id === job.ingest_job_id) : undefined}
               busyAction={busyByJob[jobKey('torrent', job.id)]}
               confirmRemove={confirmRemove === jobKey('torrent', job.id)}
+              expanded={openTorrent === job.id}
               onAction={(kind, id, state, action) => { void act(kind, id, state, action); }}
               onConfirmRemove={setConfirmRemove}
+              onToggleDetail={(id) => setOpenTorrent((current) => (current === id ? undefined : id))}
             />
           ))}
           {snapshot && torrentJobs.length === 0 && <p className="ingest-empty">No torrent jobs.</p>}

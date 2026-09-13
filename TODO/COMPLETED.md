@@ -1,6 +1,131 @@
 # Completed and tested
 
-Last updated: 2026-09-08
+Last updated: 2026-09-10
+
+## Samsung failover plays: a replacement asks for the carriage its generation was created with
+
+Stopping the serving node mid-film on the Samsung produced a long black
+screen and then *"No untried Macha playback endpoint remains"* — with three
+healthy nodes in the cluster. The decisive observation was Tom's: at the point
+of that error, selecting **Auto** resumed playback instantly from the same node
+that had just starved.
+
+**Cause.** `container` is not among a session's confirmed preferences, and
+failover rebuilds a generation from exactly those (`completePreferences` →
+`currentPreferences`). A set that had asked for MPEG-TS was therefore handed
+**fMP4 by every replacement node** — the one carriage it cannot play. The PATCH
+path already restated the container, with a comment naming this very failure;
+the create path never did. That asymmetry was the whole fault, and it is what
+the Auto recovery was pointing at: Auto is a PATCH.
+
+**Fix.** `withRestatedSegmentContainer` in `@machafoundation/core` 0.6.3, shared by the
+update path and `currentPreferences`, so failover *and* standby preparation ask
+for the carriage the generation was created with. The regression test was
+confirmed to fail against the pre-fix code with the exact container mismatch
+before it was trusted.
+
+**Verified on the set** by Tom, 2026-09-09: *"That works."*
+
+**Two theories of mine that were wrong, kept so nobody re-raises them.**
+
+*Segment holds.* The trail carries no `hls-native-first-fragment-held` line, so
+no fragment was ever held — the nodes answered the readiness probe at once. The
+theory was that a native HLS player, which has no retry policy this client can
+reach, would see one `MEDIA_ERR_NETWORK` where hls.js rides out a `500
+segment_not_ready`, charging a healthy node and walking the cluster. Plausible,
+measurable, and false. What it produced is still right and still shipped:
+
+- `WebPlayer.play()` asks the node for one byte of the first fragment before
+  handing the element a native-HLS URL, through the same admission and hold
+  path the player itself would use — honouring `Retry-After`, 30 s budget,
+  stopping immediately on `503`/transport, which *is* node evidence
+  (`awaitNativeHlsFirstFragment` in `WebPlatform.ts`).
+- The element is emptied before that wait, so a failure still arriving from the
+  generation being replaced cannot be billed to its replacement.
+- `readFirstResponseBytes` no longer requires `response.body`. Chromium 47 has
+  `fetch` and not response streams, so **every warm standby the Samsung ever
+  prepared failed its own preflight and was discarded** — the set least able to
+  afford a cold failover was the one guaranteed never to have an alternate
+  ready. That was a genuine bug found only because the wrong theory sent
+  someone to read that function.
+
+*A wedged media element.* Two replacements sat at `HAVE_NOTHING` for the full
+20 s starvation budget without fetching a byte, on a reused element, while a
+plain `fetch` of each generation's own first fragment was served immediately.
+That looked conclusive. It was the *carriage*: a native player handed fMP4 it
+cannot decode fetches nothing and reports nothing, which is indistinguishable
+from a wedged element from the outside. A change to discard the failed element
+shipped on this theory, did not fix the fault, and was **removed at Tom's
+request** on 2026-09-09 once the real cause was known. `WebPlatform.ts` no
+longer contains it.
+
+The lesson worth keeping: both theories were confirmed by checks that could not
+have failed — one by a log line that never appeared, one by an observation that
+two different causes produce identically.
+
+## Android TV has been run on a real television, and it plays
+
+The Android target had never been launched on hardware; every browser-side
+fault found on 2026-09-08 applied to it in principle and none had been observed
+there. Run on the TCL 55B6B (Android 11, WebView 151.0.7922.199, adb over
+`10.34.1.115:5555`) on 2026-09-09, with Tom at the screen:
+
+- The APK installs and launches.
+- Catalogue browsing and D-pad navigation work.
+- Playback works. Stereo titles play correctly, start to finish.
+
+Two changes came out of running it:
+
+- **`forceNativeHls` is gone from `AndroidWebPlatform`.** It was set in the
+  commit that first stood the Android target up (`0764d67`) and never
+  justified; every written argument for forcing the native path in this
+  codebase is about the Samsung's Chromium 47. WebView 151 has MediaSource, and
+  the capability probe was already advertising `hlsFmp4` on that basis — so the
+  client was asking for a container justified by a code path it then refused to
+  take. Confirmed live afterwards: the log reads `hls-js-selected`. This also
+  gives that target its first degradation channel, and therefore its first
+  possibility of a warm standby.
+- **The shell holds audio focus and keeps the screen on.** `MainActivity`
+  requests `AUDIOFOCUS_GAIN` with `USAGE_MEDIA`/`CONTENT_TYPE_MOVIE`, abandons
+  it in `onPause`, pauses the page's media on loss, and sets
+  `FLAG_KEEP_SCREEN_ON`. Android WebView requests no audio focus of its own
+  for HTML5 media, so nothing was asking.
+
+**One fault found and not fixed:** 5.1 titles play without downmixing
+correctly, and dialogue is what is lost. That is a live entry in `ACTIVE.md`
+with the measurement behind it; the decision it needs is Tom's.
+
+Note on the address: one now-removed `ACTIVE.md` entry recorded this set at
+`10.34.1.116`. Everything above was measured against `10.34.1.115`, which is
+also the address the two surviving entries use and the one adb answered on all
+evening. `.116` looks like the typo, but nothing has been checked at `.116` to
+prove it is not a second device.
+
+## The media watchdogs moved into `@machafoundation/core`, and the budget says what it is calibrated against
+
+`MediaStartWatchdog` and `MediaStallWatchdog` lived here, which meant the
+platforms with the least introspection got the least recovery: `prepareAlternate`
+is reachable only from `degrade()`, `degrade()` only from a player's optional
+degradation events, and Samsung's native path has none. Both now live in
+`@machafoundation/core` 0.7.0 with the environment injected as the first constructor
+argument, and this client keeps only `src/platform/mediaWatchdogEnvironment.ts`
+— the whole of the DOM in that mechanism. Each host wires them itself; they are
+deliberately not wired into `PlaybackCoordinator`.
+
+`note(positionMs, bufferedEndMs?)` takes buffering as **optional**, because
+`expo-video` publishes a position and nothing trustworthy about buffered ranges,
+and a fabricated zero would read as evidence about the node when the only
+evidence is that a viewer is waiting.
+
+The stall budget is **7 s**, and the number is derived rather than chosen:
+`MEDIA_STALL_TIMEOUT_MS = SERVER_SEGMENT_HOLD_MS + 1_000`. A node holds a
+request for a fragment it has not produced for `streaming.segment_timeout` —
+6000 ms — before answering `500 segment_not_ready`. Expiring inside that window
+judges a node that was about to deliver. The guard test asserts the
+*relationship*, not the value, so it cannot drift back toward the 15 s it
+started at without meeting the argument. Tom set 5 s, observed it was too short
+in practice, and settled on 7 s.
+
 
 ## Samsung stops direct-playing files, and the last broken title plays
 
@@ -98,7 +223,7 @@ or `init.mp4` that exists in the plan but has not been produced yet answers
 generation is `503 stream_failed`. Without this, every hold was node evidence:
 `isHlsNetworkDegradation()` was `data.type === 'networkError'` with no regard
 to `fatal` or status, so a held fragment reached `PlaybackCoordinator.degrade()`
-and prepared a standby session on another node — and `@macha/core`'s default is
+and prepared a standby session on another node — and `@machafoundation/core`'s default is
 against us, since a `'stream'` failure *is* endpoint evidence, so failing to
 classify is what causes the failover.
 
@@ -431,7 +556,7 @@ with E-AC-3 excluded, forcing an AAC transcode — functional, but re-encoding
 audio *and* HEVC that need no re-encoding, on every title, to work around a
 carriage fault.
 
-Four dead fields in `@macha/core` fell out of the investigation, each
+Four dead fields in `@machafoundation/core` fell out of the investigation, each
 declared, consumed, silently defaulted, and populated by nobody: `operations`,
 `hlsAudioCodecs`, `hlsTs` (also unreachable — `segmentContainer()` returned
 `fmp4` before ever reading it), and the chooser's illegal `remux` + `audio:
@@ -535,18 +660,18 @@ Verified: `tsc --noEmit` clean on both projects; 166 tests pass; the Samsung
 package built and deployed to `10.44.1.183` repeatedly through the day, with
 each fix confirmed on the set by the operator.
 
-## The client core moved to `@macha/core`; this repo consumes it
+## The client core moved to `@machafoundation/core`; this repo consumes it
 
 The platform-independent half of this client — server API families, cluster
 endpoint routing and health, playback resolution and coordination, persisted
 state — now lives in `/Users/tom/devroot/macha-ts` as the zero-dependency
-package `@macha/core`, so the React Native app can share it. Extracted by a
+package `@machafoundation/core`, so the React Native app can share it. Extracted by a
 separate session; this entry records **this** repo's side.
 
-- `package.json` gains `"@macha/core": "file:../macha-ts"`. The package
+- `package.json` gains `"@machafoundation/core": "file:../macha-ts"`. The package
   publishes built `dist`, and npm does not run a linked dependency's build,
   so **`npm run build` in macha-ts is a prerequisite** for typechecking here.
-- 64 files now import `@macha/core`; ~90 modules and their tests were
+- 64 files now import `@machafoundation/core`; ~90 modules and their tests were
   deleted from `src/`. Test count here drops from 451 to 146 (the balance,
   334 across 44 files, moved with the code and passes there).
 - Four web-specific bindings stayed behind, deliberately — each is the point
@@ -576,9 +701,10 @@ bundle), 30 files / 146 tests pass. `src/` was backed up to the session
 scratchpad before any deletion — much of this tree is uncommitted and some
 files are untracked, so a bad delete would not have been recoverable.
 
-**Not verified: nothing has been run against a real server since the move.**
-The dev server, the Samsung package and live playback are all untested on
-this arrangement. Do that before trusting it.
+**Since verified.** That caveat stood when this entry was written; it no
+longer does. The arrangement has since run against the live cluster on the dev
+server, in the packaged Samsung widget and in the Android WebView build,
+including playback and mid-stream failover, across releases up to 0.12.2.
 
 ## Endpoint choice measures throughput, not just round-trip time
 
@@ -1482,9 +1608,11 @@ can't unilaterally declare).
   guess is Samsung Tizen 3 lacked IntersectionObserver and the old
   implementation had no fallback for that — today's does
   (`typeof IntersectionObserver === 'undefined'` → eager-load) — but this is
-  unverified. **Before shipping to the Samsung build specifically**, confirm
-  on-device that the fallback path actually engages rather than throwing, and
-  reconsider if the real historical reason turns out to be something else.
+  unverified. What *is* now established: artwork loads on the Samsung across
+  many releases since, so whichever of the two paths that set takes, it does
+  not throw. What remains unknown is which one — nobody has read the value on
+  the device. Worth one line of a probe next time anything is measured there,
+  rather than a task of its own.
 
 ## Playback/cluster correctness fixes from a "grad-level howler" review
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { ClientLogEntry } from '@macha/core';
+import type { ClientLogEntry } from '@machafoundation/core';
 import { playbackFailureTrail } from './failureTrail';
 
 function entry(partial: Partial<ClientLogEntry>): ClientLogEntry {

@@ -23,20 +23,21 @@ least one proposed endpoint passes a bounded check. With no stored endpoints,
 the same locked gate is presented as first-run Welcome setup.
 
 ```text
-                          Macha node
+                          Macha cluster
                  distributed media + catalogue
                              |
        /api/v1/catalogue       /api/v1/playback
           JSON + artwork       sessions + streams
                 |                    |
-       MachaCatalogueApi     MachaPlaybackResolver
+  ==============|====================|=============== @machafoundation/core
                 |                    |
-          MachaMediaApi       PlaybackResolver
+       MachaCatalogueApi     ClusterPlaybackResolver
                 |                    |
-                |             PlaybackRuntime
-                |              /          \
-                |   PlaybackCoordinator   Player
+          MachaMediaApi         PlaybackRuntime
+                |                /          \
+                |   PlaybackCoordinator   Player (interface)
                 |                    |       |
+  ==============|====================|=======|======= macha-client
                 +---------+----------+-------+
                           |
                   React presentation
@@ -44,13 +45,18 @@ the same locked gate is presented as first-run Welcome setup.
                           |
            +--------------+--------------+
            |              |              |
-          Web          Android             Tizen
-    video + hls.js  WebView HTML media   AVPlay stub
+          Web          Android TV        Samsung
+    video + hls.js   WebView + hls.js   native HLS,
+                                        MPEG-TS segments
 ```
 
-The server owns playback negotiation and media transformation. The client owns controls and reports platform capabilities. Configured API URLs seed a client-owned endpoint registry and one shared router used by catalogue, status, management, import and playback. The endpoint that most recently completed real work is the client's authoritative API endpoint and is tried first. On retryable failure, the first working alternative becomes authoritative for subsequent work. The client checks every known API endpoint immediately and at a bounded interval, but probe completion updates health only and never displaces authority. Health-probe HTTP requests are never wired to playback, component-lifecycle or client timeout cancellation; an obsolete monitor may ignore its eventual result, but cancellation itself is never node-health evidence. The same rule applies to routed work: `AbortError` represents local client intent and cannot demote an endpoint or trigger cluster-unreachable state. Node identity and API endpoint identity remain separate because one node may advertise several reachable API bases.
+The endpoint registry, health monitoring and failover sit alongside the API
+layer in `@machafoundation/core` and are shared with the React Native clients, which
+reuse none of this repo's presentation.
 
-The Android TV package is a thin full-screen WebView shell around the Android-mode shared bundle. It uses hash routing, the common deterministic D-pad model and WebView's HTML media pipeline. The future Media3 host remains behind the existing `Platform`/`Player` boundary and does not require a second UI.
+The server owns media transformation and obeys; the client negotiates. The client reports what its platform can actually decode and chooses Direct Play, remux or transcode from that — a decision made in `@machafoundation/core` so that every Macha client makes it identically. Configured API URLs seed a client-owned endpoint registry and one shared router used by catalogue, status, management, import and playback. The endpoint that most recently completed real work is the client's authoritative API endpoint and is tried first. On retryable failure, the first working alternative becomes authoritative for subsequent work. The client checks every known API endpoint immediately and at a bounded interval, but probe completion updates health only and never displaces authority. Health-probe HTTP requests are never wired to playback, component-lifecycle or client timeout cancellation; an obsolete monitor may ignore its eventual result, but cancellation itself is never node-health evidence. The same rule applies to routed work: `AbortError` represents local client intent and cannot demote an endpoint or trigger cluster-unreachable state. Node identity and API endpoint identity remain separate because one node may advertise several reachable API bases.
+
+The Android TV package is a thin full-screen WebView shell around the Android-mode shared bundle. It uses hash routing, the common deterministic D-pad model, and hls.js/MSE — WebView 151 has MediaSource, and the managed path is also the only one that reports degradation, so it is the only one that can prepare a warm standby. The shell holds `AUDIOFOCUS_GAIN` and `FLAG_KEEP_SCREEN_ON` for as long as it is in front. A future Media3 host would sit behind the existing `Platform`/`Player` boundary and would not require a second UI. It is under consideration for one measured reason: Chromium ships no AC-3/E-AC-3 decoder, so 5.1 sources are force-transcoded and the channel layout is lost on the way to AudioFlinger — see `TODO/ACTIVE.md`.
 
 ## Catalogue loading
 
@@ -101,7 +107,8 @@ ownership rather than participating in spatial movement.
 - The client does not know about DHT extents, replicas, peers or routing.
 - The catalogue wire model mirrors Macha rather than inventing a client-specific server API.
 - The client never transcodes.
-- The server chooses Direct Play first, Remux second and Transcode only when required.
+- The client chooses Direct Play first, remux second and transcode only when required, from its own measured capabilities; the server supplies the facts and performs the work.
+- Anything a non-DOM client would also need belongs in `@machafoundation/core`, not in this repo.
 - Platform-specific code is restricted to capabilities, playback, application lifecycle and remote-key integration.
 - React owns catalogue browsing, routes, search, hierarchy, focus navigation and playback chrome; it does not own playback resources.
 - Continue Watching is installation-local state, bounded to three unfinished items and never uploaded.
@@ -160,7 +167,7 @@ The invariants are:
 - Play, pause and any seek representable by the active source generation are local transport commands.
 - A server playback update is a request for a new source generation, not a transport operation.
 - Newer user intent supersedes older intent while server work is in flight; intermediate generations are not needlessly attached.
-- Modern Web transformed playback uses hls.js/MSE with a bounded forward buffer. Pause freezes presentation without stopping acquisition: in-flight fragments finish and managed HLS continues filling to its configured buffer ceiling so Resume remains local whenever possible. Healthy playback owns no standby session. HLS network evidence may open a 30-second recovery window in which one alternate generation is created and its manifest, initialization data and first segment are preflighted without attaching a second decoder. If the primary continues, the unused alternate is closed; if it fails, the prepared generation is promoted permanently. Fatal media recovery must demonstrate playback progress before another recovery is allowed. Proven decoder or unsupported-source failures remain terminal without condemning a healthy endpoint. Samsung keeps its legacy native-HLS path.
+- Modern Web transformed playback uses hls.js/MSE with a bounded forward buffer. Pause freezes presentation without stopping acquisition: in-flight fragments finish and managed HLS continues filling to its configured buffer ceiling so Resume remains local whenever possible. Healthy playback owns no standby session. HLS network evidence may open a 30-second recovery window in which one alternate generation is created and its manifest, initialization data and first segment are preflighted without attaching a second decoder. If the primary continues, the unused alternate is closed; if it fails, the prepared generation is promoted permanently. Fatal media recovery must demonstrate playback progress before another recovery is allowed. Proven decoder or unsupported-source failures remain terminal without condemning a healthy endpoint. Samsung keeps its legacy native-HLS path with MPEG-TS segments, and therefore has no degradation channel and prepares no standby; a stall watchdog is what stands in for one there.
 - Direct Play read-ahead is optional. If its Service Worker is not already usable, playback takes the native URL immediately.
 - Cluster Direct Play starts and retains exactly one session while its source is healthy. Its rolling read-ahead worker treats Pause as an acquisition-active state: it preserves in-flight ranges and continues contiguous reads up to the bounded cache frontier. Only new viewer demand, seeking, source replacement, release or failure may interrupt speculative work. A failed speculative TCP/range read is non-terminal node-health evidence: buffered playback continues while the client creates at most one byte-compatible alternate for a 30-second recovery window. If unused it is closed; if promoted it remains the source. Cleanup of the superseded node-local session starts only after replacement bytes are buffered and retries with exponential backoff. Immutable media identity, size and MIME compatibility are required before any handoff.
 - Buffering is observable state, never a lock that disables or serializes controls.

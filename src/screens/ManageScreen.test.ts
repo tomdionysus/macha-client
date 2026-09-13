@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { candidateAlreadyCatalogued, pageSlice, pathBreadcrumbs, runBulkOperation } from './ManageScreen';
-import type { ManageCatalogueMatch, MediaProbeCandidate } from '@macha/core';
+import type { ManageCatalogueMatch, MediaProbeCandidate } from '@machafoundation/core';
 
 function probe(overrides: Partial<MediaProbeCandidate> = {}): MediaProbeCandidate {
   return {

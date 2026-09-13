@@ -1,4 +1,4 @@
-import { MachaClientConfiguration, parseEndpointList } from '@macha/core';
+import { MachaClientConfiguration, parseEndpointList } from '@machafoundation/core';
 
 /**
  * The web build's binding of the core's client configuration.

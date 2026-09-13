@@ -1,5 +1,5 @@
-import type { Platform, Player } from '@macha/core';
-import type { PlaybackCapabilities } from '@macha/core';
+import type { Platform, Player } from '@machafoundation/core';
+import type { PlaybackCapabilities } from '@machafoundation/core';
 
 /**
  * Wiring contract for the future Android TV shell.

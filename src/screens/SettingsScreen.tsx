@@ -1,10 +1,10 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import type { MediaApi } from '@macha/core';
-import type { ServerApi, ServerStatus } from '@macha/core';
+import type { MediaApi } from '@machafoundation/core';
+import type { ServerApi, ServerStatus } from '@machafoundation/core';
 import { machaLogoUrl as logoUrl } from '../uiAssets';
 import { useAsync } from '../hooks/useAsync';
-import { routes } from '@macha/core';
+import { routes } from '@machafoundation/core';
 import { clientVersion } from '../version';
 import { ConnectionForm } from '../components/ConnectionForm';
 import { failureTrailEnabled, setFailureTrailEnabled } from '../diagnostics/failureTrailSetting';

@@ -2,13 +2,13 @@
 import { act, render } from '@testing-library/react';
 import { useEffect, useState } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { MediaApi } from '@macha/core';
-import type { Platform } from '@macha/core';
-import type { PlaybackRuntime, PlaybackRuntimeRequest, PlaybackRuntimeSnapshot } from '@macha/core';
-import { ContinueWatchingStore } from '@macha/core';
-import { PlaybackQueueStore } from '@macha/core';
-import { VolumeStore } from '@macha/core';
-import type { MediaSummary } from '@macha/core';
+import type { MediaApi } from '@machafoundation/core';
+import type { Platform } from '@machafoundation/core';
+import type { PlaybackRuntime, PlaybackRuntimeRequest, PlaybackRuntimeSnapshot } from '@machafoundation/core';
+import { ContinueWatchingStore } from '@machafoundation/core';
+import { PlaybackQueueStore } from '@machafoundation/core';
+import { VolumeStore } from '@machafoundation/core';
+import type { MediaSummary } from '@machafoundation/core';
 import { AppRouter } from './AppRouter';
 import { usePlaybackController } from './usePlaybackController';
 

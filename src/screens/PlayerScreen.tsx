@@ -1,21 +1,22 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent } from 'react';
-import type { MediaApi } from '@macha/core';
+import type { MediaApi } from '@machafoundation/core';
 import { PlayIcon, RestartIcon } from '../components/PlaybackIcons';
 import { Loading } from '../components/Status';
-import { createClientLogger } from '@macha/core';
+import { createClientLogger } from '@machafoundation/core';
 import { useArtworkUrl } from '../hooks/useArtworkUrl';
 import { requestTvDefaultFocus } from '../hooks/useTvNavigation';
-import type { Platform } from '@macha/core';
+import type { Platform } from '@machafoundation/core';
 import { platformTraits } from '../platform/traits';
-import type { PlaybackUpdate } from '@macha/core';
-import { isSubtitleOnlyPlaybackUpdate, type PlaybackCoordinatorSnapshot } from '@macha/core';
-import { PlaybackRuntime, type PlaybackRuntimeRequest, type PlaybackRuntimeSnapshot } from '@macha/core';
+import type { PlaybackUpdate } from '@machafoundation/core';
+import { isSubtitleOnlyPlaybackUpdate, type PlaybackCoordinatorSnapshot } from '@machafoundation/core';
+import { PlaybackRuntime, type PlaybackRuntimeRequest, type PlaybackRuntimeSnapshot } from '@machafoundation/core';
+import { formatPlaybackTime } from '@machafoundation/core';
 import { uiSettings } from '../settings';
-import { describePlaybackSession } from '@macha/core';
+import { describePlaybackSession } from '@machafoundation/core';
 import { playbackFailureTrail, type PlaybackFailureTrailEntry } from './player/failureTrail';
 import { failureTrailEnabled } from '../diagnostics/failureTrailSetting';
-import { bufferedTimelineSegments } from '@macha/core';
-import type { MediaSummary, PlaybackEvent, PlaybackProgress } from '@macha/core';
+import { bufferedTimelineSegments } from '@machafoundation/core';
+import type { MediaSummary, PlaybackEvent, PlaybackProgress } from '@machafoundation/core';
 import { PlayerOptions } from './player/PlayerOptions';
 import { accelerateSeek, seekDirectionForKey, type SeekDirection, type SeekHold } from './player/seekAcceleration';
 import { samsungMediaCommand } from '../platform/SamsungMediaKeys';
@@ -42,14 +43,22 @@ interface Props {
 }
 
 
-function formatTime(ms: number): string {
-  const total = Math.max(0, Math.floor(ms / 1000));
-  const hours = Math.floor(total / 3600);
-  const minutes = Math.floor((total % 3600) / 60);
-  const seconds = total % 60;
-  return hours > 0
-    ? `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
-    : `${minutes}:${String(seconds).padStart(2, '0')}`;
+/**
+ * A duration the scrubber can divide by and render.
+ *
+ * This replaces `a || b || c || 1`, which was doing two jobs and only one of
+ * them deliberately: it skipped a missing duration, and it *also* skipped
+ * `NaN`, because `NaN` is falsy — which is the only reason nothing has ever
+ * rendered `NaN:NaN` on the bar. `Infinity` is truthy and went straight
+ * through, so an unknown-duration or live source would have reached the
+ * formatter intact. Stating the requirement makes the fallback a decision
+ * rather than a side effect of truthiness.
+ */
+export function firstUsableDurationMs(...candidates: (number | undefined)[]): number {
+  for (const candidate of candidates) {
+    if (candidate !== undefined && Number.isFinite(candidate) && candidate > 0) return candidate;
+  }
+  return 1;
 }
 
 type PlayerIconName = 'back' | 'previous' | 'rewind' | 'pause' | 'forward' | 'next' | 'options' | 'expand' | 'close' | 'fullscreen' | 'fullscreen-exit' | 'volume' | 'mute';
@@ -653,7 +662,7 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
 
   const session = playback.session;
   const event = playback.event;
-  const duration = session?.durationMs || event.durationMs || media.durationMs || 1;
+  const duration = firstUsableDurationMs(session?.durationMs, event.durationMs, media.durationMs);
   const displayedProgress = scrubValue ?? Math.min(duration, playback.intent.positionMs);
   const playedPercent = Math.max(0, Math.min(100, displayedProgress / Math.max(1, duration) * 100));
   const bufferedSegments = useMemo(
@@ -803,7 +812,7 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
         )}
 
         <div className="player-scrubber-row">
-          <span>{formatTime(displayedProgress)}</span>
+          <span>{formatPlaybackTime(displayedProgress)}</span>
           <div className="player-scrubber-shell">
             {scrubberVisual}
             <input
@@ -814,7 +823,7 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
               step={1_000}
               value={displayedProgress}
               aria-label="Playback position"
-              aria-valuetext={`${formatTime(displayedProgress)} of ${formatTime(duration)}`}
+              aria-valuetext={`${formatPlaybackTime(displayedProgress)} of ${formatPlaybackTime(duration)}`}
               data-tv-focusable="true"
               onChange={(changeEvent: ChangeEvent<HTMLInputElement>) => setScrubPosition(Number(changeEvent.target.value))}
               onPointerUp={() => {
@@ -855,7 +864,7 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
               }}
             />
           </div>
-          <span>{formatTime(duration)}</span>
+          <span>{formatPlaybackTime(duration)}</span>
         </div>
 
         <div className="player-button-row">
@@ -900,7 +909,7 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
         <button className="player-mini-copy" type="button" data-tv-focusable="true" onClick={onExpand} aria-label={`Open player for ${media.title}`}>
           <span className="player-mini-title">{media.title}</span>
           <span className="player-mini-subtitle">{fatalError ? `Playback failed · ${fatalError.message}` : playerSubtitle || 'Now playing'}</span>
-          <span className="player-mini-time">{formatTime(displayedProgress)} / {formatTime(duration)}</span>
+          <span className="player-mini-time">{formatPlaybackTime(displayedProgress)} / {formatPlaybackTime(duration)}</span>
           <span className="player-mini-progress" aria-hidden="true"><span style={{ width: `${Math.min(100, displayedProgress / Math.max(1, duration) * 100)}%` }} /></span>
         </button>
         <div className="player-mini-controls">

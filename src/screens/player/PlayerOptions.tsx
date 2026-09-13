@@ -5,8 +5,8 @@ import type {
   PlaybackSession,
   PlaybackStreamInfo,
   PlaybackUpdate,
-} from '@macha/core';
-import type { PlaybackMode } from '@macha/core';
+} from '@machafoundation/core';
+import type { PlaybackMode } from '@machafoundation/core';
 
 function streamLabel(stream: PlaybackStreamInfo, fallback: string): string {
   const parts = [stream.language ? stream.language.toUpperCase() : fallback, stream.codec.toUpperCase()];

@@ -1,12 +1,54 @@
 // @vitest-environment jsdom
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import type { MediaApi } from '@macha/core';
+import type { ArtworkRef, MediaApi } from '@machafoundation/core';
 import { LazyArtwork } from './LazyArtwork';
-import { VISIBLE_ARTWORK_RECOVERY_DELAY_MS } from '../hooks/useViewportArtworkUrl';
 
-function fakeApi(artwork: MediaApi['artwork'] = vi.fn(() => Promise.reject(new Error('artwork() should not be called')))): MediaApi {
-  return { artwork, invalidateArtwork: vi.fn() } as unknown as MediaApi;
+const FUTURE = '?exp=9999999999999&sig=abc';
+const PAST = '?exp=1&sig=abc';
+
+/**
+ * The shape `MachaMediaApi.artworkUrls` returns: the ref's own signed URL,
+ * the same capability re-hosted on every node, then each node's
+ * authenticated URL — which an `<img>` must not be handed.
+ */
+function fakeApi(
+  artwork: MediaApi['artwork'] = vi.fn(() => Promise.reject(new Error('artwork() should not be called'))),
+  nodes: string[] = ['http://node'],
+): MediaApi {
+  const artworkUrls = (ref: ArtworkRef) => {
+    const query = ref.url ? ref.url.slice(ref.url.indexOf('?')) : '';
+    return [
+      ...(ref.url ? [{ url: ref.url, requiresAuthorization: false }] : []),
+      ...(ref.url ? nodes.map((node) => ({ url: `${node}/api/v1/catalogue/artwork/${ref.id}${query}`, requiresAuthorization: false })) : []),
+      ...nodes.map((node) => ({ url: `${node}/api/v1/catalogue/artwork/${ref.id}`, requiresAuthorization: true })),
+    ];
+  };
+  return { artwork, artworkUrls, invalidateArtwork: vi.fn() } as unknown as MediaApi;
+}
+
+/**
+ * jsdom does not implement createObjectURL/revokeObjectURL. Patch them
+ * directly, and unmount before restoring them, so the Blob-fetch path —
+ * unchanged production code — can run here and revoke on the way out; RTL's
+ * own afterEach unmount would otherwise run after the restore.
+ */
+async function withObjectUrls(run: () => Promise<void>): Promise<void> {
+  const originalCreate = URL.createObjectURL;
+  const originalRevoke = URL.revokeObjectURL;
+  URL.createObjectURL = vi.fn(() => 'blob:fake');
+  URL.revokeObjectURL = vi.fn();
+  try {
+    await run();
+  } finally {
+    cleanup();
+    URL.createObjectURL = originalCreate;
+    URL.revokeObjectURL = originalRevoke;
+  }
+}
+
+function poster(): HTMLImageElement {
+  return screen.getByRole<HTMLImageElement>('img', { name: 'Movie poster' });
 }
 
 describe('LazyArtwork', () => {
@@ -21,9 +63,8 @@ describe('LazyArtwork', () => {
       />,
     );
 
-    const img = screen.getByRole<HTMLImageElement>('img', { name: 'Movie poster' });
-    expect(img.src).toContain('/signed/poster-1?sig=abc');
-    expect(img.getAttribute('loading')).toBe('lazy');
+    expect(poster().src).toContain('/signed/poster-1?sig=abc');
+    expect(poster().getAttribute('loading')).toBe('lazy');
     expect(artworkFetch).not.toHaveBeenCalled();
     expect(screen.queryByText('placeholder')).toBeNull();
   });
@@ -42,95 +83,134 @@ describe('LazyArtwork', () => {
     expect(screen.getByRole<HTMLImageElement>('img', { name: 'Hero' }).getAttribute('loading')).toBe('eager');
   });
 
-  it('falls back to fetching artwork without a signed URL, for a node that has not upgraded', async () => {
-    // jsdom does not implement createObjectURL/revokeObjectURL. Patch them
-    // directly (rather than vi.stubGlobal, whose restore would otherwise race
-    // the effect cleanup that RTL's automatic unmount runs in afterEach) so
-    // the legacy Blob-fetch path — unchanged production code — can run here.
-    const originalCreate = URL.createObjectURL;
-    const originalRevoke = URL.revokeObjectURL;
-    URL.createObjectURL = vi.fn(() => 'blob:fake');
-    URL.revokeObjectURL = vi.fn();
-    try {
-      const blob = new Blob(['poster-bytes'], { type: 'image/jpeg' });
-      const artworkFetch = vi.fn(() => Promise.resolve(blob));
+  it('falls back to fetching artwork without a signed URL, for a node that has not upgraded', () => withObjectUrls(async () => {
+    const blob = new Blob(['poster-bytes'], { type: 'image/jpeg' });
+    const artworkFetch = vi.fn(() => Promise.resolve(blob));
 
-      const { unmount } = render(
-        <LazyArtwork
-          api={fakeApi(artworkFetch)}
-          artwork={{ id: 'legacy-1', mimeType: 'image/jpeg' }}
-          alt="Legacy poster"
-          placeholder={<span>placeholder</span>}
-          eager
-        />,
-      );
+    render(
+      <LazyArtwork
+        api={fakeApi(artworkFetch)}
+        artwork={{ id: 'legacy-1', mimeType: 'image/jpeg' }}
+        alt="Legacy poster"
+        placeholder={<span>placeholder</span>}
+        eager
+      />,
+    );
 
-      expect(await screen.findByRole<HTMLImageElement>('img', { name: 'Legacy poster' })).toBeTruthy();
-      expect(artworkFetch).toHaveBeenCalledWith({ id: 'legacy-1', mimeType: 'image/jpeg' });
-      unmount();
-    } finally {
-      URL.createObjectURL = originalCreate;
-      URL.revokeObjectURL = originalRevoke;
-    }
-  });
+    expect(await screen.findByRole<HTMLImageElement>('img', { name: 'Legacy poster' })).toBeTruthy();
+    expect(artworkFetch).toHaveBeenCalledWith({ id: 'legacy-1', mimeType: 'image/jpeg' });
+  }));
 
-  it('retries a failed capability image twice immediately, then falls back to the placeholder and rearms after a delay', () => {
-    // A plain <img> never retries a failed load on its own — a transient
-    // blip must be handled here, the same way LegacyLazyArtwork's decode
-    // failures already are.
-    vi.useFakeTimers();
-    try {
-      render(
-        <LazyArtwork
-          api={fakeApi()}
-          artwork={{ id: 'poster-1', mimeType: 'image/jpeg', url: '/signed/poster-1?sig=abc' }}
-          alt="Movie poster"
-          placeholder={<span>placeholder</span>}
-        />,
-      );
+  it('moves a failed image straight to the same capability on the next node, then to the authenticated fetch', () => withObjectUrls(async () => {
+    // A plain <img> never retries a failed load on its own. A different node
+    // is a different failure domain, so there is nothing to wait for before
+    // trying it; and once every node has refused, the Blob path carries the
+    // bearer token and its own recovery. No timers, no 60-second placeholder.
+    const artworkFetch = vi.fn(() => Promise.resolve(new Blob(['poster-bytes'], { type: 'image/jpeg' })));
+    const ref = { id: 'poster-1', mimeType: 'image/jpeg', url: `http://a/api/v1/catalogue/artwork/poster-1${FUTURE}` };
+    render(
+      <LazyArtwork
+        api={fakeApi(artworkFetch, ['http://a', 'http://b'])}
+        artwork={ref}
+        alt="Movie poster"
+        placeholder={<span>placeholder</span>}
+        eager
+      />,
+    );
+    expect(poster().src).toBe(`http://a/api/v1/catalogue/artwork/poster-1${FUTURE}`);
 
-      fireEvent.error(screen.getByRole('img', { name: 'Movie poster' }));
-      expect(screen.getByRole('img', { name: 'Movie poster' })).toBeTruthy();
+    fireEvent.error(poster());
+    expect(poster().src).toBe(`http://b/api/v1/catalogue/artwork/poster-1${FUTURE}`);
+    expect(artworkFetch).not.toHaveBeenCalled();
 
-      fireEvent.error(screen.getByRole('img', { name: 'Movie poster' }));
-      expect(screen.getByRole('img', { name: 'Movie poster' })).toBeTruthy();
+    fireEvent.error(poster());
+    expect(artworkFetch).toHaveBeenCalledWith(ref);
+    expect((await screen.findByRole<HTMLImageElement>('img', { name: 'Movie poster' })).src).toBe('blob:fake');
+  }));
 
-      fireEvent.error(screen.getByRole('img', { name: 'Movie poster' }));
-      expect(screen.queryByRole('img', { name: 'Movie poster' })).toBeNull();
-      expect(screen.getByText('placeholder')).toBeTruthy();
+  it('goes straight to the authenticated fetch when the cluster offers only one header-free source', () => withObjectUrls(async () => {
+    // Which sources exist is `@machafoundation/core`'s call — an expired capability is
+    // re-hosted nowhere, for instance. This screen only has to spend what it
+    // was given and then hand over, rather than inventing a source of its own.
+    const artworkFetch = vi.fn(() => Promise.resolve(new Blob(['poster-bytes'], { type: 'image/jpeg' })));
+    const api = fakeApi(artworkFetch, ['http://a', 'http://b']);
+    api.artworkUrls = (ref) => [
+      { url: ref.url!, requiresAuthorization: false },
+      { url: `http://a/api/v1/catalogue/artwork/${ref.id}`, requiresAuthorization: true },
+      { url: `http://b/api/v1/catalogue/artwork/${ref.id}`, requiresAuthorization: true },
+    ];
+    render(
+      <LazyArtwork
+        api={api}
+        artwork={{ id: 'poster-1', mimeType: 'image/jpeg', url: `http://a/api/v1/catalogue/artwork/poster-1${PAST}` }}
+        alt="Movie poster"
+        placeholder={<span>placeholder</span>}
+        eager
+      />,
+    );
+    expect(poster().src).toContain(PAST);
 
-      act(() => { vi.advanceTimersByTime(VISIBLE_ARTWORK_RECOVERY_DELAY_MS); });
-      expect(screen.getByRole<HTMLImageElement>('img', { name: 'Movie poster' }).src).toContain('/signed/poster-1?sig=abc');
-    } finally {
-      vi.useRealTimers();
-    }
-  });
+    fireEvent.error(poster());
 
-  it('resets retry state when a fresh capability URL arrives for the same artwork', () => {
+    // Never node b's authenticated URL: an <img> cannot send the header.
+    expect(screen.queryByRole('img', { name: 'Movie poster' })).toBeNull();
+    expect(artworkFetch).toHaveBeenCalled();
+    expect((await screen.findByRole<HTMLImageElement>('img', { name: 'Movie poster' })).src).toBe('blob:fake');
+  }));
+
+  it('adopts a fresh capability URL for the same artwork once the current one has failed', () => {
+    const api = fakeApi();
     const { rerender } = render(
       <LazyArtwork
-        api={fakeApi()}
+        api={api}
         artwork={{ id: 'poster-1', mimeType: 'image/jpeg', url: '/signed/poster-1?sig=old' }}
         alt="Movie poster"
         placeholder={<span>placeholder</span>}
       />,
     );
-
-    fireEvent.error(screen.getByRole('img', { name: 'Movie poster' }));
-    fireEvent.error(screen.getByRole('img', { name: 'Movie poster' }));
-    fireEvent.error(screen.getByRole('img', { name: 'Movie poster' }));
-    expect(screen.queryByRole('img', { name: 'Movie poster' })).toBeNull();
+    fireEvent.error(poster());
+    expect(poster().src).toContain('sig=old');
 
     rerender(
       <LazyArtwork
-        api={fakeApi()}
+        api={api}
         artwork={{ id: 'poster-1', mimeType: 'image/jpeg', url: '/signed/poster-1?sig=new' }}
         alt="Movie poster"
         placeholder={<span>placeholder</span>}
       />,
     );
 
-    expect(screen.getByRole<HTMLImageElement>('img', { name: 'Movie poster' }).src).toContain('sig=new');
+    expect(poster().src).toContain('sig=new');
+  });
+
+  it('adopts a fresh capability URL that arrived before the current one failed, rather than giving up on signed URLs', () => {
+    // The fresh URL is ignored while the current one is still loading (it
+    // may be the cached copy), but it must not be forgotten: when the current
+    // one then fails everywhere, the fresh one is what to try next.
+    const artworkFetch = vi.fn(() => new Promise<Blob>(() => undefined));
+    const api = fakeApi(artworkFetch);
+    const { rerender } = render(
+      <LazyArtwork
+        api={api}
+        artwork={{ id: 'poster-1', mimeType: 'image/jpeg', url: '/signed/poster-1?sig=old' }}
+        alt="Movie poster"
+        placeholder={<span>placeholder</span>}
+      />,
+    );
+    rerender(
+      <LazyArtwork
+        api={api}
+        artwork={{ id: 'poster-1', mimeType: 'image/jpeg', url: '/signed/poster-1?sig=new' }}
+        alt="Movie poster"
+        placeholder={<span>placeholder</span>}
+      />,
+    );
+    expect(poster().src).toContain('sig=old');
+
+    fireEvent.error(poster());
+
+    expect(poster().src).toContain('sig=new');
+    expect(artworkFetch).not.toHaveBeenCalled();
   });
 
   it('shows the placeholder when there is no artwork at all', () => {
@@ -150,26 +230,27 @@ describe('LazyArtwork', () => {
     // image hasn't changed. Once this artwork id has loaded successfully
     // once, a merely-reissued URL for the same id must not force a new
     // <img src> — that would be a fresh HTTP-cache key for identical bytes.
+    const api = fakeApi();
     const { rerender } = render(
       <LazyArtwork
-        api={fakeApi()}
+        api={api}
         artwork={{ id: 'poster-1', mimeType: 'image/jpeg', url: '/signed/poster-1?sig=first' }}
         alt="Movie poster"
         placeholder={<span>placeholder</span>}
       />,
     );
-    fireEvent.load(screen.getByRole('img', { name: 'Movie poster' }));
+    fireEvent.load(poster());
 
     rerender(
       <LazyArtwork
-        api={fakeApi()}
+        api={api}
         artwork={{ id: 'poster-1', mimeType: 'image/jpeg', url: '/signed/poster-1?sig=second' }}
         alt="Movie poster"
         placeholder={<span>placeholder</span>}
       />,
     );
 
-    expect(screen.getByRole<HTMLImageElement>('img', { name: 'Movie poster' }).src).toContain('sig=first');
+    expect(poster().src).toContain('sig=first');
   });
 
   it('adopts a fresh remount of the same artwork id from wherever it last loaded, across component instances', () => {
@@ -184,7 +265,7 @@ describe('LazyArtwork', () => {
         placeholder={<span>placeholder</span>}
       />,
     );
-    fireEvent.load(screen.getByRole('img', { name: 'Movie poster' }));
+    fireEvent.load(poster());
     unmount();
 
     render(
@@ -196,35 +277,36 @@ describe('LazyArtwork', () => {
       />,
     );
 
-    expect(screen.getByRole<HTMLImageElement>('img', { name: 'Movie poster' }).src).toContain('sig=first');
+    expect(poster().src).toContain('sig=first');
   });
 
-  it('falls back to the fresh URL once the cached copy actually fails', () => {
+  it('forgets a remembered URL that fails, and moves on to the fresh one', () => {
+    // "Known good" stops being true the moment the browser reports otherwise:
+    // the cached copy has evaporated or its signature has finally expired.
+    const api = fakeApi();
     const { rerender } = render(
       <LazyArtwork
-        api={fakeApi()}
+        api={api}
         artwork={{ id: 'poster-3', mimeType: 'image/jpeg', url: '/signed/poster-3?sig=stale' }}
         alt="Movie poster"
         placeholder={<span>placeholder</span>}
       />,
     );
-    fireEvent.load(screen.getByRole('img', { name: 'Movie poster' }));
-
-    fireEvent.error(screen.getByRole('img', { name: 'Movie poster' }));
-    fireEvent.error(screen.getByRole('img', { name: 'Movie poster' }));
-    fireEvent.error(screen.getByRole('img', { name: 'Movie poster' }));
-    expect(screen.queryByRole('img', { name: 'Movie poster' })).toBeNull();
-
+    fireEvent.load(poster());
     rerender(
       <LazyArtwork
-        api={fakeApi()}
+        api={api}
         artwork={{ id: 'poster-3', mimeType: 'image/jpeg', url: '/signed/poster-3?sig=fresh' }}
         alt="Movie poster"
         placeholder={<span>placeholder</span>}
       />,
     );
+    expect(poster().src).toContain('sig=stale');
 
-    expect(screen.getByRole<HTMLImageElement>('img', { name: 'Movie poster' }).src).toContain('sig=fresh');
+    fireEvent.error(poster());
+
+    expect(poster().src).toContain('sig=fresh');
+    expect(poster().src).not.toContain('sig=stale');
   });
 
   it('loads a never-before-seen artwork id from its given URL, not some other id\'s cached entry', () => {
@@ -237,6 +319,6 @@ describe('LazyArtwork', () => {
       />,
     );
 
-    expect(screen.getByRole<HTMLImageElement>('img', { name: 'Movie poster' }).src).toContain('sig=only');
+    expect(poster().src).toContain('sig=only');
   });
 });

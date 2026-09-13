@@ -4,7 +4,7 @@ import {
   type Platform,
   type PlatformTarget,
   type PlatformTraits,
-} from '@macha/core';
+} from '@machafoundation/core';
 
 /**
  * Which build this is, and the web binding of the core's trait resolution.

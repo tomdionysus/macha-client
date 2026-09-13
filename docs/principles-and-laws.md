@@ -16,9 +16,15 @@ recommendations, social activity, other-viewer activity or a global watchlist.
 ### Authority and presentation remain separate
 
 The server owns catalogue authority, immutable media identity, durability,
-placement, playback negotiation and media transformation. The client owns
-presentation, navigation, controls, platform capabilities and local playback
-intent.
+placement and media transformation. The client owns presentation, navigation,
+controls, platform capabilities and local playback intent.
+
+**The server serves facts; the client negotiates.** The server states what a
+title is, what its streams are and what operations it can perform. Choosing
+between Direct Play, remux and transcode is the client's, made from its own
+measured capabilities — and it is made in `@machafoundation/core` rather than in any one
+client, so every client decides the same way from the same facts. The server
+obeys the result; it does not pick on the client's behalf.
 
 The catalogue wire model mirrors the server contract. The client must not infer
 cluster truth, invent a parallel server model, transcode media, or treat a local

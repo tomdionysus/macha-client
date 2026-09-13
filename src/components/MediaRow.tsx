@@ -1,5 +1,5 @@
-import type { MediaApi } from '@macha/core';
-import type { MediaSummary, PlaybackProgress } from '@macha/core';
+import type { MediaApi } from '@machafoundation/core';
+import type { MediaSummary, PlaybackProgress } from '@machafoundation/core';
 import { MediaCard } from './MediaCard';
 
 interface Props {

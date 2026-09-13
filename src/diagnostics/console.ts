@@ -1,9 +1,9 @@
-import { clientDiagnosticsConsole, type ClientLogEntry } from '@macha/core';
+import { clientDiagnosticsConsole, type ClientLogEntry } from '@machafoundation/core';
 
 /**
  * Exposes the core's diagnostics buffer on `window.machaDiagnostics`.
  *
- * The buffer is platform-independent and lives in `@macha/core`; reaching a
+ * The buffer is platform-independent and lives in `@machafoundation/core`; reaching a
  * `window` and the Clipboard API are browser affordances, so `copy()` and the
  * global assignment stay here.
  */

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { ConfirmModal, Modal } from '../components/Modal';
 import { FileIcon, FolderIcon, OpenIcon, RefreshIcon, UpIcon } from '../components/ManageIcons';
 import { AsyncIconButton } from '../components/AsyncIconButton';
-import type { CatalogueApi } from '@macha/core';
+import type { CatalogueApi } from '@machafoundation/core';
 import type {
   MachaDfsDirectory,
   MachaDfsEntry,
@@ -12,16 +12,16 @@ import type {
   MediaProbeCandidate,
   UnmatchedDetail,
   UnmatchedFile,
-} from '@macha/core';
-import { errorMessage } from '@macha/core';
+} from '@machafoundation/core';
+import { errorMessage } from '@machafoundation/core';
 
-export type ManageSection = 'unmatched' | 'files' | 'settings';
+export type ManageSection = 'unmatched' | 'files' | 'users';
 
 interface Props {
   api: ManageApi;
   catalogueApi: CatalogueApi;
   section: ManageSection;
-  settings: ReactNode;
+  users: ReactNode;
   onUnmatchedCountChange?: (count: number) => void;
 }
 
@@ -678,12 +678,12 @@ function FileManager({ api }: { api: ManageApi }) {
   );
 }
 
-export function ManageScreen({ api, catalogueApi, section, settings, onUnmatchedCountChange }: Props) {
+export function ManageScreen({ api, catalogueApi, section, users, onUnmatchedCountChange }: Props) {
   return (
     <div className="manage-screen">
       <h1>Manage</h1>
-      {section === 'settings'
-        ? settings
+      {section === 'users'
+        ? users
         : section === 'files'
           ? <FileManager api={api} />
           : <UnmatchedManager api={api} catalogueApi={catalogueApi} onCountChange={onUnmatchedCountChange} />}

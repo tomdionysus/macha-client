@@ -1,4 +1,4 @@
-import { ALPHABET_INDEX, type AlphabetIndexKey } from '@macha/core';
+import { ALPHABET_INDEX, type AlphabetIndexKey } from '@machafoundation/core';
 
 interface Props {
   availableKeys: Set<AlphabetIndexKey>;

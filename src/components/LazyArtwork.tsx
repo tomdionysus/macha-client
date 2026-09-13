@@ -1,8 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import type { MediaApi } from '@macha/core';
+import type { ArtworkRef, MediaApi } from '@machafoundation/core';
+import { createClientLogger } from '@machafoundation/core';
 import { useViewportArtworkUrl, VISIBLE_ARTWORK_RECOVERY_DELAY_MS } from '../hooks/useViewportArtworkUrl';
-import type { ArtworkRef } from '@macha/core';
-import { createClientLogger } from '@macha/core';
 
 const log = createClientLogger('artwork.image');
 
@@ -13,6 +12,12 @@ interface Props {
   placeholder: ReactNode;
   draggable?: boolean;
   eager?: boolean;
+}
+
+type SignedArtwork = ArtworkRef & { url: string };
+
+function isSigned(artwork?: ArtworkRef): artwork is SignedArtwork {
+  return Boolean(artwork?.url);
 }
 
 /**
@@ -26,82 +31,111 @@ interface Props {
  * a mismatch. This maps artwork id -> the last URL that actually loaded
  * successfully, so a same-image resign gets ignored in favor of the
  * already-cached one; a real failure (the cached copy genuinely expired or
- * evaporated) still falls through to the fresh URL the caller just gave us.
+ * evaporated) forgets the entry and falls through to whatever is next.
  */
 const lastLoadedUrlById = new Map<string, string>();
 
 /**
- * When the catalogue already handed us a short-lived signed capability URL,
- * the browser owns fetching, decode and caching — but NOT retry: a plain
- * `<img>` that fails once (a transient network blip, a node hiccup, a
- * truncated response) never retries itself, and with an empty `alt` a failed
- * image renders as nothing at all. Mirror `LegacyLazyArtwork`'s
- * fail-twice-immediately/fall-back-and-rearm shape (via `key` remounts,
- * since a capability `<img>` has no blob to invalidate) rather than trusting
- * the browser to cover for a dead source.
+ * Everywhere the browser can load this artwork from on its own, best first:
+ * the copy already known to be in its cache, then every URL needing no
+ * header — the capability on each node, in the cluster's own order. Which
+ * URLs those are is `@machafoundation/core`'s judgement, including whether an expired
+ * capability is worth offering elsewhere. Anything wanting an
+ * `Authorization` header is not an `<img>` source at all, and is dropped
+ * here rather than silently 401ing.
  */
-function CapabilityArtwork({ id, url, alt, draggable, eager, placeholder }: { id: string; url: string; alt: string; draggable?: boolean; eager: boolean; placeholder: ReactNode }) {
-  const [displayUrl, setDisplayUrl] = useState(() => lastLoadedUrlById.get(id) ?? url);
-  const [attempt, setAttempt] = useState(0);
-  const [failures, setFailures] = useState(0);
+function signedSources(api: MediaApi, artwork: SignedArtwork): string[] {
+  const remembered = lastLoadedUrlById.get(artwork.id);
+  const candidates = api.artworkUrls(artwork)
+    .filter((source) => !source.requiresAuthorization)
+    .map((source) => source.url);
+  return [...new Set(remembered ? [remembered, ...candidates] : candidates)];
+}
 
+/**
+ * When the catalogue handed us a signed capability URL, the browser owns
+ * fetching, decode and caching — but not retry, and not failover. A plain
+ * `<img>` that fails once never tries again, and with an empty `alt` it
+ * renders as nothing at all. So a failure moves straight to the same
+ * capability on the next node: a different node is a different failure
+ * domain, and waiting before trying it would only make the viewer wait too.
+ * Once every node has refused, the authenticated Blob path takes over: it
+ * carries the bearer token, so it survives an expired signature (a Continue
+ * Watching card rendered from storage a day later, say), and it already has
+ * its own backoff, cluster walk and recovery. Nothing here needs a timer.
+ *
+ * A fresh URL for an artwork whose current source is still loading, or has
+ * loaded, is ignored: it is a re-signing of identical bytes, and adopting it
+ * would throw away the browser's cached copy for nothing. Once a source has
+ * failed, the fresh URL is exactly what is wanted, whenever it arrived —
+ * including before the failure, which is why a failure checks for one rather
+ * than trusting an effect to have fired at the right moment.
+ */
+function CapabilityArtwork({ api, artwork, alt = '', placeholder, draggable, eager = false }: Props & { artwork: SignedArtwork }) {
+  const [plan, setPlan] = useState(() => ({ signedBy: artwork.url, sources: signedSources(api, artwork) }));
+  const [index, setIndex] = useState(0);
+
+  const restart = () => {
+    setPlan({ signedBy: artwork.url, sources: signedSources(api, artwork) });
+    setIndex(0);
+  };
+  // A different artwork starts over from whatever is known to be good for it.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(restart, [api, artwork.id]);
+  // The same artwork, re-signed, once the current signature has failed
+  // somewhere — or everywhere, which is when it matters most.
   useEffect(() => {
-    // A genuinely different artwork: prefer whatever we already know is
-    // good for it, ignoring a merely re-signed URL for the same id (the
-    // other effect below, keyed on `url`) until proven otherwise.
-    setDisplayUrl(lastLoadedUrlById.get(id) ?? url);
-    setAttempt(0);
-    setFailures(0);
+    if (index > 0) restart();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id]);
-  useEffect(() => {
-    // Only adopt a fresh URL for the SAME id once its predecessor has
-    // exhausted its retries — otherwise this fires on every catalogue
-    // re-signing of an artwork already loaded fine, smashing the cache for
-    // no reason.
-    if (failures < 3) return;
-    setDisplayUrl(url);
-    setAttempt((current) => current + 1);
-    setFailures(0);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [url]);
-  useEffect(() => {
-    if (failures < 3) return undefined;
-    const timer = setTimeout(() => { setFailures(0); setAttempt((current) => current + 1); }, VISIBLE_ARTWORK_RECOVERY_DELAY_MS);
-    return () => clearTimeout(timer);
-  }, [failures]);
+  }, [artwork.url]);
 
-  const handleLoad = () => { lastLoadedUrlById.set(id, displayUrl); };
+  if (index >= plan.sources.length) {
+    return <LegacyLazyArtwork api={api} artwork={artwork} alt={alt} placeholder={placeholder} draggable={draggable} eager={eager} />;
+  }
 
+  const url = plan.sources[index];
   const handleError = () => {
-    if (failures >= 2) {
-      setFailures(3);
-      return;
-    }
-    setFailures((current) => current + 1);
-    setAttempt((current) => current + 1);
+    if (lastLoadedUrlById.get(artwork.id) === url) lastLoadedUrlById.delete(artwork.id);
+    const resigned = artwork.url !== plan.signedBy;
+    const exhausted = index + 1 >= plan.sources.length;
+    log.warn('capability-failed', {
+      artworkId: artwork.id,
+      source: index + 1,
+      sources: plan.sources.length,
+      next: resigned ? 'fresh-capability' : exhausted ? 'authenticated-fetch' : 'next-node',
+    });
+    if (resigned) restart();
+    else setIndex(index + 1);
   };
 
   return (
     <span className="lazy-artwork">
-      {failures < 3
-        ? <img key={attempt} src={displayUrl} alt={alt} decoding="async" draggable={draggable} loading={eager ? 'eager' : 'lazy'} onLoad={handleLoad} onError={handleError} />
-        : placeholder}
+      <img
+        key={url}
+        src={url}
+        alt={alt}
+        decoding="async"
+        draggable={draggable}
+        loading={eager ? 'eager' : 'lazy'}
+        onLoad={() => lastLoadedUrlById.set(artwork.id, url)}
+        onError={handleError}
+      />
     </span>
   );
 }
 
 export function LazyArtwork(props: Props) {
-  return props.artwork?.url
-    ? <CapabilityArtwork id={props.artwork.id} url={props.artwork.url} alt={props.alt ?? ''} draggable={props.draggable} eager={props.eager ?? false} placeholder={props.placeholder} />
+  return isSigned(props.artwork)
+    ? <CapabilityArtwork {...props} artwork={props.artwork} />
     : <LegacyLazyArtwork {...props} />;
 }
 
 /**
- * Blob-fetch/cache/viewport-observer fallback for artwork without a signed
- * URL yet — a node that has not upgraded to serve one. Not reachable once
- * every known node has upgraded, but a mixed-version cluster is this
- * client's normal operating condition, not an edge case.
+ * Blob-fetch/cache/viewport-observer path, through this package's
+ * authenticated fetch and cluster walk. The only path for artwork without a
+ * signed URL — a node that has not upgraded to serve one, and a mixed-version
+ * cluster is this client's normal operating condition, not an edge case —
+ * and the last resort for artwork whose signed URL no node will honour.
  */
 function LegacyLazyArtwork({ api, artwork, alt = '', placeholder, draggable, eager = false }: Props) {
   const [element, setElement] = useState<HTMLSpanElement | null>(null);

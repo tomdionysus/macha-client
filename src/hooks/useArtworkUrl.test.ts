@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { renderHook, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import type { MediaApi } from '@macha/core';
+import type { MediaApi } from '@machafoundation/core';
 import { useArtworkUrl } from './useArtworkUrl';
 
 function fakeApi(artwork: MediaApi['artwork']): MediaApi {

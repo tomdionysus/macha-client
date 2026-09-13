@@ -1,4 +1,4 @@
-import { clientDiagnosticsConsole, type ClientLogEntry } from '@macha/core';
+import { clientDiagnosticsConsole, type ClientLogEntry } from '@machafoundation/core';
 
 /**
  * The evidence behind a playback failure, in the failure's own words.

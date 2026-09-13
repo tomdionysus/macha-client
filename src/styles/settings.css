@@ -124,7 +124,7 @@
 .connection-gate-panel > .eyebrow { margin: 0 0 .35rem; }
 .connection-gate-panel > h1 { margin: 0 0 .7rem; }
 .connection-gate-panel > p { color: var(--text-dim); line-height: 1.55; }
-.connection-gate .connection-form { margin-top: 1.4rem; }
+.connection-gate-panel .connection-form { margin-top: 1.4rem; }
 
 .sponsor-page { width: 100%; }
 .sponsor-back { display: inline-block; margin-top: .4rem; }
@@ -160,3 +160,18 @@
   .sponsor-heading { grid-template-columns: 1fr; }
   .sponsor-logo { width: 100px; }
 }
+
+/* Centred in whatever `main` was left, rather than in the viewport: this one
+   sits below a header instead of replacing the application. */
+.login-screen { flex: 1 1 auto; display: grid; place-items: center; }
+/* Equal halves on one line. The `margin` reset is deliberate: the form's own
+   `button` rule adds a top margin that would otherwise stagger them. */
+.login-actions { display: flex; gap: .7rem; margin-top: 1.4rem; }
+/* `min-width: 0` because a flex item will not shrink below its own content by
+   default, and the longer label would otherwise set both widths and leave the
+   pair a couple of pixels apart. */
+.login-actions > button { flex: 1 1 0; min-width: 0; margin: 0; box-sizing: border-box; }
+/* The secondary carries a 1px border and the primary does not, and the flex
+   basis resolves against the content box, so the pair came out exactly two
+   pixels apart. Matching the border rather than fighting the sizing. */
+.login-actions > .primary-button { border: 1px solid transparent; }

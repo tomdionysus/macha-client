@@ -1,7 +1,7 @@
-import type { MediaApi } from '@macha/core';
-import type { CatalogueMediaProfile } from '@macha/core';
+import type { MediaApi } from '@machafoundation/core';
+import type { CatalogueMediaProfile } from '@machafoundation/core';
 import { PlayIcon, RestartIcon } from '../components/PlaybackIcons';
-import type { MediaDetails, MediaSummary, PlaybackProgress } from '@macha/core';
+import type { MediaDetails, MediaSummary, PlaybackProgress } from '@machafoundation/core';
 import { useAsync } from '../hooks/useAsync';
 import { useRefreshableAsync } from '../hooks/useRefreshableAsync';
 import { ErrorMessage, Loading } from '../components/Status';

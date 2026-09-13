@@ -1,4 +1,4 @@
-import type { Platform } from '@macha/core';
+import type { Platform } from '@machafoundation/core';
 import { AndroidPlatform, type AndroidBridge } from './AndroidPlatform';
 import { AndroidWebPlatform } from './AndroidWebPlatform';
 import { TizenPlatform, type TizenBridge } from './TizenPlatform';

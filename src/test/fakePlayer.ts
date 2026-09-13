@@ -3,8 +3,8 @@ import type {
   PlaybackDegradationListener,
   PlaybackFailureListener,
   PlaybackListener,
-} from '@macha/core';
-import type { MediaTechnicalProfile, PlaybackEvent, PlaybackSource, PlaybackTimeRange } from '@macha/core';
+} from '@machafoundation/core';
+import type { MediaTechnicalProfile, PlaybackEvent, PlaybackSource, PlaybackTimeRange } from '@machafoundation/core';
 
 export interface FakePlayerPlayCall {
   source: PlaybackSource;

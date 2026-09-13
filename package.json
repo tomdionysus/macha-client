@@ -17,7 +17,7 @@
   },
   "dependencies": {
     "@fontsource-variable/roboto": "^5.3.0",
-    "@macha/core": "file:../macha-ts",
+    "@machafoundation/core": "^0.8.1",
     "hls.js": "1.6.18",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",

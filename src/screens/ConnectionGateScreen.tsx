@@ -15,7 +15,7 @@ export function ConnectionGateScreen({ welcome, notice, ...form }: Props) {
       <p>{welcome
         ? 'Configure at least one available Macha node to begin.'
         : 'Check or replace the configured endpoints to reconnect.'}</p>
-      <ConnectionForm {...form} notice={notice} submitLabel={welcome ? 'Connect to Macha' : 'Check and reconnect'} />
+      <ConnectionForm {...form} notice={notice} submitLabel={welcome ? 'Connect to Macha' : 'Save and reconnect'} />
     </section>
   </main>;
 }

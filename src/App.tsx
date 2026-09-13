@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Navigate, NavLink, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom';
-import type { CatalogueApi, CatalogueMediaProfile } from '@macha/core';
-import type { MediaApi } from '@macha/core';
+import type { CatalogueApi, CatalogueMediaProfile } from '@machafoundation/core';
+import type { MediaApi } from '@machafoundation/core';
 import { AppLogo } from './components/AppLogo';
 import { MusicNav } from './components/MusicNav';
 import { StatusNav } from './components/StatusNav';
@@ -10,15 +10,17 @@ import { machaLogoUrl as logoUrl } from './uiAssets';
 import { useTvNavigation } from './hooks/useTvNavigation';
 import { useEndpointHealthMonitor } from './cluster/useEndpointHealthMonitor';
 import { samsungBackTarget } from './platform/samsungBackNavigation';
-import type { Platform } from '@macha/core';
+import type { Platform } from '@machafoundation/core';
 import { buildPlatformTraits, isTvBuild } from './platform/traits';
-import type { PlaybackResolver } from '@macha/core';
-import { reportClusterReachable, SERVER_REACHABLE_EVENT, SERVER_UNREACHABLE_EVENT, SERVER_UNREACHABLE_MESSAGE } from '@macha/core';
-import type { Episode, MediaSummary, PlaybackProgress, SeasonSummary } from '@macha/core';
-import { ContinueWatchingStore } from '@macha/core';
-import { PlaybackQueueStore } from '@macha/core';
-import { MusicPlaylistStore } from '@macha/core';
-import { VolumeStore } from '@macha/core';
+import type { PlaybackResolver } from '@machafoundation/core';
+import { reportClusterReachable, SERVER_REACHABLE_EVENT, SERVER_UNREACHABLE_EVENT, SERVER_UNREACHABLE_MESSAGE } from '@machafoundation/core';
+import type { Episode, MediaSummary, PlaybackProgress, SeasonSummary } from '@machafoundation/core';
+import { ContinueWatchingStore } from '@machafoundation/core';
+import { hasRole, sessionManager, type UserRole } from '@machafoundation/core';
+import { useCurrentSession } from './app/useCurrentSession';
+import { PlaybackQueueStore } from '@machafoundation/core';
+import { MusicPlaylistStore } from '@machafoundation/core';
+import { VolumeStore } from '@machafoundation/core';
 import {
   getClientId,
   getBootstrapEndpoints,
@@ -27,6 +29,11 @@ import {
 } from './state/client';
 import { HomeScreen } from './screens/HomeScreen';
 import { LibraryScreen } from './screens/LibraryScreen';
+import { UsersScreen } from './screens/UsersScreen';
+import { AccountScreen, ChangePasswordScreen } from './screens/AccountScreen';
+import { LoginScreen } from './screens/LoginScreen';
+import { AccountMenu } from './components/AccountMenu';
+import { SettingsIcon } from './components/ManageIcons';
 import { MusicScreen } from './screens/MusicScreen';
 import { MusicPlaylistScreen } from './screens/MusicPlaylistScreen';
 import { SearchScreen } from './screens/SearchScreen';
@@ -40,24 +47,24 @@ import { SettingsScreen } from './screens/SettingsScreen';
 import { SponsorScreen } from './screens/SponsorScreen';
 import { MetadataEditorScreen } from './screens/MetadataEditorScreen';
 import { IngestScreen } from './screens/IngestScreen';
-import { ManageScreen } from './screens/ManageScreen';
+import { ManageScreen, type ManageSection } from './screens/ManageScreen';
 import { NodeStatusScreen, StatusScreen } from './screens/StatusScreen';
-import { pathForMedia, routes } from '@macha/core';
-import { playerRouteItemId } from '@macha/core';
+import { pathForMedia, routes } from '@machafoundation/core';
+import { playerRouteItemId } from '@machafoundation/core';
 import { useMachaServices } from './app/useMachaServices';
 import { useSession } from './app/useSession';
-import { EndpointRegistry, bootstrapEndpoints as bootstrapClusterEndpoints } from '@macha/core';
-import { EndpointBandwidth } from '@macha/core';
-import { setTransferRecorder } from '@macha/core';
+import { EndpointRegistry, bootstrapEndpoints as bootstrapClusterEndpoints } from '@machafoundation/core';
+import { EndpointBandwidth } from '@machafoundation/core';
+import { setTransferRecorder } from '@machafoundation/core';
 import { setDirectPlayTransferListener } from './playback/directPlayReadAhead';
 import { Loading } from './components/Status';
 import { useMediaRouteBack } from './app/useMediaRouteBack';
 import { useMusicController } from './app/useMusicController';
 import { usePlaybackRuntime } from './app/usePlaybackRuntime';
 import { usePlaybackController } from './app/usePlaybackController';
-import { technicalProfileFromCatalogue, type PlaybackPolicyOverrides } from '@macha/core';
+import { technicalProfileFromCatalogue, type PlaybackPolicyOverrides } from '@machafoundation/core';
 import { ConnectionGateScreen } from './screens/ConnectionGateScreen';
-import { checkEndpointConfiguration, initialConnectionGate, normalizeConnectionEndpoints, shouldEnterConnectionGate, type ConnectionGate } from '@macha/core';
+import { initialConnectionGate, normalizeConnectionEndpoints, shouldEnterConnectionGate, type ConnectionGate } from '@machafoundation/core';
 
 interface Props {
   platform: Platform;
@@ -289,6 +296,7 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
   const {
     catalogueApi,
     manageApi,
+    usersApi,
     mediaApi: api,
     playbackResolver,
     serverApi,
@@ -298,7 +306,28 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
     managementAvailable,
   } = useMachaServices({ endpointRegistry, auth, apiOverride, playbackOverride });
   useEndpointHealthMonitor(endpointRegistry, clusterStatusApi, auth, connectionRequired && bootstrapEndpoints.length > 0 && !effectiveConnectionGate);
-  const metadataEditingAvailable = managementAvailable;
+  // Not before the session has settled. `SessionManager.fetch` retries a 401
+  // only when it actually sent a token, so a whoami that goes out during the
+  // cold-start mint is answered 401, returned as-is, and the roles are never
+  // read — leaving every privileged section visible for the rest of the run.
+  // It only ever worked by timing.
+  const { session, known: sessionKnown, refresh: refreshSession } = useCurrentSession(usersApi, connectionRequired && !effectiveConnectionGate && sessionReady);
+  /**
+   * Sections that predate roles stay visible while roles are unknown.
+   *
+   * Unknown is not the same as "has no roles". A node too old to answer the
+   * whoami, or one that has not answered yet, must not read as a viewer with
+   * no permissions — that would empty the navigation for everyone the moment
+   * an old node answered first, which is this client's normal operating
+   * condition rather than an edge case.
+   */
+  const permits = useCallback((role: UserRole) => !sessionKnown || hasRole(session?.roles, role), [session, sessionKnown]);
+  // Users is the exception, and deliberately the other way round: the screen
+  // exists only because the server has accounts, so an unknown answer means
+  // there is nothing there to show rather than something to reveal.
+  const usersAvailable = sessionKnown && hasRole(session?.roles, 'manage_users');
+  const libraryManagementAvailable = managementAvailable && permits('manager');
+  const metadataEditingAvailable = libraryManagementAvailable;
   const [unmatchedCount, setUnmatchedCount] = useState(0);
 
   // What the instruction chooser reasons from: the server's reported facts for
@@ -400,13 +429,29 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
     onQueueChange: playback.setQueueState,
   });
 
+  /**
+   * Save the endpoint list. Nothing is probed first, deliberately.
+   *
+   * There used to be a pre-save reachability check here, and it could not
+   * work: it asked an unauthenticated `catalogue/status`, which every node
+   * answers 401, so no typed endpoint ever qualified and none could be saved.
+   * On a fresh install that is a lockout — no endpoint means no session,
+   * and no session means no endpoint can ever be validated.
+   *
+   * Repairing the probe would have been the wrong fix. Reachability is not a
+   * question to ask once on a button press; it is a fact the client already
+   * maintains. The health monitor probes every known node on a timer and the
+   * registry holds the answer, and the session mint already walks candidates
+   * until one responds. Saving is configuration, and the registry is built to
+   * tolerate endpoints that are dead — that is its entire job. A bad address
+   * surfaces through the same unreachable path as a node that fails later,
+   * which is also the only path that can report one that dies a minute after
+   * being saved.
+   */
   const saveServer = useCallback(async (urls: readonly string[]): Promise<string | undefined> => {
     const normalizedEndpoints = normalizeConnectionEndpoints(urls);
-    // No bearer token anywhere in this path: sessions are minted anonymously,
-    // and as of @macha/core 0.6.4 the reachability check no longer takes one.
-    const check = await checkEndpointConfiguration(normalizedEndpoints);
-    if (check.available.length === 0) {
-      const message = check.message ?? SERVER_UNREACHABLE_MESSAGE;
+    if (normalizedEndpoints.length === 0) {
+      const message = 'Enter at least one Macha API endpoint.';
       setConnectionNotice(message);
       return message;
     }
@@ -426,6 +471,18 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
   const openMetadataEditor = useCallback((id: string) => {
     navigate(routes.edit(id));
   }, [navigate]);
+
+  const settingsPane = <SettingsScreen api={api} serverApi={serverApi} bootstrapEndpoints={bootstrapEndpoints} connectionNotice={connectionNotice} onSave={saveServer} />;
+  const usersPane = <UsersScreen api={usersApi} session={session} />;
+  const managePane = (section: ManageSection) => (
+    <ManageScreen
+      api={manageApi}
+      catalogueApi={catalogueApi}
+      section={section}
+      users={usersPane}
+      onUnmatchedCountChange={setUnmatchedCount}
+    />
+  );
 
   const miniPlayerActive = Boolean(playback.playerVisible && !playback.playerRouteActive);
   const playerHost = playback.playerVisible && activePlayback ? <PlayerHost
@@ -484,7 +541,8 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
         </NavLink>
         <nav aria-label="Main navigation">
           {navItems.map((item) => {
-            if (item.to === routes.manage && !managementAvailable) return null;
+            if (item.to === routes.manage && !libraryManagementAvailable && !usersAvailable) return null;
+            if (item.to === routes.ingest && !permits('importer')) return null;
             // Importing media is a desk task: it wants a keyboard, a file
             // browser and a person willing to type paths. None of that is
             // reachable from a remote, so it does not earn a slot in a
@@ -504,7 +562,22 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
             );
           })}
         </nav>
-        <div className="platform-badge">{import.meta.env.MODE === 'samsung' ? 'SAMSUNG TV' : platform.name.toUpperCase()}</div>
+        {/* The platform badge lived here and no longer does: it labelled the
+            build on every screen for the benefit of nobody but a developer,
+            and Status already reports the platform under Playback support,
+            beside the codec probes that give it meaning. */}
+        <div className="topbar-trailing">
+          {session && <AccountMenu api={usersApi} session={session} onSignedOut={refreshSession} />}
+          <NavLink
+            to={routes.settings}
+            className={({ isActive }: { isActive: boolean }) => `topbar-settings${isActive ? ' active' : ''}`}
+            data-tv-focusable="true"
+            aria-label="Settings"
+            title="Settings"
+          >
+            <SettingsIcon />
+          </NavLink>
+        </div>
       </header>
       {!playback.playerRouteActive && (musicSectionActive || statusSectionActive || manageSectionActive) && (
         <div className="section-nav-slot">
@@ -512,7 +585,7 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
             ? <MusicNav />
             : statusSectionActive
               ? <StatusNav />
-              : <ManageNav managementAvailable={managementAvailable} />}
+              : <ManageNav managementAvailable={libraryManagementAvailable} usersAvailable={usersAvailable} />}
         </div>
       )}
       <main>
@@ -541,11 +614,19 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
           <Route path={routes.statusClient} element={<StatusScreen api={clusterStatusApi} endpointRegistry={endpointRegistry} platform={platform} manageApi={managementAvailable ? manageApi : undefined} section="client" auth={auth} />} />
           <Route path={routes.statusConnectivity} element={<StatusScreen api={clusterStatusApi} endpointRegistry={endpointRegistry} platform={platform} manageApi={managementAvailable ? manageApi : undefined} section="connectivity" auth={auth} />} />
           <Route path="/status/nodes/:nodeId" element={<NodeStatusScreen api={clusterStatusApi} />} />
-          <Route path={routes.manage} element={managementAvailable ? <ManageScreen api={manageApi} catalogueApi={catalogueApi} section="unmatched" settings={<SettingsScreen api={api} serverApi={serverApi} bootstrapEndpoints={bootstrapEndpoints} connectionNotice={connectionNotice} onSave={saveServer} />} onUnmatchedCountChange={setUnmatchedCount} /> : <Navigate to={routes.settings} replace />} />
-          <Route path={routes.manageFiles} element={managementAvailable ? <ManageScreen api={manageApi} catalogueApi={catalogueApi} section="files" settings={<SettingsScreen api={api} serverApi={serverApi} bootstrapEndpoints={bootstrapEndpoints} connectionNotice={connectionNotice} onSave={saveServer} />} onUnmatchedCountChange={setUnmatchedCount} /> : <Navigate to={routes.settings} replace />} />
-          <Route path={routes.settings} element={<ManageScreen api={manageApi} catalogueApi={catalogueApi} section="settings" settings={<SettingsScreen api={api} serverApi={serverApi} bootstrapEndpoints={bootstrapEndpoints} connectionNotice={connectionNotice} onSave={saveServer} />} />} />
-          <Route path={routes.connection} element={<ManageScreen api={manageApi} catalogueApi={catalogueApi} section="settings" settings={<SettingsScreen api={api} serverApi={serverApi} bootstrapEndpoints={bootstrapEndpoints} connectionNotice={connectionNotice} onSave={saveServer} />} />} />
-          <Route path="/settings" element={<Navigate to={routes.settings} replace />} />
+          <Route path={routes.manage} element={libraryManagementAvailable ? managePane('unmatched') : <Navigate to={routes.settings} replace />} />
+          <Route path={routes.manageFiles} element={libraryManagementAvailable ? managePane('files') : <Navigate to={routes.settings} replace />} />
+          <Route path={routes.manageUsers} element={usersAvailable ? managePane('users') : <Navigate to={routes.settings} replace />} />
+          <Route path={routes.settings} element={settingsPane} />
+          <Route path={routes.connection} element={settingsPane} />
+          {/* Settings used to live under Manage. A bookmark from then still
+              works rather than landing on the catch-all and silently becoming
+              Home, which reads as the setting having been lost. */}
+          <Route path="/manage/settings" element={<Navigate to={routes.settings} replace />} />
+          <Route path="/manage/settings/connection" element={<Navigate to={routes.connection} replace />} />
+          <Route path={routes.login} element={<LoginScreen onSignIn={(username, password) => sessionManager.signIn({ username, password })} onSignedIn={refreshSession} />} />
+          <Route path={routes.account} element={<AccountScreen api={usersApi} session={session} />} />
+          <Route path={routes.accountPassword} element={<ChangePasswordScreen api={usersApi} policy={session?.password_policy} onChanged={refreshSession} />} />
           <Route path={routes.sponsor} element={<SponsorScreen />} />
           <Route path="*" element={<Navigate to={routes.home} replace />} />
         </Routes>

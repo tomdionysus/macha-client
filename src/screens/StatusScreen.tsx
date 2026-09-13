@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import type { Platform } from '@macha/core';
+import type { Platform } from '@machafoundation/core';
 import { DeviceCapabilities } from '../components/DeviceCapabilities';
 import type {
   ClusterNodeStatus,
@@ -9,19 +9,19 @@ import type {
   ConnectivityCheck,
   NodeRuntimeStatus,
   PublicConnectivityStatus,
-} from '@macha/core';
-import { startupPhaseLabel, startupReadyCount, startupSubsystems } from '@macha/core';
-import type { IdentityAssociationResetResult, ManageApi } from '@macha/core';
-import { routes } from '@macha/core';
+} from '@machafoundation/core';
+import { startupPhaseLabel, startupReadyCount, startupSubsystems } from '@machafoundation/core';
+import type { IdentityAssociationResetResult, ManageApi } from '@machafoundation/core';
+import { routes } from '@machafoundation/core';
 import { usePollingTask } from '../hooks/usePollingTask';
-import { errorMessage } from '@macha/core';
-import { EndpointRegistry, type EndpointCandidate } from '@macha/core';
+import { errorMessage } from '@machafoundation/core';
+import { EndpointRegistry, type EndpointCandidate } from '@machafoundation/core';
 import { ConfirmModal } from '../components/Modal';
 import { AsyncIconButton } from '../components/AsyncIconButton';
 import { RefreshIcon } from '../components/ManageIcons';
-import { probeKnownEndpoints } from '@macha/core';
-import type { AuthenticatedFetch } from '@macha/core';
-import { reportClusterReachable, reportClusterUnreachable } from '@macha/core';
+import { probeKnownEndpoints } from '@machafoundation/core';
+import type { AuthenticatedFetch } from '@machafoundation/core';
+import { reportClusterReachable, reportClusterUnreachable } from '@machafoundation/core';
 
 function formatBytes(value: number): string {
   if (!Number.isFinite(value) || value <= 0) return '0 B';

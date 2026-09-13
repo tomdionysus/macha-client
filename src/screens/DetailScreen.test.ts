@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { CatalogueMediaProfile } from '@macha/core';
+import type { CatalogueMediaProfile } from '@machafoundation/core';
 import { mediaProfileSummary } from './DetailScreen';
 
 describe('mediaProfileSummary', () => {

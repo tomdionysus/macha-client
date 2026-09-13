@@ -1,6 +1,6 @@
 import type Hls from 'hls.js';
 import { loadHls, managedHlsSupported, warmHls } from './hlsRuntime';
-import { createClientLogger } from '@macha/core';
+import { createClientLogger } from '@machafoundation/core';
 import {
   PlaybackSourceError,
   type Platform,
@@ -8,10 +8,11 @@ import {
   type PlaybackFailureListener,
   type PlaybackListener,
   type Player,
-} from '@macha/core';
-import type { MediaTechnicalProfile, PlaybackCapabilities, PlaybackEvent, PlaybackSource, PlaybackTimeRange } from '@macha/core';
+} from '@machafoundation/core';
+import type { MediaTechnicalProfile, PlaybackCapabilities, PlaybackEvent, PlaybackSource, PlaybackTimeRange } from '@machafoundation/core';
 import { ManagedHlsMediaRecoveryBudget } from './ManagedHlsRecovery';
-import { MediaStallWatchdog, MediaStartWatchdog } from './MediaWatchdog';
+import { MediaStallWatchdog, MediaStartWatchdog } from '@machafoundation/core';
+import { browserMediaWatchdogEnvironment } from './mediaWatchdogEnvironment';
 import { detectHlsTsSupport, detectWebMediaCodecCapabilities, hlsDeliveryProbe } from './WebMediaCapabilities';
 import { WebMediaTimeline } from './WebMediaTimeline';
 import {
@@ -367,8 +368,8 @@ class WebPlayer implements Player {
   private hlsMediaRecovery?: ManagedHlsMediaRecoveryBudget;
   private mediaTimeline?: WebMediaTimeline;
   private lastPublishedEvent?: PlaybackEvent;
-  private readonly startWatchdog = new MediaStartWatchdog();
-  private readonly stallWatchdog = new MediaStallWatchdog();
+  private readonly startWatchdog = new MediaStartWatchdog(browserMediaWatchdogEnvironment);
+  private readonly stallWatchdog = new MediaStallWatchdog(browserMediaWatchdogEnvironment);
 
   constructor(private readonly options: WebPlayerOptions = {}) {}
 
@@ -1152,7 +1153,11 @@ class WebPlayer implements Player {
         ...videoState(video),
         visibleMs,
         stalledAtMs: Math.round(positionMs),
-        bufferedEndMs: Math.round(bufferedEndMs),
+        // Absent stays absent all the way to the log line. A player that
+        // cannot measure buffering is not a player whose buffer is at zero,
+        // and rounding `undefined` into the record would invent the one
+        // figure that separates a slow node from a dead one.
+        bufferedEndMs: bufferedEndMs === undefined ? undefined : Math.round(bufferedEndMs),
         mode: source.mode,
         url: source.url,
       };

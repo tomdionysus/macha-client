@@ -1,5 +1,5 @@
 import { useState, type ChangeEvent, type FormEvent } from 'react';
-import { errorMessage } from '@macha/core';
+import { errorMessage } from '@machafoundation/core';
 
 export interface ConnectionFormProps {
   bootstrapEndpoints: readonly string[];
@@ -8,22 +8,22 @@ export interface ConnectionFormProps {
   notice?: string;
 }
 
-export function ConnectionForm({ bootstrapEndpoints, onSave, submitLabel = 'Check and save', notice }: ConnectionFormProps) {
+export function ConnectionForm({ bootstrapEndpoints, onSave, submitLabel = 'Save endpoints', notice }: ConnectionFormProps) {
   const [urls, setUrls] = useState(bootstrapEndpoints.join('\n'));
-  const [checking, setChecking] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string>();
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    if (checking) return;
-    setChecking(true);
+    if (saving) return;
+    setSaving(true);
     setError(undefined);
     try {
       setError(await onSave(urls.split(/[\n,]/)));
     } catch (cause) {
       setError(errorMessage(cause));
     } finally {
-      setChecking(false);
+      setSaving(false);
     }
   };
 
@@ -37,12 +37,15 @@ export function ConnectionForm({ bootstrapEndpoints, onSave, submitLabel = 'Chec
       onChange={(event: ChangeEvent<HTMLTextAreaElement>) => setUrls(event.target.value)}
       placeholder="One endpoint per line, for example http://macha-node:7438"
       spellCheck={false}
-      disabled={checking}
+      disabled={saving}
     />
     {(error ?? notice) && <p className="settings-status-error" role="alert">{error ?? notice}</p>}
-    <button className="primary-button" type="submit" disabled={checking} data-tv-focusable="true">
-      {checking ? 'Checking endpoints…' : submitLabel}
+    <button className="primary-button" type="submit" disabled={saving} data-tv-focusable="true">
+      {saving ? 'Saving…' : submitLabel}
     </button>
-    <p>Each endpoint is checked before it is saved. The client can learn additional node APIs after connecting.</p>
+    {/* No longer "each endpoint is checked before it is saved". It never was,
+        and saying so invited a viewer to read a saved endpoint as a verified
+        one. The client reports what it can actually reach once it tries. */}
+    <p>Endpoints are tried in order, and whichever answers is used. The client can learn additional node APIs after connecting.</p>
   </form>;
 }

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { sessionManager, type AuthenticatedFetch, type SessionManager } from '@macha/core';
-import type { EndpointRegistry } from '@macha/core';
+import { sessionManager, type AuthenticatedFetch, type SessionManager } from '@machafoundation/core';
+import type { EndpointRegistry } from '@machafoundation/core';
 
 export interface Session {
   auth: AuthenticatedFetch;

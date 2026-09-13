@@ -1,13 +1,13 @@
 // @vitest-environment jsdom
 import { act, renderHook } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import type { MediaApi } from '@macha/core';
-import type { Platform } from '@macha/core';
-import type { PlaybackRuntime, PlaybackRuntimeSnapshot } from '@macha/core';
-import { ContinueWatchingStore } from '@macha/core';
-import { PlaybackQueueStore } from '@macha/core';
-import { VolumeStore } from '@macha/core';
-import type { MediaSummary } from '@macha/core';
+import type { MediaApi } from '@machafoundation/core';
+import type { Platform } from '@machafoundation/core';
+import type { PlaybackRuntime, PlaybackRuntimeSnapshot } from '@machafoundation/core';
+import { ContinueWatchingStore } from '@machafoundation/core';
+import { PlaybackQueueStore } from '@machafoundation/core';
+import { VolumeStore } from '@machafoundation/core';
+import type { MediaSummary } from '@machafoundation/core';
 import { usePlaybackController } from './usePlaybackController';
 
 // Real `navigate()` calls, minus actually applying them to the route: in the

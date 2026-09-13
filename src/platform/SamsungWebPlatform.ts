@@ -1,6 +1,6 @@
-import { createClientLogger, type PlaybackPolicyOverrides } from '@macha/core';
-import type { PlaybackCapabilities } from '@macha/core';
-import type { Platform, Player } from '@macha/core';
+import { createClientLogger, type PlaybackPolicyOverrides } from '@machafoundation/core';
+import type { PlaybackCapabilities } from '@machafoundation/core';
+import type { Platform, Player } from '@machafoundation/core';
 import { WebPlatform } from './WebPlatform';
 import { registerSamsungMediaKeys } from './SamsungMediaKeys';
 

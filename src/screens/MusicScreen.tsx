@@ -1,12 +1,12 @@
 import { useMemo } from 'react';
-import type { MediaApi } from '@macha/core';
+import type { MediaApi } from '@machafoundation/core';
 import { AlphabetIndex } from '../components/AlphabetIndex';
 import { MediaCard, type MediaCardAction } from '../components/MediaCard';
 import { ErrorMessage, Loading } from '../components/Status';
 import { useAlphabetIndex } from '../hooks/useAlphabetIndex';
 import { useRefreshableAsync } from '../hooks/useRefreshableAsync';
-import { sortMediaByIndexedTitle } from '@macha/core';
-import type { MediaSummary } from '@macha/core';
+import { sortMediaByIndexedTitle } from '@machafoundation/core';
+import type { MediaSummary } from '@machafoundation/core';
 import { MediaPageTitle } from '../components/MediaPageTitle';
 
 export type MusicSection = 'artists' | 'albums' | 'tracks';

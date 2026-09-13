@@ -7,8 +7,9 @@ import {
   configureClientDiagnostics,
   configureMachaHost,
   createClientLogger,
-} from '@macha/core';
+} from '@machafoundation/core';
 import { installClientDiagnosticsConsole } from './diagnostics/console';
+import { installLogcatConsoleBridge } from './diagnostics/logcatConsole';
 import { detectPlatform } from './platform';
 import { diagnosticsSettings } from './settings';
 import { installDirectPlayReadAheadDiagnostics, warmDirectPlayReadAhead } from './playback/directPlayReadAhead';
@@ -16,6 +17,11 @@ import { installAbortControllerPolyfill } from './platform/AbortControllerPolyfi
 import './styles.css';
 
 const samsung = import.meta.env.MODE === 'samsung';
+const android = import.meta.env.MODE === 'android';
+// Before anything logs: the Android TV has no console of its own, so logcat is
+// the only way to read this client, and it flattens object arguments to
+// `[object Object]` unless they are strings before they leave the page.
+if (android) installLogcatConsoleBridge();
 installAbortControllerPolyfill(window);
 // Everything the core needs from a host. Storage, clock, id generation and
 // performance all auto-detect correctly in a browser; only the origin has to

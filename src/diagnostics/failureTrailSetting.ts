@@ -1,4 +1,4 @@
-import { machaHost } from '@macha/core';
+import { machaHost } from '@machafoundation/core';
 
 /**
  * Whether the playback failure screen prints the evidence behind a failure, or

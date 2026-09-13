@@ -65,8 +65,24 @@
 }
 .ingest-job-card.state-blocked, .ingest-job-card.state-failed { border-color: #73232c73; }
 .ingest-job-card.state-paused { border-color: #6c623465; }
+.ingest-job-open {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: .55rem;
+  background: none;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.ingest-job-open:focus-visible { outline: 1px solid var(--focus); outline-offset: 3px; }
+.ingest-job-open:hover .ingest-disclosure { color: #d0d0d4; }
+.ingest-disclosure { flex: 0 0 auto; align-self: center; color: var(--text-faint); font-size: 1.1rem; line-height: 1; }
 .ingest-job-heading { display: flex; justify-content: space-between; gap: 1rem; align-items: start; padding-right: 2.5rem; }
 .ingest-job-heading > div { min-width: 0; }
+.ingest-job-heading > div:first-child { flex: 1; }
 .ingest-job-heading h3 { margin: .2rem 0 .18rem; font-size: 1.12rem; overflow-wrap: anywhere; }
 .ingest-state { color: var(--text-faint); text-transform: uppercase; letter-spacing: .1em; font-size: .68rem; }
 .ingest-percent { flex: 0 0 auto; color: #d8d8dc; font-size: 1.2rem; font-variant-numeric: tabular-nums; }
@@ -83,6 +99,36 @@
 .ingest-current { margin: .75rem 0 0; color: var(--text-faint); font-size: .82rem; }
 .ingest-current span { color: var(--text-dim); overflow-wrap: anywhere; }
 .ingest-job-error { margin: .75rem 0 0; color: #ffb4b4; line-height: 1.45; }
+.ingest-job-detail {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));
+  gap: 1rem 1.5rem;
+  margin-top: .9rem;
+  padding-top: .9rem;
+  border-top: 1px solid #ffffff12;
+}
+.ingest-detail-group { min-width: 0; }
+.ingest-detail-group h4 {
+  margin: 0 0 .5rem;
+  color: var(--text-faint);
+  text-transform: uppercase;
+  letter-spacing: .1em;
+  font-size: .68rem;
+  font-weight: 600;
+}
+.ingest-detail-group dl { display: grid; gap: .3rem; margin: 0; }
+.ingest-detail-group dl > div { display: flex; justify-content: space-between; gap: 1rem; min-width: 0; }
+.ingest-detail-group dt { flex: 0 0 auto; color: var(--text-faint); font-size: .82rem; }
+.ingest-detail-group dd {
+  min-width: 0;
+  margin: 0;
+  color: #d0d0d4;
+  font-size: .82rem;
+  text-align: right;
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}
+.ingest-detail-group code { color: #dedee2; }
 .ingest-job-actions { display: flex; flex-wrap: wrap; gap: .55rem; justify-content: flex-end; margin-top: .85rem; }
 .ingest-job-actions .secondary-button { margin: 0; padding: .58rem .85rem; }
 .ingest-job-remove { top: .7rem; right: .75rem; }

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { Platform } from '@macha/core';
-import type { PlaybackResolver } from '@macha/core';
-import { PlaybackRuntime, type PlaybackRuntimeOptions } from '@macha/core';
+import type { Platform } from '@machafoundation/core';
+import type { PlaybackResolver } from '@machafoundation/core';
+import { PlaybackRuntime, type PlaybackRuntimeOptions } from '@machafoundation/core';
 import { platformTraits } from '../platform/traits';
 
 export function usePlaybackRuntime(platform: Platform, resolver: PlaybackResolver, options?: PlaybackRuntimeOptions) {

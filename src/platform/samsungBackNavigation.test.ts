@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { samsungBackTarget } from './samsungBackNavigation';
-import type { MediaApi } from '@macha/core';
+import type { MediaApi } from '@machafoundation/core';
 
 const api = {
   details: vi.fn(async (id: string) => {
@@ -28,8 +28,15 @@ describe('Samsung Return hierarchy', () => {
     await expect(samsungBackTarget('/status/nodes/node', api)).resolves.toBe('/status');
     await expect(samsungBackTarget('/status', api)).resolves.toBe('/');
     await expect(samsungBackTarget('/manage/files', api)).resolves.toBe('/manage');
-    await expect(samsungBackTarget('/manage/settings', api)).resolves.toBe('/manage');
+    await expect(samsungBackTarget('/manage/users', api)).resolves.toBe('/manage');
     await expect(samsungBackTarget('/manage', api)).resolves.toBe('/');
+    // Settings left Manage and is now reached from the top bar, so Return
+    // goes Home rather than into a section a viewer may have no role for.
+    await expect(samsungBackTarget('/settings', api)).resolves.toBe('/');
+    await expect(samsungBackTarget('/settings/connection', api)).resolves.toBe('/settings');
+    await expect(samsungBackTarget('/account', api)).resolves.toBe('/');
+    await expect(samsungBackTarget('/account/password', api)).resolves.toBe('/account');
+    await expect(samsungBackTarget('/login', api)).resolves.toBe('/');
     await expect(samsungBackTarget('/', api)).resolves.toBeUndefined();
   });
   it('returns the full player to its browse screen', async () => {

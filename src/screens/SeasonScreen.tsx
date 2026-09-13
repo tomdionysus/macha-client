@@ -1,9 +1,9 @@
-import type { MediaApi } from '@macha/core';
+import type { MediaApi } from '@machafoundation/core';
 import { EpisodeRail } from '../components/EpisodeRail';
 import { ErrorMessage, Loading } from '../components/Status';
 import { useArtworkUrl } from '../hooks/useArtworkUrl';
 import { useRefreshableAsync } from '../hooks/useRefreshableAsync';
-import type { Episode, PlaybackProgress, SeasonDetails, ShowDetails } from '@macha/core';
+import type { Episode, PlaybackProgress, SeasonDetails, ShowDetails } from '@machafoundation/core';
 import { EditButton } from '../components/EditButton';
 import { MediaPageTitle } from '../components/MediaPageTitle';
 

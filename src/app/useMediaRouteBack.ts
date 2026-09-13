@@ -1,6 +1,6 @@
 import { useCallback } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import type { MediaApi } from '@macha/core';
+import type { MediaApi } from '@machafoundation/core';
 import { samsungBackTarget } from '../platform/samsungBackNavigation';
 import { buildPlatformTraits } from '../platform/traits';
 

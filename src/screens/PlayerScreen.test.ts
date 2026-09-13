@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { boundedPlayerSeekTarget, isSubtitleOnlyUpdate, playerBackAction, playerBufferedTimelineEnabled, playerControlShowsPlay, playerMediaSubtitle, samsungTransportSeekDirection, webSeekDeltaForKey } from './PlayerScreen';
-import type { MediaSummary } from '@macha/core';
+import { boundedPlayerSeekTarget, firstUsableDurationMs, isSubtitleOnlyUpdate, playerBackAction, playerBufferedTimelineEnabled, playerControlShowsPlay, playerMediaSubtitle, samsungTransportSeekDirection, webSeekDeltaForKey } from './PlayerScreen';
+import type { MediaSummary } from '@machafoundation/core';
 
 describe('player UI transport bindings', () => {
   it('maps Web left/right arrows to ten-second seeks', () => {
@@ -93,5 +93,31 @@ describe('player UI transport bindings', () => {
     it('leaves a track showing its track number, not its year', () => {
       expect(playerMediaSubtitle({ id: 't1', kind: 'track', title: 'Song', subtitle: 'Track 3', year: 1999, mediaIds: ['file:t1'] })).toBe('Track 3');
     });
+  });
+});
+
+describe('the duration the scrubber renders and divides by', () => {
+  it('takes the first stated duration in preference order', () => {
+    expect(firstUsableDurationMs(5_025_000, 1_000, 2_000)).toBe(5_025_000);
+    expect(firstUsableDurationMs(undefined, 1_000, 2_000)).toBe(1_000);
+    expect(firstUsableDurationMs(undefined, undefined, 2_000)).toBe(2_000);
+  });
+
+  it('refuses a duration that cannot be rendered or divided by', () => {
+    // The predecessor was `a || b || c || 1`, which skipped `NaN` only
+    // because `NaN` is falsy — an accident, not a guard. `Infinity` is
+    // truthy and went straight through to the formatter, where it rendered
+    // as `Infinity:NaN:NaN`. Both now fall to the next stated candidate.
+    expect(firstUsableDurationMs(Number.NaN, 90_000)).toBe(90_000);
+    expect(firstUsableDurationMs(Number.POSITIVE_INFINITY, 90_000)).toBe(90_000);
+    expect(firstUsableDurationMs(0, 90_000)).toBe(90_000);
+    expect(firstUsableDurationMs(-1, 90_000)).toBe(90_000);
+  });
+
+  it('falls back to a divisible one rather than to nothing', () => {
+    // `playedPercent` divides by this, and a source that has reported no
+    // duration at all is the ordinary state before the first event.
+    expect(firstUsableDurationMs(undefined, Number.NaN, Number.POSITIVE_INFINITY)).toBe(1);
+    expect(firstUsableDurationMs()).toBe(1);
   });
 });

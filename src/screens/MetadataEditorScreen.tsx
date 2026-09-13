@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { CatalogueApi, CatalogueArtwork, CatalogueItem, CatalogueKind } from '@macha/core';
+import type { CatalogueApi, CatalogueArtwork, CatalogueItem, CatalogueKind } from '@machafoundation/core';
 import { ErrorMessage, Loading } from '../components/Status';
 import { useAsync } from '../hooks/useAsync';
 

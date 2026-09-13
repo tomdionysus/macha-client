@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { addDirectPlayReadAheadAlternative, buildDirectPlayReadAheadProxyUrl, directPlayReadAheadUrl } from './directPlayReadAhead';
-import type { PlaybackSource } from '@macha/core';
+import type { PlaybackSource } from '@machafoundation/core';
 
 function source(): PlaybackSource {
   return {
