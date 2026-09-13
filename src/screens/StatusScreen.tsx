@@ -153,12 +153,30 @@ export function StatusHeader({ eyebrow, title = 'Status', health, refreshing, on
   </header>;
 }
 
-export function clientEndpointHealth(candidate: EndpointCandidate, now = Date.now()): { className: string; label: string } {
-  const { health } = candidate;
+/**
+ * Whether a failing endpoint is still cooling down is the registry's question
+ * to answer, not this screen's.
+ *
+ * It used to be decided here, by comparing `health.retryAt` against
+ * `Date.now()` — which only held because `retryAt` happens to be stamped with a
+ * wall clock. `EndpointRegistry` takes its clock as a constructor argument, so
+ * that is a property of how it was constructed, not of what `retryAt` means: a
+ * host that supplies a duration clock (an arbitrary origin restarting near zero
+ * each load) puts the two on unrelated number lines. That would not throw and
+ * would not look wrong. It would label cooling nodes retry-eligible and back,
+ * plausibly, on the one screen someone reads when working out why a node is
+ * misbehaving.
+ *
+ * `ready` is computed inside the registry against whatever clock it actually
+ * holds, so there is nothing left to get wrong here, and nothing for this file
+ * to know about how the registry measures time.
+ */
+export function clientEndpointHealth(candidate: EndpointCandidate): { className: string; label: string } {
+  const { health, ready } = candidate;
   if (health.consecutiveFailures > 0) {
-    return (health.retryAt ?? 0) > now
-      ? { className: 'cooling', label: 'Cooling down' }
-      : { className: 'degraded', label: 'Retry eligible' };
+    return ready
+      ? { className: 'degraded', label: 'Retry eligible' }
+      : { className: 'cooling', label: 'Cooling down' };
   }
   return health.lastSuccessAt
     ? { className: 'available', label: 'Available' }
@@ -197,7 +215,6 @@ function ClientApiEndpoints({ registry }: { registry: EndpointRegistry }) {
       : <div className="client-endpoint-grid">{endpoints.map((candidate) => {
         const state = clientEndpointHealth(candidate);
         const { endpoint, health } = candidate;
-        const cooldownMs = Math.max(0, (health.retryAt ?? 0) - Date.now());
         return <article className="node-detail-card client-endpoint-card" key={endpoint.id}>
           <div className="cluster-node-heading">
             <div><strong>{endpoint.nodeId ?? 'Unidentified node'}</strong><code>{endpoint.baseUrl || 'same origin'}</code></div>
@@ -208,7 +225,10 @@ function ClientApiEndpoints({ registry }: { registry: EndpointRegistry }) {
             <DetailItem label="Failures">{health.consecutiveFailures}</DetailItem>
             <DetailItem label="Last success">{timestamp(health.lastSuccessAt)}</DetailItem>
             <DetailItem label="Last failure">{timestamp(health.lastFailureAt)}</DetailItem>
-            {cooldownMs > 0 && <DetailItem label="Retry in">{formatDuration(cooldownMs)}</DetailItem>}
+            {/* No "Retry in" countdown. It was derived from `retryAt` and had
+                the same clock problem the pill above just shed, and the seconds
+                were never actionable anyway — "cooling down" against "retry
+                eligible" is the whole of what a reader can use. */}
           </dl>
         </article>;
       })}</div>}
@@ -288,8 +308,15 @@ function NodeCard({ node, canManage, resetting, onReset }: { node: ClusterNodeSt
           <div><strong>{nodeName(node)}</strong><code>{node.id.slice(0, 12)}</code></div>
           <span className={`cluster-state-pill ${nodeStatusClassName(node)}`}>{nodeStatusLabel(node)}</span>
         </div>
+        {/* Version belongs on the card, not only on the node's own page. This
+            cluster is deliberately not uniform and drifts apart in practice —
+            gbni-2 sat on 0.38.1 while the others moved to 0.38.4 — and "which
+            node is behind" is the first question when one of them behaves
+            differently from the rest. Having to open each node in turn to
+            compare a version is how that goes unnoticed. */}
         <div className="cluster-node-meta">
           <span>{node.roles.length ? node.roles.join(' · ') : 'node'}</span>
+          <span className="cluster-node-version">{node.version || '—'}</span>
           <span className={telemetryAgeClassName(node)}>{freshnessLabel(node)}</span>
         </div>
         <dl className="cluster-node-stats">

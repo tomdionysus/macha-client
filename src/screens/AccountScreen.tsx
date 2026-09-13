@@ -17,6 +17,7 @@ const ROLE_LABELS: Record<UserRole, string> = {
   importer: 'Import',
   manager: 'Manage library',
   manage_users: 'Manage users',
+  view_status: 'View cluster status',
 };
 
 function when(unixMs: number | undefined): string {
@@ -65,9 +66,23 @@ export function AccountScreen({ api, session }: { api: UsersApi; session?: Curre
         )}
 
       <div className="account-actions">
-        <button className="primary-button" type="button" data-tv-focusable="true" onClick={() => navigate(routes.accountPassword)}>
-          Change password
-        </button>
+        {/* Rendered from the server's own `mutable` block, never from the
+            username — the same rule the Users screen follows, and for the same
+            reason: which accounts are protected is not knowable from what they
+            are called. The anonymous account holds no credential at all, so
+            offering to change a password it cannot have is a control whose only
+            outcome is an error.
+
+            Absent `mutable` means an older node that does not state this, which
+            is not the same as a refusal: the button stays, and the server is
+            still the one that decides. */}
+        {details.value?.mutable?.set_password === false
+          ? <p className="account-no-password">This account has no password, and one cannot be set for it.</p>
+          : (
+            <button className="primary-button" type="button" data-tv-focusable="true" onClick={() => navigate(routes.accountPassword)}>
+              Change password
+            </button>
+          )}
       </div>
     </section>
   );

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { errorMessage, isSignedIn, routes, type CurrentSession, type UsersApi } from '@machafoundation/core';
 import { OverflowMenu } from './OverflowMenu';
 import { ConfirmModal } from './Modal';
@@ -40,6 +40,9 @@ function UserIcon() {
  */
 export function AccountMenu({ api, session, onSignedOut }: Props) {
   const navigate = useNavigate();
+  // Recorded on the login link below, so signing in returns the viewer to the
+  // page they were on rather than to Home.
+  const location = useLocation();
   const who = session.username?.trim() || '';
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -65,7 +68,7 @@ export function AccountMenu({ api, session, onSignedOut }: Props) {
   // control, saying the only thing they can usefully do.
   if (!isSignedIn(session)) {
     return (
-      <Link className="account-menu account-login" to={routes.login} data-tv-focusable="true">
+      <Link className="account-menu account-login" to={routes.login} state={{ from: location.pathname }} data-tv-focusable="true">
         <span className="account-username">Log in</span>
         <span className="account-icon" aria-hidden="true"><UserIcon /></span>
       </Link>
@@ -74,13 +77,19 @@ export function AccountMenu({ api, session, onSignedOut }: Props) {
 
   return (
     <div className="account-menu">
-      <span className="account-identity" title={who}>
-        <span className="account-username">{who}</span>
-        <span className="account-icon" aria-hidden="true"><UserIcon /></span>
-      </span>
+      {/* The identity *is* the control. It used to sit beside a `⋯` button,
+          which made two adjacent targets for one idea and left the account
+          icon looking pressable while doing nothing — and on a remote it cost
+          a D-pad stop to reach the half that worked. */}
       <OverflowMenu
         className="account-overflow"
         label={`Account options for ${who}`}
+        trigger={
+          <span className="account-identity" title={who}>
+            <span className="account-username">{who}</span>
+            <span className="account-icon" aria-hidden="true"><UserIcon /></span>
+          </span>
+        }
         actions={[
           { label: 'User details', onSelect: () => navigate(routes.account) },
           { label: 'Change password', onSelect: () => navigate(routes.accountPassword) },
@@ -96,9 +105,22 @@ export function AccountMenu({ api, session, onSignedOut }: Props) {
         onCancel={() => { setConfirming(false); setError(undefined); }}
         onConfirm={() => void signOut()}
       >
+        {/* What logout actually does, measured rather than assumed: `logout()`
+            is `DELETE /api/v1/session`, which revokes this one token. Two
+            sessions were minted for one account against gbni-1 and one
+            revoked; the other kept answering 200.
+
+            This said "ends the session for <who> everywhere, not just on this
+            device", which was a misreading of core's own wording — the
+            revocation "propagates to every node", meaning this token cannot be
+            used against a different node, not that every session the account
+            holds is ended. Signing out everywhere is what a *password or role
+            change* does, by bumping `credential_generation`. Telling someone
+            their other devices have been signed out when they have not is the
+            kind of wrong that stops them doing the thing they actually needed. */}
         <p>
-          This ends the session for <strong>{who}</strong> everywhere, not just on this device.
-          Anything playing will stop.
+          This signs <strong>{who}</strong> out on this device only — anywhere else stays signed in.
+          Anything playing here will stop.
         </p>
         {error && <p className="manage-error" role="alert">{error}</p>}
       </ConfirmModal>

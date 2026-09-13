@@ -6,19 +6,42 @@ import type { ClusterNodeStatus, ClusterStatusSnapshot } from '@machafoundation/
 import type { IdentityAssociationResetResult, ManageApi } from '@machafoundation/core';
 import { acceptNodeIdentityAssociationReset, clientEndpointHealth, identityResetAcceptanceMessage, nodeNotYetReady, nodeStatusLabel, StatusHeader, statusSectionVisibility, systemMemoryBytes, TELEMETRY_AGEING_MS, TELEMETRY_STALE_MS, telemetryAge, withoutRetiredNodeIdentity } from './StatusScreen';
 
-function candidate(health: EndpointCandidate['health']): EndpointCandidate {
+function candidate(health: EndpointCandidate['health'], ready = true): EndpointCandidate {
   return {
     endpoint: { id: 'http://node', baseUrl: 'http://node', source: 'bootstrap' },
     health,
+    ready,
   };
 }
 
 describe('client API endpoint status', () => {
   it('distinguishes no evidence, success, active cooldown and elapsed cooldown', () => {
-    expect(clientEndpointHealth(candidate({ consecutiveFailures: 0 }), 1_000).label).toBe('Not tried');
-    expect(clientEndpointHealth(candidate({ consecutiveFailures: 0, lastSuccessAt: 900 }), 1_000).label).toBe('Available');
-    expect(clientEndpointHealth(candidate({ consecutiveFailures: 1, retryAt: 1_500 }), 1_000).label).toBe('Cooling down');
-    expect(clientEndpointHealth(candidate({ consecutiveFailures: 1, retryAt: 900 }), 1_000).label).toBe('Retry eligible');
+    expect(clientEndpointHealth(candidate({ consecutiveFailures: 0 })).label).toBe('Not tried');
+    expect(clientEndpointHealth(candidate({ consecutiveFailures: 0, lastSuccessAt: 900 })).label).toBe('Available');
+    expect(clientEndpointHealth(candidate({ consecutiveFailures: 1 }, false)).label).toBe('Cooling down');
+    expect(clientEndpointHealth(candidate({ consecutiveFailures: 1 }, true)).label).toBe('Retry eligible');
+  });
+
+  it('takes the cooldown answer from the registry rather than recomputing it', () => {
+    // This used to compare `health.retryAt` against `Date.now()`, which was
+    // right only because App.tsx happens to inject `Date.now` as the registry's
+    // clock. The registry's default is a duration clock whose origin restarts
+    // near zero every load, so the comparison was one constructor argument away
+    // from silently inverting — and inverting plausibly, on the screen someone
+    // reads when a node is misbehaving.
+    //
+    // `ready` now decides, so a `retryAt` from any clock at all changes nothing.
+    const cooling = candidate({ consecutiveFailures: 2, retryAt: Number.MAX_SAFE_INTEGER }, false);
+    const eligible = candidate({ consecutiveFailures: 2, retryAt: Number.MAX_SAFE_INTEGER }, true);
+
+    expect(clientEndpointHealth(cooling).label).toBe('Cooling down');
+    expect(clientEndpointHealth(eligible).label).toBe('Retry eligible');
+  });
+
+  it('never calls a failing endpoint available, whatever it once managed', () => {
+    // A node with a success behind it and failures in front of it is failing.
+    expect(clientEndpointHealth(candidate({ consecutiveFailures: 1, lastSuccessAt: 900 }, false)).label)
+      .toBe('Cooling down');
   });
 });
 

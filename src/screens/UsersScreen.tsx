@@ -26,6 +26,7 @@ const ROLE_LABELS: Record<UserRole, string> = {
   importer: 'Import',
   manager: 'Manage library',
   manage_users: 'Manage users',
+  view_status: 'View cluster status',
 };
 
 const ROLE_DESCRIPTIONS: Record<UserRole, string> = {
@@ -33,6 +34,12 @@ const ROLE_DESCRIPTIONS: Record<UserRole, string> = {
   importer: 'Add content through torrents and ingest.',
   manager: 'Files, namespaces and catalogue matches.',
   manage_users: 'Add, edit and remove accounts.',
+  // Deliberately says what it does *not* cover. `view_status` gates the
+  // diagnostic view only — the node roster, per-node capacity, which node is
+  // being asked for what. Health, ranking, failover and the connection gate
+  // all run off `/api/v1/health`, which needs no session and no role, so
+  // withholding this costs a viewer the Status screen and nothing else.
+  view_status: 'Node health and capacity. Does not affect playback.',
 };
 
 /**

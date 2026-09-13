@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { describe, expect, it, vi } from 'vitest';
 import type { CurrentSession, UsersApi } from '@machafoundation/core';
@@ -55,6 +55,46 @@ describe('AccountMenu', () => {
     expect(screen.getByText('alice')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Account options for alice' })).toBeTruthy();
     expect(screen.queryByRole('link', { name: 'Log in' })).toBeNull();
+  });
+
+  it('makes the identity itself the control, with no second target beside it', () => {
+    // It used to be an inert username-and-icon chip next to a `⋯` button:
+    // two adjacent targets for one idea, an account icon that looked
+    // pressable and did nothing, and an extra D-pad stop on a remote to
+    // reach the half that worked.
+    show(session());
+
+    const trigger = screen.getByRole('button', { name: 'Account options for alice' });
+    expect(trigger.textContent).toContain('alice');
+    expect(trigger.querySelector('.account-icon')).toBeTruthy();
+    // The ellipsis glyph is what a separate trigger would have rendered.
+    expect(screen.queryByText('⋯')).toBeNull();
+    expect(screen.getAllByRole('button')).toHaveLength(1);
+  });
+
+  it('opens the account actions when the identity is pressed', () => {
+    show(session());
+
+    expect(screen.queryByRole('menuitem', { name: 'Log out' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Account options for alice' }));
+    expect(screen.getByRole('menuitem', { name: 'User details' })).toBeTruthy();
+    expect(screen.getByRole('menuitem', { name: 'Log out' })).toBeTruthy();
+  });
+
+  it('describes what logging out actually does, and not more', () => {
+    // `logout()` is DELETE /api/v1/session, which revokes one token. Verified
+    // against gbni-1: two sessions minted for one account, one revoked, the
+    // other still answered 200. Claiming it signs the account out everywhere
+    // describes what a password or role change does — and telling someone
+    // their other devices are signed out when they are not stops them doing
+    // the thing they actually needed.
+    show(session());
+    fireEvent.click(screen.getByRole('button', { name: 'Account options for alice' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Log out' }));
+
+    const dialog = screen.getByRole('dialog');
+    expect(dialog.textContent).toContain('on this device only');
+    expect(dialog.textContent).not.toMatch(/everywhere/i);
   });
 
   it('treats a username that is only whitespace as no username', () => {

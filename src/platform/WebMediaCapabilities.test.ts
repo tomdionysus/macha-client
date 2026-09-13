@@ -1,10 +1,50 @@
 import { describe, expect, it } from 'vitest';
-import { detectHlsTsSupport, detectWebMediaCodecCapabilities, hlsDeliveryProbe } from './WebMediaCapabilities';
+import { detectHlsTsSupport, detectMatroskaSupport, detectWebMediaCodecCapabilities, hlsDeliveryProbe } from './WebMediaCapabilities';
 
 function probeFrom(supported: readonly string[]): (mime: string) => boolean {
   const set = new Set(supported);
   return (mime) => set.has(mime);
 }
+
+describe('detectMatroskaSupport', () => {
+  // Chrome 151, measured 2026-09-13: both spellings answer for a real codec
+  // and refuse a nonsense one.
+  const chrome = [
+    'video/x-matroska',
+    'video/x-matroska; codecs="avc1.42E01E"',
+    'video/x-matroska; codecs="hvc1.1.6.L93.B0"',
+    'video/matroska',
+    'video/matroska; codecs="avc1.42E01E"',
+  ];
+
+  it('claims the container where the engine discriminates on the codec inside it', () => {
+    expect(detectMatroskaSupport(probeFrom(chrome))).toBe(true);
+    expect(detectWebMediaCodecCapabilities(probeFrom([...chrome, 'video/mp4'])).containers)
+      .toEqual(['mp4', 'matroska']);
+  });
+
+  it('refuses an engine that agrees to an impossible codec in the container', () => {
+    // The Samsung's shape of failure: accepts Matroska, renders it corrupt.
+    // A host that says yes to everything has said nothing, so it gets no claim
+    // — and this is the assertion that has to be able to fail, because it is
+    // the only thing standing between an honest probe and the corrupt picture
+    // the old hardcoded exclusion was written to prevent.
+    const blanket = (mime: string) => mime.startsWith('video/x-matroska') || mime.startsWith('video/matroska');
+    expect(detectMatroskaSupport(blanket)).toBe(false);
+    expect(detectWebMediaCodecCapabilities(blanket).containers).not.toContain('matroska');
+  });
+
+  it('makes no claim where the container is unknown to the engine', () => {
+    expect(detectMatroskaSupport(probeFrom(['video/mp4', 'video/webm']))).toBe(false);
+  });
+
+  it('does not let a WebM claim carry Matroska in with it', () => {
+    // They share a demuxer and are not the same container to a decoder.
+    const capabilities = detectWebMediaCodecCapabilities(probeFrom(['video/webm']));
+    expect(capabilities.containers).toContain('webm');
+    expect(capabilities.containers).not.toContain('matroska');
+  });
+});
 
 describe('detectWebMediaCodecCapabilities', () => {
   it('recognises AC-3 and E-AC-3 through their fMP4 codec identifiers', () => {

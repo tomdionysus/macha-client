@@ -1,6 +1,6 @@
 {
   "name": "macha-client",
-  "version": "0.13.0",
+  "version": "0.14.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -17,7 +17,7 @@
   },
   "dependencies": {
     "@fontsource-variable/roboto": "^5.3.0",
-    "@machafoundation/core": "^0.8.1",
+    "@machafoundation/core": "file:../macha-ts",
     "hls.js": "1.6.18",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",

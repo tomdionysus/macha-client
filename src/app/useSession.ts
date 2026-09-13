@@ -1,11 +1,26 @@
 import { useEffect, useState } from 'react';
-import { sessionManager, type AuthenticatedFetch, type SessionManager } from '@machafoundation/core';
+import { sessionManager, type AuthenticatedFetch, type SessionManager, type UserRole } from '@machafoundation/core';
 import type { EndpointRegistry } from '@machafoundation/core';
 
 export interface Session {
   auth: AuthenticatedFetch;
   /** False only while a cold-start mint attempt is genuinely in flight. */
   ready: boolean;
+  /**
+   * What this session may do, or `undefined` when nothing has said yet.
+   *
+   * Comes from the token rather than from a separate request. Both paths that
+   * produce a session already state its roles — the mint response carries them,
+   * and the warm-reload validation is itself the whoami — so there is no second
+   * fetch here to race, fail, or need re-asking after a failover.
+   *
+   * `undefined` is the third answer and the permissive one: a node too old to
+   * state roles leaves it `undefined` for ever, and hiding sections on the
+   * strength of an answer nobody gave would empty the navigation for everyone
+   * the moment a node was slow. Read it through `sessionPermits` /
+   * `sessionLockedOut`, which encode that rule so no call site can forget it.
+   */
+  roles: UserRole[] | undefined;
 }
 
 /**
@@ -26,9 +41,12 @@ export function useSession(options: {
   endpointRegistry: EndpointRegistry;
 }, manager: SessionManager = sessionManager): Session {
   const { connectionRequired, serverConfigured, endpointRegistry } = options;
-  const [managerReady, setManagerReady] = useState(manager.isReady);
+  const [managerState, setManagerState] = useState(() => ({ ready: manager.isReady, roles: manager.roles }));
 
-  useEffect(() => manager.subscribe(() => setManagerReady(manager.isReady)), [manager]);
+  useEffect(
+    () => manager.subscribe(() => setManagerState({ ready: manager.isReady, roles: manager.roles })),
+    [manager],
+  );
 
   useEffect(() => {
     if (!connectionRequired || !serverConfigured) {
@@ -41,6 +59,7 @@ export function useSession(options: {
 
   return {
     auth: manager,
-    ready: !connectionRequired || !serverConfigured || managerReady,
+    ready: !connectionRequired || !serverConfigured || managerState.ready,
+    roles: managerState.roles,
   };
 }

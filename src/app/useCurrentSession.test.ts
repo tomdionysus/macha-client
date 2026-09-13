@@ -68,3 +68,13 @@ describe('useCurrentSession', () => {
     expect(result.current.known).toBe(false);
   });
 });
+
+// Deleted with the code they covered:
+//
+//   - the whoami retry, because there is nothing left here to retry. Roles no
+//     longer come from this request — they ride the token, on
+//     `sessionManager.roles`, stated by whichever path produced it. A failure
+//     here now costs a display name until the next refresh, not permissions.
+//   - `sessionLockedOut`, which is core's. Its semantics are tested there
+//     (`sessionRoles.test.ts`) against `roles | undefined`, so that "unknown is
+//     not none" holds by construction rather than per call site.

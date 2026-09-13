@@ -97,6 +97,47 @@ const HLS_MIME = 'application/vnd.apple.mpegurl';
  * meaningless yes.
  */
 /**
+ * Matroska spellings, and a codec known to exist inside one. Both spellings
+ * are asked because engines disagree about which is the real name.
+ */
+const MATROSKA_MIMES = ['video/x-matroska', 'video/matroska'] as const;
+const MATROSKA_CODECS = ['avc1.42E01E', 'hvc1.1.6.L93.B0'] as const;
+
+/**
+ * Whether this engine demuxes Matroska, asked so that a blanket "yes" cannot
+ * pass for an answer.
+ *
+ * This container was excluded outright until now, and the exclusion was
+ * written for a real fault: the Samsung's media element accepts Matroska and
+ * renders corrupt video, so its `canPlayType` could not be believed. The cost
+ * was 23% of the library — 173 titles measured on 2026-09-08 that are remuxed
+ * for `container-not-playable` with both streams already `copy`, which is to
+ * say remuxed for no reason a decoder would recognise. Chrome played a
+ * 2582x1080 HEVC Matroska whole from a `mode=direct` session the same day.
+ *
+ * So the question is not whether to trust `canPlayType` here — it is how to
+ * ask it something it cannot answer dishonestly. An engine that agrees to an
+ * impossible codec inside the container is not discriminating on the
+ * container at all, and its yes carries no information; measured on Chrome
+ * 151, `video/x-matroska; codecs="avc1.42E01E"` answers `probably` while the
+ * same container with a nonsense codec answers `""`. That is the identical
+ * discipline `hlsDeliveryProbe` above applies for the identical reason, and
+ * it turns "this host's oracle lies" from a name hardcoded here into
+ * something each host demonstrates about itself.
+ *
+ * The audio inside is not this function's business and must not become it: a
+ * Matroska carrying E-AC-3, TrueHD or DTS still has nowhere to decode on the
+ * web, and the chooser already objects per stream (`audio-codec-not-playable`)
+ * before it ever reaches direct play. A container claim states that the
+ * wrapper can be opened, nothing more.
+ */
+export function detectMatroskaSupport(probe: MimeProbe): boolean {
+  return MATROSKA_MIMES.some((mime) =>
+    !probe(`${mime}; codecs="zzzz.invalid"`)
+    && anySupported(probe, MATROSKA_CODECS.map((codec) => `${mime}; codecs="${codec}"`)));
+}
+
+/**
  * Whether this engine can take HLS segments as MPEG-TS.
  *
  * Worth asking separately from `hlsFmp4` rather than assuming one implies the
@@ -175,12 +216,10 @@ export function detectWebMediaCodecCapabilities(
   const containers: string[] = [];
   if (probe('video/mp4') || probe('audio/mp4')) containers.push('mp4');
   if (probe('video/webm') || probe('audio/webm')) containers.push('webm');
+  if (detectMatroskaSupport(probe)) containers.push('matroska');
   if (probe('audio/mpeg')) containers.push('mp3');
   if (probe('audio/flac')) containers.push('flac');
   if (probe('audio/ogg')) containers.push('ogg');
-  // Deliberately not probed: matroska. The Samsung's media element accepts it
-  // and renders corrupt video, so `canPlayType` cannot be trusted for it, and
-  // claiming it invites the server to serve raw mkv by direct play.
 
   const videoBitDepth = anySupported(probe, TWELVE_BIT_PROFILES) ? 12
     : anySupported(probe, TEN_BIT_PROFILES) ? 10

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 
 export interface OverflowMenuAction {
   label: string;
@@ -11,9 +11,18 @@ interface Props {
   label: string;
   actions: readonly OverflowMenuAction[];
   className?: string;
+  /**
+   * What the viewer presses to open the menu. Defaults to the `⋯` glyph.
+   *
+   * Supplied where the thing the menu belongs to is already on screen and can
+   * be the control itself — the account identity being the case in point.
+   * Putting a `⋯` next to it made two adjacent targets for one idea, and the
+   * icon beside it looked like a control while doing nothing.
+   */
+  trigger?: ReactNode;
 }
 
-export function OverflowMenu({ label, actions, className = '' }: Props) {
+export function OverflowMenu({ label, actions, className = '', trigger }: Props) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -56,7 +65,7 @@ export function OverflowMenu({ label, actions, className = '' }: Props) {
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
       >
-        <span aria-hidden="true">⋯</span>
+        {trigger ?? <span aria-hidden="true">⋯</span>}
       </button>
       {open && (
         <div className="overflow-menu-popover" role="menu">

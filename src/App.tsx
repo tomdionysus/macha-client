@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactElement } from 'react';
 import { Navigate, NavLink, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom';
 import type { CatalogueApi, CatalogueMediaProfile } from '@machafoundation/core';
 import type { MediaApi } from '@machafoundation/core';
@@ -16,7 +16,7 @@ import type { PlaybackResolver } from '@machafoundation/core';
 import { reportClusterReachable, SERVER_REACHABLE_EVENT, SERVER_UNREACHABLE_EVENT, SERVER_UNREACHABLE_MESSAGE } from '@machafoundation/core';
 import type { Episode, MediaSummary, PlaybackProgress, SeasonSummary } from '@machafoundation/core';
 import { ContinueWatchingStore } from '@machafoundation/core';
-import { hasRole, sessionManager, type UserRole } from '@machafoundation/core';
+import { hasRole, sessionLockedOut, sessionManager, sessionPermits, type UserRole } from '@machafoundation/core';
 import { useCurrentSession } from './app/useCurrentSession';
 import { PlaybackQueueStore } from '@machafoundation/core';
 import { MusicPlaylistStore } from '@machafoundation/core';
@@ -72,16 +72,29 @@ interface Props {
   playbackOverride?: PlaybackResolver;
 }
 
-const navItems = [
-  { to: routes.home, label: 'Home', end: true },
-  { to: routes.movies, label: 'Movies', end: false },
-  { to: routes.series, label: 'TV Shows', end: false },
-  { to: routes.music, label: 'Music', end: false },
-  { to: routes.search, label: 'Search', end: false },
-  { to: routes.ingest, label: 'Import', end: false },
-  { to: routes.status, label: 'Status', end: false },
-  { to: routes.manage, label: 'Manage', end: false },
-] as const;
+/**
+ * `needs` is the role a section is worth showing for, stated here rather than
+ * as a chain of special cases at the render site.
+ *
+ * Everything that reads the catalogue needs `media_viewer` — including Home,
+ * which is a catalogue screen despite not looking like one. Leaving it
+ * ungated is what turns an account without that role into a wall of failed
+ * requests: the viewer lands on Home, Home asks for the catalogue, and the
+ * server answers 401 exactly as it should.
+ *
+ * Manage is the exception and carries no `needs`: two different roles reach
+ * it and either will do, so it is decided at the render site instead.
+ */
+export const navItems = [
+  { to: routes.home, label: 'Home', end: true, needs: 'media_viewer' },
+  { to: routes.movies, label: 'Movies', end: false, needs: 'media_viewer' },
+  { to: routes.series, label: 'TV Shows', end: false, needs: 'media_viewer' },
+  { to: routes.music, label: 'Music', end: false, needs: 'media_viewer' },
+  { to: routes.search, label: 'Search', end: false, needs: 'media_viewer' },
+  { to: routes.ingest, label: 'Import', end: false, needs: 'importer' },
+  { to: routes.status, label: 'Status', end: false, needs: 'view_status' },
+  { to: routes.manage, label: 'Manage', end: false, needs: undefined },
+] as const satisfies readonly { to: string; label: string; end: boolean; needs?: UserRole }[];
 
 function required(value: string | undefined, name: string): string {
   if (!value) throw new Error(`Missing route parameter: ${name}`);
@@ -260,6 +273,11 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
       // if the single configured endpoint happens to be down at that exact
       // moment; the next successful discovery cycle supersedes it either way.
       ...bootstrapClusterEndpoints(getDiscoveredEndpoints(), 'environment'),
+      // Wall-clock, so the timestamps the registry stamps on health — last
+      // success, last failure — are readable as dates on the Status screen.
+      // Nothing outside the registry compares against its *durations* any
+      // more: `EndpointCandidate.ready` answers "is this endpoint out of
+      // cooldown" from inside, against whatever clock it actually holds.
     ], Date.now, endpointBandwidth),
     [endpointKey, endpointBandwidth],
   );
@@ -288,7 +306,7 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
       endpointBandwidth.flush();
     };
   }, [endpointBandwidth, endpointRegistry]);
-  const { auth, ready: sessionReady } = useSession({
+  const { auth, ready: sessionReady, roles } = useSession({
     connectionRequired,
     serverConfigured: bootstrapEndpoints.length > 0,
     endpointRegistry,
@@ -311,22 +329,49 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
   // cold-start mint is answered 401, returned as-is, and the roles are never
   // read — leaving every privileged section visible for the rest of the run.
   // It only ever worked by timing.
-  const { session, known: sessionKnown, refresh: refreshSession } = useCurrentSession(usersApi, connectionRequired && !effectiveConnectionGate && sessionReady);
+  const { session, refresh: refreshSession } = useCurrentSession(usersApi, connectionRequired && !effectiveConnectionGate && sessionReady);
   /**
-   * Sections that predate roles stay visible while roles are unknown.
+   * Permissions come from the token, identity comes from the whoami.
    *
-   * Unknown is not the same as "has no roles". A node too old to answer the
-   * whoami, or one that has not answered yet, must not read as a viewer with
-   * no permissions — that would empty the navigation for everyone the moment
-   * an old node answered first, which is this client's normal operating
-   * condition rather than an edge case.
+   * They are deliberately separate now. `roles` rides the session itself, so a
+   * failover or a slow node cannot leave the navigation guessing; the whoami
+   * above supplies only the display name and the password policy, and a
+   * failure there costs a name rather than a set of permissions.
+   *
+   * `sessionPermits` keeps the rule that unknown is not none — an unanswered
+   * cluster permits everything rather than emptying the navigation — and it is
+   * core's, so all four clients answer it identically.
    */
-  const permits = useCallback((role: UserRole) => !sessionKnown || hasRole(session?.roles, role), [session, sessionKnown]);
+  const permits = useCallback((role: UserRole) => sessionPermits(roles, role), [roles]);
+  const locked = sessionLockedOut(roles);
   // Users is the exception, and deliberately the other way round: the screen
   // exists only because the server has accounts, so an unknown answer means
-  // there is nothing there to show rather than something to reveal.
-  const usersAvailable = sessionKnown && hasRole(session?.roles, 'manage_users');
+  // there is nothing there to show rather than something to reveal. `hasRole`
+  // is the strict test — `undefined` is false — which is exactly that.
+  const usersAvailable = hasRole(roles, 'manage_users');
   const libraryManagementAvailable = managementAvailable && permits('manager');
+  const mediaAvailable = permits('media_viewer');
+  /**
+   * The Manage pane this account can actually open, or nothing.
+   *
+   * `/manage` is the unmatched-files pane and wants `manager`, so an account
+   * holding only `manage_users` has to be sent to the Users pane directly —
+   * pointing it at the section root would bounce it to Settings, which is the
+   * section it could not use rather than the one it could.
+   */
+  const manageLanding = libraryManagementAvailable ? routes.manage
+    : usersAvailable ? routes.manageUsers
+      : undefined;
+  /**
+   * Where a viewer goes when the route they asked for is not theirs to see.
+   *
+   * Home is only the right answer for someone who may read the catalogue. An
+   * account with `manage_users` and nothing else has no media at all, so
+   * sending it to Home would land it on the one screen guaranteed to fail —
+   * and the catch-all would send it straight back. Settings is the last
+   * resort because it is the one section no role gates.
+   */
+  const landing = mediaAvailable ? routes.home : manageLanding ?? routes.settings;
   const metadataEditingAvailable = libraryManagementAvailable;
   const [unmatchedCount, setUnmatchedCount] = useState(0);
 
@@ -416,6 +461,19 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
     }
   }, [effectiveConnectionGate, location.pathname, navigate]);
 
+  // Same shape as the connection gate above, and for the same reason: the
+  // route has to agree with what is on screen, or Back walks into a page this
+  // session may not see. `routes.connection` stays reachable deliberately —
+  // see the render guard — and so does anything already playing, because a
+  // redirect mid-film is the same interruption the render guard refuses.
+  useEffect(() => {
+    if (!locked || activePlayback) return;
+    if (location.pathname === routes.login || location.pathname === routes.connection) return;
+    // Carry where they were trying to go, so signing in finishes the journey
+    // rather than dropping them on Home to start it again.
+    navigate(routes.login, { replace: true, state: { from: location.pathname } });
+  }, [activePlayback, locked, location.pathname, navigate]);
+
   const open = useCallback((item: MediaSummary) => navigate(pathForMedia(item)), [navigate]);
   const openPlayer = useCallback((item: MediaSummary) => playback.startPlayback(item), [playback.startPlayback]);
   const openPlayerFromStart = useCallback((item: MediaSummary) => playback.startPlayback(item, { fromStart: true }), [playback.startPlayback]);
@@ -474,6 +532,13 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
 
   const settingsPane = <SettingsScreen api={api} serverApi={serverApi} bootstrapEndpoints={bootstrapEndpoints} connectionNotice={connectionNotice} onSave={saveServer} />;
   const usersPane = <UsersScreen api={usersApi} session={session} />;
+  /**
+   * Hiding a link is not access control — a bookmark, a Back, or the catch-all
+   * below all reach a route with no nav involved. Every catalogue screen goes
+   * through here so that the nav and the routes agree, rather than the nav
+   * being tidy while the routes stay open.
+   */
+  const mediaPane = (element: ReactElement) => mediaAvailable ? element : <Navigate to={landing} replace />;
   const managePane = (section: ManageSection) => (
     <ManageScreen
       api={manageApi}
@@ -527,6 +592,41 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
     {playerHost}
   </div>;
 
+  // A session the server granted nothing gets a login and nothing else: no
+  // topbar, no navigation, no routes into the library.
+  //
+  // **Never while something is playing**, which is the same rule the splash
+  // above follows and for a stronger reason. This wall is raised from a
+  // re-read of the session, and a re-read happens on every re-mint — which is
+  // what failover does. Tearing the player down on it would turn a node dying
+  // mid-film, the exact event this client exists to survive invisibly, into a
+  // black screen. Nothing is lost by waiting: revoking a role bumps
+  // `credential_generation` and kills the session cluster-wide, so the stream
+  // stops at the server, authoritatively, without the client guessing. The
+  // wall goes up when playback ends.
+  //
+  // `routes.connection` is the other exception, and it is not a hole in the
+  // wall: it grants no media, only the ability to point this client at a
+  // different cluster. Without it a viewer whose node stops granting roles
+  // can neither sign in nor leave — 0.13.0 shipped that exact shape of
+  // lockout, where the gate stood in front of the one screen that could undo
+  // it, and it took a release to get out of.
+  if (locked && !activePlayback) return <div className="app-shell">
+    {location.pathname === routes.connection
+      ? <ConnectionGateScreen
+          welcome={false}
+          notice={connectionNotice}
+          bootstrapEndpoints={bootstrapEndpoints}
+          onSave={saveServer}
+        />
+      : <LoginScreen
+          guestAllowed={false}
+          connectionReachable
+          onSignIn={(username, password) => sessionManager.signIn({ username, password })}
+          onSignedIn={refreshSession}
+        />}
+  </div>;
+
   const musicSectionActive = location.pathname === routes.music || location.pathname.startsWith(`${routes.music}/`);
   const statusSectionActive = location.pathname === routes.status || location.pathname.startsWith(`${routes.status}/`);
   const manageSectionActive = location.pathname === routes.manage || location.pathname.startsWith(`${routes.manage}/`);
@@ -542,7 +642,7 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
         <nav aria-label="Main navigation">
           {navItems.map((item) => {
             if (item.to === routes.manage && !libraryManagementAvailable && !usersAvailable) return null;
-            if (item.to === routes.ingest && !permits('importer')) return null;
+            if (item.needs && !permits(item.needs)) return null;
             // Importing media is a desk task: it wants a keyboard, a file
             // browser and a person willing to type paths. None of that is
             // reachable from a remote, so it does not earn a slot in a
@@ -551,7 +651,7 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
             return (
               <NavLink
                 key={item.to}
-                to={item.to}
+                to={item.to === routes.manage ? manageLanding ?? item.to : item.to}
                 end={item.end}
                 data-tv-focusable="true"
                 className={({ isActive }: { isActive: boolean }) => isActive ? 'active' : undefined}
@@ -590,30 +690,30 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
       )}
       <main>
         <Routes>
-          <Route path={routes.home} element={<HomeScreen api={api} continueWatching={playback.continueWatching} onOpen={open} onResume={openPlayer} onRemoveFromContinueWatching={playback.removeFromContinueWatching} />} />
-          <Route path={routes.movies} element={<LibraryScreen api={api} kind="movies" onOpen={open} />} />
-          <Route path="/movies/:movieId" element={<DetailRoute api={api} onPlay={openPlayer} onPlayFromStart={openPlayerFromStart} progressById={playback.progressById} parameter="movieId" onEdit={metadataEditingAvailable ? openMetadataEditor : undefined} onMediaProfile={preparePlaybackProfile} />} />
-          <Route path={routes.series} element={<LibraryScreen api={api} kind="shows" onOpen={open} />} />
-          <Route path="/series/:seriesId" element={<SeriesRoute api={api} onOpenSeason={open} onEdit={metadataEditingAvailable ? openMetadataEditor : undefined} />} />
-          <Route path="/series/:seriesId/seasons/:seasonId" element={<SeasonRoute api={api} progress={playback.progressById} onPlayEpisode={playback.openSeasonEpisode} onEdit={metadataEditingAvailable ? openMetadataEditor : undefined} />} />
-          <Route path="/episodes/:episodeId" element={<DetailRoute api={api} onPlay={openPlayer} onPlayFromStart={openPlayerFromStart} progressById={playback.progressById} parameter="episodeId" onEdit={metadataEditingAvailable ? openMetadataEditor : undefined} onMediaProfile={preparePlaybackProfile} />} />
-          <Route path={routes.music} element={<Navigate to={routes.musicArtists} replace />} />
-          <Route path={routes.musicArtists} element={<MusicScreen api={api} section="artists" onOpen={open} onPlayNow={music.playNow} onAddToPlaylist={music.addToPlaylist} onPlayNext={music.playNext} onPlayLater={music.playLater} onShuffle={music.shuffle} />} />
-          <Route path={routes.musicAlbums} element={<MusicScreen api={api} section="albums" onOpen={open} onPlayNow={music.playNow} onAddToPlaylist={music.addToPlaylist} onPlayNext={music.playNext} onPlayLater={music.playLater} onShuffle={music.shuffle} />} />
-          <Route path={routes.musicTracks} element={<MusicScreen api={api} section="tracks" onOpen={open} onPlayNow={music.playNow} onAddToPlaylist={music.addToPlaylist} onPlayNext={music.playNext} onPlayLater={music.playLater} onShuffle={music.shuffle} />} />
-          <Route path={routes.musicPlaylist} element={<MusicPlaylistScreen api={api} entries={music.playlistEntries} onPlay={(index) => music.playPlaylist(false, index)} onShuffle={() => music.playPlaylist(true)} onRemove={music.removePlaylistEntry} onMove={music.movePlaylistEntry} onClear={music.clearPlaylist} />} />
-          <Route path="/music/artists/:artistId" element={<ArtistRoute api={api} onOpenAlbum={open} onAddToPlaylist={music.addToPlaylist} onPlayNext={music.playNext} onPlayLater={music.playLater} onShuffle={music.shuffle} onEdit={metadataEditingAvailable ? openMetadataEditor : undefined} />} />
-          <Route path="/music/albums/:albumId" element={<AlbumRoute api={api} onPlay={playback.openAlbumTrack} onPlayAll={music.playAlbumAll} onOpenTrack={open} onAddToPlaylist={music.addToPlaylist} onPlayNext={music.playNext} onPlayLater={music.playLater} onShuffle={music.shuffle} onEdit={metadataEditingAvailable ? openMetadataEditor : undefined} />} />
-          <Route path="/music/tracks/:trackId" element={<DetailRoute api={api} onPlay={openPlayer} onPlayFromStart={openPlayerFromStart} progressById={playback.progressById} parameter="trackId" onEdit={metadataEditingAvailable ? openMetadataEditor : undefined} onMediaProfile={preparePlaybackProfile} />} />
+          <Route path={routes.home} element={mediaPane(<HomeScreen api={api} continueWatching={playback.continueWatching} onOpen={open} onResume={openPlayer} onRemoveFromContinueWatching={playback.removeFromContinueWatching} />)} />
+          <Route path={routes.movies} element={mediaPane(<LibraryScreen api={api} kind="movies" onOpen={open} />)} />
+          <Route path="/movies/:movieId" element={mediaPane(<DetailRoute api={api} onPlay={openPlayer} onPlayFromStart={openPlayerFromStart} progressById={playback.progressById} parameter="movieId" onEdit={metadataEditingAvailable ? openMetadataEditor : undefined} onMediaProfile={preparePlaybackProfile} />)} />
+          <Route path={routes.series} element={mediaPane(<LibraryScreen api={api} kind="shows" onOpen={open} />)} />
+          <Route path="/series/:seriesId" element={mediaPane(<SeriesRoute api={api} onOpenSeason={open} onEdit={metadataEditingAvailable ? openMetadataEditor : undefined} />)} />
+          <Route path="/series/:seriesId/seasons/:seasonId" element={mediaPane(<SeasonRoute api={api} progress={playback.progressById} onPlayEpisode={playback.openSeasonEpisode} onEdit={metadataEditingAvailable ? openMetadataEditor : undefined} />)} />
+          <Route path="/episodes/:episodeId" element={mediaPane(<DetailRoute api={api} onPlay={openPlayer} onPlayFromStart={openPlayerFromStart} progressById={playback.progressById} parameter="episodeId" onEdit={metadataEditingAvailable ? openMetadataEditor : undefined} onMediaProfile={preparePlaybackProfile} />)} />
+          <Route path={routes.music} element={mediaPane(<Navigate to={routes.musicArtists} replace />)} />
+          <Route path={routes.musicArtists} element={mediaPane(<MusicScreen api={api} section="artists" onOpen={open} onPlayNow={music.playNow} onAddToPlaylist={music.addToPlaylist} onPlayNext={music.playNext} onPlayLater={music.playLater} onShuffle={music.shuffle} />)} />
+          <Route path={routes.musicAlbums} element={mediaPane(<MusicScreen api={api} section="albums" onOpen={open} onPlayNow={music.playNow} onAddToPlaylist={music.addToPlaylist} onPlayNext={music.playNext} onPlayLater={music.playLater} onShuffle={music.shuffle} />)} />
+          <Route path={routes.musicTracks} element={mediaPane(<MusicScreen api={api} section="tracks" onOpen={open} onPlayNow={music.playNow} onAddToPlaylist={music.addToPlaylist} onPlayNext={music.playNext} onPlayLater={music.playLater} onShuffle={music.shuffle} />)} />
+          <Route path={routes.musicPlaylist} element={mediaPane(<MusicPlaylistScreen api={api} entries={music.playlistEntries} onPlay={(index) => music.playPlaylist(false, index)} onShuffle={() => music.playPlaylist(true)} onRemove={music.removePlaylistEntry} onMove={music.movePlaylistEntry} onClear={music.clearPlaylist} />)} />
+          <Route path="/music/artists/:artistId" element={mediaPane(<ArtistRoute api={api} onOpenAlbum={open} onAddToPlaylist={music.addToPlaylist} onPlayNext={music.playNext} onPlayLater={music.playLater} onShuffle={music.shuffle} onEdit={metadataEditingAvailable ? openMetadataEditor : undefined} />)} />
+          <Route path="/music/albums/:albumId" element={mediaPane(<AlbumRoute api={api} onPlay={playback.openAlbumTrack} onPlayAll={music.playAlbumAll} onOpenTrack={open} onAddToPlaylist={music.addToPlaylist} onPlayNext={music.playNext} onPlayLater={music.playLater} onShuffle={music.shuffle} onEdit={metadataEditingAvailable ? openMetadataEditor : undefined} />)} />
+          <Route path="/music/tracks/:trackId" element={mediaPane(<DetailRoute api={api} onPlay={openPlayer} onPlayFromStart={openPlayerFromStart} progressById={playback.progressById} parameter="trackId" onEdit={metadataEditingAvailable ? openMetadataEditor : undefined} onMediaProfile={preparePlaybackProfile} />)} />
           <Route path="/play/:itemId" element={<div className="player-route-placeholder" aria-hidden="true" />} />
-          <Route path="/items/:itemId" element={<DetailRoute api={api} onPlay={openPlayer} onPlayFromStart={openPlayerFromStart} progressById={playback.progressById} parameter="itemId" onEdit={metadataEditingAvailable ? openMetadataEditor : undefined} onMediaProfile={preparePlaybackProfile} />} />
-          <Route path="/items/:itemId/edit" element={metadataEditingAvailable ? <MetadataEditorRoute api={catalogueApi} /> : <Navigate to={routes.home} replace />} />
-          <Route path={routes.search} element={<SearchScreen api={api} onOpen={open} />} />
-          <Route path={routes.ingest} element={<IngestScreen api={acquisitionApi} />} />
-          <Route path={routes.status} element={<StatusScreen api={clusterStatusApi} endpointRegistry={endpointRegistry} platform={platform} manageApi={managementAvailable ? manageApi : undefined} section="overview" auth={auth} />} />
-          <Route path={routes.statusClient} element={<StatusScreen api={clusterStatusApi} endpointRegistry={endpointRegistry} platform={platform} manageApi={managementAvailable ? manageApi : undefined} section="client" auth={auth} />} />
-          <Route path={routes.statusConnectivity} element={<StatusScreen api={clusterStatusApi} endpointRegistry={endpointRegistry} platform={platform} manageApi={managementAvailable ? manageApi : undefined} section="connectivity" auth={auth} />} />
-          <Route path="/status/nodes/:nodeId" element={<NodeStatusScreen api={clusterStatusApi} />} />
+          <Route path="/items/:itemId" element={mediaPane(<DetailRoute api={api} onPlay={openPlayer} onPlayFromStart={openPlayerFromStart} progressById={playback.progressById} parameter="itemId" onEdit={metadataEditingAvailable ? openMetadataEditor : undefined} onMediaProfile={preparePlaybackProfile} />)} />
+          <Route path="/items/:itemId/edit" element={metadataEditingAvailable ? <MetadataEditorRoute api={catalogueApi} /> : <Navigate to={landing} replace />} />
+          <Route path={routes.search} element={mediaPane(<SearchScreen api={api} onOpen={open} />)} />
+          <Route path={routes.ingest} element={permits('importer') ? <IngestScreen api={acquisitionApi} /> : <Navigate to={landing} replace />} />
+          <Route path={routes.status} element={permits('view_status') ? <StatusScreen api={clusterStatusApi} endpointRegistry={endpointRegistry} platform={platform} manageApi={managementAvailable ? manageApi : undefined} section="overview" auth={auth} /> : <Navigate to={landing} replace />} />
+          <Route path={routes.statusClient} element={permits('view_status') ? <StatusScreen api={clusterStatusApi} endpointRegistry={endpointRegistry} platform={platform} manageApi={managementAvailable ? manageApi : undefined} section="client" auth={auth} /> : <Navigate to={landing} replace />} />
+          <Route path={routes.statusConnectivity} element={permits('view_status') ? <StatusScreen api={clusterStatusApi} endpointRegistry={endpointRegistry} platform={platform} manageApi={managementAvailable ? manageApi : undefined} section="connectivity" auth={auth} /> : <Navigate to={landing} replace />} />
+          <Route path="/status/nodes/:nodeId" element={permits('view_status') ? <NodeStatusScreen api={clusterStatusApi} /> : <Navigate to={landing} replace />} />
           <Route path={routes.manage} element={libraryManagementAvailable ? managePane('unmatched') : <Navigate to={routes.settings} replace />} />
           <Route path={routes.manageFiles} element={libraryManagementAvailable ? managePane('files') : <Navigate to={routes.settings} replace />} />
           <Route path={routes.manageUsers} element={usersAvailable ? managePane('users') : <Navigate to={routes.settings} replace />} />
@@ -628,7 +728,7 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
           <Route path={routes.account} element={<AccountScreen api={usersApi} session={session} />} />
           <Route path={routes.accountPassword} element={<ChangePasswordScreen api={usersApi} policy={session?.password_policy} onChanged={refreshSession} />} />
           <Route path={routes.sponsor} element={<SponsorScreen />} />
-          <Route path="*" element={<Navigate to={routes.home} replace />} />
+          <Route path="*" element={<Navigate to={landing} replace />} />
         </Routes>
       </main>
 

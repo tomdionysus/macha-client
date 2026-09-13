@@ -983,6 +983,31 @@ h2 { font-size: clamp(1.2rem, 2vw, 1.75rem); letter-spacing: -.01em; margin: 1.1
 .account-icon { display: inline-flex; opacity: .8; }
 .account-username { font-size: .78rem; letter-spacing: .02em; max-width: 9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .account-overflow button { color: var(--text-dim); }
+/* The identity is the trigger, so it is sized by its own content rather than
+   by the 1.8rem box a `⋯` glyph needs, and it stays flat until pointed at:
+   a permanent button outline in the top bar would compete with the navigation
+   for attention it has not earned. The focus ring is restored explicitly —
+   the rules above lose to this selector's specificity, and losing the ring on
+   a television is losing the only cue there is. */
+.account-overflow .overflow-menu-trigger {
+  width: auto;
+  height: auto;
+  padding: .22rem .42rem;
+  font-size: inherit;
+  line-height: inherit;
+  opacity: 1;
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+}
+.account-overflow .overflow-menu-trigger:hover { background: #ffffff0f; border-color: #ffffff1f; color: var(--text); }
+.account-overflow .overflow-menu-trigger[aria-expanded='true'] { background: #ffffff14; border-color: #ffffff24; color: var(--text); }
+.account-overflow .overflow-menu-trigger:focus-visible {
+  border-color: var(--focus);
+  box-shadow: 0 0 0 1px var(--focus);
+  color: var(--text);
+}
 .account-screen { max-width: 46rem; }
 .account-details { display: grid; grid-template-columns: minmax(9rem, auto) 1fr; gap: .4rem 1.25rem; margin: 1rem 0 1.75rem; }
 .account-details dt { color: var(--text-dim); font-size: .85rem; }

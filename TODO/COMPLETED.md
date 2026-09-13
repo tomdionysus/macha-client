@@ -1,6 +1,280 @@
 # Completed and tested
 
-Last updated: 2026-09-10
+Last updated: 2026-09-13
+
+## Matroska direct play, the login wall, and role-gated navigation (client 0.14.0)
+
+### Matroska is claimed honestly, and it is worth 15% of the library
+
+The container was excluded outright. The exclusion was written for a real
+fault — the Samsung accepts Matroska and renders corrupt video — but the cause
+was `matroska,webm` being read as WebM, and core now resolves a demuxer list to
+one container family. It had become a falsified capability outliving its
+reason, which is exactly what `SamsungWebPlatform`'s own policy comment warns
+against.
+
+`detectMatroskaSupport` does not take `canPlayType` at its word: it requires
+the engine to **refuse** an impossible codec in the same container before
+believing a yes — the discipline `hlsDeliveryProbe` already applies, and it
+turns "this host's oracle lies" into something each host demonstrates about
+itself rather than a name hardcoded in the client. Measured on Chrome 151:
+`video/x-matroska; codecs="avc1.42E01E"` → `probably`, `codecs="zzzz.invalid"`
+→ `""`.
+
+Measured against 1004 items on gbni-1 with `scripts/playback-baseline.mjs`:
+
+```
+                                    before   after
+direct     video:copy audio:copy      745  →   898
+remux      video:copy audio:copy      153  →     0
+transcode  (all three buckets)        106  →   106
+```
+
+Every one of the 153 was `container-not-playable` with both streams already
+`copy`, and **no title in any other bucket moved** — the result to expect,
+since `containerPlayable` is read only by the direct branch of
+`choosePlaybackInstruction`. The 101 still transcoding are E-AC-3/TrueHD/DTS
+that Chrome cannot decode, objected to per stream before direct play is reached.
+
+### The login wall
+
+For deployments where only registered users see media. `media_viewer` comes off
+the `anonymous` account and the session arrives holding an empty role list.
+
+The server met this halfway: it had conflated "no roles" with "anonymous
+disabled" and refused the mint with `403 anonymous_disabled`, so the client
+never received the list it needed. Fixed server-side in 0.38.4 —
+`PasswordCredentialValidator::validate` read
+`if (!user || user->roles.empty()) return disabled;`, one branch for two
+unrelated states. `anonymous_disabled` now means only
+`session.allow_anonymous: false` in `macha.yaml`.
+
+Verified live against 0.38.4 on gbni-1: `POST /api/v1/session {}` → 201 with
+`roles: []`; with that powerless token `GET /api/v1/session` 200,
+`/api/v1/catalogue/items` **403**, `/api/v1/status` 200, `/api/v1/users/me`
+**403**. Driving the real client: a cold start lands on `/login` with one
+button and no "Browse as guest"; `/movies`, `/series`, `/manage/users`,
+`/status` and `/` all bounce to it; `/settings/connection` renders.
+
+Three things the wall gets right, each for a stated reason:
+
+- **It never interrupts playback.** It is raised from a re-read of the session,
+  and a re-read happens on every re-mint — which is what failover does. Tearing
+  the player down would turn a node dying mid-film, the event this client exists
+  to survive invisibly, into a black screen. Revoking a role bumps
+  `credential_generation` and stops the stream at the server anyway.
+- **Settings → Connection stays reachable, with a link to it.** It grants no
+  media, only the ability to point the client elsewhere. Without it a viewer
+  whose cluster stops granting roles can neither sign in nor leave, and on a
+  television there is no address bar — which is the shape of the bootstrap
+  lockout 0.13.0 shipped and needed a release to undo.
+- **Unknown is not none.** An unanswered whoami must not read as a session with
+  no privileges, or the wall flashes on every cold start.
+
+### Role-gated navigation, and `view_status`
+
+Every nav entry declares the role it is worth showing for, and the routes are
+gated to match — hiding a link is not access control, because a bookmark, a
+Back or the catch-all all reach a route with no nav involved. **Home is a
+catalogue screen despite not looking like one**, and leaving it ungated is what
+met an account without `media_viewer` with a wall of failures.
+
+Status carries `view_status` (server 0.38.5) rather than borrowing `manager`.
+Neither existing gate said "see the health of this cluster": `manager` took the
+diagnostic screen from an ordinary viewer at the moment it earns its place, and
+ungated showed it to a session granted nothing. Liveness, ranking, failover and
+the connection gate all run off `/api/v1/health`, which needs no session and no
+role, so withholding it costs the Status screen and nothing else.
+
+### Account screen, menu and logout
+
+- The identity **is** the control. It used to be an inert chip beside a `⋯`
+  button: two targets for one idea, an icon that looked pressable and did
+  nothing, and an extra D-pad stop to reach the half that worked.
+- **"This ends the session everywhere" was false.** `logout()` is
+  `DELETE /api/v1/session`, which revokes one token — verified by minting two
+  sessions for one account and revoking one while the other kept answering 200.
+  Signing out everywhere is what a password or role change does. The wording
+  came from misreading core's "the revocation propagates to every node", which
+  means the token cannot be used against a different node.
+- A refusal is now stated in this client's words. `Could not start a session:
+  401` describes the transport, not the situation. One message covers a wrong
+  password and an unknown username alike, because the server answers those
+  identically so nobody can enumerate accounts; anything that is not a refusal
+  keeps its own wording.
+- **A successful login no longer strands the viewer on the login screen.** The
+  token is live at once but the roles are not, so `navigate` was judged against
+  the session just replaced and bounced back — and nothing navigated again when
+  the roles landed. Signing in returns them to the page that sent them there.
+- No password control for an account that holds no credential, rendered from
+  the server's `mutable.set_password` and never from the username. An absent
+  block is "this node does not say", not a refusal.
+
+### Session policy moved into core
+
+`sessionPermits(roles, role)` and `sessionLockedOut(roles)` are core's, taking
+`roles | undefined` rather than a value plus a `known` flag, so "unknown is not
+none" holds by construction instead of per call site. Four clients now answer
+it identically.
+
+The whoami retry this client had built was **deleted rather than moved**: roles
+already arrive with the token on both paths and core was discarding them — the
+mint response states `roles`, and `validateAnonymousSession` was already calling
+the whoami and reading only the status code. `SessionManager.roles` is populated
+by whichever path produced the token, so there is no separate fetch to fail.
+
+Also taken from core: `EndpointCandidate.ready` for the endpoint cooldown state,
+replacing a `retryAt` vs `Date.now()` comparison that was correct only because
+this application injects a wall clock into the registry.
+
+## Accounts, roles and login (client 0.13.0, core 0.8.x)
+
+The client can now sign in, show who it is, and manage accounts.
+
+**Login** is core's, not the screen's: `LoginScreen` collects two fields and
+`sessionManager.signIn()` exchanges them on the same route, with the same
+response shape, as the anonymous mint. One session lifecycle, not two.
+`signOut()` revokes server-side first (a request that can fail) and only then
+clears locally (which cannot), because ending up still signed in after asking
+to leave is the one outcome that must not happen.
+
+**Identity** comes from `GET /api/v1/session`. On the 0.37.x nodes deployed at
+the time it carried neither `user_id` nor `username`, so `useCurrentSession`
+falls back to `GET /api/v1/users/me`. 0.38.0 added `user_id`, and `username`
+arrived on 2026-09-13 — **the fallback can be deleted once every node reports
+it** (see ACTIVE).
+
+**Roles gate the navigation**, and the rule is that stated roles are literal:
+a capability the server did not name is one the session does not have,
+including role names this build has never seen. A node that cannot answer
+leaves roles *unknown*, which is deliberately different from having none, so
+sections that predate roles stay visible against an older node instead of the
+navigation emptying for everyone. The one presentational special case Tom
+sanctioned: a session belonging to the `anonymous` user shows a "Log in"
+control rather than an account menu. Nothing mechanical keys off that name.
+
+**The Users screen** renders every control from the server's own per-field
+`mutable` block, never a name check, so `root` and `anonymous` lock correctly
+without this client knowing anything about them. A roles lock caused by the
+last-manager rule says so rather than greying out silently.
+
+**Two bugs found by running it rather than reasoning about it.** The whoami
+could fire before the session mint settled; `SessionManager.fetch` only
+retries a 401 when it actually sent a token, so that request was answered 401,
+returned as-is, and the roles were never read — leaving every privileged
+section visible for the rest of the run. It had only ever worked by timing.
+And `MachaUsersApi.list()` read `response.items` while the server sends
+`{"users":[…]}`; reading an absent key yields `undefined`, which is not an
+error anywhere downstream, so the screen rendered its heading and nothing else
+and looked broken rather than reporting a bad answer.
+
+**Not yet verified:** the Users screen against an account actually holding
+`manage_users`, and none of this on a television. Both are in ACTIVE.
+
+## Settings left Manage for its own top-level section
+
+Settings is client-local configuration that no role gates, and grouping it
+under a privileged section hid it from the people most likely to need it:
+anyone who cannot reach a node has no roles either, and the endpoint list is
+the one thing that would fix that. It is now a top-level route reached by a
+cog beside the account marker, and Manage holds only Unmatched, Files and
+Users. Old `/manage/settings` bookmarks redirect rather than falling through
+to the catch-all, which would have read as the setting being lost.
+
+The Samsung Return hierarchy was stale and its test caught it: Settings was
+still treated as a child of Manage. Fixed, and the account, login and Users
+routes were added to it — they had never been in it.
+
+## A bootstrap lockout: saving an endpoint could never succeed
+
+The connection form probed an unauthenticated `catalogue/status` before
+saving, and counted an endpoint usable only on an OK response. Every node
+answers that 401. Measured against three of Tom's nodes: zero endpoints
+qualified, so none could be saved — and with no endpoint there is no session,
+so nothing could ever validate one. A fresh install could not be configured.
+Invisible to anyone whose endpoints come from build configuration, which is
+why it survived.
+
+**The probe is gone rather than repaired.** Reachability is not a question to
+ask on a button press; it is a fact the client already maintains. The health
+monitor probes every known node on a timer and the registry holds the answer,
+and the session mint already walks candidates until one responds. Saving is
+configuration, and the registry is built to tolerate dead endpoints. A bad
+address now surfaces through the same unreachable path as a node that dies a
+minute after being saved — the only path that could ever have reported that
+case anyway.
+
+Verified end to end 2026-09-13: typed `https://macnessa.macha.network` into
+the form, saved, and the library loaded from it.
+
+## Artwork fails over between nodes instead of vanishing
+
+A poster whose signed capability URL would not load showed a blank card for
+sixty seconds. It now tries the same capability on the next node immediately,
+then the authenticated fetch.
+
+The premise was verified against the live cluster rather than assumed: an
+artwork capability is a **cluster** credential — the signature covers the
+artwork id and expiry and never the host — so a capability signed by
+`10.44.1.50` returned an identical 68725-byte JPEG from `.51` and from the
+remote WAN node. An expired capability is re-hosted nowhere, since every node
+would refuse it, but still leads the list because the browser may hold the
+image cached under it.
+
+`exp` is **unix milliseconds**, not seconds. That is unusual enough to be
+worth stating: read as seconds it makes every live capability look long
+expired, no alternate is ever offered, and the failover silently stops
+existing while every test still passes. Settled three ways — the server signs
+`unix_ms() + ttl`, and core's own parse classifies 41 live capability URLs
+correctly — and pinned by a test.
+
+Observed working 2026-09-13: on one page load, four capability failures
+recovered on another node and twelve of twelve forced images loaded.
+
+## Three cluster-health bugs in the session and probe paths
+
+All three had the same shape: something that is not a node fault being
+recorded as one, and costing endpoint ranking and playback failover.
+
+- **A refused password marked every node unhealthy.** Signing in reused the
+  any-node mint walk, which records a failure per endpoint on any error, so
+  one mistyped password walked the cluster and marked all of it failed. A 401
+  or 403 is a refusal and a cluster-wide answer: record success, stop walking.
+  429 is deliberately excluded — a rate limit is worth trying elsewhere.
+- **The same shape in session validation.** During a rolling upgrade a session
+  minted by the older build carries a role vocabulary the new one refuses, so
+  every route answers 403. Treated as a transport fault it marked every node
+  unhealthy on the way to re-minting, at exactly the moment the cluster was
+  already in flux.
+- **The health probe's cache-buster repeated across reloads.** It was built
+  from the monotonic clock, which restarts near zero on every page load. Two
+  consecutive reloads measured 744 and 571; the first probe of any load lands
+  in a band a few hundred wide and is re-entered every time, so a cache could
+  answer a probe for a node that is gone — the exact failure the function
+  exists to prevent, failing towards reporting a dead node healthy.
+
+The rule that came out of it, now stated in core beside `MachaHost.now()`: a
+duration goes through the host clock, an absolute instant stays on the wall
+clock, and nothing converts between them.
+
+## The web client is served on the LAN, and installed on the television
+
+A dependency-free Node static host under systemd on `192.168.1.50`, serving
+the release build on port 80 as `www-data` with `CAP_NET_BIND_SERVICE` rather
+than as root. Deep links fall back to the app but a missing `/assets/` file
+stays a 404, because answering that with HTML turns a broken deploy into a
+confusing script error. Fingerprinted assets cache for a year; `index.html`
+does not, since it is how a browser discovers new fingerprints. Path traversal
+was probed in encoded, doubled and null-byte forms; nothing outside the served
+directory is readable. Persistence verified by restart and by `kill -9`.
+
+Checked before taking port 80: haproxy already holds 443 on that box and
+certbot renews via DNS-01, so renewal is unaffected. Serving over plain HTTP
+means the page is not a secure context, so the Direct Play read-ahead service
+worker does not register — playback works, the read-ahead does not.
+
+The Samsung build installed and launched on the set 2026-09-13 after
+Developer Mode was re-enabled. **Nothing on it has been verified visually.**
 
 ## Samsung failover plays: a replacement asks for the carriage its generation was created with
 

@@ -72,6 +72,10 @@
 .client-endpoint-card .cluster-node-heading code { overflow-wrap: anywhere; white-space: normal; }
 .cluster-node-meta { display: flex; justify-content: space-between; gap: 1rem; margin: .75rem 0; color: var(--text-faint); font-size: .78rem; }
 .cluster-node-meta span:last-child { text-align: right; }
+/* Centre column of the three. Tabular figures so versions line up down a column
+   of cards — comparing 0.38.1 against 0.38.4 at a glance is the whole reason it
+   is here, and proportional digits make that harder than it needs to be. */
+.cluster-node-version { text-align: center; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .cluster-node-stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .45rem 1.2rem; margin: 0; padding-top: .75rem; border-top: 1px solid #ffffff0b; }
 .cluster-node-stats > div { display: flex; justify-content: space-between; gap: .6rem; min-width: 0; }
 .cluster-node-stats dt { color: var(--text-faint); }

@@ -1,6 +1,6 @@
 # Active tasks and concepts to explore
 
-Last updated: 2026-09-10
+Last updated: 2026-09-13
 
 This is the working backlog for the current session. Add new work here. When an
 item is implemented and its stated verification is complete, remove it from
@@ -32,10 +32,185 @@ the same pair measured 2 ms and 5 ms and es-1→gbni-2 went from 207 ms to
 62 ms. Check how a metric is sampled before explaining its shape with the
 wiring.
 
+**Where this stands, 2026-09-13.** 0.14.0 shipped Matroska direct play, the
+login wall for registered-users-only deployments, role-gated navigation with
+`view_status`, and the move of session role policy into
+`@machafoundation/core`. `COMPLETED.md` has the detail and the measurements.
+
+**Read this first if you are picking this up cold.** The artwork P0 below is
+the oldest open item and the one with the clearest user impact — Tom raised
+image caching as a P0 in its own right on 2026-09-13 and it has not been
+started; it is the next thing to do. Everything under "shipped unseen" needs
+Tom present: a television, or a login this assistant will not perform.
+
+`@machafoundation/core` is a `file:../macha-ts` link in this repo as of
+2026-09-13, not a published version — core's working tree is what this client
+compiles against, so a rebuild there lands here immediately. Address that
+session as `Macha NPM Core`.
+
 Priority reflects active-breakage/user-impact, not effort: P0 is a live or
 recently-live correctness problem in playback itself; P1 is important,
 scoped, and actionable now; P2 is real but either blocked on something
 outside this repo or needs groundwork before it can be started safely.
+
+## P0 — 40% of artwork is unreachable when one of three nodes is down
+
+**Not this repo's fix.** Raised with the server session 2026-09-13 and noted
+here only because it presents as a client bug and will be re-diagnosed
+otherwise. Do not spend client time on it; re-measure and confirm it has gone.
+
+With `ramaroja` unreachable, two posters were blank on Home. Both artwork
+objects answer **404 from `inverbeg` and from `macnessa`** while a control
+poster that renders answers 200 from both — so the bytes are on the node that
+is down, and no client failover can help.
+
+The nodes' own `catalogue/status` says why: of 1618 artwork objects,
+`inverbeg` holds 516 locally (32%) and **`macnessa` holds 0**. With
+replication 2 across three nodes each should hold roughly 1079. A sample of 24
+movie artwork objects split 14 on both reachable nodes, **0 on exactly one**,
+10 on neither — and that empty middle bucket is the tell: nothing is placed on
+a pair containing the down node plus a reachable one.
+
+One thing the client cannot distinguish from outside, flagged to the server:
+a 404 may mean "I do not hold this" or "I do not hold it and could not read it
+from its DHT owner either". Those are different bugs with different fixes.
+
+**To re-check:** `GET /api/v1/catalogue/status` on each reachable node and
+compare `local_artwork_objects` against `artwork_objects`.
+
+**Re-checked 2026-09-13 — not fixed.** `gbni-1` (server 0.38.0) reports
+`local_artwork_objects: 0` against `artwork_objects: 1618`. Same shape as the
+original finding, now on a different node, so the replication fault is not
+node-specific and has not gone. Only `gbni-1` was reachable at the time
+(`gbni-2` and `es-1` both down), so the three-node comparison could not be
+repeated — but a node holding none of 1618 objects is the fault by itself.
+Still the server's to fix; re-check again when the cluster is whole.
+
+## P0 — Artwork caching: posters reload from scratch and the viewer waits
+
+Raised by Tom 2026-09-13 as a P0 in its own right, and **not started**. His
+words: images "load slowly, and when 'cached' they're just less slow. Changing
+anything or waiting for a minute or two, and they all load from scratch again.
+It's crap." The governing rule is [[never make the user wait]] — a poster the
+viewer has already seen should never be fetched twice.
+
+**The framing he set, which is the useful part:** *media posters are long-term
+cache objects*. They are content-addressed and immutable — artwork is served by
+id, any node serves the same bytes, and an artwork capability URL is a cluster
+credential whose signature covers the id and expiry but never the host. Nothing
+about a poster changes. So anything that re-fetches one is wrong, not slow.
+
+His questions, which want answering before anything is built:
+
+- What strategies are available beyond whatever is happening now? The Service
+  Worker already exists in this repo for Direct Play byte-range read-ahead
+  (`public/macha-direct-play-sw.js`) and is a candidate, but it is refused on
+  Tizen — a widget served from `file://` cannot register one — so whatever is
+  chosen has to degrade on the set rather than depend on it. Cache Storage,
+  IndexedDB and plain HTTP caching are all on the table.
+- **Does this need server involvement?** Probably the crux. Immutable artwork
+  wants long-lived `Cache-Control: immutable` and a stable URL, and a *signed*
+  URL with an expiry is the opposite of a stable cache key — the signature
+  changes, so the cache misses, which may be the whole of the reported
+  behaviour. Measure that before designing around it.
+
+**Do not start by writing a cache.** Start by measuring what actually happens
+to one poster across a reload and across a minute: which request goes out, what
+the response headers say, whether the URL differed from last time, and where
+the time goes. Tom's "changing anything and they all load from scratch" is a
+symptom with several possible causes and they need separating first.
+
+Related but distinct: the artwork *replication* P0 above is a server-side
+availability fault, not a caching one. Do not conflate them.
+
+## P2 — Do not work around the anonymous account's missing password
+
+Raised by the server session 2026-09-13, unprompted, as a thing a client
+might reasonably be tempted to do. Recorded so nobody tries it later.
+
+On server 0.38.0, `PATCH /api/v1/users/me` needed only `media_viewer`, which
+`anonymous` holds at genesis — so an anonymous session could set the anonymous
+account's own password and get a token back. Combined with the mint path never
+checking `allow_anonymous`, that turned an anonymous visit into a credentialed
+login which survived anonymous access being switched off.
+
+0.38.4 closes it: the anonymous account holds no credential at all (`kdf` 0),
+`verify` refuses the username, and a password `PATCH` on it answers
+`409 no_password` with `mutable.set_password: false` on the record.
+
+**This also answers Tom's "the anonymous user has no password and one cannot
+be set" — it is deliberate, not a fault.** The client now renders that from
+the server's own `mutable` block (`AccountScreen`), the same rule the Users
+screen already follows, rather than testing the username. An absent `mutable`
+is treated as "this node does not say", not as a refusal.
+
+- Never add a client path that sets a password on the anonymous account, and
+  treat any code that `PATCH`es `/api/v1/users/me` as worth a second look.
+
+## P2 — One small account-screen fault Tom found
+
+Both raised 2026-09-13, neither investigated yet.
+
+- [ ] The **Discard** button on edit user is styled wrongly (`UsersScreen`).
+- [x] The **anonymous user has no password and one cannot be set** — answered
+      by the server session: deliberate, and a security fix. See the P2 above.
+
+## P1 — The session dies with the tab, which suited anonymous and does not suit accounts
+
+The token is cached in the host's *ephemeral* storage — `sessionStorage` on
+web — which core documents as matching an anonymous session's own lifetime.
+That was right when every session was anonymous. Now that people have
+accounts, a new tab means signed out, and tokens are 30 days with no sliding
+renewal, so the storage choice is the only thing throwing the session away.
+
+Needs a decision rather than a patch: persist the token (and accept a bearer
+token at rest in `localStorage`), or keep it ephemeral and make signing in
+cheap. Note the same choice faces the React Native clients, where "ephemeral"
+means the process rather than a tab, and core's docstring says a host wanting
+survival must pass persistent storage **explicitly** rather than inherit it.
+
+## P1 — Drop the `/users/me` fallback once every node names the session user
+
+`useCurrentSession` fetches the session, and when it carries no `username`
+falls back to `GET /api/v1/users/me` purely to learn a name. The 0.37.x nodes
+named no user at all; 0.38.0 added `user_id`; `username` arrived 2026-09-13.
+
+- [ ] Confirm every node in the cluster reports `username` on
+      `GET /api/v1/session`, then delete the fallback and its round trip.
+      Keep it until then — a mixed-version cluster is normal here.
+
+**2026-09-13: one node of three confirmed.** `gbni-1` on server 0.38.0
+returns `username` alongside `user_id` on both the mint and
+`GET /api/v1/session`. `gbni-2` and `es-1` were down and remain unasked, so
+the fallback stays. Check those two and this becomes a deletion.
+
+## P2 — Should `root` keep `manage_users` permanently?
+
+Tom's call, open since 2026-09-12. Today root is protected from rename and
+deletion but its roles are editable, so the last-manager check guarantees
+*a* holder exists without guaranteeing it is reachable: if the only
+`manage_users` account has a lost password and root no longer holds the role,
+the install has no way back. The server session agreed with the reasoning and
+put it to Tom rather than deciding it.
+
+Nothing to build either way — the UI renders from the per-field `mutable`
+block, so it is already correct whichever he chooses.
+
+## P2 — Repo conventions not yet applied here
+
+Tom set these 2026-09-13 and asked every session be told; this repo predates
+them.
+
+- Work happens on a long-lived **`develop`**; releases are tags on `main`.
+  This repo's working branch is currently named `0.14.0`, which is the thing
+  the convention exists to prevent — branch `0.13.0` already collided with tag
+  `0.13.0` and had to be renamed.
+- The remote still carries branches `0.13.0` (redundant with its tag) and
+  `0.14.0`.
+
+**Do not push or delete remote branches without Tom asking for that
+specifically.** A general go-ahead is not approval; this was reinforced after
+a push that had only been approved in general terms.
 
 ## P1 — What Tizen 3 actually provides, and one build behind
 
@@ -104,41 +279,34 @@ the null application", three attempts, with the app still in `applist`). A
 reinstall of the wgt fixed it. Budget a redeploy as part of the exercise
 rather than discovering it afterwards.
 
-## P1 — `matroska` is missing from this client's advertised containers
+## P1 — 0.14.0 shipped unseen on both televisions
 
-`WebMediaCapabilities.ts` advertises `mp4`, `webm`, `mp3`, `flac` and `ogg`.
-There is no `matroska` probe, so no .mkv can ever be cleared for direct play
-on the web or on either television, and every Matroska file in the library is
-remuxed or transcoded for devices that may well play it whole. It would look
-like correct behaviour from every angle.
+Everything here is built, tested, and verified on the desk against gbni-1.
+None of it has been looked at on a set. `COMPLETED.md` has what was built and
+how it was measured; this is only what is left to confirm.
 
-Measured 2026-09-08, and this is the reason it is written down rather than
-wondered about: Chrome played a 2582×1080 HEVC Matroska **whole**, from a
-`mode=direct` session — `readyState 4`, `currentTime` advancing, 1,149 video
-frames decoded. The container is playable and the client says it is not.
-
-- [ ] Probe it honestly on both hosts (`video/x-matroska`, and the codec
-      strings inside it) rather than adding the string to the list. A
-      capability states what the device does; asserting one to obtain a
-      better instruction is the same mistake as excluding a codec to obtain a
-      worse one, in the other direction.
-- [ ] The audio is the catch, not the container: that direct session played
-      silently, because the E-AC-3 inside it has no decoder in Chrome
-      (`canPlayType` and `MediaSource.isTypeSupported` both refuse `ec-3` and
-      `ac-3`). So direct play of .mkv is right only where every stream in it
-      is playable, which is what the chooser already reasons about — it just
-      needs to be told the truth about the container.
-
-**Sized 2026-09-08 — this is 23% of the library, not a corner case.**
-`scripts/playback-baseline.mjs` bucketed 748 items against gbni-1 with live
-Chrome capabilities: **173 titles are remuxed for `container-not-playable`
-with both streams already `copy`** (Aliens, Casino, 28 Years Later, …). Those
-are exactly the ones that would become direct play if the container claim were
-honest, since nothing else objects to them. A further 115 Matroska titles
-would *stay* transformed regardless — they carry E-AC-3, TrueHD or DTS, which
-Chrome cannot decode at all — so the honest claim wins 173 titles, not 288,
-and the audio caveat above is what accounts for the difference. Re-run that
-script after any capability change to re-measure rather than re-estimate.
+- [ ] **Android TV is the exposed host for Matroska.** It runs plain
+      `WebPlatform` with no `neverDirect`, so if its WebView probes Matroska
+      true it will direct play `.mkv` on the set. The only host where the
+      container change can alter playback with no policy backstop — check it
+      before the next Android build goes out.
+- [ ] **Samsung: confirm, but the risk is nil.** `neverDirect: true` already
+      forbids handing that set a whole file, so a Matroska claim changes only
+      a reason string, not what is served. Worth logging what Chromium 47
+      answers to the probe's impossible-codec guard, as a fact about the probe.
+- [ ] **The login wall on a remote.** New markup on the screen a TV viewer now
+      meets first, and focus is where this client has had trouble before.
+      D-pad must reach both fields and the button — and the escape link to
+      Settings → Connection must take focus visibly, because on a television
+      it is the only way out and there is no address bar behind it.
+- [ ] **The account control on a remote.** The identity is the trigger now, a
+      wider target than the `⋯` it replaced, and its focus ring had to be
+      restored explicitly against the base rule's specificity.
+- [ ] **Signing in at all.** The post-login redirect and the refusal wording
+      are unit-tested but have never run against a real account, because
+      entering a password is off-limits to this assistant. One attempt by Tom
+      settles both — as it does the Users screen, which has still never run
+      against an account holding `manage_users`.
 
 ## P1 — The MPEG-TS preference is asserted, not gated
 
@@ -1227,6 +1395,14 @@ design — handle it as a hard limit, not a queue.**
   it as "too many streams open", say so, and make sure the client is not the
   one leaking: a session that outlives its player is what turns this into a
   user-visible dead end.
+
+**Auth sessions have their own cap and it is not the same one.**
+`session.max_sessions` defaults to 4096 per node and minting at the cap
+answers 429 `too_many_sessions`, which lands on real logins. It exists because
+a re-mint loop filled it in production once. The practical rule that came out
+of designing around it: never use `POST /api/v1/session` as a liveness probe —
+it has a side effect, and a viewer pressing a button repeatedly during an
+outage is the same loop with a person driving it.
 
 ## P1 — Android TV: what is still unverified on the set
 

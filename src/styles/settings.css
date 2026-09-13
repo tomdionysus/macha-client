@@ -175,3 +175,11 @@
    basis resolves against the content box, so the pair came out exactly two
    pixels apart. Matching the border rather than fighting the sizing. */
 .login-actions > .primary-button { border: 1px solid transparent; }
+/* The escape hatch out of a login wall. Quiet on purpose — it is the way out
+   for a viewer who cannot get in, not a second way in — but it must still take
+   D-pad focus visibly, because on a television it is the only control besides
+   the form itself. */
+.login-connection-escape { margin-top: 1.5rem; text-align: center; font-size: .85rem; }
+.login-connection-escape a { color: var(--text-muted, #9aa0a6); text-decoration: underline; }
+.login-connection-escape a:hover,
+.login-connection-escape a:focus-visible { color: var(--text, #f4f4f5); }

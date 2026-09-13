@@ -28,14 +28,19 @@ function arg(name, fallback) {
 const NODE = arg('node', 'http://10.44.1.50:7438');
 const LIMIT = Number(arg('limit', '400'));
 
-/** Chrome 151 on macOS, probed live from the running client. */
+/**
+ * Chrome 151 on macOS, probed live from the running client. `matroska` joined
+ * the list on 2026-09-13, when `canPlayType` was measured to discriminate on
+ * it properly: `video/x-matroska; codecs="avc1.42E01E"` answers `probably`
+ * and the same container with a nonsense codec answers `""`.
+ */
 const CHROME = {
   platform: 'web',
   videoCodecs: ['h264', 'hevc', 'vp9', 'av1'],
   audioCodecs: ['aac', 'opus', 'vorbis', 'mp3', 'flac'],
   hlsVideoCodecs: ['h264', 'hevc', 'vp9', 'av1'],
   hlsAudioCodecs: ['aac', 'opus', 'mp3'],
-  containers: ['mp4', 'webm', 'mp3', 'flac', 'ogg'],
+  containers: ['mp4', 'webm', 'matroska', 'mp3', 'flac', 'ogg'],
   hlsFmp4: true, hlsTs: true, dash: false,
   videoBitDepth: 12, hdr: [], dolbyVision: [],
 };
