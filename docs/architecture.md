@@ -10,6 +10,40 @@ focus-managed confirmation modal. Browser `alert`, `confirm` and `prompt`
 dialogs are not part of the client UI: they are visually inconsistent, block
 the event loop and do not provide reliable Web/TV focus behaviour.
 
+## Records are listed compactly and edited in a dialogue
+
+This is the client's single idiom for anything the viewer manages — accounts,
+files, playlists, unmatched media — and it is one design language rather than
+a preference per screen.
+
+A **list** presents records compactly and read-only: identity, a one-line
+summary of the record's state, and an actions menu. **A row contains no
+inputs.** An editable field sitting in a list is a control the viewer can
+change without meaning to, it makes every row as tall as its longest form, and
+it forces each row to carry its own busy state, dirty state and error slot —
+which is how a management screen becomes a wall.
+
+Every mutation opens a **dialogue**: `FormModal` for editing, `ConfirmModal`
+for a destructive act. The dialogue owns the form, the busy state and the
+failure. It stays open when the server refuses, because a dialogue that closes
+on failure takes the only explanation with it. Field-level errors sit beside
+the field that caused them — the dialogue's own error slot is for the failure
+with no field to sit against.
+
+Two rules follow from the television, where there is no pointer:
+
+- The row itself is the edit control, not a separate "Edit" button beside a
+  name that does nothing. Two adjacent targets for one idea costs a D-pad stop
+  to reach the half that works. Secondary and destructive actions go in the
+  row's overflow menu.
+- Every control carries `data-tv-focusable="true"`, including the ones inside
+  a dialogue.
+
+Acts with different consequences get different dialogues rather than more
+fields in one. Setting an account's password is not part of editing it: it
+signs that account out everywhere, and burying it in the middle of an edit
+form is how somebody does it by accident.
+
 Cluster transport exhaustion is an application-level state, not a screen-level
 error. Only the dedicated background health scan may publish that transition,
 and only after every configured endpoint fails its independent status request;

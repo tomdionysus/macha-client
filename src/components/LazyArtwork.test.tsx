@@ -321,4 +321,47 @@ describe('LazyArtwork', () => {
 
     expect(poster().src).toContain('sig=only');
   });
+  /**
+   * The sticky artwork host lives in core (`ArtworkHostPreference`), because
+   * every client with a URL-keyed image cache has the same bug: the browser's
+   * cache key includes the host, the capability's signature does not, and the
+   * preferred endpoint moves on a 10 s probe cycle, so a swap renames every
+   * poster. Ordering is core's to get right and core's to test. This client's
+   * whole part in it is reporting what actually loaded — success only, so a
+   * single artwork 404 never moves the preference.
+   */
+  it('reports the URL that actually loaded, so core can prefer that node next time', () => {
+    const api = fakeApi();
+    const noteArtworkLoaded = vi.fn();
+    (api as { noteArtworkLoaded?: (url: string) => void }).noteArtworkLoaded = noteArtworkLoaded;
+    render(
+      <LazyArtwork
+        api={api}
+        artwork={{ id: 'poster-noted', mimeType: 'image/jpeg', url: `http://node/api/v1/catalogue/artwork/poster-noted${FUTURE}` }}
+        alt="Movie poster"
+        placeholder={<span>placeholder</span>}
+      />,
+    );
+
+    expect(noteArtworkLoaded).not.toHaveBeenCalled();
+    fireEvent.load(poster());
+    expect(noteArtworkLoaded).toHaveBeenCalledWith(poster().src);
+  });
+
+  it('tells core nothing when a source fails, so one missing object cannot move the preference', () => {
+    const api = fakeApi();
+    const noteArtworkLoaded = vi.fn();
+    (api as { noteArtworkLoaded?: (url: string) => void }).noteArtworkLoaded = noteArtworkLoaded;
+    render(
+      <LazyArtwork
+        api={api}
+        artwork={{ id: 'poster-404', mimeType: 'image/jpeg', url: `http://node/api/v1/catalogue/artwork/poster-404${FUTURE}` }}
+        alt="Movie poster"
+        placeholder={<span>placeholder</span>}
+      />,
+    );
+
+    fireEvent.error(poster());
+    expect(noteArtworkLoaded).not.toHaveBeenCalled();
+  });
 });

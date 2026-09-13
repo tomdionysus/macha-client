@@ -6,7 +6,7 @@ import type { Platform } from '@machafoundation/core';
 import type { PlaybackRuntime, PlaybackRuntimeSnapshot } from '@machafoundation/core';
 import { ContinueWatchingStore } from '@machafoundation/core';
 import { PlaybackQueueStore } from '@machafoundation/core';
-import { VolumeStore } from '@machafoundation/core';
+import { VolumeStore } from '../state/volume';
 import type { MediaSummary } from '@machafoundation/core';
 import { usePlaybackController } from './usePlaybackController';
 

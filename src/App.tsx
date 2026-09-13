@@ -20,7 +20,7 @@ import { hasRole, sessionLockedOut, sessionManager, sessionPermits, type UserRol
 import { useCurrentSession } from './app/useCurrentSession';
 import { PlaybackQueueStore } from '@machafoundation/core';
 import { MusicPlaylistStore } from '@machafoundation/core';
-import { VolumeStore } from '@machafoundation/core';
+import { VolumeStore } from './state/volume';
 import {
   getClientId,
   getBootstrapEndpoints,

@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { Fragment, useCallback, useState } from 'react';
 import {
   errorMessage,
   hasRole,
@@ -13,7 +13,8 @@ import { useRefreshableAsync } from '../hooks/useRefreshableAsync';
 import { ErrorMessage, Loading } from '../components/Status';
 import { AsyncIconButton } from '../components/AsyncIconButton';
 import { RefreshIcon } from '../components/ManageIcons';
-import { ConfirmModal } from '../components/Modal';
+import { ConfirmModal, FormModal } from '../components/Modal';
+import { OverflowMenu } from '../components/OverflowMenu';
 
 interface Props {
   api: UsersApi;
@@ -43,10 +44,70 @@ const ROLE_DESCRIPTIONS: Record<UserRole, string> = {
 };
 
 /**
+ * What an account can do, in one line, in the canonical order.
+ *
+ * The list is for recognising an account and seeing what it holds at a glance;
+ * the labels are the same ones the editor uses, so the summary and the
+ * checkboxes never read as two different vocabularies. An account with no
+ * roles is a real and important state — it can sign in and do nothing — so it
+ * says so rather than rendering an empty cell.
+ */
+export function roleSummary(roles: readonly UserRole[]): string {
+  const named = USER_ROLES.filter((role) => roles.includes(role)).map((role) => ROLE_LABELS[role]);
+  // A role this build does not recognise still counts: the server granted it,
+  // and silently dropping it would under-report what the account can do.
+  const unrecognised = roles.filter((role) => !USER_ROLES.includes(role)).length;
+  if (unrecognised > 0) named.push(unrecognised === 1 ? '1 other role' : `${unrecognised} other roles`);
+  return named.length > 0 ? named.join(' · ') : 'No roles';
+}
+
+/**
+ * An account the server protects from being renamed — `root` and `anonymous`,
+ * on this deployment.
+ *
+ * Asked of the server's own flag rather than by testing for those two names,
+ * which is the rule the rest of this screen follows: the names are the
+ * server's to choose, and a client that tested for them would pin the wrong
+ * accounts the moment they changed — and pin nothing at all on a deployment
+ * that names them something else.
+ *
+ * `rename` is the honest one of the four flags for this. `delete` is also
+ * withheld from the last `manage_users` holder and from your own account, both
+ * of which are ordinary accounts that must not float to the top.
+ */
+export function isProtectedAccount(user: MachaUser): boolean {
+  return user.mutable.rename === false;
+}
+
+/**
+ * The two accounts an operator cannot recreate, first, and in that order:
+ * `root`, then `anonymous`, then everyone else alphabetically.
+ *
+ * The order within the protected pair is also read from the server rather than
+ * from the names. `anonymous` is the account that holds no credential at all —
+ * server 0.38.4 made that explicit, answering `409 no_password` and stating
+ * `set_password: false` — so "can hold a password" separates the operator's
+ * own superuser from the account that exists to be nobody. That is the
+ * difference the ordering is really about, and it survives a rename.
+ */
+export function byStanding(left: MachaUser, right: MachaUser): number {
+  const protection = Number(isProtectedAccount(right)) - Number(isProtectedAccount(left));
+  if (protection !== 0) return protection;
+  if (isProtectedAccount(left)) {
+    // The account that can hold a password first. Note the operands run the
+    // other way round from the protection test above: there the flag being
+    // true sorts first, here the flag being false sorts last.
+    const credentialless = Number(left.mutable.set_password === false) - Number(right.mutable.set_password === false);
+    if (credentialless !== 0) return credentialless;
+  }
+  return left.username.localeCompare(right.username);
+}
+
+/**
  * Which form field a server error belongs against.
  *
- * The whole value of an error code is knowing which input was wrong, and a
- * message at the top of the form throws that away. Anything unrecognised
+ * Codes, never message text: the server owns the wording and this only has to
+ * know which control the reader should look at. Anything unrecognised
  * falls through to the form-level slot rather than being hidden — an
  * unfamiliar code from a newer server must still be readable.
  */
@@ -84,6 +145,35 @@ function passwordComplaint(password: string, policy: PasswordPolicy | undefined)
   return `Passwords must be at least ${minimum} characters.`;
 }
 
+/**
+ * One request from a dialogue, with the busy state and the error mapping that
+ * every one of them needs.
+ *
+ * Returned rather than thrown on failure so the caller decides whether the
+ * dialogue closes: a refusal has to stay on screen beside the field it
+ * belongs to, and a dialogue that closes on failure takes the only
+ * explanation with it.
+ */
+function useDialogueSubmit(onDone: () => void) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<FieldError>();
+  const run = useCallback(async (action: () => Promise<unknown>) => {
+    setBusy(true);
+    setError(undefined);
+    try {
+      await action();
+      onDone();
+      return true;
+    } catch (cause) {
+      setError(fieldError(cause));
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  }, [onDone]);
+  return { busy, error, setError, run };
+}
+
 function RoleChoice({ roles, disabled, onChange }: {
   roles: readonly UserRole[];
   disabled: boolean;
@@ -114,174 +204,143 @@ function RoleChoice({ roles, disabled, onChange }: {
   );
 }
 
-function NewUser({ api, policy, onCreated }: {
+function NewUserDialogue({ api, policy, open, onClose, onCreated }: {
   api: UsersApi;
   policy: PasswordPolicy | undefined;
+  open: boolean;
+  onClose: () => void;
   onCreated: () => void;
 }) {
-  const [open, setOpen] = useState(false);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [roles, setRoles] = useState<UserRole[]>(['media_viewer']);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<FieldError>();
+  const { busy, error, setError, run } = useDialogueSubmit(onCreated);
 
-  const reset = () => {
+  const close = () => {
     setUsername('');
     setPassword('');
     setRoles(['media_viewer']);
     setError(undefined);
+    onClose();
   };
 
-  const submit = async () => {
+  const submit = () => {
     const complaint = passwordComplaint(password, policy);
     if (complaint) { setError({ field: 'password', message: complaint }); return; }
-    setBusy(true);
-    setError(undefined);
-    try {
-      await api.create({ username: username.trim(), password, roles });
-      reset();
-      setOpen(false);
-      onCreated();
-    } catch (cause) {
-      setError(fieldError(cause));
-    } finally {
-      setBusy(false);
-    }
+    void run(() => api.create({ username: username.trim(), password, roles })).then((created) => {
+      if (created) close();
+    });
   };
 
-  if (!open) {
-    return (
-      <button className="primary-button" type="button" data-tv-focusable="true" onClick={() => setOpen(true)}>
-        Add a user
-      </button>
-    );
-  }
-
   return (
-    <form className="user-form" onSubmit={(event) => { event.preventDefault(); void submit(); }}>
-      <h3>New user</h3>
-      <label htmlFor="new-username">Username</label>
-      <input
-        id="new-username"
-        data-tv-focusable="true"
-        value={username}
-        disabled={busy}
-        autoComplete="off"
-        onChange={(event) => setUsername(event.target.value)}
-      />
+    <FormModal
+      open={open}
+      title="New user"
+      submitLabel="Create user"
+      busy={busy}
+      submitDisabled={!username.trim() || !password}
+      error={error?.field === 'form' ? error.message : undefined}
+      onSubmit={submit}
+      onCancel={close}
+    >
+      <label className="modal-field">
+        <span>Username</span>
+        <input
+          data-tv-focusable="true"
+          value={username}
+          disabled={busy}
+          autoComplete="off"
+          onChange={(event) => setUsername(event.target.value)}
+        />
+      </label>
       {error?.field === 'username' && <p className="manage-error" role="alert">{error.message}</p>}
 
-      <label htmlFor="new-password">Password</label>
-      <input
-        id="new-password"
-        type="password"
-        data-tv-focusable="true"
-        value={password}
-        disabled={busy}
-        autoComplete="new-password"
-        onChange={(event) => setPassword(event.target.value)}
-      />
-      {error?.field === 'password' && <p className="manage-error" role="alert">{error.message}</p>}
-      {policy?.min_password_length !== undefined && error?.field !== 'password' && (
-        <p className="user-form-hint">At least {policy.min_password_length} characters.</p>
-      )}
+      <label className="modal-field">
+        <span>Password</span>
+        <input
+          type="password"
+          data-tv-focusable="true"
+          value={password}
+          disabled={busy}
+          autoComplete="new-password"
+          onChange={(event) => setPassword(event.target.value)}
+        />
+      </label>
+      {error?.field === 'password'
+        ? <p className="manage-error" role="alert">{error.message}</p>
+        : policy?.min_password_length !== undefined && <p className="user-form-hint">At least {policy.min_password_length} characters.</p>}
 
       <fieldset>
         <legend>Roles</legend>
         <RoleChoice roles={roles} disabled={busy} onChange={setRoles} />
       </fieldset>
       {error?.field === 'roles' && <p className="manage-error" role="alert">{error.message}</p>}
-      {error?.field === 'form' && <p className="manage-error" role="alert">{error.message}</p>}
-
-      <div className="user-form-actions">
-        <button className="primary-button" type="submit" data-tv-focusable="true" disabled={busy || !username.trim() || !password}>
-          {busy ? 'Creating…' : 'Create user'}
-        </button>
-        <button type="button" data-tv-focusable="true" disabled={busy} onClick={() => { reset(); setOpen(false); }}>
-          Cancel
-        </button>
-      </div>
-    </form>
+    </FormModal>
   );
 }
 
 /**
- * One account.
+ * Renaming an account and setting its roles — the two things that describe who
+ * it is, together, because they are saved by one request.
  *
- * Every control is enabled from the server's own `mutable` block rather than
- * from anything this screen knows about the user. Root and anonymous are
- * ordinary records that happen to be protected, and a client-side name check
- * would be wrong the moment those names change — and wrong everywhere at
- * once, because all four clients would carry the same guess.
+ * A password is not here. Setting one is a different kind of act with a
+ * different consequence — it bumps `credential_generation` and signs that
+ * account out everywhere — and burying it in the middle of an edit form is how
+ * somebody does it by accident. It has its own dialogue, reached from the same
+ * menu.
  */
-function UserRow({ api, user, policy, isSelf, onChanged }: {
+function EditUserDialogue({ api, user, open, onClose, onChanged }: {
   api: UsersApi;
   user: MachaUser;
-  policy: PasswordPolicy | undefined;
-  isSelf: boolean;
+  open: boolean;
+  onClose: () => void;
   onChanged: () => void;
 }) {
   const [username, setUsername] = useState(user.username);
   const [roles, setRoles] = useState<UserRole[]>(user.roles);
-  const [password, setPassword] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<FieldError>();
-  const [notice, setNotice] = useState<string>();
-  const [deleteOpen, setDeleteOpen] = useState(false);
+  const { busy, error, setError, run } = useDialogueSubmit(onChanged);
 
   const renamed = username.trim() !== user.username;
   const rolesChanged = roles.length !== user.roles.length || roles.some((role) => !user.roles.includes(role));
   const dirty = (user.mutable.rename && renamed) || (user.mutable.set_roles && rolesChanged);
 
-  const run = async (action: () => Promise<unknown>, success?: string) => {
-    setBusy(true);
+  const close = () => {
+    setUsername(user.username);
+    setRoles(user.roles);
     setError(undefined);
-    setNotice(undefined);
-    try {
-      await action();
-      if (success) setNotice(success);
-      onChanged();
-    } catch (cause) {
-      setError(fieldError(cause));
-    } finally {
-      setBusy(false);
-    }
+    onClose();
   };
 
-  const save = () => void run(() => api.update(user.id, {
-    ...(user.mutable.rename && renamed ? { username: username.trim() } : {}),
-    ...(user.mutable.set_roles && rolesChanged ? { roles } : {}),
-  }), 'Saved.');
-
-  const setNewPassword = () => {
-    const complaint = passwordComplaint(password, policy);
-    if (complaint) { setError({ field: 'password', message: complaint }); return; }
-    void run(() => api.update(user.id, { password }), 'Password changed.').then(() => setPassword(''));
+  const submit = () => {
+    void run(() => api.update(user.id, {
+      ...(user.mutable.rename && renamed ? { username: username.trim() } : {}),
+      ...(user.mutable.set_roles && rolesChanged ? { roles } : {}),
+    })).then((saved) => {
+      if (saved) onClose();
+    });
   };
 
   return (
-    <li className="user-card">
-      <div className="user-card-heading">
-        <div className="user-identity">
-          <label className="user-identity-label" htmlFor={`username-${user.id}`}>Username</label>
-          <input
-            id={`username-${user.id}`}
-            data-tv-focusable="true"
-            value={username}
-            disabled={busy || !user.mutable.rename}
-            autoComplete="off"
-            onChange={(event) => setUsername(event.target.value)}
-          />
-          {!user.mutable.rename && <span className="user-locked">This account cannot be renamed.</span>}
-          {isSelf && <span className="user-self">This is you.</span>}
-        </div>
-        {user.mutable.delete
-          ? <button type="button" className="destructive-button" data-tv-focusable="true" disabled={busy} onClick={() => setDeleteOpen(true)}>
-              Remove
-            </button>
-          : <span className="user-locked">Cannot be removed.</span>}
-      </div>
+    <FormModal
+      open={open}
+      title={`Edit ${user.username}`}
+      busy={busy}
+      submitDisabled={!dirty}
+      error={error?.field === 'form' ? error.message : undefined}
+      onSubmit={submit}
+      onCancel={close}
+    >
+      <label className="modal-field">
+        <span>Username</span>
+        <input
+          data-tv-focusable="true"
+          value={username}
+          disabled={busy || !user.mutable.rename}
+          autoComplete="off"
+          onChange={(event) => setUsername(event.target.value)}
+        />
+      </label>
+      {!user.mutable.rename && <p className="user-locked">This account cannot be renamed.</p>}
       {error?.field === 'username' && <p className="manage-error" role="alert">{error.message}</p>}
 
       <fieldset>
@@ -296,56 +355,153 @@ function UserRow({ api, user, policy, isSelf, onChanged }: {
         )}
       </fieldset>
       {error?.field === 'roles' && <p className="manage-error" role="alert">{error.message}</p>}
+    </FormModal>
+  );
+}
 
-      {user.mutable.set_password && (
-        <div className="user-password">
-          <label htmlFor={`password-${user.id}`}>Set a new password</label>
-          <div className="user-password-row">
-            <input
-              id={`password-${user.id}`}
-              type="password"
-              data-tv-focusable="true"
-              value={password}
-              disabled={busy}
-              autoComplete="new-password"
-              placeholder="Leave blank to keep the current one"
-              onChange={(event) => setPassword(event.target.value)}
-            />
-            <button type="button" data-tv-focusable="true" disabled={busy || !password} onClick={setNewPassword}>
-              Change password
-            </button>
-          </div>
-          {error?.field === 'password' && <p className="manage-error" role="alert">{error.message}</p>}
-        </div>
-      )}
+function PasswordDialogue({ api, user, policy, open, onClose, onChanged }: {
+  api: UsersApi;
+  user: MachaUser;
+  policy: PasswordPolicy | undefined;
+  open: boolean;
+  onClose: () => void;
+  onChanged: () => void;
+}) {
+  const [password, setPassword] = useState('');
+  const { busy, error, setError, run } = useDialogueSubmit(onChanged);
 
-      {error?.field === 'form' && <p className="manage-error" role="alert">{error.message}</p>}
-      {notice && <p className="user-notice" role="status">{notice}</p>}
+  const close = () => {
+    setPassword('');
+    setError(undefined);
+    onClose();
+  };
 
-      <div className="user-card-actions">
-        <button className="primary-button" type="button" data-tv-focusable="true" disabled={busy || !dirty} onClick={save}>
-          {busy ? 'Saving…' : 'Save changes'}
-        </button>
-        {dirty && (
-          <button type="button" data-tv-focusable="true" disabled={busy} onClick={() => { setUsername(user.username); setRoles(user.roles); setError(undefined); }}>
-            Discard
-          </button>
-        )}
-      </div>
+  const submit = () => {
+    const complaint = passwordComplaint(password, policy);
+    if (complaint) { setError({ field: 'password', message: complaint }); return; }
+    void run(() => api.update(user.id, { password })).then((saved) => {
+      if (saved) close();
+    });
+  };
 
+  return (
+    <FormModal
+      open={open}
+      title={`Set a password for ${user.username}`}
+      submitLabel="Change password"
+      busy={busy}
+      submitDisabled={!password}
+      error={error?.field !== 'password' ? error?.message : undefined}
+      onSubmit={submit}
+      onCancel={close}
+    >
+      <p className="user-form-hint">
+        This signs {user.username} out everywhere, on every device.
+      </p>
+      <label className="modal-field">
+        <span>New password</span>
+        <input
+          type="password"
+          data-tv-focusable="true"
+          value={password}
+          disabled={busy}
+          autoComplete="new-password"
+          onChange={(event) => setPassword(event.target.value)}
+        />
+      </label>
+      {error?.field === 'password'
+        ? <p className="manage-error" role="alert">{error.message}</p>
+        : policy?.min_password_length !== undefined && <p className="user-form-hint">At least {policy.min_password_length} characters.</p>}
+    </FormModal>
+  );
+}
+
+/**
+ * One account, as a row.
+ *
+ * The row states what the account is and nothing else; everything that changes
+ * it opens a dialogue. Which actions are offered comes from the server's
+ * per-field `mutable` block, never from the username — the names of the
+ * protected accounts are the server's to choose, and a client that tested for
+ * `root` or `anonymous` would be wrong the moment those names change, and
+ * wrong everywhere at once because all four clients would carry the same
+ * guess. An absent `mutable` is read as "this node does not say", not as a
+ * refusal.
+ */
+function UserRow({ api, user, policy, isSelf, onChanged }: {
+  api: UsersApi;
+  user: MachaUser;
+  policy: PasswordPolicy | undefined;
+  isSelf: boolean;
+  onChanged: () => void;
+}) {
+  const [dialogue, setDialogue] = useState<'edit' | 'password' | 'remove'>();
+  const [removeBusy, setRemoveBusy] = useState(false);
+  const [removeError, setRemoveError] = useState<string>();
+  const close = useCallback(() => setDialogue(undefined), []);
+
+  const editable = user.mutable.rename || user.mutable.set_roles;
+
+  const remove = async () => {
+    setRemoveBusy(true);
+    setRemoveError(undefined);
+    try {
+      await api.remove(user.id);
+      setDialogue(undefined);
+      onChanged();
+    } catch (cause) {
+      setRemoveError(errorMessage(cause));
+    } finally {
+      setRemoveBusy(false);
+    }
+  };
+
+  return (
+    <li className="record-row">
+      {/* The row is the edit control, the way the account identity is its own
+          menu trigger in the top bar. A separate "Edit" button beside a name
+          that does nothing is two targets for one idea, and on a remote it
+          costs a D-pad stop to reach the half that works. */}
+      <button
+        type="button"
+        className="record-main"
+        data-tv-focusable="true"
+        disabled={!editable}
+        aria-label={`Edit ${user.username}`}
+        onClick={() => setDialogue('edit')}
+      >
+        <span className="record-name">
+          {user.username}
+          {isSelf && <span className="record-tag">You</span>}
+        </span>
+        <span className="record-detail">{roleSummary(user.roles)}</span>
+      </button>
+
+      <OverflowMenu
+        label={`Actions for ${user.username}`}
+        actions={[
+          ...(editable ? [{ label: 'Edit', onSelect: () => setDialogue('edit') }] : []),
+          ...(user.mutable.set_password ? [{ label: 'Set a password', onSelect: () => setDialogue('password') }] : []),
+          ...(user.mutable.delete ? [{ label: 'Remove', destructive: true, onSelect: () => setDialogue('remove') }] : []),
+        ]}
+      />
+
+      <EditUserDialogue api={api} user={user} open={dialogue === 'edit'} onClose={close} onChanged={onChanged} />
+      <PasswordDialogue api={api} user={user} policy={policy} open={dialogue === 'password'} onClose={close} onChanged={onChanged} />
       <ConfirmModal
-        open={deleteOpen}
+        open={dialogue === 'remove'}
         title={`Remove ${user.username}?`}
         confirmLabel="Remove user"
         destructive
-        busy={busy}
-        onCancel={() => setDeleteOpen(false)}
-        onConfirm={() => void run(() => api.remove(user.id)).then(() => setDeleteOpen(false))}
+        busy={removeBusy}
+        onCancel={() => { setDialogue(undefined); setRemoveError(undefined); }}
+        onConfirm={() => void remove()}
       >
         <p>
           <strong>{user.username}</strong> will be removed and any session they hold will stop working.
           This cannot be undone.
         </p>
+        {removeError && <p className="manage-error" role="alert">{removeError}</p>}
       </ConfirmModal>
     </li>
   );
@@ -355,6 +511,7 @@ export function UsersScreen({ api, session }: Props) {
   const result = useRefreshableAsync((signal) => api.list(signal), [api]);
   const refresh = result.refresh;
   const onChanged = useCallback(() => refresh(), [refresh]);
+  const [adding, setAdding] = useState(false);
 
   // `Manage` is the page heading, so each section heads itself the way Files
   // and Unmatched do. A second `h1` here meant the biggest words on screen
@@ -389,28 +546,48 @@ export function UsersScreen({ api, session }: Props) {
     );
   }
 
-  const users = [...result.value].sort((left, right) => left.username.localeCompare(right.username));
+  const users = [...result.value].sort(byStanding);
+  // Where the protected pair stops and the ordinary accounts begin. A rule is
+  // drawn there, and only there: a divider above nothing, or below nothing,
+  // is a line with no two things either side of it.
+  const ordinaryFrom = users.filter(isProtectedAccount).length;
 
   return (
     <section className="manage-panel">
       {heading}
       {result.error && <p className="manage-error" role="alert">Refresh failed: {result.error.message}</p>}
-      {users.length === 0 && <p className="manage-empty">No accounts exist yet.</p>}
 
-      <NewUser api={api} policy={session?.password_policy} onCreated={onChanged} />
+      <div className="manage-panel-actions">
+        <button className="primary-button" type="button" data-tv-focusable="true" onClick={() => setAdding(true)}>
+          Add a user
+        </button>
+      </div>
+      <NewUserDialogue
+        api={api}
+        policy={session?.password_policy}
+        open={adding}
+        onClose={() => setAdding(false)}
+        onCreated={onChanged}
+      />
 
-      <ul className="user-list">
-        {users.map((user) => (
-          <UserRow
-            key={user.id}
-            api={api}
-            user={user}
-            policy={session?.password_policy}
-            isSelf={user.id === session?.user_id}
-            onChanged={onChanged}
-          />
-        ))}
-      </ul>
+      {users.length === 0
+        ? <p className="manage-empty">No accounts exist yet.</p>
+        : (
+          <ul className="record-list">
+            {users.map((user, index) => (
+              <Fragment key={user.id}>
+                {index === ordinaryFrom && ordinaryFrom > 0 && <li className="record-divider" aria-hidden="true" />}
+                <UserRow
+                  api={api}
+                  user={user}
+                  policy={session?.password_policy}
+                  isSelf={user.id === session?.user_id}
+                  onChanged={onChanged}
+                />
+              </Fragment>
+            ))}
+          </ul>
+        )}
     </section>
   );
 }

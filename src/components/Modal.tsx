@@ -58,6 +58,72 @@ export function Modal({ open, title, children, actions, onClose }: ModalProps) {
   );
 }
 
+interface FormModalProps {
+  open: boolean;
+  title: string;
+  /** The fields. Use `.modal-field` per field, as the rest of the client does. */
+  children: ReactNode;
+  submitLabel?: string;
+  busy?: boolean;
+  /** Nothing to save — a pristine form, or one the viewer has not filled in. */
+  submitDisabled?: boolean;
+  /** A failure that belongs to the dialogue as a whole rather than to one field. */
+  error?: ReactNode;
+  onSubmit: () => void;
+  onCancel: () => void;
+}
+
+/**
+ * Editing one record, in a dialogue.
+ *
+ * This is the client's single idiom for changing something: a list shows
+ * records compactly and read-only, and every mutation opens one of these. It
+ * exists so that no screen hand-rolls the parts that must not vary — a
+ * focus-managed panel, Cancel first and the commit second, one busy state
+ * disabling both, and Escape meaning cancel. See `docs/architecture.md`.
+ *
+ * The commit is wired twice, deliberately: the form's `submit` so Enter in a
+ * field commits, and the button's `click`. The button is outside the `<form>`
+ * because the actions row is the modal's, not the form's, and associating them
+ * with a `form` attribute would rest on markup Chromium 47 on the Samsung
+ * handles inconsistently. Two call sites of one handler is the cheaper
+ * certainty.
+ *
+ * Field-level errors are not this component's business — they belong beside
+ * the field that caused them, which only the caller can place. `error` is for
+ * what is left: the failure with no field to sit against.
+ */
+export function FormModal({
+  open,
+  title,
+  children,
+  submitLabel = 'Save',
+  busy = false,
+  submitDisabled = false,
+  error,
+  onSubmit,
+  onCancel,
+}: FormModalProps) {
+  return (
+    <Modal
+      open={open}
+      title={title}
+      onClose={busy ? () => undefined : onCancel}
+      actions={<>
+        <button className="secondary-button" type="button" disabled={busy} onClick={onCancel} data-tv-focusable="true">Cancel</button>
+        <button className="primary-button" type="button" disabled={busy || submitDisabled} onClick={onSubmit} data-tv-focusable="true">
+          {busy ? 'Working…' : submitLabel}
+        </button>
+      </>}
+    >
+      <form className="modal-form" onSubmit={(event) => { event.preventDefault(); if (!busy && !submitDisabled) onSubmit(); }}>
+        {children}
+        {error && <p className="manage-error" role="alert">{error}</p>}
+      </form>
+    </Modal>
+  );
+}
+
 interface ConfirmModalProps {
   open: boolean;
   title: string;

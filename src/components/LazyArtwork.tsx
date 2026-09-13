@@ -21,28 +21,34 @@ function isSigned(artwork?: ArtworkRef): artwork is SignedArtwork {
 }
 
 /**
- * The server re-signs a capability URL's `exp`/`sig` on every catalogue
- * fetch of the same artwork, even when nothing about the image changed and
- * its previous signature hasn't actually expired yet. Handing each fresh
- * signature straight to `<img src>` makes every re-fetch a new browser
- * HTTP-cache key, so revisiting a screen re-downloads and re-decodes every
- * poster already on screen — the server's `Cache-Control` never gets a
- * chance to do anything, since the cache key itself is what's churning, not
- * a mismatch. This maps artwork id -> the last URL that actually loaded
- * successfully, so a same-image resign gets ignored in favor of the
- * already-cached one; a real failure (the cached copy genuinely expired or
- * evaporated) forgets the entry and falls through to whatever is next.
+ * Artwork id -> the last URL that actually loaded, so an identical image is
+ * never asked for under a second name.
+ *
+ * This guards the *signature*: a node that re-signs a capability on every
+ * catalogue read hands out a fresh `exp`/`sig` for bytes that have not
+ * changed, and each fresh signature is a fresh browser cache key. Measured
+ * against server 0.38.x on 2026-09-13 the signature is in fact stable — `exp`
+ * is pinned to a UTC day boundary and is identical for every artwork object —
+ * but a mixed-version cluster is this client's normal operating condition, so
+ * the guard stays until no node re-signs.
+ *
+ * It cannot guard the *host*, which is the larger half of the same problem and
+ * is core's `ArtworkHostPreference`: this map is module-scoped, so it
+ * dies on reload and does not exist in a new tab, and it only knows about
+ * artwork this page has already loaded. A failure forgets the entry and falls
+ * through to whatever is next.
  */
 const lastLoadedUrlById = new Map<string, string>();
 
 /**
  * Everywhere the browser can load this artwork from on its own, best first:
- * the copy already known to be in its cache, then every URL needing no
- * header — the capability on each node, in the cluster's own order. Which
- * URLs those are is `@machafoundation/core`'s judgement, including whether an expired
- * capability is worth offering elsewhere. Anything wanting an
- * `Authorization` header is not an `<img>` source at all, and is dropped
- * here rather than silently 401ing.
+ * the copy already known to be in its cache, then whatever order
+ * `@machafoundation/core` gives — which now leads with the node that last
+ * served artwork, so a pre-emptive endpoint swap no longer renames every
+ * poster. That ordering was this client's for a few hours and is core's now,
+ * because every client with a URL-keyed image cache has the same bug.
+ * Anything wanting an `Authorization` header is not an `<img>` source at all,
+ * and is dropped here rather than silently 401ing.
  */
 function signedSources(api: MediaApi, artwork: SignedArtwork): string[] {
   const remembered = lastLoadedUrlById.get(artwork.id);
@@ -114,10 +120,9 @@ function CapabilityArtwork({ api, artwork, alt = '', placeholder, draggable, eag
         key={url}
         src={url}
         alt={alt}
-        decoding="async"
         draggable={draggable}
         loading={eager ? 'eager' : 'lazy'}
-        onLoad={() => lastLoadedUrlById.set(artwork.id, url)}
+        onLoad={() => { lastLoadedUrlById.set(artwork.id, url); api.noteArtworkLoaded?.(url); }}
         onError={handleError}
       />
     </span>

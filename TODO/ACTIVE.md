@@ -1,57 +1,126 @@
 # Active tasks and concepts to explore
 
-Last updated: 2026-09-13
+Last updated: 2026-09-13 (end of session; 0.15.0 released)
 
-This is the working backlog for the current session. Add new work here. When an
-item is implemented and its stated verification is complete, remove it from
-this file and add a dated entry with evidence to `COMPLETED.md`.
+This is the working backlog. Add new work here. When an item is implemented and
+its stated verification is complete, remove it from this file and add a dated
+entry with evidence to `COMPLETED.md`. The dated documents in this directory
+remain the detailed plans and verification records; this file is the index.
 
-The existing documents in this directory remain the detailed plans,
-checkpoints, and verification records. This file is only the current index.
+Scope: this repo is macha-client only — the UI/playback client. Server-side
+backlogs (`macha`'s own `TODO/ACTIVE.md`) and core's are different repos'
+concerns and are not duplicated here, even when a client bug and a server bug
+are related. Core is addressed as the `Macha NPM Core` session.
 
-Scope: this file (and this repo) is macha-client only — the UI/playback
-client. Server-side backlogs (e.g. `macha`'s own `TODO/ACTIVE.md`) are a
-different repo's concern and are not tracked or duplicated here, even when a
-client bug and a server bug are related.
+## Start here
 
-**The test cluster is deliberately not uniform.** `gbni-1` (`10.44.1.50`) is
-wired, `gbni-2` (`10.44.1.51`) is on **wireless** (a knowingly flaky link),
-and `es-1` (`10.34.1.50`) is a remote site across the internet. This is the
-point — the client is developed in the conditions it must actually survive.
-So: never read a cross-node measurement as if the nodes were equivalent, and
-never call a slow or stalled result on `gbni-2`/`es-1` a client bug until the
-same test has been run against wired `gbni-1`.
+**0.15.0 is released and deployed.** It carries the artwork caching fix, the
+blank-poster fix, the Users redesign, and `VolumeStore` moving out of core.
+`CHANGELOG.md` has the detail and `COMPLETED.md` the evidence.
 
-Equally, do not reach for the topology to explain every odd number. On
+**The next thing is the core 0.11.0 port** — `AccountMenu.signOut` and
+`lastIdentityChange`, P1 below. It is the only item with another session
+waiting on it, and it is not mechanical: the wording a viewer sees depends on a
+measured fact about this cluster, recorded in that item.
+
+**After that, the P0s are the honest priority.** Three of the four are playback
+correctness and all three are old: Direct Play stuck at `readyState 0`,
+any-node failover, and a ready standby discarded 33 s before it is used. The
+fourth is the server's, and only needs re-measuring.
+
+**Anything on a television needs Tom present.** The Samsung items below are
+gated on the set being on.
+
+## How the test cluster behaves, and how to read it
+
+**The cluster is deliberately not uniform.** `gbni-1` (`10.44.1.50`) is wired,
+`gbni-2` (`10.44.1.51`) is on **wireless** (a knowingly flaky link), and `es-1`
+(`10.34.1.50`) is a remote site across the internet. This is the point — the
+client is developed in the conditions it must survive. So never read a
+cross-node measurement as if the nodes were equivalent, and never call a slow
+or stalled result on `gbni-2`/`es-1` a client bug until the same test has run
+against wired `gbni-1`.
+
+The public names are `macnessa`, `inverbeg` and `ramaroja` (`.macha.network`),
+which is what the client is configured with and what measurements will name.
+They are fast, slow and middling respectively in most artwork measurements
+taken on 2026-09-13 — macnessa answered a 95 KB poster in 46 ms where inverbeg
+took 7.9 s — but that ordering is a measurement, not a property; re-measure
+rather than assuming it.
+
+**Equally, do not reach for the topology to explain every odd number.** On
 2026-09-07 the server's `peer_latency_ms` looked badly asymmetric
 (gbni-1→gbni-2 114 ms against gbni-2→gbni-1 4 ms) and the tidy explanation —
 every path *toward* the wireless node slow, wifi power-save buffering inbound
 frames — was wrong. The metric was sampling every control call, counting
 payload and handler time as network distance. Sampling heartbeat pings only,
 the same pair measured 2 ms and 5 ms and es-1→gbni-2 went from 207 ms to
-62 ms. Check how a metric is sampled before explaining its shape with the
-wiring.
+62 ms. **Check how a metric is sampled before explaining its shape with the
+wiring.**
 
-**Where this stands, 2026-09-13.** 0.14.0 shipped Matroska direct play, the
-login wall for registered-users-only deployments, role-gated navigation with
-`view_status`, and the move of session role policy into
-`@machafoundation/core`. `COMPLETED.md` has the detail and the measurements.
+A second instance of the same lesson, 2026-09-13: core reported from the
+server's source that an artwork capability's `exp` was `unix_ms() + ttl` with
+millisecond granularity and explicitly unbucketed. Measured against the
+deployed cluster it was pinned to a UTC day boundary and identical across 418
+refs and across 2.6 hours. Neither was lying; the deployed build was two
+releases ahead of the source being read. **Measure against the deployed
+cluster, not against the server's source.**
 
-**Read this first if you are picking this up cold.** The artwork P0 below is
-the oldest open item and the one with the clearest user impact — Tom raised
-image caching as a P0 in its own right on 2026-09-13 and it has not been
-started; it is the next thing to do. Everything under "shipped unseen" needs
-Tom present: a television, or a login this assistant will not perform.
+## Testing against the cluster
 
-`@machafoundation/core` is a `file:../macha-ts` link in this repo as of
-2026-09-13, not a published version — core's working tree is what this client
-compiles against, so a rebuild there lands here immediately. Address that
-session as `Macha NPM Core`.
+There is a permanent test account, `webclient`, with `media_viewer` and
+`view_status` only — deliberately not `manage_users`, both because a standing
+account that can rewrite accounts is a hazard and because an account holding
+everything cannot detect a role-gating fault. Credentials are in `.env.local`
+(gitignored). Ask Tom to add a role when a task needs one rather than making
+that account omnipotent.
 
-Priority reflects active-breakage/user-impact, not effort: P0 is a live or
-recently-live correctness problem in playback itself; P1 is important,
-scoped, and actionable now; P2 is real but either blocked on something
-outside this repo or needs groundwork before it can be started safely.
+`POST /api/v1/session` takes a **nested** envelope,
+`{"credentials":{"username":...,"password":...}}`. A flat body does not fail —
+it returns 201 with an *anonymous* session holding `roles: []`, which then 403s
+on the catalogue and looks like a broken account. Revoke any probe session you
+do not keep: the cap is 4096 per node and a re-mint loop has filled it before.
+
+To drive the browser client without typing a password into the login form, mint
+with `curl` and inject `{token, expiresAtMs, username, roles}` into
+`localStorage` under `macha.session.v1`. Note that a fabricated
+`expires_unix_ms` is only a client-side hint — the server's own lifetime
+governs whether the token is accepted.
+
+## Core is a `file:` link, and its last build is what you compile against
+
+`@machafoundation/core` is `file:../macha-ts` and
+`node_modules/@machafoundation/core` is a **symlink** to that tree — not a
+published version and not an installed copy. **Resolution goes through core's
+`"main": "./dist/index.js"`, so this client compiles against core's last
+build, never its working tree.** A change on core's `develop` is invisible here
+until it builds. `pretest` (`cd ../macha-ts && npm run dist:check`) is what
+catches a stale dist, and it runs at test time only — `typecheck` will happily
+pass against a dist that is weeks old. See [[built is not released]].
+
+Core is on **0.11.0** as of 2026-09-13, carrying the artwork host preference
+and the removal of `VolumeStore`. Its build now stages and atomically renames,
+so a partial `dist` mid-rebuild should no longer be possible; if a whole suite
+fails to collect at once, check core's build state before looking here.
+
+## Priorities
+
+P0 is a live or recently-live correctness problem in playback itself; P1 is
+important, scoped and actionable now; P2 is real but either blocked on
+something outside this repo or needs groundwork before it can start safely.
+
+## Standing rules
+
+- **Never add a client path that sets a password on the anonymous account**,
+  and treat any code that `PATCH`es `/api/v1/users/me` as worth a second look.
+  Server 0.38.4 closed the hole that made it possible; the rule outlives it.
+  Background in `COMPLETED.md`.
+- **Protected accounts are flagged, never name-checked.** Drive `root` and
+  `anonymous` handling from the server's per-record `mutable` block
+  (`rename`, `delete`, `set_password`, `set_roles`), not from the username.
+  An absent `mutable` means "this node does not say", not "refused".
+- **Roles are literal.** A capability the server did not name is one the
+  session does not have; unknown is not the same as none.
 
 ## P0 — 40% of artwork is unreachable when one of three nodes is down
 
@@ -85,241 +154,6 @@ node-specific and has not gone. Only `gbni-1` was reachable at the time
 (`gbni-2` and `es-1` both down), so the three-node comparison could not be
 repeated — but a node holding none of 1618 objects is the fault by itself.
 Still the server's to fix; re-check again when the cluster is whole.
-
-## P0 — Artwork caching: posters reload from scratch and the viewer waits
-
-Raised by Tom 2026-09-13 as a P0 in its own right, and **not started**. His
-words: images "load slowly, and when 'cached' they're just less slow. Changing
-anything or waiting for a minute or two, and they all load from scratch again.
-It's crap." The governing rule is [[never make the user wait]] — a poster the
-viewer has already seen should never be fetched twice.
-
-**The framing he set, which is the useful part:** *media posters are long-term
-cache objects*. They are content-addressed and immutable — artwork is served by
-id, any node serves the same bytes, and an artwork capability URL is a cluster
-credential whose signature covers the id and expiry but never the host. Nothing
-about a poster changes. So anything that re-fetches one is wrong, not slow.
-
-His questions, which want answering before anything is built:
-
-- What strategies are available beyond whatever is happening now? The Service
-  Worker already exists in this repo for Direct Play byte-range read-ahead
-  (`public/macha-direct-play-sw.js`) and is a candidate, but it is refused on
-  Tizen — a widget served from `file://` cannot register one — so whatever is
-  chosen has to degrade on the set rather than depend on it. Cache Storage,
-  IndexedDB and plain HTTP caching are all on the table.
-- **Does this need server involvement?** Probably the crux. Immutable artwork
-  wants long-lived `Cache-Control: immutable` and a stable URL, and a *signed*
-  URL with an expiry is the opposite of a stable cache key — the signature
-  changes, so the cache misses, which may be the whole of the reported
-  behaviour. Measure that before designing around it.
-
-**Do not start by writing a cache.** Start by measuring what actually happens
-to one poster across a reload and across a minute: which request goes out, what
-the response headers say, whether the URL differed from last time, and where
-the time goes. Tom's "changing anything and they all load from scratch" is a
-symptom with several possible causes and they need separating first.
-
-Related but distinct: the artwork *replication* P0 above is a server-side
-availability fault, not a caching one. Do not conflate them.
-
-## P2 — Do not work around the anonymous account's missing password
-
-Raised by the server session 2026-09-13, unprompted, as a thing a client
-might reasonably be tempted to do. Recorded so nobody tries it later.
-
-On server 0.38.0, `PATCH /api/v1/users/me` needed only `media_viewer`, which
-`anonymous` holds at genesis — so an anonymous session could set the anonymous
-account's own password and get a token back. Combined with the mint path never
-checking `allow_anonymous`, that turned an anonymous visit into a credentialed
-login which survived anonymous access being switched off.
-
-0.38.4 closes it: the anonymous account holds no credential at all (`kdf` 0),
-`verify` refuses the username, and a password `PATCH` on it answers
-`409 no_password` with `mutable.set_password: false` on the record.
-
-**This also answers Tom's "the anonymous user has no password and one cannot
-be set" — it is deliberate, not a fault.** The client now renders that from
-the server's own `mutable` block (`AccountScreen`), the same rule the Users
-screen already follows, rather than testing the username. An absent `mutable`
-is treated as "this node does not say", not as a refusal.
-
-- Never add a client path that sets a password on the anonymous account, and
-  treat any code that `PATCH`es `/api/v1/users/me` as worth a second look.
-
-## P2 — One small account-screen fault Tom found
-
-Both raised 2026-09-13, neither investigated yet.
-
-- [ ] The **Discard** button on edit user is styled wrongly (`UsersScreen`).
-- [x] The **anonymous user has no password and one cannot be set** — answered
-      by the server session: deliberate, and a security fix. See the P2 above.
-
-## P1 — The session dies with the tab, which suited anonymous and does not suit accounts
-
-The token is cached in the host's *ephemeral* storage — `sessionStorage` on
-web — which core documents as matching an anonymous session's own lifetime.
-That was right when every session was anonymous. Now that people have
-accounts, a new tab means signed out, and tokens are 30 days with no sliding
-renewal, so the storage choice is the only thing throwing the session away.
-
-Needs a decision rather than a patch: persist the token (and accept a bearer
-token at rest in `localStorage`), or keep it ephemeral and make signing in
-cheap. Note the same choice faces the React Native clients, where "ephemeral"
-means the process rather than a tab, and core's docstring says a host wanting
-survival must pass persistent storage **explicitly** rather than inherit it.
-
-## P1 — Drop the `/users/me` fallback once every node names the session user
-
-`useCurrentSession` fetches the session, and when it carries no `username`
-falls back to `GET /api/v1/users/me` purely to learn a name. The 0.37.x nodes
-named no user at all; 0.38.0 added `user_id`; `username` arrived 2026-09-13.
-
-- [ ] Confirm every node in the cluster reports `username` on
-      `GET /api/v1/session`, then delete the fallback and its round trip.
-      Keep it until then — a mixed-version cluster is normal here.
-
-**2026-09-13: one node of three confirmed.** `gbni-1` on server 0.38.0
-returns `username` alongside `user_id` on both the mint and
-`GET /api/v1/session`. `gbni-2` and `es-1` were down and remain unasked, so
-the fallback stays. Check those two and this becomes a deletion.
-
-## P2 — Should `root` keep `manage_users` permanently?
-
-Tom's call, open since 2026-09-12. Today root is protected from rename and
-deletion but its roles are editable, so the last-manager check guarantees
-*a* holder exists without guaranteeing it is reachable: if the only
-`manage_users` account has a lost password and root no longer holds the role,
-the install has no way back. The server session agreed with the reasoning and
-put it to Tom rather than deciding it.
-
-Nothing to build either way — the UI renders from the per-field `mutable`
-block, so it is already correct whichever he chooses.
-
-## P2 — Repo conventions not yet applied here
-
-Tom set these 2026-09-13 and asked every session be told; this repo predates
-them.
-
-- Work happens on a long-lived **`develop`**; releases are tags on `main`.
-  This repo's working branch is currently named `0.14.0`, which is the thing
-  the convention exists to prevent — branch `0.13.0` already collided with tag
-  `0.13.0` and had to be renamed.
-- The remote still carries branches `0.13.0` (redundant with its tag) and
-  `0.14.0`.
-
-**Do not push or delete remote branches without Tom asking for that
-specifically.** A general go-ahead is not approval; this was reinforced after
-a push that had only been approved in general terms.
-
-## P1 — What Tizen 3 actually provides, and one build behind
-
-Measured on the set 2026-09-10, not inferred: a separate signed widget
-carrying this app's own `polyfills-legacy` chunk, installed alongside Macha,
-run, and uninstalled. UA `Tizen 3.0 / AppleWebKit 538.1`. Prompted by
-`@machafoundation/core`'s new `types/platform-neutral.d.ts`, which states the platform
-surface core is allowed to assume — a gate that proves core does not
-*reference* anything outside the list, and cannot prove a host *provides* it.
-
-**`AbortController` does not exist on Chromium 47 at all**, and the legacy
-polyfill chunk does not supply one (core-js has none). It works here only
-because `src/platform/AbortControllerPolyfill.ts` installs one from
-`main.tsx:25` before anything else runs. So core's declared surface is met on
-this platform by a **consumer-supplied shim**, not by the host. That shim is
-load-bearing for every bounded request in the app: delete it, or let anything
-run before it, and `fetchWithTimeout` throws on its first call.
-
-**Two real gaps, both silent:**
-
-- **`RequestInit.cache` is not merely unsupported — the property does not
-  exist.** `'cache' in new Request(url, {cache:'no-store'})` is `false`, so
-  `no-store` evaporates with no fallback. A cached `/api/v1/catalogue/status`
-  would let a dead node answer 200 and stay top of the endpoint ranking.
-  Fixed in core 0.7.0, which appends `?_=<ms>` to the probe URL — the only
-  mechanism all three hosts honour, and the only one that also defeats an
-  intermediary cache on a WAN path like es-1.
-- **`keepalive` is absent**, so the teardown `DELETE` does not survive
-  navigation on this set. Best-effort session close is lost there and nothing
-  else.
-
-**`{ once: true }` is ignored by Tizen's native `addEventListener`** — the
-options-object probe returns `false` and a `once` listener on `window` fires
-twice. It does not bite core, but only because the one signal core uses
-`once` on is our own `LegacyAbortSignal`, which honours the flag itself. It is
-correct here by accident of the shim, not because the host obeys.
-
-**Present and behaving**, verified against a live 401 rather than a
-constructed object: `fetch` (native), `Response.url` populated,
-`ok`/`status`/`statusText`/`headers`, and `json()`/`text()`/`blob()`;
-`Headers` with `get`/`set`/`forEach` (which does iterate, lower-casing names);
-`new Response(body, {status, statusText, headers})`; native `URL` with
-`origin`; `Blob` size/type; `DOMException` constructible as `(message, name)`;
-`crypto.getRandomValues`. `crypto.randomUUID` is absent.
-
-**Not measured, and worth knowing before relying on it:** whether Chromium 47
-honours `init.signal` at all. It almost certainly does not — `signal`
-postdates this engine — which would mean `fetchWithTimeout` still rejects on
-time (the race is in JS) while the underlying request runs to completion. The
-probe's abort test never ran, because it was gated on a native
-`AbortController` that turned out not to exist.
-
-- [ ] **Deploy a post-0.7.0 build to the Samsung.** The wgt currently on the
-      set was built at 00:53 and `c8b1bb8` landed at 01:09; the shipped bundle
-      has zero occurrences of the cache-busted probe URL. The one platform
-      where `no-store` vanishes without a fallback is the one still missing
-      the fix. Awaiting Tom — an unrequested action on that television is what
-      broke it in the first place.
-- [ ] **Re-verify failover on the Samsung while there.** That set has never
-      run the 0.6.3 container fix and the 7 s stall budget together, and that
-      combination is the one nobody has seen work.
-
-**If anyone repeats the probe:** installing and then uninstalling a second
-widget left `macha00001.Macha` installed but unlaunchable ("Could not launch
-the null application", three attempts, with the app still in `applist`). A
-reinstall of the wgt fixed it. Budget a redeploy as part of the exercise
-rather than discovering it afterwards.
-
-## P1 — 0.14.0 shipped unseen on both televisions
-
-Everything here is built, tested, and verified on the desk against gbni-1.
-None of it has been looked at on a set. `COMPLETED.md` has what was built and
-how it was measured; this is only what is left to confirm.
-
-- [ ] **Android TV is the exposed host for Matroska.** It runs plain
-      `WebPlatform` with no `neverDirect`, so if its WebView probes Matroska
-      true it will direct play `.mkv` on the set. The only host where the
-      container change can alter playback with no policy backstop — check it
-      before the next Android build goes out.
-- [ ] **Samsung: confirm, but the risk is nil.** `neverDirect: true` already
-      forbids handing that set a whole file, so a Matroska claim changes only
-      a reason string, not what is served. Worth logging what Chromium 47
-      answers to the probe's impossible-codec guard, as a fact about the probe.
-- [ ] **The login wall on a remote.** New markup on the screen a TV viewer now
-      meets first, and focus is where this client has had trouble before.
-      D-pad must reach both fields and the button — and the escape link to
-      Settings → Connection must take focus visibly, because on a television
-      it is the only way out and there is no address bar behind it.
-- [ ] **The account control on a remote.** The identity is the trigger now, a
-      wider target than the `⋯` it replaced, and its focus ring had to be
-      restored explicitly against the base rule's specificity.
-- [ ] **Signing in at all.** The post-login redirect and the refusal wording
-      are unit-tested but have never run against a real account, because
-      entering a password is off-limits to this assistant. One attempt by Tom
-      settles both — as it does the Users screen, which has still never run
-      against an account holding `manage_users`.
-
-## P1 — The MPEG-TS preference is asserted, not gated
-
-Samsung HLS playback is fixed (see COMPLETED.md). The reporting half of this
-is now closed: server 0.33.1 states `output.container`, `@machafoundation/core` maps it,
-and the player's top line shows the container actually served.
-
-- [ ] **The preference is still not gated on a fact from the node serving
-  it.** `copy_into_mpegts` exists on `operations` as of 0.33.1, and the
-  chooser asks about whichever carriage the instruction names — but the facts
-  are fetched from one node and the instruction may be performed by another.
-  A cluster is not uniform in what its builds can do, and nothing checks that
-  the node which answers can emit what the node which was asked said it could.
 
 ## P0 — Direct Play sometimes never starts: `<video>` element stuck at readyState 0 forever
 
@@ -667,6 +501,256 @@ failures). Remaining work, in priority order:
   not actionable yet: blocked on a minimum-supported-node-capability
   guarantee (immutable media profiles) that does not exist yet.
 
+## P0 — A ready standby is discarded 33 s before it is used
+
+Measured live 2026-09-08, web client, remux/HLS generation on gbni-2, node
+stopped mid-playback:
+
+```
+397973  source-degraded (fragLoadError)
+398240  alternate-ready -> gbni-1          <- rescue ready 267 ms in
+428241  alternate-recovery-window-expired  <- thrown away, unused
+461395  source-terminal-failure
+461548  source-failover-ready -> gbni-1    <- the same work, done again
+```
+
+**63.6 s of black screen where the replacement was ready in 267 ms.**
+
+Two budgets chosen independently, each defensible, whose product is a rescue
+that always goes stale. `ALTERNATE_RECOVERY_WINDOW_MS` holds a standby for
+**30 s**. hls.js's `errorRetry` is 6 attempts backing off 1/2/4/8/8/8 —
+about 31 s — and `managedHlsErrorAction` permits one `restart-network` per
+generation, which resets that budget, so the primary cannot go fatal for
+~63 s. `recoverFromSourceFailure` only runs on fatal. The window therefore
+expires before anything can ask for it, every time.
+
+A longer window is the wrong fix: it would make the rescue survive, but the
+viewer still waits for the fatal. Once an alternate is ready *and* the primary
+is still producing degradation evidence, there is nothing left to wait for —
+retrying a node already replaced is the whole 63 seconds.
+
+`promoteReadyAlternate` landed in `@machafoundation/core` 0.6.1 and answers that.
+
+- [ ] **Re-measure. This is the only thing left in this entry.** The bar is
+      set by the path that works: the silent Direct Play swap failed over in
+      **17 ms** on the same cluster and title, uninterrupted
+      (`alternate-promoted-silently`). Nobody has watched the managed-HLS path
+      since the fix, so the 63.6 s figure above is still the last measurement
+      taken.
+
+**The Samsung half of this entry is closed** — the cluster-exhaustion symptom
+that shared this section turned out to be a different defect entirely
+(failover asked for the wrong segment container) and is now in `COMPLETED.md`
+under *"Samsung failover plays: a replacement asks for the carriage its
+generation was created with"*, together with the two wrong theories it
+produced and the first-fragment gate that was built to test one of them.
+
+## P1 — Port onto core 0.11.0's session model (`signOut`, `lastIdentityChange`)
+
+**Status 2026-09-13: adopted and green, not ported.** This client builds and
+tests against `@machafoundation/core` 0.11.0 — 45 files / 317 tests, typecheck
+clean, `pretest` green against a current build — and references none of the
+renamed or removed symbols. That is *compiles and passes*, which is not the
+same as ported, and the distinction is deliberate: two things are still
+untouched.
+
+- [ ] `AccountMenu.tsx:55` still calls `await api.logout()`. It should call
+      `sessionManager.signOut()`, which revokes server-side and does not mint a
+      replacement, then `sessionManager.start(registry)` **only if** that screen
+      actually wants a session afterwards. This is the change held back until
+      core stated the composition; core has now stated it.
+- [ ] `lastIdentityChange` (`{ from?, to?, at }`) is subscribed nowhere.
+
+**Why this is not a mechanical swap, measured on this cluster 2026-09-13.**
+Core's session TTL is 30 days from creation with no sliding expiry and no
+refresh tokens, so core's "refresh" timer **re-mints** rather than renewing.
+Core describes the consequence as conditional — bad *"on a cluster whose
+anonymous account holds no roles"*. On Tom's cluster it is not conditional:
+`POST /api/v1/session` with empty credentials mints successfully on every node
+and returns **`roles: []`**, after which `/catalogue/items` answers `403
+requires the 'media_viewer' role`.
+
+So a signed-in viewer whose session ages out is not degraded to browsing. They
+are degraded to a session that **cannot read the catalogue at all**, which
+presents as an empty client rather than as a sign-out. `lastIdentityChange` and
+`sessionLockedOut` are the two signals that separate "your session aged out"
+from "this cluster refuses you", and core deliberately says nothing about what
+the change *means* — the wording is this client's to choose. Choose it knowing
+the above, rather than writing "your session timed out" and leaving a viewer
+staring at an empty library.
+
+## P1 — Use core's `lastMintFailure` so a refusal stops raising the connection gate
+
+Outstanding since core 0.9.0 and **not done**. The other two items from that
+release were taken up in 0.14.0 — `sessionPermits`/`sessionLockedOut` are in
+`App.tsx`, and `EndpointCandidate.ready` drives the Status cooling-down split.
+This one was not, and `grep lastMintFailure src` still returns nothing while
+core still exports it.
+
+A node that answered **403 in forty milliseconds has been reached**. Telling
+the viewer every endpoint is unreachable sends them to check a server that is
+working exactly as configured — and on this cluster that is the ordinary case,
+not an edge one, because the anonymous account holds no roles and an
+unauthenticated mint is refused by design. `lastMintFailure` distinguishes a
+refusal from a failure to connect; the connection gate should be raised only by
+the second.
+
+Related to the port below, and worth doing in the same sitting: both are about
+telling a viewer the truth about why they cannot see anything.
+
+## P1 — Logout uses a revoked token until something 401s
+
+Tom's ruling, relayed by the `@machafoundation/core` session 2026-09-13: **a
+revoked token must not be used at all.** The correct composition is an
+explicit server-side logout, then — *only if one is actually needed* — a
+separate call to obtain an anonymous token. The phone client already does
+this; this client does not.
+
+`AccountMenu.signOut` (`src/components/AccountMenu.tsx:51`) calls
+`api.logout()`, then `onSignedOut()`, then navigates. It never calls
+`sessionManager.signOut()`, so the revoked token stays in memory and in
+`sessionStorage` and is carried on every subsequent request until a later 401
+forces a re-mint.
+
+- [ ] Change to the ruled composition. Core will state it on the API surface
+      first — on the `UsersApi.logout` and `SessionManager.signOut` doc
+      comments, which is where all four clients read it. The conditional half
+      — mint anonymous only when one is needed, not always — is the part that
+      is easy to get wrong.
+
+**A related core defect, open, and explicitly not to be worked around here.**
+Raised by the `@machafoundation/core` session 2026-09-13: `SessionManager`
+answers a 401 by re-minting, and a re-mint carrying no credentials is an
+*anonymous* mint. So an administrator whose roles change is silently
+downgraded to anonymous with nothing telling them they were signed out. It is
+core's to fix and it is on their list. Do not build around it — a client-side
+detector for "my roles just vanished" would be a second guess at a thing core
+is about to state properly.
+
+## P1 — Drop the `/users/me` fallback once every node names the session user
+
+`useCurrentSession` fetches the session, and when it carries no `username`
+falls back to `GET /api/v1/users/me` purely to learn a name. The 0.37.x nodes
+named no user at all; 0.38.0 added `user_id`; `username` arrived 2026-09-13.
+
+- [ ] Confirm every node in the cluster reports `username` on
+      `GET /api/v1/session`, then delete the fallback and its round trip.
+      Keep it until then — a mixed-version cluster is normal here.
+
+**2026-09-13: one node of three confirmed.** `gbni-1` on server 0.38.0
+returns `username` alongside `user_id` on both the mint and
+`GET /api/v1/session`. `gbni-2` and `es-1` were down and remain unasked, so
+the fallback stays. Check those two and this becomes a deletion.
+
+## P1 — What Tizen 3 actually provides, and one build behind
+
+Measured on the set 2026-09-10, not inferred: a separate signed widget
+carrying this app's own `polyfills-legacy` chunk, installed alongside Macha,
+run, and uninstalled. UA `Tizen 3.0 / AppleWebKit 538.1`. Prompted by
+`@machafoundation/core`'s new `types/platform-neutral.d.ts`, which states the platform
+surface core is allowed to assume — a gate that proves core does not
+*reference* anything outside the list, and cannot prove a host *provides* it.
+
+**`AbortController` does not exist on Chromium 47 at all**, and the legacy
+polyfill chunk does not supply one (core-js has none). It works here only
+because `src/platform/AbortControllerPolyfill.ts` installs one from
+`main.tsx:25` before anything else runs. So core's declared surface is met on
+this platform by a **consumer-supplied shim**, not by the host. That shim is
+load-bearing for every bounded request in the app: delete it, or let anything
+run before it, and `fetchWithTimeout` throws on its first call.
+
+**Two real gaps, both silent:**
+
+- **`RequestInit.cache` is not merely unsupported — the property does not
+  exist.** `'cache' in new Request(url, {cache:'no-store'})` is `false`, so
+  `no-store` evaporates with no fallback. A cached `/api/v1/catalogue/status`
+  would let a dead node answer 200 and stay top of the endpoint ranking.
+  Fixed in core 0.7.0, which appends `?_=<ms>` to the probe URL — the only
+  mechanism all three hosts honour, and the only one that also defeats an
+  intermediary cache on a WAN path like es-1.
+- **`keepalive` is absent**, so the teardown `DELETE` does not survive
+  navigation on this set. Best-effort session close is lost there and nothing
+  else.
+
+**`{ once: true }` is ignored by Tizen's native `addEventListener`** — the
+options-object probe returns `false` and a `once` listener on `window` fires
+twice. It does not bite core, but only because the one signal core uses
+`once` on is our own `LegacyAbortSignal`, which honours the flag itself. It is
+correct here by accident of the shim, not because the host obeys.
+
+**Present and behaving**, verified against a live 401 rather than a
+constructed object: `fetch` (native), `Response.url` populated,
+`ok`/`status`/`statusText`/`headers`, and `json()`/`text()`/`blob()`;
+`Headers` with `get`/`set`/`forEach` (which does iterate, lower-casing names);
+`new Response(body, {status, statusText, headers})`; native `URL` with
+`origin`; `Blob` size/type; `DOMException` constructible as `(message, name)`;
+`crypto.getRandomValues`. `crypto.randomUUID` is absent.
+
+**Not measured, and worth knowing before relying on it:** whether Chromium 47
+honours `init.signal` at all. It almost certainly does not — `signal`
+postdates this engine — which would mean `fetchWithTimeout` still rejects on
+time (the race is in JS) while the underlying request runs to completion. The
+probe's abort test never ran, because it was gated on a native
+`AbortController` that turned out not to exist.
+
+- [ ] **Deploy a post-0.7.0 build to the Samsung.** The wgt currently on the
+      set was built at 00:53 and `c8b1bb8` landed at 01:09; the shipped bundle
+      has zero occurrences of the cache-busted probe URL. The one platform
+      where `no-store` vanishes without a fallback is the one still missing
+      the fix. Awaiting Tom — an unrequested action on that television is what
+      broke it in the first place.
+- [ ] **Re-verify failover on the Samsung while there.** That set has never
+      run the 0.6.3 container fix and the 7 s stall budget together, and that
+      combination is the one nobody has seen work.
+
+**If anyone repeats the probe:** installing and then uninstalling a second
+widget left `macha00001.Macha` installed but unlaunchable ("Could not launch
+the null application", three attempts, with the app still in `applist`). A
+reinstall of the wgt fixed it. Budget a redeploy as part of the exercise
+rather than discovering it afterwards.
+
+## P1 — Releases keep shipping unseen on both televisions
+
+Everything here is built, tested, and verified on the desk against gbni-1.
+None of it has been looked at on a set. `COMPLETED.md` has what was built and
+how it was measured; this is only what is left to confirm.
+
+- [ ] **Android TV is the exposed host for Matroska.** It runs plain
+      `WebPlatform` with no `neverDirect`, so if its WebView probes Matroska
+      true it will direct play `.mkv` on the set. The only host where the
+      container change can alter playback with no policy backstop — check it
+      before the next Android build goes out.
+- [ ] **Samsung: confirm, but the risk is nil.** `neverDirect: true` already
+      forbids handing that set a whole file, so a Matroska claim changes only
+      a reason string, not what is served. Worth logging what Chromium 47
+      answers to the probe's impossible-codec guard, as a fact about the probe.
+- [ ] **The login wall on a remote.** New markup on the screen a TV viewer now
+      meets first, and focus is where this client has had trouble before.
+      D-pad must reach both fields and the button — and the escape link to
+      Settings → Connection must take focus visibly, because on a television
+      it is the only way out and there is no address bar behind it.
+- [ ] **The account control on a remote.** The identity is the trigger now, a
+      wider target than the `⋯` it replaced, and its focus ring had to be
+      restored explicitly against the base rule's specificity.
+- [ ] **Signing in at all.** The post-login redirect and the refusal wording
+      are unit-tested but have never run against a real account, because
+      entering a password is off-limits to this assistant. One attempt by Tom
+      settles both — as it does the Users screen, which has still never run
+      against an account holding `manage_users`.
+
+## P1 — The MPEG-TS preference is asserted, not gated
+
+Samsung HLS playback is fixed (see COMPLETED.md). The reporting half of this
+is now closed: server 0.33.1 states `output.container`, `@machafoundation/core` maps it,
+and the player's top line shows the container actually served.
+
+- [ ] **The preference is still not gated on a fact from the node serving
+  it.** `copy_into_mpegts` exists on `operations` as of 0.33.1, and the
+  chooser asks about whichever carriage the instruction names — but the facts
+  are fetched from one node and the instruction may be performed by another.
+  A cluster is not uniform in what its builds can do, and nothing checks that
+  the node which answers can emit what the node which was asked said it could.
+
 ## P1 — Surface server self-healing state (server 0.30.0–0.32.0)
 
 Requested 2026-09-06 by the Macha server session across three messages
@@ -826,50 +910,6 @@ worker that can no longer fetch anything. **Direct Play breaks outright**, on
       Android WebView: it needs a secure origin *and* https nodes, so it is
       blocked on the same thing.
 
-## P0 — A ready standby is discarded 33 s before it is used
-
-Measured live 2026-09-08, web client, remux/HLS generation on gbni-2, node
-stopped mid-playback:
-
-```
-397973  source-degraded (fragLoadError)
-398240  alternate-ready -> gbni-1          <- rescue ready 267 ms in
-428241  alternate-recovery-window-expired  <- thrown away, unused
-461395  source-terminal-failure
-461548  source-failover-ready -> gbni-1    <- the same work, done again
-```
-
-**63.6 s of black screen where the replacement was ready in 267 ms.**
-
-Two budgets chosen independently, each defensible, whose product is a rescue
-that always goes stale. `ALTERNATE_RECOVERY_WINDOW_MS` holds a standby for
-**30 s**. hls.js's `errorRetry` is 6 attempts backing off 1/2/4/8/8/8 —
-about 31 s — and `managedHlsErrorAction` permits one `restart-network` per
-generation, which resets that budget, so the primary cannot go fatal for
-~63 s. `recoverFromSourceFailure` only runs on fatal. The window therefore
-expires before anything can ask for it, every time.
-
-A longer window is the wrong fix: it would make the rescue survive, but the
-viewer still waits for the fatal. Once an alternate is ready *and* the primary
-is still producing degradation evidence, there is nothing left to wait for —
-retrying a node already replaced is the whole 63 seconds.
-
-`promoteReadyAlternate` landed in `@machafoundation/core` 0.6.1 and answers that.
-
-- [ ] **Re-measure. This is the only thing left in this entry.** The bar is
-      set by the path that works: the silent Direct Play swap failed over in
-      **17 ms** on the same cluster and title, uninterrupted
-      (`alternate-promoted-silently`). Nobody has watched the managed-HLS path
-      since the fix, so the 63.6 s figure above is still the last measurement
-      taken.
-
-**The Samsung half of this entry is closed** — the cluster-exhaustion symptom
-that shared this section turned out to be a different defect entirely
-(failover asked for the wrong segment container) and is now in `COMPLETED.md`
-under *"Samsung failover plays: a replacement asks for the carriage its
-generation was created with"*, together with the two wrong theories it
-produced and the first-fragment gate that was built to test one of them.
-
 ## P1 — Android TV plays 5.1 titles without downmixing them
 
 **Superseded 2026-09-10, and the heading was the symptom.** Tom: *"The 2 min
@@ -902,14 +942,17 @@ however capable the hardware is. It is forced to AAC 5.1, and Chromium's
 decode path then presents the result to AudioFlinger index-masked. This also
 explains why Direct Play is unaffected: nothing re-presents the channels.
 
-- [ ] **Decision, Tom's, not taken.** Server-side stereo transcode was
-      proposed and rejected. What remains: a native player host on Android
-      (~2–4 days; `Platform` is 5 members, `Player` ~12, and presentation
-      coupling is a single `player-host` div plus `runtime.attach(host)` —
-      the risk is compositing a transparent WebView over a SurfaceView), or a
-      channel-count preference negotiated like every other transform, which
-      touches all three repos. No client work should start on either without
-      that decision.
+- [x] **Not this session's, 2026-09-13.** Tom: this belongs to the **Android
+      TV React Native session**, not here. The two routes that were open —
+      a native player host on Android (~2–4 days; `Platform` is 5 members,
+      `Player` ~12, and presentation coupling is a single `player-host` div
+      plus `runtime.attach(host)`, the risk being a transparent WebView
+      composited over a SurfaceView), or a channel-count preference
+      negotiated like every other transform — are theirs to weigh. Server-side
+      stereo transcode was proposed and rejected. **Start no client work here
+      on either.** The measurement above is kept because it is the evidence
+      that session will need, and because the `8000003F` index-mask finding is
+      the one thing nobody should have to re-derive.
 
 ---
 
@@ -975,7 +1018,6 @@ Note it does add a pause path that did not exist: the activity now holds focus
 and pauses the page's media on loss, which is the only way this app can yield
 the audio device at all. It has since run on the set without anyone reporting a
 spurious pause, but nobody has deliberately provoked a focus loss to test it.
-
 
 ## P1 — One open question on the 7 s stall budget
 
@@ -1350,16 +1392,88 @@ has no legitimate caller. `create(name, items)` covers the honest version.
   `data-tv-focusable="true"` — this screen is reachable on both televisions,
   where there is no pointer to fall back on.
 - [ ] Move `useMusicController` from `useState` reassigned by every mutation to
-  a real subscription. Today exactly one component owns the list, so nothing
-  else can observe it and two consumers would silently diverge. Note the RN
-  session's scar when doing it: subscribing to a revision counter and then
-  calling `list()` freezes, because the memo is keyed on a store whose identity
-  never changes — the snapshot must *be* the value the caller renders.
-  **Note this may be decided above us:** core currently has two subscription
-  idioms — the coordinator and runtime return stable snapshots, the four state
-  stores do not — and the `@machafoundation/core` session has put the question of fixing
-  all four to Tom, citing this controller as the live evidence. Wait for that
-  answer rather than fixing the playlist store alone.
+  a real subscription. Note the RN session's scar when doing it: subscribing to
+  a revision counter and then calling `list()` freezes, because the memo is
+  keyed on a store whose identity never changes — the snapshot must *be* the
+  value the caller renders.
+
+  **Unblocked 2026-09-13.** Core gave `PlaybackQueueStore` and
+  `ContinueWatchingStore` a `subscribe` and a `getSnapshot` with stable
+  identity between mutations, matching `PlaylistStore`. Two of the four named
+  in the original question needed nothing: `VolumeStore` returns a number, and
+  a primitive is stable by value; `MusicPlaylistStore` is superseded by
+  `PlaylistStore` and gets deleted rather than a new surface. Tom also ruled
+  that volume and mute are player logic and do not belong in core, so expect no
+  mute concept there.
+
+  **The "two consumers would silently diverge" case is not hypothetical here —
+  it already exists, checked 2026-09-13.** `PlaybackQueueStore` has two: the
+  owner, `usePlaybackController`, which holds `queueState` in `useState`
+  seeded from `queueStore.load()`; and `useMusicController`, which calls
+  `queueStore.load()` / `insertNext` / `append` directly and hands the result
+  back through an `onQueueChange` callback wired in `App.tsx:486` to
+  `playback.setQueueState`.
+
+  It is correct today, and nothing is broken. But the two are kept consistent
+  by one callback that no test asserts and nothing enforces: any future path
+  that mutates the queue store and forgets to call it leaves the controller
+  rendering a stale queue, with no error and nothing to point at. That is the
+  argument for the subscription, and it is stronger than the playlist case
+  that originally prompted it — `ContinueWatchingStore` has only the one
+  consumer, so the queue is where the work should start.
+
+## P1 — Swap the HLS walks onto core's `hlsWalk.ts`
+
+Core absorbed both walks — the preflight and the readiness probe
+(`probeFirstFragment` and its hold-aware 500 retry) — into one module over a
+shared target primitive, plus `EndpointHealthMonitor.probeNow()`. This
+client's `preflightWebHlsSource` and `probeFirstFragment` become deletable.
+
+**Two behaviour changes come with it, both of which fix real faults here:**
+
+- **A non-manifest source now returns `true`.** Mine returns `false`, which
+  makes the coordinator destroy a standby it could have promoted — see the
+  open P0 on a ready standby being discarded. The Android TV client's answer
+  was the correct one and mine was the bug.
+- **The deadline is now above `SERVER_SEGMENT_HOLD_MS`.** Mine is
+  `timeoutMs = 5_000` on `preflightWebHlsSource`, bounding the whole walk
+  against a 6 s server `segment_timeout` — so a node legitimately producing its
+  first fragment could never pass. It failed *because* the node was doing the
+  right thing slowly.
+
+**The lesson in that second one, which generalises past this swap:** the 5 s
+was picked, not derived. In the same file,
+`NATIVE_HLS_FIRST_FRAGMENT_TIMEOUT_MS = 30_000` states its relationship in its
+own comment — "five of the server's own six-second holds" — and the 5 s states
+nothing. Core's replacement asserts the *inequality* against
+`SERVER_SEGMENT_HOLD_MS` in a test rather than pinning the number, so it cannot
+drift back. Do the same here. The same smell is on the 7 s stall budget, whose
+relationship to the server's 6 s hold lives in this file as prose and is pinned
+nowhere in code.
+
+- [ ] Swap both implementations, run the suite, and confirm the two changed
+      behaviours **by test rather than by reading** before deleting anything.
+      `Player.preflightSource` stays the seam the coordinator drives, and core
+      does not call `probeFirstFragment` for a host — so the call sites stay
+      here and only the implementations move. If a call site ends up with no
+      obvious home, ask core rather than improvising; that is how a fourth copy
+      gets born.
+
+**A playlist must never carry a `Range` header — checked here 2026-09-13, and
+this client is clean.** Both probes fetch playlists bare
+(`WebPlatform.ts:121` and `:196`); `Range` appears only on media legs
+(`bytes=0-65535` preflight, `bytes=0-0` readiness). The Android TV client found
+the opposite in theirs: up to 64 KB pulled per playlist per attempt for a check
+documented as reading no payload, and — the real fault — **a media playlist
+over 64 KB comes back `206` with a silently truncated body**. A two-hour film
+at six-second segments is ~1,200 entries, so real content crosses that line.
+Parsing top-down hides it completely: the probe still finds a first URI and
+still returns ready.
+
+Being clean here is luck, not foresight. The `bytes=0-0` comment explains why
+one byte is right *for a fragment*; nothing says why a playlist must carry no
+Range at all. Tidying the two fetches into one helper with a shared header
+would introduce exactly their bug, and no test here would catch it.
 
 ## P1 — Seek acceleration is Samsung-only and should work everywhere
 
@@ -1436,6 +1550,26 @@ untried.
       back navigation on every other screen is completely unaffected, since
       the hook is absent outside the player and `MainActivity` should fall
       through to its original behaviour there.
+
+## P2 — Repo conventions
+
+Tom set these 2026-09-13 and asked every session be told.
+
+- Work happens on a long-lived **`develop`**; releases are tags on `main`.
+- **Done 2026-09-13:** local `develop` created at `af426f7` (the 0.14.0
+  release commit) and checked out. The old local branch `0.14.0` still exists
+  and is the same commit.
+- The remote still carries branches `0.13.0` and `0.14.0`, both sitting at
+  `623082e` — the same commit as `origin/main`, and the same commit tag
+  `0.13.0` points at. Neither branch holds anything unreachable, so both are
+  safe to delete. Bash for that was handed to Tom 2026-09-13; it is his to
+  run.
+- Note `0.14.0` is **not tagged**, locally or on the remote, and commit
+  `af426f7` exists only in this working copy. The release is unpushed.
+
+**Do not push or delete remote branches without Tom asking for that
+specifically.** A general go-ahead is not approval; this was reinforced after
+a push that had only been approved in general terms.
 
 ## P2 — TV spatial navigation redesign
 

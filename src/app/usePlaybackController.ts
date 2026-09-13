@@ -7,7 +7,7 @@ import { pathForMedia, routes, type PlaybackRouteState } from '@machafoundation/
 import { ContinueWatchingStore } from '@machafoundation/core';
 import { migrateEpisodeContext, needsEpisodeContextMigration } from '@machafoundation/core';
 import { PlaybackQueueStore, type PlaybackQueueState } from '@machafoundation/core';
-import { VolumeStore } from '@machafoundation/core';
+import { VolumeStore } from '../state/volume';
 import type { Episode, MediaSummary, PlaybackProgress } from '@machafoundation/core';
 import type { StartPlaybackOptions } from './useMusicController';
 import {

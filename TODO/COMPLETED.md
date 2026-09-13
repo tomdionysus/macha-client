@@ -2,6 +2,455 @@
 
 Last updated: 2026-09-13
 
+## Artwork caching, blank posters, the Users redesign and volume (client 0.15.0)
+
+Released 2026-09-13. Each section below is the item as it stood in
+`ACTIVE.md` when it was closed, with its measurements.
+
+### Artwork caching: posters reload from scratch and the viewer waits
+
+Raised by Tom 2026-09-13 as a P0 in its own right. His words: images "load
+slowly, and when 'cached' they're just less slow. Changing anything or waiting
+for a minute or two, and they all load from scratch again. It's crap." The
+governing rule is [[never make the user wait]] — a poster the viewer has
+already seen should never be fetched twice.
+
+**The framing he set, which is the useful part:** *media posters are long-term
+cache objects*. They are content-addressed and immutable — artwork is served by
+id, any node serves the same bytes, and an artwork capability URL is a cluster
+credential whose signature covers the id and expiry but never the host. Nothing
+about a poster changes. So anything that re-fetches one is wrong, not slow.
+
+### Measured 2026-09-13, against the whole cluster. Diagnosed and fixed.
+
+Measured through the real client at `localhost:5173` signed in as `webclient`,
+against all three nodes live. **Both suspects in the original writeup were
+wrong, and the real cause is the host in the cache key.**
+
+**The signature does not churn.** Two `/catalogue/items?type=movie` fetches a
+second apart returned 418 artwork refs with **418 identical URLs and zero
+changed**. `exp` is pinned to a UTC day boundary (`1789430400000` =
+2026-09-15T00:00:00Z) and is the *same value for every artwork object in the
+catalogue*. The comment at the top of `LazyArtwork.tsx` says the server
+re-signs on every fetch; on the deployed cluster that is **no longer true**, and
+`lastLoadedUrlById` is guarding a hazard that no longer exists in the form it
+describes. That comment has been corrected; the guard itself stays, because a
+mixed-version cluster is this client's normal operating condition and an older
+node may still re-sign.
+
+**Which build, because it was briefly disputed.** The nodes report
+**0.40.0**, and 0.40.0 is the release the server session built day-bucketing
+for — so the stable `exp` measured here *is* their bucketing, already deployed.
+Core had relayed their source reading of `exp = unix_ms() + ttl`, millisecond
+granularity and explicitly unbucketed, which contradicted this; the
+contradiction was two different builds, not two different facts. Re-measured
+2.6 hours after the first reading: `exp` **had not moved by one millisecond**
+(1789430400000 on both macnessa and ramaroja, 836 refs each), which `now + ttl`
+cannot produce. Whatever a client assumes about `exp`, measure it against the
+deployed cluster rather than against the server's source.
+
+**`Cache-Control` is already right, on every node.** A signed artwork 200
+answers `cache-control: public, max-age=86400, immutable`, identically from
+macnessa, inverbeg and ramaroja. **This needs no server involvement** — that
+was Tom's crux question and the answer is no.
+
+**What actually happens.** The host is part of the browser's cache key and the
+signature is not. So:
+
+1. `EndpointHealthMonitor` runs a probe cycle every **10 s**
+   (`ENDPOINT_HEALTH_INTERVAL_MS = 10_000`) and calls
+   `registry.evaluatePreferredSwap()`, which re-ranks on throughput, latency
+   and capacity.
+2. A swap moves the preferred node. Catalogue reads follow the new head, and
+   `withAbsoluteArtworkUrls` stamps *that node's host* onto every signed
+   artwork URL.
+3. Every poster on screen is now a URL the browser has never seen, so every
+   poster re-downloads — from a node whose copy the browser already holds
+   under a different name.
+
+Observed live: `preemptive-endpoint-swap` logged at 17:27:13, and in the same
+window **29 posters re-fetched from `inverbeg` at 2.7–3.0 s each**. The proof
+that nothing was actually missing — same artwork id, same `?exp&sig`, three
+hosts:
+
+| host | result |
+| --- | --- |
+| macnessa | 200, 29,987 B, **3 ms** (browser disk cache) |
+| ramaroja | 200, 29,987 B, 135 ms |
+| inverbeg | 200, 29,987 B, **923 ms** |
+
+Byte-identical. The bytes were in the cache the whole time.
+
+The irony worth keeping: the swap is chosen *for throughput*, and the swap
+itself costs a full re-download of every visible poster. The measurement
+behind "this node is faster" is about streaming media and says nothing about
+which node's artwork the browser already has.
+
+**A plain reload is fine.** 31 posters, identical URLs, **all 0 ms**. So
+"reload from scratch" is not about page lifetime — it is the swap, on a 10 s
+cadence, which is exactly Tom's "waiting for a minute or two".
+
+**Where `lastLoadedUrlById` stands.** It does real work — 32 of 40 posters
+still rendered from macnessa after the swap — but 29 requests still escaped to
+inverbeg, and it dies on reload. Which subset escapes it (never-loaded lazy
+images below the fold is the obvious candidate) is **not yet established and
+should not be guessed at**; establish it before designing around it.
+
+### The blank posters are the same root cause, 2026-09-13 — fix applied
+
+Tom, looking at Movies: *"STILL MISSING POSTERS."* They were not missing, and
+they were not slow. **They had loaded and were never painted.**
+
+Established on the blank cards themselves, not inferred:
+
+- `complete === true`, `naturalWidth === 500`, `naturalHeight === 750` on every
+  visible image, at **every 250 ms sample from t=0** across a 12 s trace —
+  33/33 visible images loaded, while the screen showed three of them blank.
+- The bytes are real: fetched and decoded to a canvas, `Airplane!` measured
+  mean luma 162 / stdDev 68 over a 68,338-byte JPEG. Not a blank image.
+- Nothing is covering them: `elementFromPoint` at the centre of each blank box
+  returns that card's own `<img>`, `visibility: visible`, `opacity: 1`, no
+  transform, no filter, no clip, wrapper `overflow: visible`.
+
+**What makes them appear is the tell.** Anything that dirties *paint* on the
+element works — setting `outline`, appending a child. Anything that does not
+re-raster leaves them blank — a 1 px scroll (compositor only), removing 185
+sibling cards. So the image is resident and correct and Chrome never schedules
+a raster for it.
+
+**The trigger is ours, and it is the host churn above.** `CapabilityArtwork`
+renders `<img key={url} …>`, so every preferred-endpoint swap changes `url`,
+React destroys and recreates ~200 `<img>` elements at once, and ~200
+simultaneous async decodes land with some paint invalidations dropped. One
+cause, two symptoms: the re-download *and* the blank posters.
+
+**Fix applied:** `decoding="async"` removed from the `CapabilityArtwork`
+`<img>` (browser default `auto`). Before: blanks on most loads, a different
+set each time. After: clean on repeated reloads and scrolling ~100 posters
+through the grid. 44 files / 307 tests pass.
+
+This is a treatment for the symptom. The cause is still the `key={url}` churn,
+and the stable-host fix removes it — after which the `decoding` attribute is
+worth revisiting rather than kept by superstition. `LegacyLazyArtwork` still
+carries `decoding="async"` on the Blob path; the same hazard applies there in
+principle but has not been observed, so it was left alone deliberately.
+
+### Fixed — a sticky artwork host, and it now lives in core
+
+The bytes were already cached correctly under `immutable`; the client kept
+*renaming* them. So artwork now has its own host preference, independent of the
+streaming endpoint: whichever node last served a poster successfully keeps
+being asked, persisted in `localStorage` under `macha.artworkHost.v1`, and
+`signedSources` orders the candidates by it.
+
+It is expressed as an **ordering over URLs the cluster already offered**, not a
+choice of node, and that is what makes it need no failure handling. A preferred
+host that is down, cooling off or gone from the registry contributes no
+candidate, so the ordinary order and the ordinary per-image failover apply
+untouched — and a single artwork 404, a normal event while the replication P0
+stands, is not read as evidence about the host. The preference follows success
+only, so a genuine failover re-points it onto whatever actually answered.
+
+Verified live, not just in tests: with the catalogue served by **macnessa**, a
+preference forced to **ramaroja** put all 208 posters on ramaroja — the
+preference beats the node that signed them, which is exactly the property that
+survives a swap. Restored, a clean reload was **63/63 requests at 0 ms**, all
+on one host. 45 files / 315 tests pass, typecheck clean.
+
+`lastLoadedUrlById` stays, with its comment corrected: it guards the
+*signature* (an older node that re-signs on every read), the host preference
+guards the *host*, and the file now says which does which.
+
+**Now in core, and this client's copy is gone.** Tom approved it and core
+shipped `ArtworkHostPreference` with `MachaMediaApi.artworkUrls` promoting its
+candidates, plus `MediaApi.noteArtworkLoaded?(url)`. `src/state/artworkHost.ts`
+and its tests are deleted; `LazyArtwork` calls `api.noteArtworkLoaded?.(url)`
+on load and nothing on error, and the ordering assertions went with the module
+because they are core's to make. Core's version is better than the one it
+replaced on two counts: the node base is recovered by splitting on
+`/api/v1/catalogue/artwork/`, so a proxy-mounted node with a path prefix
+survives, and the ordering is stable, so everything behind the promoted host
+keeps the cluster's own ranking.
+
+Re-verified live after the swap, same test as before: catalogue served by
+macnessa, preference forced to ramaroja, all 208 posters on ramaroja.
+Restored, a reload made **zero artwork requests at all** — not cache hits,
+no requests — and every poster rendered. 44 files / 309 tests, typecheck clean,
+`pretest` green again now core has rebuilt.
+
+**The reasoning, which is Tom's and is worth keeping.** He asked why we cannot just index
+artwork by the file sha256 — and the answer is that we already do everywhere we
+control. `ArtworkRef.id` *is* the sha256, core's `artworkCache` is keyed on it,
+and the URL path is already `/artwork/{sha256}`. The cache that was broken is
+the platform's, which keys on the whole URL and which no client can re-key. So
+the question was never "add a cache", it was **"why does the host vary at
+all?"** — and the answer was: by accident. What stays here is only the `<img>`
+failover, which is genuinely browser-shaped.
+
+Related but distinct: the artwork *replication* P0 above is a server-side
+availability fault, not a caching one. Do not conflate them.
+
+### Do not work around the anonymous account's missing password
+
+Raised by the server session 2026-09-13, unprompted, as a thing a client
+might reasonably be tempted to do. Recorded so nobody tries it later.
+
+On server 0.38.0, `PATCH /api/v1/users/me` needed only `media_viewer`, which
+`anonymous` holds at genesis — so an anonymous session could set the anonymous
+account's own password and get a token back. Combined with the mint path never
+checking `allow_anonymous`, that turned an anonymous visit into a credentialed
+login which survived anonymous access being switched off.
+
+0.38.4 closes it: the anonymous account holds no credential at all (`kdf` 0),
+`verify` refuses the username, and a password `PATCH` on it answers
+`409 no_password` with `mutable.set_password: false` on the record.
+
+**This also answers Tom's "the anonymous user has no password and one cannot
+be set" — it is deliberate, not a fault.** The client now renders that from
+the server's own `mutable` block (`AccountScreen`), the same rule the Users
+screen already follows, rather than testing the username. An absent `mutable`
+is treated as "this node does not say", not as a refusal.
+
+- Never add a client path that sets a password on the anonymous account, and
+  treat any code that `PATCH`es `/api/v1/users/me` as worth a second look.
+
+### One small account-screen fault Tom found
+
+Both raised 2026-09-13, both now closed.
+
+- [x] The **Discard** button on edit user was styled wrongly (`UsersScreen`).
+      Gone: the Users redesign below replaced in-row editing with a dialogue,
+      whose Cancel is the shared modal's own control.
+- [x] The **anonymous user has no password and one cannot be set** — answered
+      by the server session: deliberate, and a security fix. See the P2 above.
+
+### One UI design language: records listed compactly, edited in a dialogue
+
+Tom, 2026-09-13, on Manage → Users: *"It should display the users and their
+roles in a compact list, and allow editing in another dialogue. This is
+actually true in a few places in client — this should be the single UI design
+language."*
+
+**Written down as the rule** in `docs/architecture.md`, beside the existing
+ban on `alert`/`confirm`/`prompt`, so it is a stated convention and not one
+screen's taste. In short: a row states what a record is and holds no inputs;
+every mutation opens a dialogue that owns the form, the busy state and the
+failure, and stays open when the server refuses; the row itself is the edit
+control with secondary and destructive actions in its overflow menu; acts with
+different consequences get different dialogues.
+
+**Done — Users.** `UsersScreen` was the worst case: every account rendered a
+permanently-open edit form, so a list of accounts was a stack of username
+inputs, role checkboxes with descriptions, a password field and four buttons
+each. It is now a compact row per account — name, a `You` tag, and the roles
+in one line in canonical order — opening `Edit`, `Set a password` and `Remove`
+dialogues. `FormModal` was added to `components/Modal.tsx` as the shared piece
+so no screen hand-rolls a dialogue's actions row again. 27 tests, every
+behaviour the old screen pinned carried over, and eight of them were watched
+going red against deliberate breaks before being trusted green
+([[see the check fail]]) — one of which caught a real inversion in the sort.
+
+**Ordering, Tom 2026-09-13: root, then anonymous, then a faint divider, then
+everyone else alphabetically.** Both halves read the server's `mutable` flags
+rather than the two usernames, which is the rule this screen has followed
+since it was written — the names are the server's to choose, and a client that
+tested for them would pin the wrong accounts the moment they changed and pin
+nothing at all on a deployment that names them differently.
+
+- Protection is `mutable.rename === false`. Deliberately *not* `delete`, which
+  is also withheld from the last `manage_users` holder and from your own
+  account — sorting on that would pin whoever happens to be signed in.
+- Root above anonymous is `mutable.set_password`. Anonymous is the account
+  that can hold no credential at all (server 0.38.4 made that explicit:
+  `409 no_password`, `set_password: false`), so "can hold a password" is what
+  actually separates the superuser from the account that exists to be nobody.
+  The alphabet gets this pair backwards, which is what the test pins.
+- The divider is drawn only where both groups have members. A fresh install
+  holding just the protected pair is the case that made that worth a test.
+
+**Still to convert, in the same idiom:**
+
+- [ ] **`ManageScreen`'s `UnmatchedReview`** is the other bad case and is
+      worse than Users was: choosing "Review" expands a panel inside the list,
+      which then expands `ManualMetadataForm` inside *itself*, with a
+      `scrollIntoView` to compensate for the form appearing at the foot of a
+      tall panel. The `scrollIntoView` is the tell — a dialogue needs no such
+      compensation, because it is not somewhere else on the page.
+- [ ] **`ManageScreen`'s `FileManager`** already opens a dialogue to create a
+      folder, so it is half-converted; check the rest of its mutations follow.
+- [ ] **Music playlists**, when the named-playlist UI is built (see the
+      playlist item below). It should be born in this idiom rather than
+      converted later — the entry already says to use `Modal`/`ConfirmModal`,
+      and `FormModal` is now the more specific answer.
+
+### Session lifetime: decided, and already built
+
+**Tom's call, 2026-09-13: keep the token in `sessionStorage`, and check it on
+client boot.** `localStorage` was the alternative and was not taken — a
+30-day bearer token at rest outlives the tab that earned it. The accepted
+consequence is that a new tab is a new `sessionStorage` and therefore signed
+out; signing in has to be cheap rather than the session being long-lived.
+
+**Nothing to build: core already does exactly this**, verified by reading
+`@machafoundation/core`'s `SessionManager` rather than assumed.
+`signIn` and `mintNow` both call `cacheSession`, which writes
+`{token, expiresAtMs}` to `machaHost().ephemeralStorage` under
+`macha-session`; `bootstrap` — `start()`'s entry point — loads it, checks the
+expiry, validates it with `validateAnonymousSessionAnyNode` and adopts the
+roles that validation returned, minting only when that fails. `signOut`
+removes the key. This client supplies no storage override
+(`configureMachaHost({ origin })` in `main.tsx:30`), so it inherits
+`sessionStorage` on web. The signed-in token is cached the same way the
+anonymous one is, so a **reload** keeps the account — it is only a new tab
+that does not.
+
+- [ ] Confirm on the set, during the same sitting as the login work below:
+      sign in, reload, and check the account survives rather than dropping
+      back to anonymous. Read rather than measured so far, and the signed-in
+      reload is the path nobody has actually walked.
+
+### `/api/v1/users` envelope, checked 2026-09-13
+
+The server is changing `GET /api/v1/users` from `{"users": [...]}` to
+`{"items": [...]}`, and asked about an accept-either shim it believed this
+client had built. **It does not exist here, and never did.** Verified rather
+than recalled: the only `api/v1` strings in `src` are a test fixture
+(`test/fakeCluster.ts`) and two prose comments; every users call goes through
+core's `UsersApi`, obtained from `createMachaServices` in
+`app/useMachaServices.ts`. Core's `userList` already accepts a bare array,
+`users` or `items`, so the envelope change is invisible here. If such a shim
+exists it belongs to one of the other clients. Recorded so this does not come
+back as an action for this repo.
+
+### `root` and `manage_users`
+
+**Answered: no, root does not keep `manage_users` permanently.** Tom, and not
+this client's concern either way — the UI renders from the per-field
+`mutable` block, so it states whatever the server decides without knowing the
+rule. Recorded here only so nobody re-opens it.
+
+### Volume moved out of core; `setVolume` stayed
+
+**`VolumeStore` is this client's own, at `src/state/volume.ts`**, copied from
+`@machafoundation/core` on Tom's authorisation and deleted from core once both
+this client and Android TV held copies. The key is unchanged —
+`macha.volume.v1.${clientId}` — so no viewer's volume was lost and no migration
+was needed. All five import sites repointed; 45 files / 317 tests, typecheck
+clean, `pretest` green against core's post-deletion build.
+
+**Core keeps `PlaybackRuntime.setVolume`, and this is the part worth
+remembering.** Core planned to delete it as "a one-line passthrough that only
+existed to carry the member", and that premise was wrong twice over. It touches
+`VolumeStore` nowhere — it is `this.player.setVolume?.(volume)`, delegating to
+`Player.setVolume?`, which core keeps. And the advice that came with it, "call
+your player adapter directly instead", was impossible: `PlaybackRuntime` holds
+`private readonly player`, built internally by `platform.createPlayer()`, so no
+client ever receives that reference. `PlayerScreen.tsx:276` would have been
+left with no way to set volume at all.
+
+The distinction that settles it, and Android TV stated it best by finding the
+same fault from the other end: in their `usePlayerVolume.ts` the hook passes
+`effective` to the runtime and `setting` to the store, four lines apart, because
+**one applies a volume to the player and the other persists a viewer's
+choice**. Same word, different concern.
+
+**One behaviour was changed deliberately, and both clients changed it
+together.** `Number('')` is `0`, and `0` is finite, so an empty stored entry was
+read as a deliberate mute — the exact "comes up silent with nothing explaining
+why" failure this store exists to prevent. `load()` now treats an empty or
+whitespace-only entry as absent (`raw.trim() === ''` → 1) while a stored `0`
+keeps meaning silence, because that is a choice a viewer made. The store was
+copied faithfully first and the old behaviour recorded in a test before being
+changed, so the move and the behaviour change are not the same commit.
+
+
+
+Tom, 2026-09-13: *"Why does core carry anything to do with volume at all?"*
+Raised with the `Macha NPM Core` session and both React Native clients on his
+instruction — core owns the change, the other clients had to be told directly
+rather than find out from a release.
+
+Core carries four volume things and they are not equally defensible:
+
+- **`VolumeStore` (`src/state/volume.ts`) — moves out, but as a copy per
+  client, not a deletion.** 27 lines persisting a clamped 0–1 number to
+  `macha.volume.v1.<clientId>`. Core has no internal consumer — `grep` across
+  its tree outside the store's own file returns nothing — so core has no stake
+  in it beyond exporting it.
+
+  **Correction, 2026-09-13: "nobody uses it" was wrong.** The Android TV React
+  Native client is a real second consumer — `MachaProvider.tsx:95` constructs
+  it, `hooks/usePlayerVolume.ts` reads and writes it — wired that same day,
+  plausibly after the grep that found it dead. So it moves as *each client owns
+  its own*, which the per-client storage key already suits, and **both clients
+  hold a local copy before core removes anything**. Deleting it as unused would
+  break their build.
+- **`Player.setVolume(volume)` — done, core `develop`, 2026-09-13.** Now
+  optional, with `PlaybackRuntime.setVolume` forwarding via `?.`.
+  Source-compatible for every existing implementation, so nothing here had to
+  change: verified by running this client's own `typecheck` and full suite
+  against it — 44 files, 307 tests, green. The evidence was stronger than the
+  argument made for it: **all three** `Player` implementations in core satisfy
+  the member with an empty body (`FakePlayer.ts:71`, and the local fakes in
+  `PlaybackCoordinator.test.ts:45` and `PlaybackRuntime.test.ts:85`), plus
+  `src/test/fakePlayer.ts` here. A required member that every real
+  implementation satisfies with an empty body is the interface saying it is
+  optional and not being believed.
+- **`PlaybackRuntime.setVolume()`** is a one-line passthrough carrying the
+  above. No opinion — it goes or stays with it.
+- **`Platform.initialVolume?()` — keep.** Optional, and the seam by which a
+  platform says "I do not do app volume, do not restore one". *Whether the
+  host owns app-level volume* is the genuine cross-client fact, and it is the
+  one both clients agree belongs in core.
+
+**A television does not imply the set owns volume — that was this client's
+mistake, 2026-09-13, and it is worth keeping.** `SamsungWebPlatform` returns 1
+from `initialVolume()` because a Tizen widget has no meaningful per-app level.
+That is evidence about *Samsung*, and it was generalised into "a television
+owns volume", which is false for Android TV: `expo-video` is Media3 underneath
+and exposes a real per-player volume independent of the set's. The remote's
+keys drive the television's output stage and the app's 0–1 rides underneath
+it, so both are real. A persisted app volume is meaningful there and
+meaningless here — which is precisely why `initialVolume` exists, and precisely
+what one host's truth must not be allowed to answer for another's. The claim
+went into a core doc comment before it was caught; core has been asked to
+correct it.
+
+The boundary test ([[core versus client boundary]]) therefore gives
+`initialVolume` yes, the rest no — but on the narrower ground that *some* hosts
+own no app-level volume, not that none do.
+
+**Core confirmed the three facts in its own tree rather than on my reading:**
+`VolumeStore` has zero consumers inside core (only its own file and test
+mention it), `Platform.initialVolume?()` was already optional, and
+`setVolume` was required against three empty-bodied implementations.
+
+- [ ] **`VolumeStore` is held, waiting on Tom, and that is right.** Core is in
+      session with him and will not delete from a shared package on a relayed
+      instruction — a cross-client deletion is his to authorise directly. He
+      raised the question unprompted this morning, so a yes is likely, but
+      nobody should act on a second-hand one.
+- [x] Whether either RN client imports `VolumeStore`: **Android TV does, yes.**
+      Answered 2026-09-13. The mobile client has not replied yet, so a third
+      consumer is still possible.
+- [ ] **Both clients take a local copy first, then core deletes** — in that
+      order, so the store never exists nowhere for either of them. The two
+      changes do not share a release.
+- [ ] Worth reconsidering rather than assuming: with a second real consumer,
+      "27 shared lines two clients both want" is a defensible reason to leave
+      it in core. The original argument was that it was dead weight in a
+      package that assumes no browser, and half of that is now false. Tom's
+      call, on the corrected facts.
+- [ ] **Steal the Android TV client's mute design when taking the copy.** They
+      keep `{ effective, setting, muted }` where `setting` is what persists and
+      never goes to 0 because of a mute; adjusting while muted unmutes, and
+      unmuting from a 0 setting restores to an audible floor. This client has
+      none of that. Writing 0 on mute makes the next launch come up silent with
+      nothing explaining why — a bug this client would otherwise have shipped.
+- [ ] `PlaybackRuntime.setVolume()` stays for now. Removing the passthrough
+      would break this client's controller for no gain while the store is
+      undecided; it can go with the store if the store goes.
+
 ## Matroska direct play, the login wall, and role-gated navigation (client 0.14.0)
 
 ### Matroska is claimed honestly, and it is worth 15% of the library
