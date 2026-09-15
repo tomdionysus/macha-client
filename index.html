@@ -4,6 +4,12 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#111111" />
+    <!-- `robots.txt` stops a crawler fetching this; it does not stop the URL
+         being indexed from a link somewhere else, because a crawler that is
+         not allowed to fetch the page never sees a directive inside it. This
+         is the half that says "do not index", and it has to be in the markup
+         rather than in the file it is forbidden to read. -->
+    <meta name="robots" content="noindex, nofollow, noarchive" />
     <link rel="preload" as="image" type="image/svg+xml" href="/macha-logo.svg" />
     <link rel="icon" type="image/svg+xml" href="/macha-logo.svg" />
     <title>Macha</title>

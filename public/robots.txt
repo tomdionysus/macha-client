@@ -1,0 +1,5 @@
+# Macha is a private, self-hosted media client. Nothing here is for the public
+# web, and a node that advertises a public endpoint is reachable by a crawler
+# exactly as it is by a viewer.
+User-agent: *
+Disallow: /
