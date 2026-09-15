@@ -105,6 +105,8 @@
 .connection-form input:focus, .connection-form textarea:focus { outline: 1px solid var(--focus); border-color: var(--focus); }
 .connection-form button { justify-self: start; margin: .35rem 0 0; }
 .connection-form p { margin: 0; }
+.connection-form-origin { color: var(--text-dim); }
+.connection-form-origin code { word-break: break-all; }
 
 .connection-gate {
   min-height: 100vh;

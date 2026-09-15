@@ -13,6 +13,8 @@ interface Props {
   api: MediaApi;
   serverApi: ServerApi;
   bootstrapEndpoints: readonly string[];
+  /** See `ConnectionFormProps.usingHost`. */
+  usingHost?: string;
   connectionNotice?: string;
   onSave: (urls: readonly string[]) => Promise<string | undefined>;
 }
@@ -35,7 +37,7 @@ function formatLastSync(unixMs: number): string {
   return new Date(unixMs).toLocaleString();
 }
 
-export function SettingsScreen({ api, serverApi, bootstrapEndpoints, connectionNotice, onSave }: Props) {
+export function SettingsScreen({ api, serverApi, bootstrapEndpoints, usingHost, connectionNotice, onSave }: Props) {
   const [failureTrail, setFailureTrail] = useState(failureTrailEnabled);
   const server = useAsync(() => serverApi.status(), [serverApi]);
   const catalogue = useAsync(() => api.status(), [api]);
@@ -137,7 +139,7 @@ export function SettingsScreen({ api, serverApi, bootstrapEndpoints, connectionN
 
       <div className="settings-connection">
         <h2>Connection</h2>
-        <ConnectionForm bootstrapEndpoints={bootstrapEndpoints} onSave={onSave} notice={connectionNotice} />
+        <ConnectionForm bootstrapEndpoints={bootstrapEndpoints} usingHost={usingHost} onSave={onSave} notice={connectionNotice} />
       </div>
     </section>
   );

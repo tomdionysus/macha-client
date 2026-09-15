@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { EndpointCandidate } from '@machafoundation/core';
 import type { ClusterNodeStatus, ClusterStatusSnapshot } from '@machafoundation/core';
 import type { IdentityAssociationResetResult, ManageApi } from '@machafoundation/core';
-import { acceptNodeIdentityAssociationReset, clientEndpointHealth, identityResetAcceptanceMessage, nodeNotYetReady, nodeStatusLabel, StatusHeader, statusSectionVisibility, systemMemoryBytes, TELEMETRY_AGEING_MS, TELEMETRY_STALE_MS, telemetryAge, withoutRetiredNodeIdentity } from './StatusScreen';
+import { acceptNodeIdentityAssociationReset, clientEndpointHealth, conditionIsInformational, identityResetAcceptanceMessage, nodeInboundCapable, nodeNotYetReady, nodeStatusLabel, StatusHeader, statusSectionVisibility, systemMemoryBytes, TELEMETRY_AGEING_MS, TELEMETRY_STALE_MS, telemetryAge, withoutRetiredNodeIdentity } from './StatusScreen';
 
 function candidate(health: EndpointCandidate['health'], ready = true): EndpointCandidate {
   return {
@@ -85,6 +85,62 @@ describe('per-node phase distinct from connection state', () => {
     expect(nodeStatusLabel(recovering)).toBe('online, recovering');
     expect(nodeStatusLabel(starting)).toBe('online, starting');
     expect(nodeStatusLabel(unknownPhase)).toBe('online');
+  });
+});
+
+describe('cluster conditions that are configuration rather than fault', () => {
+  /**
+   * A node configured to accept no inbound connections is a normal topology —
+   * this cluster has one on its own LAN — and it is permanent. Painting it
+   * amber on every visit to Status trains the reader to skip the row that will
+   * one day carry something real.
+   */
+  it('does not warn about a node that accepts no inbound connections', () => {
+    expect(conditionIsInformational('1 node accepts no inbound connections')).toBe(true);
+    // The server counts them, so the count is not part of the match.
+    expect(conditionIsInformational('2 nodes accept no inbound connections')).toBe(true);
+  });
+
+  it('keeps warning about everything it does not recognise', () => {
+    // Unknown is not benign. A condition this helper has never seen must keep
+    // the amber, or the next genuinely bad one arrives wearing grey.
+    expect(conditionIsInformational('metadata quorum unavailable')).toBe(false);
+    expect(conditionIsInformational('1 node offline')).toBe(false);
+    expect(conditionIsInformational('')).toBe(false);
+  });
+});
+
+describe('a node that accepts no inbound connections', () => {
+  const node = (fields: Record<string, unknown>) => fields as unknown as ClusterNodeStatus;
+
+  /**
+   * The case this was originally got wrong, kept as the first test because it
+   * is the only one that distinguishes the two plausible implementations.
+   *
+   * They are two planes, not two names for one. `api_endpoint` is the HTTP URL
+   * a client dials; `inbound_capable` is whether peers can dial this node's
+   * RPC plane. A node behind CGNAT refuses peer connections and still serves
+   * its API to clients that can route to it. Measured on the deployed cluster
+   * 2026-09-15, `corvus-fi-1` reports `inbound_capable: false` while
+   * advertising `http://10.35.1.50:7438` — usable from inside that building,
+   * dead from anywhere else. Deriving one from the other calls that node
+   * inbound-capable, which is backwards, on the one node in the cluster the
+   * label exists for.
+   */
+  it('does not mistake an advertised API endpoint for inbound peer capability', () => {
+    expect(nodeInboundCapable(node({ inbound_capable: false, api_endpoint: 'http://10.35.1.50:7438' }))).toBe(false);
+    expect(nodeInboundCapable(node({ inbound_capable: true, api_endpoint: 'https://macnessa.macha.network' }))).toBe(true);
+  });
+
+  /**
+   * Unknown is not false. A node too old to report the field has not said it
+   * refuses inbound connections, and printing that it does would be the client
+   * inventing a fact — the same rule the roles and `mutable` handling follow.
+   */
+  it('says nothing for a node that did not report the field', () => {
+    expect(nodeInboundCapable(node({ api_endpoint: 'https://node.example' }))).toBeUndefined();
+    expect(nodeInboundCapable(node({ inbound_capable: 'false' }))).toBeUndefined();
+    expect(nodeInboundCapable(node({ inbound_capable: null }))).toBeUndefined();
   });
 });
 

@@ -105,6 +105,41 @@ function telemetryAgeClassName(node: ClusterNodeStatus): string | undefined {
   return age ? `telemetry-age ${age}` : undefined;
 }
 
+/**
+ * Whether a node accepts inbound connections, as the node itself reports it.
+ *
+ * Read straight off `inbound_capable`, which is the field the cluster's own
+ * `nodes_inbound_incapable` counter counts — so the node detail and the
+ * cluster condition cannot disagree about which nodes they mean.
+ *
+ * **This is the cluster plane, not the API plane, and they are not the same
+ * endpoint.** `api_endpoint` is the HTTP URL a *client* dials; inbound
+ * capability is whether *peers* can dial this node's RPC plane. A node behind
+ * CGNAT accepts no peer connections and still serves its HTTP API normally to
+ * clients that can route to it. Measured on this cluster 2026-09-15,
+ * `corvus-fi-1` reports `inbound_capable: false` while advertising
+ * `http://10.35.1.50:7438` — a LAN address a browser in that building uses
+ * happily and that is dead from anywhere else.
+ *
+ * So this says nothing about whether the client can reach the node, nothing
+ * about discovery, and nothing about the failover pool: fi-1 is a discovered
+ * endpoint and an eligible failover target for a client on its network. Both
+ * errors were made here first — deriving the flag from `api_endpoint`, then
+ * explaining the failover pool with the flag — and each one was wrong about
+ * the single node in this cluster the label exists for.
+ *
+ * Tri-state on purpose. `undefined` is a node that did not say — a build older
+ * than the field — and the screen says nothing rather than claiming a node
+ * takes inbound connections it never mentioned. Unknown is not false.
+ *
+ * `inbound_capable` is not in core's `ClusterNodeStatus` yet; core owns the
+ * wire model and this narrowing goes when it declares the field.
+ */
+export function nodeInboundCapable(node: ClusterNodeStatus): boolean | undefined {
+  const reported = (node as ClusterNodeStatus & { inbound_capable?: unknown }).inbound_capable;
+  return typeof reported === 'boolean' ? reported : undefined;
+}
+
 function freshnessLabel(node: ClusterNodeStatus): string {
   if (node.telemetry_freshness === 'live') return 'Live';
   if (node.telemetry_freshness === 'stale') return `Stale · ${formatDuration(node.live_age_ms)}`;
@@ -125,6 +160,31 @@ export function nodeStatusLabel(node: ClusterNodeStatus): string {
 
 function nodeStatusClassName(node: ClusterNodeStatus): string {
   return nodeNotYetReady(node) ? `${node.state} ${node.phase}` : node.state;
+}
+
+/**
+ * Conditions that describe how the cluster is configured rather than what is
+ * wrong with it.
+ *
+ * `conditions` arrives as free prose with no severity on the wire, and the
+ * panel paints every entry amber. So a node deliberately configured to accept
+ * no inbound connections — a normal topology, not a fault — reads as a warning
+ * every time Status is opened. A panel that cries wolf on a permanent,
+ * intended state is worse than one that says nothing: it teaches the reader to
+ * skip the row that will one day carry something real.
+ *
+ * Matched on the stable half of the sentence, because the server counts the
+ * nodes: "1 node accepts no inbound connections", "2 nodes accept…". Prose is
+ * a poor thing to match on and this should be a severity the server states —
+ * raised with the server session — but until it is, the choice is between
+ * matching the sentence and miscolouring the fact.
+ *
+ * Anything unrecognised keeps the warning styling. Unknown is not benign.
+ */
+const INFORMATIONAL_CONDITIONS: readonly RegExp[] = [/\bno inbound connections\b/i];
+
+export function conditionIsInformational(condition: string): boolean {
+  return INFORMATIONAL_CONDITIONS.some((pattern) => pattern.test(condition));
 }
 
 function UsageBar({ used, capacity }: { used: number; capacity: number }) {
@@ -483,7 +543,9 @@ export function StatusScreen({ api, endpointRegistry, manageApi, platform, secti
         </div>
         {snapshot.startup.error && <p className="cluster-startup-error">{snapshot.startup.error}</p>}
       </section>}
-      {cluster.conditions.length > 0 && <div className="cluster-conditions">{cluster.conditions.map((condition) => <span key={condition}>{condition}</span>)}</div>}
+      {cluster.conditions.length > 0 && <div className="cluster-conditions">{cluster.conditions.map((condition) => (
+        <span key={condition} className={conditionIsInformational(condition) ? 'informational' : undefined}>{condition}</span>
+      ))}</div>}
       <div className="cluster-metric-grid">
         <ClusterMetric label="Nodes" value={`${cluster.nodes_online} / ${cluster.nodes_known}`} detail="online" />
         <ClusterMetric label="Metadata" value={cluster.metadata_availability === 'writable' ? 'Writable' : cluster.metadata_availability === 'read-only' ? 'Read-only' : 'Unavailable'} detail={`${cluster.metadata_voters_online}/${cluster.metadata_voters} voters · ${cluster.metadata_quorum_required} required`} />
@@ -580,6 +642,7 @@ export function NodeStatusScreen({ api }: { api: ClusterStatusApi }) {
   const runtime = node.runtime;
   const memory = systemMemoryBytes(runtime);
   const connectivity = check?.results[0];
+  const inboundCapable = nodeInboundCapable(node);
   return (
     <section className="cluster-status-screen node-status-screen">
       <Link className="back-button" to={routes.status} data-tv-focusable="true">← Overview</Link>
@@ -598,8 +661,25 @@ export function NodeStatusScreen({ api }: { api: ClusterStatusApi }) {
               somewhere with nothing listening. Both are shown now, each under
               its own name, because the RPC pair is still what an identity
               reset is keyed on and an operator reading this card may need it. */}
-          <DetailItem label="API endpoint">{node.api_endpoint || '—'}</DetailItem>
+          {/* "—" read as "this screen has nothing to tell you". An absent
+              endpoint is not an absent reading: it is the node saying it has
+              no HTTP API for a client to dial, which is why core's discovery
+              leaves it out of the client's endpoint registry.
+              Deliberately independent of inbound peer capability below — a
+              node can advertise a perfectly good API endpoint and still accept
+              no peer connections, which is exactly what fi-1 does. */}
+          <DetailItem label="API endpoint">{node.api_endpoint?.includes('://') ? node.api_endpoint : 'None advertised'}</DetailItem>
           <DetailItem label="RPC address">{node.host ? `${node.host}:${node.port}` : '—'}</DetailItem>
+          {/* Its own line, directly under the RPC address it is about, because
+              it is a standing property of the node rather than a qualifier on
+              something else. A plain Yes/No states it without implying a
+              verdict: a No here is a normal topology, not a fault, and it says
+              nothing about whether a client can reach this node's API — that
+              is the line above, on the other plane. An em dash is a node that
+              did not report the field, which is not the same as a No. */}
+          <DetailItem label="Inbound RPC connections">
+            {inboundCapable === undefined ? '—' : yesNo(inboundCapable)}
+          </DetailItem>
           <DetailItem label="Failure domain">{node.failure_domain || '—'}</DetailItem>
           <DetailItem label="Roles">{node.roles.join(', ') || '—'}</DetailItem>
           <DetailItem label="Telemetry"><span className={telemetryAgeClassName(node)}>{freshnessLabel(node)}</span></DetailItem>

@@ -6,9 +6,19 @@ export interface ConnectionFormProps {
   onSave: (urls: readonly string[]) => Promise<string | undefined>;
   submitLabel?: string;
   notice?: string;
+  /**
+   * The host this page was served from, confirmed as a Macha node and in use
+   * because nothing is configured.
+   *
+   * Stated, never filled into the field. It is not configuration and it is not
+   * stored, so a viewer who presses save must be saving what they typed rather
+   * than something the client guessed on their behalf — and an empty field is
+   * the honest description of an unconfigured client.
+   */
+  usingHost?: string;
 }
 
-export function ConnectionForm({ bootstrapEndpoints, onSave, submitLabel = 'Save endpoints', notice }: ConnectionFormProps) {
+export function ConnectionForm({ bootstrapEndpoints, onSave, submitLabel = 'Save endpoints', notice, usingHost }: ConnectionFormProps) {
   const [urls, setUrls] = useState(bootstrapEndpoints.join('\n'));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string>();
@@ -47,5 +57,9 @@ export function ConnectionForm({ bootstrapEndpoints, onSave, submitLabel = 'Save
         and saying so invited a viewer to read a saved endpoint as a verified
         one. The client reports what it can actually reach once it tries. */}
     <p>Endpoints are tried in order, and whichever answers is used. The client can learn additional node APIs after connecting.</p>
+    {usingHost && <p className="connection-form-origin">
+      Nothing is configured, so this client is using the host it was served from: <code>{usingHost}</code>.
+      That is checked again on every start and is not saved. Enter an endpoint above to use a different node.
+    </p>}
   </form>;
 }

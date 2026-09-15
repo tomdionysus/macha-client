@@ -1,6 +1,6 @@
 # Active tasks and concepts to explore
 
-Last updated: 2026-09-13 (end of session; 0.15.0 released)
+Last updated: 2026-09-15 (0.16.0 released)
 
 This is the working backlog. Add new work here. When an item is implemented and
 its stated verification is complete, remove it from this file and add a dated
@@ -14,9 +14,19 @@ are related. Core is addressed as the `Macha NPM Core` session.
 
 ## Start here
 
-**0.15.0 is released and deployed.** It carries the artwork caching fix, the
-blank-poster fix, the Users redesign, and `VolumeStore` moving out of core.
-`CHANGELOG.md` has the detail and `COMPLETED.md` the evidence.
+**0.16.0 is released.** It carries same-origin endpoint discovery, the Status
+condition that stopped reading as a warning, and the inbound-RPC line on the
+node page. `CHANGELOG.md` has the detail and `COMPLETED.md` the evidence.
+
+**One decision in it is still open — P1 below.** The confirmed same-origin
+endpoint is not persisted. Tom's view is that it should be, and the shape was
+not settled before the release went out, so 0.16.0 ships the non-persisted
+form.
+
+**The cluster is whole and on 0.42.1** as of 2026-09-15 — `es-1`, `fi-1` and
+`gbni-1`. `gbni-1` had been on 0.40.1, which is protocol 20 and could not
+handshake with the protocol-21 nodes at all. Nothing measured before today
+against a partial cluster should be quoted as current.
 
 **The next thing is the core 0.11.0 port** — `AccountMenu.signOut` and
 `lastIdentityChange`, P1 below. It is the only item with another session
@@ -544,6 +554,48 @@ that shared this section turned out to be a different defect entirely
 under *"Samsung failover plays: a replacement asks for the carriage its
 generation was created with"*, together with the two wrong theories it
 produced and the first-fragment gate that was built to test one of them.
+
+## P1 — Persist the confirmed same-origin endpoint, and decide where
+
+0.16.0 ships the non-persisted form: the origin is re-derived and re-confirmed
+on every cold start and seeded into the registry as `environment`. Tom's view
+is that it should be persisted. The shape was not settled before the release,
+so this is the open half of a shipped feature rather than new work.
+
+**What is already true and easy to miss:** `EndpointHealthMonitor`'s
+`persistConfirmedEndpoints` writes every confirmed endpoint into
+`macha-discovered-endpoints-v1` on each cycle. So an adopted origin is
+*already* persisted as discovered history and re-seeded into the registry next
+start. What it does not do is count as "configured", so the gate and the probe
+still run over the top of it.
+
+**Discovered is the more correct classification** — it is runtime-learned, not
+configuration, and the store documents itself that way. Making discovered count
+as configured is therefore a small change and supersedes autodetection
+entirely: the probe never runs, the splash never holds, and the client starts
+with the whole cluster rather than one node.
+
+**The gap it leaves, which is the actual decision.** Discovered names hosts
+unrelated to the page's origin. A bundle later served from a different host
+reconnects to the *old* cluster and, being "configured", never probes to notice
+the Macha node it is now being served from. Narrower case, same shape: page
+moves, old cluster is dead, new same-origin node is right there, and the viewer
+gets an endpoint form.
+
+Two ways to have both:
+
+- **Discovered plus probe-on-unreachable.** Let discovered count as
+  configured, and re-run the same-origin probe when every known endpoint has
+  failed rather than dropping to the gate. One store, self-heals the
+  moved-host case, at the cost of adopting an origin during an outage.
+- **Discovered for the cluster, an origin-keyed record for the fact.** The
+  health monitor keeps writing discovered; a separate small record remembers
+  that *this origin* is Macha, so the probe is skipped on a matching origin and
+  re-run on a different one. Two stores, each saying one thing.
+
+Writing it to `macha-bootstrap-endpoints-v1` was considered and is the one to
+avoid: it becomes indistinguishable from an endpoint the viewer chose, appears
+in the Connection field as if they typed it, and survives the page moving.
 
 ## P1 — Port onto core 0.11.0's session model (`signOut`, `lastIdentityChange`)
 

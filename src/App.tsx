@@ -9,6 +9,7 @@ import { ManageNav } from './components/ManageNav';
 import { machaLogoUrl as logoUrl } from './uiAssets';
 import { useTvNavigation } from './hooks/useTvNavigation';
 import { useEndpointHealthMonitor } from './cluster/useEndpointHealthMonitor';
+import { useSameOriginEndpoint } from './cluster/sameOriginEndpoint';
 import { samsungBackTarget } from './platform/samsungBackNavigation';
 import type { Platform } from '@machafoundation/core';
 import { buildPlatformTraits, isTvBuild } from './platform/traits';
@@ -252,20 +253,57 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
   const [bootstrapEndpoints, setBootstrapEndpoints] = useState(() => getBootstrapEndpoints());
   const [connectionNotice, setConnectionNotice] = useState<string>();
   const [clusterUnreachable, setClusterUnreachable] = useState(false);
-  const [connectionGate, setConnectionGate] = useState<ConnectionGate | undefined>(() =>
-    initialConnectionGate(connectionRequired, getBootstrapEndpoints()),
+  /**
+   * With nothing configured, ask this page's own host before asking the viewer.
+   *
+   * A client served from a Macha node should not make somebody type in the
+   * address they are already looking at. The candidate is confirmed from the
+   * body of `/api/v1/health` rather than from its status line — see
+   * `useSameOriginEndpoint` for why that distinction is the whole feature —
+   * and it is never persisted as configuration, so this asks again on every
+   * cold start and can never go stale.
+   */
+  const sameOrigin = useSameOriginEndpoint(connectionRequired && bootstrapEndpoints.length === 0);
+  /**
+   * What this client is actually pointed at, which is not the same as what a
+   * viewer has configured. Everything that needs an endpoint reads this;
+   * `ConnectionForm` keeps reading `bootstrapEndpoints`, so the field stays
+   * honestly empty when nothing has been typed.
+   */
+  const effectiveEndpoints = useMemo(
+    () => bootstrapEndpoints.length > 0
+      ? bootstrapEndpoints
+      : sameOrigin.endpoint ? [sameOrigin.endpoint] : [],
+    [bootstrapEndpoints, sameOrigin.endpoint],
   );
-  const effectiveConnectionGate = connectionRequired ? connectionGate : undefined;
+  // Only `'unreachable'` is held as state. `'welcome'` is derived, so it cannot
+  // disagree with the endpoint list the way a stored copy of the same fact can.
+  const [connectionGate, setConnectionGate] = useState<ConnectionGate | undefined>();
+  /**
+   * Nothing is decided yet, so decide nothing: no gate, no navigation, no
+   * session mint against an endpoint list that is about to change. The splash
+   * holds instead, bounded by the probe's own deadline.
+   */
+  const connectionProbePending = connectionRequired && bootstrapEndpoints.length === 0 && sameOrigin.probing;
+  const effectiveConnectionGate = connectionRequired && !connectionProbePending
+    ? connectionGate ?? initialConnectionGate(connectionRequired, effectiveEndpoints)
+    : undefined;
   const clientId = useMemo(() => getClientId(), []);
   const progressStore = useMemo(() => new ContinueWatchingStore(clientId), [clientId]);
   const queueStore = useMemo(() => new PlaybackQueueStore(clientId), [clientId]);
   const playlistStore = useMemo(() => new MusicPlaylistStore(clientId), [clientId]);
   const volumeStore = useMemo(() => new VolumeStore(clientId), [clientId]);
-  const endpointKey = bootstrapEndpoints.join('\n');
+  const endpointKey = effectiveEndpoints.join('\n');
   const endpointBandwidth = useMemo(() => new EndpointBandwidth(clientId), [clientId]);
   const endpointRegistry = useMemo(
     () => new EndpointRegistry([
       ...bootstrapClusterEndpoints(bootstrapEndpoints),
+      // A Macha node confirmed on this page's own origin. Seeded the way
+      // discovered membership is, because that is what it is — derived rather
+      // than configured, and never written where configuration is read from.
+      // It exists only while nothing is configured, so it can never outrank an
+      // endpoint a viewer typed.
+      ...bootstrapClusterEndpoints(sameOrigin.endpoint ? [sameOrigin.endpoint] : [], 'environment'),
       // Runtime-discovered membership confirmed reachable in a previous
       // session — never user configuration (`docs/server-api.md`), so it's
       // seeded after the real bootstrap seeds and dropped on any conflict by
@@ -308,7 +346,7 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
   }, [endpointBandwidth, endpointRegistry]);
   const { auth, ready: sessionReady, roles } = useSession({
     connectionRequired,
-    serverConfigured: bootstrapEndpoints.length > 0,
+    serverConfigured: effectiveEndpoints.length > 0,
     endpointRegistry,
   });
   const {
@@ -323,7 +361,7 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
     playbackFactsApi,
     managementAvailable,
   } = useMachaServices({ endpointRegistry, auth, apiOverride, playbackOverride });
-  useEndpointHealthMonitor(endpointRegistry, clusterStatusApi, auth, connectionRequired && bootstrapEndpoints.length > 0 && !effectiveConnectionGate);
+  useEndpointHealthMonitor(endpointRegistry, clusterStatusApi, auth, connectionRequired && effectiveEndpoints.length > 0 && !effectiveConnectionGate);
   // Not before the session has settled. `SessionManager.fetch` retries a 401
   // only when it actually sent a token, so a whoami that goes out during the
   // cold-start mint is answered 401, returned as-is, and the roles are never
@@ -530,7 +568,7 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
     navigate(routes.edit(id));
   }, [navigate]);
 
-  const settingsPane = <SettingsScreen api={api} serverApi={serverApi} bootstrapEndpoints={bootstrapEndpoints} connectionNotice={connectionNotice} onSave={saveServer} />;
+  const settingsPane = <SettingsScreen api={api} serverApi={serverApi} bootstrapEndpoints={bootstrapEndpoints} usingHost={sameOrigin.endpoint} connectionNotice={connectionNotice} onSave={saveServer} />;
   const usersPane = <UsersScreen api={usersApi} session={session} />;
   /**
    * Hiding a link is not access control — a bookmark, a Back, or the catch-all
@@ -571,12 +609,21 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
     onVolumeChange={playback.changeVolume}
   /> : null;
 
+  // Presentation only, and the same shape as the session splash below: hold
+  // while this page's own host is asked whether it is Macha, rather than
+  // flashing a form at somebody who is about to not need it. Bounded by the
+  // probe's own deadline, so the worst case is a slightly late Welcome screen.
+  if (connectionProbePending) return <div className={`app-shell${miniPlayerActive ? ' has-mini-player' : ''}`}>
+    <Loading />
+    {playerHost}
+  </div>;
+
   if (effectiveConnectionGate) return <div className={`app-shell${miniPlayerActive ? ' has-mini-player' : ''}`}>
     <ConnectionGateScreen
       welcome={effectiveConnectionGate === 'welcome'}
       notice={connectionNotice}
       bootstrapEndpoints={bootstrapEndpoints}
-     
+      usingHost={sameOrigin.endpoint}
       onSave={saveServer}
     />
     {playerHost}
@@ -617,6 +664,7 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
           welcome={false}
           notice={connectionNotice}
           bootstrapEndpoints={bootstrapEndpoints}
+          usingHost={sameOrigin.endpoint}
           onSave={saveServer}
         />
       : <LoginScreen

@@ -1,6 +1,93 @@
 # Completed and tested
 
-Last updated: 2026-09-13
+Last updated: 2026-09-15
+
+## Same-origin endpoint discovery, and two Status corrections (client 0.16.0)
+
+Released 2026-09-15. Raised by Tom in session rather than from `ACTIVE.md`, so
+each section is written here with its measurements rather than moved.
+
+### A client served from a Macha node should find it without being told
+
+**The idea, as Tom put it:** if the SPA is served from the same host, the API
+links automatically; if it is not there, the client shows the endpoint screen.
+
+**The trap that decided the design.** `README.md` states the deployment
+requirement — the web host must serve `index.html` for unknown application
+paths, or a deep link never reaches React Router. So a host serving this bundle
+and *not* running Macha answers `200` at `/api/v1/health`, with the application
+shell. Core's `checkEndpointConfiguration` confirms on `response.ok` alone, so
+every correctly-deployed Macha web host would have identified as a Macha node.
+Status is not a usable signal; the body is.
+
+**Measured against the deployed cluster before writing the check**, through the
+`Macha Server` session, because reading the server's source has been wrong
+twice on this project. The body was exactly `{"status":"ok"}` — 15 bytes, no
+product field, no version, no custom header, no `Cache-Control`. Three states:
+`ok` with 200, `starting` and `failed` with 503, answerable with no session and
+no role because liveness is the first bearer-auth exemption. CORS headers
+unconditional with `Allow-Origin: *`.
+
+**The server change that followed.** Tom approved requesting a product marker;
+server 0.42.1 adds `service: "macha"` in the single return that serves all
+three states. `version` was removed and then reinstated by Tom's own decision,
+taken against the stated objection that a version lets a scanner index
+unpatched hosts rather than spray — recorded on the server side at
+`health_response()`, in the test that used to forbid it, and in its changelog.
+This client gates on `service` alone and never asserts on `version`.
+
+**Verified live on all three nodes, 0.42.1:**
+`{"service":"macha","status":"ok","version":"0.42.1"}`, and es-1 was caught
+mid-restart serving `503 {"service":"macha","status":"starting"}` — the state
+the client's predicate pairs, observed in production rather than asserted
+against a fake.
+
+**Seen failing first.** Against a naive status-only implementation, 6 of 14
+tests go red, including the SPA-host case with exactly the expected diff
+(`expected { status: 'ok', marked: false } to be undefined`). Green against the
+real one.
+
+**Not persisted.** The confirmed origin is seeded into the registry as
+`environment`, like discovered membership, and never written where
+`bootstrapEndpoints` is read from. Re-derived and re-confirmed on every cold
+start. The open question below is whether that stays.
+
+### Status: a normal topology was painted as a warning
+
+`ClusterSummaryStatus.conditions` is `string[]` with no severity on the wire,
+and `.cluster-conditions span` is amber. So "1 node accepts no inbound
+connections" — a standing, intended state — read as a fault on every visit.
+Now rendered in the neutral palette; anything unrecognised keeps the amber.
+Matched on prose (`/\bno inbound connections\b/i`, count excluded because the
+server counts the nodes), which is not good and is the server's to fix with a
+severity if it ever earns a release.
+
+### Status: inbound RPC capability, and two wrong derivations
+
+**Both wrong answers were about the same confusion, and both were confidently
+wrong about the one node the feature exists for.**
+
+First: derive it from `api_endpoint`, matching core's discovery filter
+character for character. Wrong — `api_endpoint` is the HTTP URL a *client*
+dials and is published whenever the node's API is enabled; inbound capability
+is whether *peers* can dial the RPC plane. `corvus-fi-1` reports
+`inbound_capable: false` **while advertising** `http://10.35.1.50:7438`, a LAN
+address usable inside that building and dead from anywhere else.
+
+Second, after the first was corrected: explaining the failover pool with the
+flag. Same error inverted — fi-1 is a discovered endpoint and a legitimate
+failover target for a client on its own network.
+
+**A server change was requested and then withdrawn.** Measured with the
+`webclient` account (one `/api/v1/status` read, session revoked, `204`), 0.42.1
+already reports per node: `inbound_capable`, `dialable`, `hosts_extents`, with
+`_mode` variants, and `nodes_inbound_incapable` on the summary. Nothing was
+needed. Core's `ClusterNodeStatus` does not declare these, so `inbound_capable`
+is read through a narrow cast that goes when core adopts it.
+
+The node page carries `Inbound RPC connections — Yes / No / —`, beside the RPC
+address it belongs to. The em dash is a node that did not report the field,
+which is not a No.
 
 ## Artwork caching, blank posters, the Users redesign and volume (client 0.15.0)
 
