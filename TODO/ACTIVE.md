@@ -97,21 +97,39 @@ with `curl` and inject `{token, expiresAtMs, username, roles}` into
 `expires_unix_ms` is only a client-side hint — the server's own lifetime
 governs whether the token is accepted.
 
-## Core is a `file:` link, and its last build is what you compile against
+## Core comes from npm, and the registry is the only resolution path
 
-`@machafoundation/core` is `file:../macha-ts` and
-`node_modules/@machafoundation/core` is a **symlink** to that tree — not a
-published version and not an installed copy. **Resolution goes through core's
-`"main": "./dist/index.js"`, so this client compiles against core's last
-build, never its working tree.** A change on core's `develop` is invisible here
-until it builds. `pretest` (`cd ../macha-ts && npm run dist:check`) is what
-catches a stale dist, and it runs at test time only — `typecheck` will happily
-pass against a dist that is weeks old. See [[built is not released]].
+`@machafoundation/core` is `^0.11.1` from the registry as of 0.17.0. A clone and
+an `npm install` are the whole setup — no sibling checkout, which is the point:
+this repo has to work for someone who only downloaded it.
 
-Core is on **0.11.0** as of 2026-09-13, carrying the artwork host preference
-and the removal of `VolumeStore`. Its build now stages and atomically renames,
-so a partial `dist` mid-rebuild should no longer be possible; if a whole suite
-fails to collect at once, check core's build state before looking here.
+**There is no local link, deliberately.** No `npm link`, no `file:` override
+kept aside. The development cycle resolves core exactly as a user's install
+does, because a loop that resolves differently from the thing being shipped is
+how something reaches a release working only locally. `pretest` went with the
+link — `cd ../macha-ts && npm run dist:check` validated a tree we no longer
+compile against, and a green check that means nothing is how a real one stops
+being read.
+
+**When core needs eyes on something unreleased** it publishes a prerelease under
+a dist-tag (`npm publish --tag next`) and this client installs
+`@machafoundation/core@next`. Same install path, same tarball shape, `latest`
+unmoved. Expect that rather than a `file:` path.
+
+**A swap can silently not happen.** `npm install` reuses an existing link rather
+than fetching the tarball, and a version check can agree while it does — the
+local tree was also 0.11.1, so `require(...).version` said 0.11.1 with the
+symlink still in place, and the suite passed. `test -L
+node_modules/@machafoundation/core` is the only check that cannot lie. Reported
+to the `Macha NPM Core` session for the phone and Android TV clients, who have
+it worse: they are renaming `@macha/core`, so a stale link can survive under the
+old key while the new one resolves from npm.
+
+**[[built is not released]] still applies, differently.** It used to mean core's
+last *build* was what you compiled against. It now means core's last *publish*
+is: a change on core's `develop`, or even a git tag, is invisible here until it
+reaches the registry and this client's range moves. Read core's published
+versions, not its git log.
 
 ## Priorities
 

@@ -19,7 +19,7 @@ of them:
 | Repository | What it is |
 | --- | --- |
 | `macha` | The server. C++, clustered — any node can answer for the catalogue and serve or transform media. |
-| `macha-ts` → **`@machafoundation/core`** | The shared TypeScript core. Consumed here as `file:../macha-ts`. |
+| `macha-ts` → **`@machafoundation/core`** | The shared TypeScript core. Consumed here from npm, as a normal dependency. |
 | `macha-client` | **This repo.** The DOM client: web browsers, Samsung Tizen, Android TV. |
 | React Native clients | Phone and Android TV apps that share `@machafoundation/core` but not this UI. |
 
@@ -75,20 +75,26 @@ npm run build          # web bundle → dist/
 ```
 
 Requires Node.js 20 or later and a reachable Macha node with the catalogue and
-streaming HTTP APIs enabled.
+streaming HTTP APIs enabled. Nothing else: `@machafoundation/core` is published
+to npm, so a clone and an `npm install` are the whole setup and no sibling
+checkout is needed.
 
-For development against an API on `127.0.0.1:7438`:
+### The registry is the only resolution path
 
-```sh
-cp .env.example .env.local
-npm run dev
-```
+There is deliberately no `npm link` step and no `file:` override kept aside for
+development. The development cycle resolves `@machafoundation/core` exactly as a
+user's install does, because a loop that resolves differently from the thing
+being shipped is how something reaches a release working only locally.
 
-Macha emits CORS headers, so the Vite dev server does not proxy API requests.
+When core needs a change in front of this client before a release it publishes a
+prerelease under a dist-tag — `npm publish --tag next` — and this client installs
+`@machafoundation/core@next`. The install path, the tarball and the resolution
+stay the same shape as a user's, and `latest` does not move until it is meant to.
 
-With a Samsung certificate profile and a development TV provisioned,
-`npm run install-samsung` builds, signs, installs and launches the widget;
-`TV_SERIAL` and `CERT_PROFILE` override the defaults in `install-samsung.sh`.
+**Check that a dependency swap actually took.** `npm install` will silently keep
+an existing link rather than fetch the tarball, and a version string can agree
+while it does. `test -L node_modules/@machafoundation/core` is the only answer
+that cannot lie.
 
 The web deployment must serve `index.html` for unknown application paths, or
 opening a route such as `/series/:id/seasons/:seasonId` directly will not reach
