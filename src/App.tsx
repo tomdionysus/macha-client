@@ -55,8 +55,6 @@ import { playerRouteItemId } from '@machafoundation/core';
 import { useMachaServices } from './app/useMachaServices';
 import { useSession } from './app/useSession';
 import { EndpointRegistry, bootstrapEndpoints as bootstrapClusterEndpoints } from '@machafoundation/core';
-import { EndpointBandwidth } from '@machafoundation/core';
-import { setTransferRecorder } from '@machafoundation/core';
 import { setDirectPlayTransferListener } from './playback/directPlayReadAhead';
 import { Loading } from './components/Status';
 import { useMediaRouteBack } from './app/useMediaRouteBack';
@@ -96,6 +94,33 @@ export const navItems = [
   { to: routes.status, label: 'Status', end: false, needs: 'view_status' },
   { to: routes.manage, label: 'Manage', end: false, needs: undefined },
 ] as const satisfies readonly { to: string; label: string; end: boolean; needs?: UserRole }[];
+
+/**
+ * Where a viewer goes once they have signed in.
+ *
+ * The login redirect already records where they were heading — a deep link
+ * into a title, usually — and without this that intent is collected and then
+ * dropped: `onSignedIn` refreshed the session and nothing navigated, leaving
+ * somebody who has just authenticated looking at the login form they only
+ * filled in because they wanted to watch something.
+ *
+ * `from` is trusted only as far as it is a path this application produced. It
+ * comes from `location.state`, which a viewer can author via the History API,
+ * so anything that is not a same-document absolute path is discarded rather
+ * than navigated to. `/login` itself is excluded because sending them back
+ * there would be the same dead end by a longer route.
+ *
+ * Whether the account may actually see the destination is not decided here.
+ * The route guards already answer that, and they answer it the same way for a
+ * bookmark, a Back or the catch-all — so an account that signs in and still
+ * cannot view the title lands wherever those send it, rather than this
+ * second-guessing them with a different rule.
+ */
+export function postSignInDestination(from: unknown, landing: string): string {
+  if (typeof from !== 'string') return landing;
+  if (!from.startsWith('/') || from.startsWith('//')) return landing;
+  return from === routes.login ? landing : from;
+}
 
 function required(value: string | undefined, name: string): string {
   if (!value) throw new Error(`Missing route parameter: ${name}`);
@@ -294,7 +319,6 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
   const playlistStore = useMemo(() => new MusicPlaylistStore(clientId), [clientId]);
   const volumeStore = useMemo(() => new VolumeStore(clientId), [clientId]);
   const endpointKey = effectiveEndpoints.join('\n');
-  const endpointBandwidth = useMemo(() => new EndpointBandwidth(clientId), [clientId]);
   const endpointRegistry = useMemo(
     () => new EndpointRegistry([
       ...bootstrapClusterEndpoints(bootstrapEndpoints),
@@ -316,34 +340,33 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
       // Nothing outside the registry compares against its *durations* any
       // more: `EndpointCandidate.ready` answers "is this endpoint out of
       // cooldown" from inside, against whatever clock it actually holds.
-    ], Date.now, endpointBandwidth),
-    [endpointKey, endpointBandwidth],
+    ], Date.now),
+    [endpointKey],
   );
-  // Throughput evidence comes from responses the client was already fetching.
-  // Installed here, once, because the HTTP layer must not reach into cluster
-  // bookkeeping on its own; `endpointId` is the normalized base URL, so a
-  // response attributes to whichever configured endpoint prefixes its URL.
+  /**
+   * Media is where the bytes are, and core cannot see them.
+   *
+   * Core records its own JSON reads from 0.12.0 and owns the bandwidth store,
+   * so the client wires one thing only: the bytes the Direct Play read-ahead
+   * worker moved. Without this the record describes JSON alone — which is how
+   * this client once spent an afternoon streaming from the slowest node it
+   * had, because a node serving nothing but media had no throughput evidence
+   * to be judged on.
+   *
+   * It matters more than it looks. Measured against the cluster on 2026-09-15,
+   * a movie listing is 416 KB and a show listing 67 KB — both clear core's
+   * sample floor — but `/api/v1/status` is 5.7 KB and `catalogue/status` 303
+   * bytes, so the ten-second health cycle contributes nothing at all. JSON
+   * evidence therefore arrives only when a viewer opens a library, and a
+   * client launched straight into a player has none. This feed is the only
+   * throughput evidence such a session will ever produce.
+   */
   useEffect(() => {
-    const record = (url: string, bytes: number, durationMs: number) => {
-      const endpoint = endpointRegistry.snapshot()
-        .find(({ endpoint: candidate }) => url.startsWith(candidate.baseUrl));
-      if (endpoint) endpointBandwidth.record(endpoint.endpoint.id, bytes, durationMs);
-    };
-    setTransferRecorder(record);
-    // Media is where the bytes are. Without this the bandwidth record only ever
-    // described JSON, so a node that served nothing but media had no throughput
-    // evidence and endpoint ranking had nothing to judge it on — which is how
-    // this client spent an afternoon streaming from the slowest node it had.
-    // The worker reports a query-free origin, and an endpoint id is its
-    // normalized base URL, so the same prefix attribution works for both.
-    setDirectPlayTransferListener(record);
-    return () => {
-      setTransferRecorder(undefined);
-      setDirectPlayTransferListener(undefined);
-      // Persistence is throttled, so the last few samples are still in memory.
-      endpointBandwidth.flush();
-    };
-  }, [endpointBandwidth, endpointRegistry]);
+    setDirectPlayTransferListener(
+      (url, bytes, durationMs) => endpointRegistry.recordTransferByUrl(url, bytes, durationMs),
+    );
+    return () => setDirectPlayTransferListener(undefined);
+  }, [endpointRegistry]);
   const { auth, ready: sessionReady, roles } = useSession({
     connectionRequired,
     serverConfigured: effectiveEndpoints.length > 0,
@@ -431,6 +454,19 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
   const preparePlaybackProfile = useCallback((profile: CatalogueMediaProfile) => {
     playbackRuntime.prepare(technicalProfileFromCatalogue(profile));
   }, [playbackRuntime]);
+  /**
+   * Whether playback may be reconstructed from the URL yet.
+   *
+   * A deep link into `/play/:id` runs its effect before anything has been
+   * established, so without this the client asks for playback facts with no
+   * endpoint and no session and chooses an instruction blind. `sessionReady`
+   * alone is not the test — it is true precisely while the client is
+   * *unconfigured* — so the endpoint list has to be in it.
+   *
+   * `!connectionRequired` is the injected-API case, which has no endpoints, no
+   * session and nothing to wait for.
+   */
+  const playbackReady = !connectionRequired || (effectiveEndpoints.length > 0 && sessionReady);
   const playback = usePlaybackController({
     api,
     platform,
@@ -439,6 +475,7 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
     progressStore,
     queueStore,
     volumeStore,
+    ready: playbackReady,
   });
   const activePlayback = playback.activePlayback;
 
@@ -509,8 +546,16 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
     if (location.pathname === routes.login || location.pathname === routes.connection) return;
     // Carry where they were trying to go, so signing in finishes the journey
     // rather than dropping them on Home to start it again.
-    navigate(routes.login, { replace: true, state: { from: location.pathname } });
-  }, [activePlayback, locked, location.pathname, navigate]);
+    navigate(routes.login, { replace: true, state: { from: `${location.pathname}${location.search}` } });
+  }, [activePlayback, locked, location.pathname, location.search, navigate]);
+
+  /**
+   * Finish the journey the login interrupted, rather than ending it at the form.
+   */
+  const finishSignIn = useCallback(() => {
+    refreshSession();
+    navigate(postSignInDestination((location.state as { from?: unknown } | null)?.from, landing), { replace: true });
+  }, [landing, location.state, navigate, refreshSession]);
 
   const open = useCallback((item: MediaSummary) => navigate(pathForMedia(item)), [navigate]);
   const openPlayer = useCallback((item: MediaSummary) => playback.startPlayback(item), [playback.startPlayback]);
@@ -671,7 +716,7 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
           guestAllowed={false}
           connectionReachable
           onSignIn={(username, password) => sessionManager.signIn({ username, password })}
-          onSignedIn={refreshSession}
+          onSignedIn={finishSignIn}
         />}
   </div>;
 
@@ -772,7 +817,7 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
               Home, which reads as the setting having been lost. */}
           <Route path="/manage/settings" element={<Navigate to={routes.settings} replace />} />
           <Route path="/manage/settings/connection" element={<Navigate to={routes.connection} replace />} />
-          <Route path={routes.login} element={<LoginScreen onSignIn={(username, password) => sessionManager.signIn({ username, password })} onSignedIn={refreshSession} />} />
+          <Route path={routes.login} element={<LoginScreen onSignIn={(username, password) => sessionManager.signIn({ username, password })} onSignedIn={finishSignIn} />} />
           <Route path={routes.account} element={<AccountScreen api={usersApi} session={session} />} />
           <Route path={routes.accountPassword} element={<ChangePasswordScreen api={usersApi} policy={session?.password_policy} onChanged={refreshSession} />} />
           <Route path={routes.sponsor} element={<SponsorScreen />} />

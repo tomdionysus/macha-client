@@ -71,7 +71,7 @@ describe('usePlaybackController route reconstruction', () => {
 
     const { result } = renderHook(
       (runtimeState: PlaybackRuntimeSnapshot) => usePlaybackController({
-        api, platform, runtime, runtimeState, progressStore, queueStore, volumeStore,
+        api, platform, runtime, runtimeState, progressStore, queueStore, volumeStore, ready: true,
       }),
       {
         initialProps: stalledSnapshot(),
@@ -101,7 +101,7 @@ describe('usePlaybackController route reconstruction', () => {
 
     renderHook(
       () => usePlaybackController({
-        api, platform, runtime, runtimeState: stalledSnapshot(), progressStore, queueStore, volumeStore,
+        api, platform, runtime, runtimeState: stalledSnapshot(), progressStore, queueStore, volumeStore, ready: true,
       }),
       { wrapper: ({ children }) => <MemoryRouter initialEntries={['/play/m2']}>{children}</MemoryRouter> },
     );
@@ -116,6 +116,58 @@ describe('usePlaybackController route reconstruction', () => {
     expect(details).toHaveBeenCalledWith('m2');
     expect(play).toHaveBeenCalledTimes(1);
   });
+
+  /**
+   * The 0.16.0 regression, measured against the deployed client before it was
+   * fixed: a reload into `/play/:id` reconstructed at 15 ms, some 700 ms before
+   * same-origin discovery had produced an endpoint at all. `runtime.play()`
+   * then asked for playback facts through a session manager that had not been
+   * started; core's `SessionManager.fetch` waits only for a mint already in
+   * flight, so the request went out bare, took a 401 and was returned
+   * unretried. The coordinator chose a container and codec anyway
+   * (`instruction-without-facts`), which reached the viewer as a Format error.
+   *
+   * Waiting is free here and guessing is not: this is the one playback path
+   * that runs off a URL rather than off a viewer acting in a connected app.
+   */
+  it('does not reconstruct from the URL before the client has an endpoint', async () => {
+    const play = vi.fn().mockResolvedValue(undefined);
+    const runtime = { play, stop: vi.fn(), setReturnTo: vi.fn() } as unknown as PlaybackRuntime;
+    const details = vi.fn().mockResolvedValue(movie('m3'));
+    const api = { details } as unknown as MediaApi;
+    const progressStore = new ContinueWatchingStore('test-client');
+    const queueStore = new PlaybackQueueStore('test-client');
+    const volumeStore = new VolumeStore('test-client');
+
+    const { rerender } = renderHook(
+      (ready: boolean) => usePlaybackController({
+        api, platform, runtime, runtimeState: stalledSnapshot(), progressStore, queueStore, volumeStore, ready,
+      }),
+      {
+        initialProps: false,
+        wrapper: ({ children }) => <MemoryRouter initialEntries={['/play/m3']}>{children}</MemoryRouter>,
+      },
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(play).not.toHaveBeenCalled();
+    expect(details).not.toHaveBeenCalled();
+
+    // And it is a hold, not a refusal: the same reload plays as soon as the
+    // client has somewhere to ask.
+    rerender(true);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(details).toHaveBeenCalledWith('m3');
+    expect(play).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('usePlaybackController season queue', () => {
@@ -127,7 +179,7 @@ describe('usePlaybackController season queue', () => {
     const volumeStore = new VolumeStore('test-client');
     return renderHook(
       () => usePlaybackController({
-        api, platform, runtime, runtimeState: stalledSnapshot(), progressStore, queueStore, volumeStore,
+        api, platform, runtime, runtimeState: stalledSnapshot(), progressStore, queueStore, volumeStore, ready: true,
       }),
       { wrapper: ({ children }) => <MemoryRouter initialEntries={[path]}>{children}</MemoryRouter> },
     );

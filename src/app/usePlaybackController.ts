@@ -26,8 +26,18 @@ export function usePlaybackController(options: {
   progressStore: ContinueWatchingStore;
   queueStore: PlaybackQueueStore;
   volumeStore: VolumeStore;
+  /**
+   * Whether this client has somewhere to ask yet: an endpoint, and a session
+   * attempt that has settled.
+   *
+   * Only the route-reconstruction effect reads it, and only that effect needs
+   * it — every other way playback starts is a viewer acting inside an app that
+   * is already connected. Reconstruction is the one path that runs off a URL on
+   * a cold load, before anything has been established.
+   */
+  ready: boolean;
 }) {
-  const { api, platform, runtime, runtimeState, progressStore, queueStore, volumeStore } = options;
+  const { api, platform, runtime, runtimeState, progressStore, queueStore, volumeStore, ready } = options;
   const navigate = useNavigate();
   const location = useLocation();
   const activePlayback = runtimeState.request;
@@ -160,6 +170,26 @@ export function usePlaybackController(options: {
   }, [activePlayback?.returnTo, location.pathname, location.search, navigate, playerRouteActive, progressStore, queueStore, runtime, widenToSeason]);
 
   useEffect(() => {
+    /**
+     * Never reconstruct playback before the client is connected.
+     *
+     * This effect runs off the URL, so on a deep link or a reload into
+     * `/play/:id` it fires on the first effect pass — measured at 15 ms against
+     * the deployed client, some 700 ms before same-origin endpoint discovery
+     * had produced an endpoint at all. `runtime.play()` then asks for playback
+     * facts through a session manager that has not been started, and core's
+     * `SessionManager.fetch` only waits for a mint that is already in flight:
+     * with none, it sends the request bare, takes the 401, and returns it
+     * unretried because nothing was sent to retry with. The coordinator logs
+     * `instruction-without-facts` and chooses a container and codec anyway,
+     * which reaches the viewer as a Format error on a title that plays.
+     *
+     * Regression from 0.16.0: before same-origin discovery, endpoints existed
+     * at first render and a mint was always already in flight by the time this
+     * ran. Nothing below can detect that — an endpoint probe is this client's
+     * business — so the gate belongs here rather than in core.
+     */
+    if (!ready) return undefined;
     if (runtimeState.phase === 'stopping') return undefined;
     if (suppressReconstructRef.current) {
       // Only the route catching up (leaving `/play/:id`) proves the
@@ -226,7 +256,7 @@ export function usePlaybackController(options: {
       if (nextQueue.items.length === 1) await widenToSeason(media);
     })().catch((error) => console.error('[macha] unable to reconstruct playback route', error));
     return () => { cancelled = true; };
-  }, [activePlayback?.media.id, api, location.search, location.state, playerItemId, progressStore, queueStore, runtime, runtimeState.phase, widenToSeason]);
+  }, [activePlayback?.media.id, api, location.search, location.state, playerItemId, progressStore, queueStore, ready, runtime, runtimeState.phase, widenToSeason]);
 
   const persistPlaybackPosition = useCallback((media: MediaSummary, positionMs: number) => {
     const persisted = queueStore.load();

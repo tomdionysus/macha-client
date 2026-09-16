@@ -23,6 +23,7 @@ export function webHlsBufferConfig(): Record<string, number | boolean> {
 
 export type ManagedHlsErrorAction =
   | { action: 'nonfatal' }
+  | { action: 'park-paused'; details: string }
   | { action: 'fail-unbuffered'; occurrences: number; details: string }
   | { action: 'restart-network'; attempt: number }
   | { action: 'fail-network'; attempts: number; details: string }
@@ -92,11 +93,20 @@ export function isHlsNetworkDegradation(data: HlsErrorShape): boolean {
   return data.type === HLS_NETWORK_ERROR && !isHlsSegmentHold(data);
 }
 
+/**
+ * @param viewerWaiting Whether the viewer currently wants this playing. Every
+ *   judgement below asks "is this node failing the person watching", and while
+ *   playback is paused there is nobody to fail: hls.js is topping up a buffer
+ *   on its own initiative, against a frontier the viewer will not reach for
+ *   minutes or hours. Defaults to true, so a caller that has not thought about
+ *   it gets the judging behaviour rather than the silent one.
+ */
 export function managedHlsErrorAction(
   data: { fatal?: boolean; type?: unknown; details?: unknown },
   recovery: ManagedHlsMediaRecoveryBudget,
   positionMs: number,
   buffered = true,
+  viewerWaiting = true,
 ): ManagedHlsErrorAction {
   if (!data.fatal) {
     // A non-fatal media error while nothing has ever buffered is only
@@ -116,6 +126,21 @@ export function managedHlsErrorAction(
       }
     }
     return { action: 'nonfatal' };
+  }
+  // Fatal, and nobody is watching. Judging here spends the one network restart
+  // the viewer will need when they come back, and a second fatal error during a
+  // long pause tears down a generation nothing was using — which is how a pause
+  // ends on a failure screen naming a node the viewer never asked for. Stop
+  // asking, and ask again on resume with the viewer actually present.
+  //
+  // Deliberately every fatal class and not just the network one. A media
+  // pipeline that died while paused is in the same position: the recovery is
+  // worth attempting when it can be seen to work, and worth nothing beforehand.
+  if (!viewerWaiting) {
+    return {
+      action: 'park-paused',
+      details: typeof data.details === 'string' ? data.details : String(data.type ?? 'unknown'),
+    };
   }
   if (data.type === HLS_NETWORK_ERROR) {
     const decision = recovery.fatalNetworkError();

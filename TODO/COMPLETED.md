@@ -1,6 +1,86 @@
 # Completed and tested
 
-Last updated: 2026-09-15
+Last updated: 2026-09-16
+
+## A pause is no longer read as a dead node
+
+2026-09-16. The client half of the P0 in
+[a paused generation is declared dead](2026-09-16-pause-fails-playback.md),
+which has the full timelines. Not the whole entry: the failover half is core's
+and stays open, and a live re-measurement is still owed.
+
+**The symptom.** Pause a title, leave it, and the player fails on its own with
+`Macha endpoint http://10.35.1.50:7438 failed: Failed to fetch`. Play recovers.
+Reproduced three times against the live cluster, client on core 0.12.0, server
+0.43.0 on ramaroja, hls.js path, transcode with video copied.
+
+**Two independent detectors were judging a node with nobody waiting on it.**
+
+*The stall watchdog ran straight through the pause.* Core's
+`MediaStallWatchdog` restarts its countdown on every advancing report and is
+armed until something disarms it; `WebPlayer.publish()` reports only while
+`!video.paused`. So pausing stops the restarts and leaves the countdown running.
+Measured from the diagnostics buffer: `source-stalled` fired **7001 ms** after
+the last report before the pause, which is the budget exactly. Core had built
+`suspend()` for this case — "Paused is not stalled: the viewer stopped it on
+purpose" — and the web player had never called it.
+
+*hls.js exhausted its recovery budget while paused.* It keeps filling its
+forward buffer through a pause, which is the intended design. On a node
+producing segments slowly — its own session POSTs answered 503 after 20 s and
+34 s, `VOD planning timed out while loading video seek index` and `timed out
+waiting for first fragmented-MP4 segment` — the one permitted `restart-network`
+was spent at 21 s into a pause and the next fatal error went terminal at 130 s.
+A generation nothing was using, torn down.
+
+**The fix, in one sentence each.** `pause()` now suspends the stall watchdog,
+which core re-arms on the first report after the resume, so a node that dies
+mid-pause is still judged the moment anyone waits on it again. And a fatal
+hls.js error raised while paused now parks the load rather than being judged:
+`managedHlsErrorAction` gained a `viewerWaiting` argument and a `park-paused`
+action, `WebPlayer` answers it with `stopLoad()`, and `resume()` calls
+`startLoad(video.currentTime)` before asking the element to play, so the same
+error is met again with the viewer present and the budget intact.
+
+Keyed on `wantsPlayback`, not `video.paused`. Between a play request and the
+element actually running, `video.paused` is still true while the viewer is very
+much waiting, and that window is precisely when a node refusing the stream must
+be judged rather than excused.
+
+**Seen failing first, in the shape that shipped.** "holds a pause indefinitely
+rather than deciding the source died" fails against the unfixed player with the
+live message verbatim — `Playback stopped and nothing arrived for 7s.` — and
+"judges the node again from the moment playback resumes" covers the opposite
+error of switching the watchdog off, asserting silence through the pause and
+exactly one failure after the resume. Both confirmed red by removing the single
+`suspend()` call from the finished code and running them again. Two policy tests
+cover parking. 346 tests green, typecheck clean.
+
+**Verified live the same day**, dev client against ramaroja on server 0.43.0,
+hls.js path, same episode. Paused at 43.6 s and held for **138 s with zero
+warnings or errors**, where the old code failed at 7 s; resumed cleanly to
+55.2 s. `visibilityState` was confirmed `visible` throughout and `hasFocus()`
+was `false` for the first half, which is the condition Tom set — a pause must
+hold whether or not the tab has focus. The first attempt at this measurement was
+worthless for exactly that reason: with the window occluded the element sat at
+`readyState 0` and the watchdogs banked no time, the same confound recorded
+under the `readyState 0` P0.
+
+The buffered frontier moved from 79 s to 165 s across the pause, which is the
+other half of the result: parking only happens on a fatal error, so an ordinary
+pause still fills its forward buffer as the design comment promises and the
+resume is instant rather than a reload. Not covered live: a node that actually
+dies mid-pause, which needs a node stopped at the right moment; the re-arm is
+unit-covered.
+
+**One thing found on the way and left alone.** With the stall watchdog
+suspended, the first version of the test failed instead on `The stream delivered
+no data in 20s.` — the *start* watchdog, which is armed for element-owned
+fetches regardless of pause. It is narrow in practice (`preload="auto"` means a
+paused element still fetches) and the obvious fix is wrong: core exposes only
+`stop()`/`start()`, so re-arming on resume would run a fresh 20 s budget against
+an element resuming from a full buffer that may not fire `progress` inside it.
+That is a core seam, not a client workaround. Recorded in the dated document.
 
 ## Same-origin endpoint discovery, and two Status corrections (client 0.16.0)
 

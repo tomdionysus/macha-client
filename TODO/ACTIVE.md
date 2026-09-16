@@ -1,6 +1,6 @@
 # Active tasks and concepts to explore
 
-Last updated: 2026-09-15 (0.16.0 released)
+Last updated: 2026-09-16 (pause P0 added)
 
 This is the working backlog. Add new work here. When an item is implemented and
 its stated verification is complete, remove it from this file and add a dated
@@ -33,10 +33,17 @@ against a partial cluster should be quoted as current.
 waiting on it, and it is not mechanical: the wording a viewer sees depends on a
 measured fact about this cluster, recorded in that item.
 
-**After that, the P0s are the honest priority.** Three of the four are playback
-correctness and all three are old: Direct Play stuck at `readyState 0`,
-any-node failover, and a ready standby discarded 33 s before it is used. The
-fourth is the server's, and only needs re-measuring.
+**The first P0 below is a business P0 and outranks the rest** — scope-ratio
+titles play small in a black window, which is the quality of the product on the
+titles people choose it for. It is blocked on a server fact and needs chasing
+rather than coding.
+
+**After that, the P0s are the honest priority.** Every failover from an https
+page lands on an unreachable http node and shows "Failed to fetch" (2026-09-16 —
+the client half is fixed and in `COMPLETED.md`, the rest is core's). Three more
+are playback correctness and all three are old: Direct Play stuck at
+`readyState 0`, any-node failover, and a ready standby discarded 33 s before it
+is used. The last is the server's, and only needs re-measuring.
 
 **Anything on a television needs Tom present.** The Samsung items below are
 gated on the set being on.
@@ -149,6 +156,47 @@ something outside this repo or needs groundwork before it can start safely.
   An absent `mutable` means "this node does not say", not "refused".
 - **Roles are literal.** A capability the server did not name is one the
   session does not have; unknown is not the same as none.
+
+## P0 — Any failover from an https page dies on an http node, and says "Failed to fetch"
+
+Diagnosed 2026-09-16. Evidence and timelines:
+[a paused generation is declared dead](2026-09-16-pause-fails-playback.md).
+**The client half of that document is fixed and in `COMPLETED.md`; this is what
+is left, and it is the more important half.**
+
+Two symptoms, one cause. Pause a title and leave it, and the player fails on its
+own with `Macha endpoint http://10.35.1.50:7438 failed: Failed to fetch`. And,
+reported separately by Tom the same day, *"random 'Failed to fetch' in a running
+stream which resolves if you press play"*. Nobody had connected them.
+
+**Every door into a failover ends in the same room.** A stall, a fatal hls.js
+error, a premature source end — any of them correctly hands the coordinator a
+generation to replace. What follows never varies: the failed node is excluded,
+the only remaining candidate is a discovered plain-http LAN address, an https
+page cannot fetch it, and the viewer gets a failure screen naming a node that
+was never serving them. Play recovers because it is a fresh candidate walk with
+no exclusions. Failing over while playing is right; offering a candidate this
+host has no way of reaching is not.
+
+Both items are core's, and neither has a client workaround worth building:
+
+- [ ] **An http endpoint is not a failover candidate from an https page.** The
+      same browser constraint as the P1 "https deployment against http nodes"
+      entry below, which covers the read-ahead worker and not this. Whether a
+      host can reach an endpoint at all is host knowledge, like
+      `MediaWatchdogEnvironment.visible()` — core has no way to know and today
+      has no seam to be told.
+- [ ] **The terminal error carries the failure that started the failover**, not
+      the last endpoint tried. Today the screen blames a node that was never
+      serving the title, which is what sent this investigation to the wrong
+      place to begin with.
+The pause itself is verified live: 138 s paused with no warnings, no errors and
+a forward buffer still filling, against 7 s to failure before the fix. Evidence
+in `COMPLETED.md`. What is not verified live is a node dying *during* a pause,
+which needs a node stopped at the right moment; the re-arm is unit-covered.
+
+The "Pause: confirmed not applicable" note under any-node failover below was
+right that pause makes no server call and wrong about the conclusion.
 
 ## P0 — 40% of artwork is unreachable when one of three nodes is down
 

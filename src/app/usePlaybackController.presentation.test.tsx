@@ -76,6 +76,7 @@ describe('presentation while playback is starting', () => {
         progressStore,
         queueStore,
         volumeStore,
+        ready: true,
       });
       renders.push({ visible: playback.playerVisible, routeActive: playback.playerRouteActive });
       startPlayback = playback.startPlayback;

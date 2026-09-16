@@ -26,10 +26,6 @@
 .cluster-startup-error { margin: .7rem 0 0; font-size: .82rem; }
 .cluster-conditions { display: flex; flex-wrap: wrap; gap: .5rem; margin: 0 0 1rem; }
 .cluster-conditions span { padding: .45rem .65rem; border: 1px solid #815b293f; border-radius: .5rem; background: #38240952; color: #d7bb8b; font-size: .82rem; }
-/* A stated fact about the topology, not a problem with it. Same shape as a
-   condition so it still reads as one, in the neutral palette the metric cards
-   use, so it does not compete with the amber that means something is wrong. */
-.cluster-conditions span.informational { border-color: #ffffff10; background: #151517c9; color: var(--text-dim); }
 .cluster-check-result { margin: 0 0 1rem; color: var(--text-dim); font-size: .9rem; }
 .cluster-check-result.reachable { color: #a8c8ae; }
 .cluster-check-result.unreachable { color: #e4a9ad; }

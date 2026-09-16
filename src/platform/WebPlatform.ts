@@ -366,6 +366,8 @@ class WebPlayer implements Player {
   private degradedSourceGeneration?: number;
   private unsubscribeDirectDegradation?: () => void;
   private hlsMediaRecovery?: ManagedHlsMediaRecoveryBudget;
+  /** A managed-HLS load stopped by a fatal error raised while nobody was watching. */
+  private hlsLoadParkedWhilePaused = false;
   private mediaTimeline?: WebMediaTimeline;
   private lastPublishedEvent?: PlaybackEvent;
   private readonly startWatchdog = new MediaStartWatchdog(browserMediaWatchdogEnvironment);
@@ -484,6 +486,7 @@ class WebPlayer implements Player {
     const sourceGeneration = ++this.sourceGeneration;
     this.failedSourceGeneration = undefined;
     this.degradedSourceGeneration = undefined;
+    this.hlsLoadParkedWhilePaused = false;
     this.wantsPlayback = !startPaused;
     // Suppress media-element teardown events from the previous source. The new
     // generation timeline must not observe or learn an origin from old buffer
@@ -933,6 +936,16 @@ class WebPlayer implements Player {
     this.log.info('pause-request', this.video ? videoState(this.video) : undefined);
     this.wantsPlayback = false;
     setDirectPlayReadAheadMode(this.directReadAheadSourceUrl, 'paused');
+    // Paused is not stalled. The stall budget measures a viewer waiting on a
+    // picture that will not move, and a pause is the one case where the picture
+    // is not moving because they said so — so the countdown is stood down here
+    // rather than left to expire against nobody. Without this a pause reliably
+    // ended in a failure screen seven seconds later, on a node that was fine.
+    //
+    // Stood down, not switched off: core re-arms on the first report after the
+    // resume, so a node that dies mid-pause is still judged the moment anyone
+    // is waiting on it again.
+    this.stallWatchdog.suspend();
     // Pause is presentation intent, not source teardown. Managed HLS and the
     // Direct Play worker continue filling their bounded forward buffers.
     this.video?.pause();
@@ -948,7 +961,25 @@ class WebPlayer implements Player {
     }
     this.log.info('resume-request', videoState(video));
     this.wantsPlayback = true;
+    this.restartParkedHlsLoad(video);
     this.requestPlay(video, 'resume');
+  }
+
+  /**
+   * Put a managed-HLS load back on the road after a pause parked it.
+   *
+   * The restart is the same call the judged path makes for `restart-network`,
+   * and it is deliberately made before `requestPlay`: whatever killed the load
+   * is about to be met again, and it should be met while the viewer is waiting,
+   * which is the state in which this client knows what to do about it.
+   */
+  private restartParkedHlsLoad(video: HTMLVideoElement): void {
+    if (!this.hlsLoadParkedWhilePaused) return;
+    this.hlsLoadParkedWhilePaused = false;
+    const hls = this.hls;
+    if (!hls) return;
+    this.log.warn('hls-load-restarted-after-pause', videoState(video));
+    hls.startLoad(video.currentTime);
   }
 
   private requestPlay(video: HTMLVideoElement, reason: string, expectedGeneration = this.playRequestGeneration): void {
@@ -1043,6 +1074,7 @@ class WebPlayer implements Player {
     this.sourceGeneration += 1;
     this.failedSourceGeneration = undefined;
     this.degradedSourceGeneration = undefined;
+    this.hlsLoadParkedWhilePaused = false;
     this.wantsPlayback = false;
     this.activeSource = undefined;
     this.mediaTimeline = undefined;
@@ -1246,6 +1278,11 @@ class WebPlayer implements Player {
         mediaRecovery,
         this.lastPublishedEvent?.positionMs ?? 0,
         video.buffered.length > 0,
+        // Viewer intent, not the element's state. Between a play request and
+        // the element actually running, `video.paused` is still true while the
+        // viewer is very much waiting — and that window is exactly when a node
+        // that refuses the stream must be judged rather than excused.
+        this.wantsPlayback,
       );
       if (action.action === 'nonfatal') {
         this.log.warn('hls-error-nonfatal', payload);
@@ -1263,6 +1300,15 @@ class WebPlayer implements Player {
         return;
       }
       this.log.error('hls-error-fatal', payload);
+      if (action.action === 'park-paused') {
+        // Logged as a warning and kept out of the failure channel entirely.
+        // Nothing is torn down and no budget is spent; `resume()` picks the
+        // load back up and the same error, if it is still true, is judged then.
+        this.log.warn('hls-load-parked-while-paused', { ...payload, details: action.details });
+        this.hlsLoadParkedWhilePaused = true;
+        hls.stopLoad();
+        return;
+      }
       if (action.action === 'restart-network') {
         this.log.warn('hls-recovery-network-start-load', { ...payload, attempt: action.attempt });
         hls.startLoad(video.currentTime);

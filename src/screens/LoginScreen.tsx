@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { errorMessage, routes } from '@machafoundation/core';
+import { errorMessage, routes, SessionNotStartedError } from '@machafoundation/core';
 import { machaLogoUrl as logoUrl } from '../uiAssets';
 
 interface Props {
@@ -53,8 +53,20 @@ interface Props {
  * Anything that is *not* a refusal keeps its original wording. An unreachable
  * node, a 500, a timeout — none of those are a wrong password, and saying so
  * would send someone hunting for a typo that is not there.
+ *
+ * `SessionNotStartedError` is checked first and separately, because it is the
+ * one failure where **no node was asked at all**. It arrives as a
+ * `MachaConnectionError` so that a client which classifies broadly still
+ * treats it as a failure rather than a success, but calling it unreachable
+ * would blame a cluster that was never contacted and send somebody to check a
+ * server that is up. It is this application not having started its session
+ * manager — our fault, not theirs, and the only honest thing to say is that
+ * the client was not ready.
  */
 function signInComplaint(cause: unknown): string {
+  if (cause instanceof SessionNotStartedError) {
+    return 'The client was not ready to sign in. Please try again in a moment.';
+  }
   const status = (cause as { status?: unknown } | undefined)?.status;
   return status === 401 || status === 403
     ? 'That username and password were not recognised. Please try again.'

@@ -18,13 +18,21 @@ const log = createClientLogger('cluster.same-origin');
 export const SAME_ORIGIN_PROBE_TIMEOUT_MS = 1_500;
 
 /**
- * The three answers `/api/v1/health` gives, from server 0.38.5: `ok` with 200,
- * `starting` and `failed` with 503. Documented on `LIVENESS_PATH` in core and
- * measured against the deployed cluster on 2026-09-15.
+ * The answers `/api/v1/health` gives: `ok` with 200, and `starting`, `failed`
+ * or `busy` with 503. The first three are from server 0.38.5, documented on
+ * `LIVENESS_PATH` in core and measured against the deployed cluster on
+ * 2026-09-15; `busy` arrives with 0.43.0.
+ *
+ * `busy` is a node refusing work because its control lane's queue is full, and
+ * it carries `Retry-After`. It identifies the node exactly as the others do —
+ * the refusal body keeps `service` and `status` for that reason — so it is a
+ * node to wait for, never evidence that the address is not Macha. Refusing it
+ * would put an endpoint form in front of a viewer during a load spike, on a
+ * node that is plainly there.
  */
-export type MachaHealthStatus = 'ok' | 'starting' | 'failed';
+export type MachaHealthStatus = 'ok' | 'starting' | 'failed' | 'busy';
 
-const HEALTH_STATUSES: readonly MachaHealthStatus[] = ['ok', 'starting', 'failed'];
+const HEALTH_STATUSES: readonly MachaHealthStatus[] = ['ok', 'starting', 'failed', 'busy'];
 
 /**
  * The product marker, once a node states one.
@@ -110,9 +118,9 @@ export async function confirmMachaEndpoint(
   if (typeof record.status !== 'string') return undefined;
   const status = record.status as MachaHealthStatus;
   if (!HEALTH_STATUSES.includes(status)) return undefined;
-  // The status line and the body carry the same answer. A payload that
-  // disagrees with its own response code is not this contract being answered,
-  // whatever it is.
+  // The status line and the body carry the same answer: `ok` is the only 200,
+  // and every other value is a 503. A payload that disagrees with its own
+  // response code is not this contract being answered, whatever it is.
   if (status === 'ok' ? !response.ok : response.status !== 503) return undefined;
   if (record.service !== undefined && record.service !== PRODUCT_MARKER) return undefined;
 

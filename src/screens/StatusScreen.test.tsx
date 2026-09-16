@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { EndpointCandidate } from '@machafoundation/core';
 import type { ClusterNodeStatus, ClusterStatusSnapshot } from '@machafoundation/core';
 import type { IdentityAssociationResetResult, ManageApi } from '@machafoundation/core';
-import { acceptNodeIdentityAssociationReset, clientEndpointHealth, conditionIsInformational, identityResetAcceptanceMessage, nodeInboundCapable, nodeNotYetReady, nodeStatusLabel, StatusHeader, statusSectionVisibility, systemMemoryBytes, TELEMETRY_AGEING_MS, TELEMETRY_STALE_MS, telemetryAge, withoutRetiredNodeIdentity } from './StatusScreen';
+import { acceptNodeIdentityAssociationReset, clientEndpointHealth, conditionStatedPerNode, identityResetAcceptanceMessage, nodeInboundCapable, nodeNotYetReady, nodeStatusLabel, StatusHeader, statusSectionVisibility, systemMemoryBytes, TELEMETRY_AGEING_MS, TELEMETRY_STALE_MS, telemetryAge, withoutRetiredNodeIdentity } from './StatusScreen';
 
 function candidate(health: EndpointCandidate['health'], ready = true): EndpointCandidate {
   return {
@@ -88,25 +88,25 @@ describe('per-node phase distinct from connection state', () => {
   });
 });
 
-describe('cluster conditions that are configuration rather than fault', () => {
+describe('cluster conditions the node pages already state', () => {
   /**
    * A node configured to accept no inbound connections is a normal topology —
    * this cluster has one on its own LAN — and it is permanent. Painting it
    * amber on every visit to Status trains the reader to skip the row that will
    * one day carry something real.
    */
-  it('does not warn about a node that accepts no inbound connections', () => {
-    expect(conditionIsInformational('1 node accepts no inbound connections')).toBe(true);
+  it('drops the cluster-level count, which the node page states per node', () => {
+    expect(conditionStatedPerNode('1 node accepts no inbound connections')).toBe(true);
     // The server counts them, so the count is not part of the match.
-    expect(conditionIsInformational('2 nodes accept no inbound connections')).toBe(true);
+    expect(conditionStatedPerNode('2 nodes accept no inbound connections')).toBe(true);
   });
 
-  it('keeps warning about everything it does not recognise', () => {
+  it('shows everything it does not recognise, still as a warning', () => {
     // Unknown is not benign. A condition this helper has never seen must keep
     // the amber, or the next genuinely bad one arrives wearing grey.
-    expect(conditionIsInformational('metadata quorum unavailable')).toBe(false);
-    expect(conditionIsInformational('1 node offline')).toBe(false);
-    expect(conditionIsInformational('')).toBe(false);
+    expect(conditionStatedPerNode('metadata quorum unavailable')).toBe(false);
+    expect(conditionStatedPerNode('1 node offline')).toBe(false);
+    expect(conditionStatedPerNode('')).toBe(false);
   });
 });
 

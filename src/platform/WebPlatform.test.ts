@@ -227,6 +227,97 @@ describe('Web player source reassignment', () => {
       return player;
     }
 
+    /**
+     * A fake element that accepts `play()`, so the player's own resume path
+     * runs rather than throwing before it reaches the element.
+     *
+     * The readiness constants live on the `HTMLMediaElement` constructor rather
+     * than on an element, and `publish()` reads one of them, so a suite with no
+     * DOM has to supply it or no fake element is usable at all.
+     */
+    function playableVideo(): HTMLVideoElement {
+      vi.stubGlobal('HTMLMediaElement', { HAVE_FUTURE_DATA: 3 });
+      const video = fakeVideo();
+      (video as unknown as { play: () => Promise<void> }).play = () => Promise.resolve();
+      return video;
+    }
+
+    /**
+     * One publish at a new position. The stall watchdog is driven from these
+     * and from nothing else, so arming it takes two: one to establish a
+     * baseline and one to advance past it.
+     */
+    function advanceTo(video: HTMLVideoElement, seconds: number): void {
+      (video as { currentTime: number }).currentTime = seconds;
+      emit(video, 'timeupdate');
+    }
+
+    function setPaused(video: HTMLVideoElement, paused: boolean): void {
+      (video as { paused: boolean }).paused = paused;
+      emit(video, paused ? 'pause' : 'play');
+    }
+
+    it('holds a pause indefinitely rather than deciding the source died', async () => {
+      vi.useFakeTimers();
+      try {
+        const video = playableVideo();
+        const player = attachedPlayer(video);
+        const failures: Error[] = [];
+        player.subscribeFailure?.((error) => failures.push(error));
+
+        await player.play(directSource, 0, false);
+        // Bytes reached the element, which stands the start watchdog down and
+        // leaves the stall budget as the only thing judging what follows.
+        emit(video, 'progress');
+        setPaused(video, false);
+        advanceTo(video, 1);
+        advanceTo(video, 2);
+
+        player.pause();
+        setPaused(video, true);
+
+        // Far past the stall budget. Nothing is arriving because nobody asked
+        // for anything, and a viewer who paused has not been let down by a node.
+        vi.advanceTimersByTime(120_000);
+        expect(failures).toEqual([]);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('judges the node again from the moment playback resumes', async () => {
+      vi.useFakeTimers();
+      try {
+        const video = playableVideo();
+        const player = attachedPlayer(video);
+        const failures: Error[] = [];
+        player.subscribeFailure?.((error) => failures.push(error));
+
+        await player.play(directSource, 0, false);
+        emit(video, 'progress');
+        setPaused(video, false);
+        advanceTo(video, 1);
+        advanceTo(video, 2);
+        player.pause();
+        setPaused(video, true);
+        vi.advanceTimersByTime(120_000);
+        expect(failures).toEqual([]);
+
+        // The node died during the pause. Resuming is the first moment anyone
+        // is waiting on it again, and the budget runs from there — suspending
+        // the watchdog must never amount to switching it off.
+        player.resume();
+        setPaused(video, false);
+        emit(video, 'timeupdate');
+        vi.advanceTimersByTime(120_000);
+
+        expect(failures).toHaveLength(1);
+        expect(failures[0]?.message).toContain('nothing arrived');
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it('surfaces a retryable stream failure so the coordinator can fail over', async () => {
       vi.useFakeTimers();
       try {

@@ -65,6 +65,30 @@ describe('confirmMachaEndpoint', () => {
   });
 
   /**
+   * Server 0.43.0 refuses work when the control lane's queue is full, with a
+   * 503 and `Retry-After`. The refusal body deliberately keeps `service` and
+   * `status`, so it still identifies the node — and a node that is busy is one
+   * to wait for, not evidence that the address is not Macha. Refusing it would
+   * put an endpoint form in front of a viewer during a load spike, on a node
+   * that is plainly there.
+   */
+  it('confirms a node refusing work because it is busy', async () => {
+    const overloaded = answering(answer(503, 'application/json', {
+      service: 'macha',
+      status: 'busy',
+      error: { code: 'overloaded', message: 'the node is busy; retry shortly' },
+    }));
+    expect(await confirmMachaEndpoint('https://node', overloaded)).toEqual({ status: 'busy', marked: true });
+  });
+
+  // `busy` is a 503 like the other two, and the pairing rule still holds: a
+  // body claiming to be busy on a 200 is not this contract being answered.
+  it('refuses a busy body that arrives with a 200', async () => {
+    const inconsistent = answering(answer(200, 'application/json', { service: 'macha', status: 'busy' }));
+    expect(await confirmMachaEndpoint('https://node', inconsistent)).toBeUndefined();
+  });
+
+  /**
    * The marker the server is adding: `{"service":"macha","status":"ok"}` and
    * nothing more. It carries no version deliberately — an unauthenticated
    * route that answers anyone who can reach the port does not get to say which

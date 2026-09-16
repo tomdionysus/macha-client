@@ -44,6 +44,22 @@ const REASON_TEXT: Record<PlaybackDecisionReason, string> = {
 };
 
 /**
+ * Why the facts lookup failed, in one clause, or nothing.
+ *
+ * `factsError` is `unknown` by contract — it is whatever the facts supplier
+ * threw — so nothing here assumes a shape. An absent error is not a failure to
+ * describe: core states that it is absent when there is no facts supplier at
+ * all, which is a configuration rather than a fault, and inventing a sentence
+ * for it would report a problem nobody has.
+ */
+function describeFactsError(cause: unknown): string | undefined {
+  if (cause === undefined || cause === null) return undefined;
+  const message = cause instanceof Error ? cause.message : String(cause);
+  const trimmed = message.trim();
+  return trimmed.length > 0 ? trimmed.replace(/\.$/, '') : undefined;
+}
+
+/**
  * Why this stream is being served the way it is.
  *
  * The chooser's worst failure has no symptom without this. When the facts
@@ -57,7 +73,18 @@ const REASON_TEXT: Record<PlaybackDecisionReason, string> = {
 function instructionNote(instruction: PlaybackInstructionReport | undefined): string | undefined {
   if (!instruction) return undefined;
   if (instruction.chosenByViewer) return 'Chosen by you.';
-  if (instruction.withoutFacts) return 'Chosen without facts — transcoding because nothing could be reasoned from.';
+  if (instruction.withoutFacts) {
+    // Say *why* nothing could be read, from server 0.12.0's `factsError`. A
+    // viewer who sees "could not be reasoned from" has no idea whether their
+    // file is broken, their node is busy or this client never asked — and the
+    // symptom they get downstream is a media error that reads as a corrupt
+    // download. `factsError` is deliberately `unknown`, because it is whatever
+    // the supplier threw, so it is described rather than trusted.
+    const cause = describeFactsError(instruction.factsError);
+    return cause
+      ? `Chosen without facts — transcoding because this file's details could not be read: ${cause}`
+      : 'Chosen without facts — transcoding because nothing could be reasoned from.';
+  }
   const reasons = instruction.reasons.map((reason) => REASON_TEXT[reason] ?? reason);
   return reasons.length > 0 ? `Chosen automatically: ${reasons.join('; ')}.` : 'Chosen automatically.';
 }

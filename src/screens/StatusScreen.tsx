@@ -163,28 +163,32 @@ function nodeStatusClassName(node: ClusterNodeStatus): string {
 }
 
 /**
- * Conditions that describe how the cluster is configured rather than what is
- * wrong with it.
+ * Conditions the node pages already state, per node, and better.
  *
- * `conditions` arrives as free prose with no severity on the wire, and the
- * panel paints every entry amber. So a node deliberately configured to accept
- * no inbound connections — a normal topology, not a fault — reads as a warning
- * every time Status is opened. A panel that cries wolf on a permanent,
- * intended state is worse than one that says nothing: it teaches the reader to
- * skip the row that will one day carry something real.
+ * `conditions` is free prose with no severity on the wire and the panel paints
+ * every entry amber, so "1 node accepts no inbound connections" — a permanent,
+ * intended topology — read as a fault at the top of Status on every visit. A
+ * panel that cries wolf about a standing state teaches the reader to skip the
+ * row that will one day carry something real.
+ *
+ * Styling it neutrally was the first attempt and was not enough: the line is
+ * still the first thing on the screen, and it still says nothing actionable.
+ * It is dropped now rather than recoloured because the fact is not lost — the
+ * node's own page carries `Inbound RPC connections`, attributed to the node it
+ * is about, which is more than the cluster-level count ever said.
  *
  * Matched on the stable half of the sentence, because the server counts the
  * nodes: "1 node accepts no inbound connections", "2 nodes accept…". Prose is
- * a poor thing to match on and this should be a severity the server states —
- * raised with the server session — but until it is, the choice is between
- * matching the sentence and miscolouring the fact.
+ * a poor thing to match on and a severity stated on the wire would be the
+ * durable fix; until then the choice is between matching the sentence and
+ * showing a permanent false alarm.
  *
- * Anything unrecognised keeps the warning styling. Unknown is not benign.
+ * Anything unrecognised is still shown, and still amber. Unknown is not benign.
  */
-const INFORMATIONAL_CONDITIONS: readonly RegExp[] = [/\bno inbound connections\b/i];
+const CONDITIONS_STATED_PER_NODE: readonly RegExp[] = [/\bno inbound connections\b/i];
 
-export function conditionIsInformational(condition: string): boolean {
-  return INFORMATIONAL_CONDITIONS.some((pattern) => pattern.test(condition));
+export function conditionStatedPerNode(condition: string): boolean {
+  return CONDITIONS_STATED_PER_NODE.some((pattern) => pattern.test(condition));
 }
 
 function UsageBar({ used, capacity }: { used: number; capacity: number }) {
@@ -523,6 +527,7 @@ export function StatusScreen({ api, endpointRegistry, manageApi, platform, secti
   </section>;
 
   const cluster = snapshot.cluster;
+  const clusterConditions = cluster.conditions.filter((condition) => !conditionStatedPerNode(condition));
   const reachable = check?.results.filter((result) => result.reachable).length;
   const visible = statusSectionVisibility(section);
   return (
@@ -543,9 +548,9 @@ export function StatusScreen({ api, endpointRegistry, manageApi, platform, secti
         </div>
         {snapshot.startup.error && <p className="cluster-startup-error">{snapshot.startup.error}</p>}
       </section>}
-      {cluster.conditions.length > 0 && <div className="cluster-conditions">{cluster.conditions.map((condition) => (
-        <span key={condition} className={conditionIsInformational(condition) ? 'informational' : undefined}>{condition}</span>
-      ))}</div>}
+      {clusterConditions.length > 0 && <div className="cluster-conditions">
+        {clusterConditions.map((condition) => <span key={condition}>{condition}</span>)}
+      </div>}
       <div className="cluster-metric-grid">
         <ClusterMetric label="Nodes" value={`${cluster.nodes_online} / ${cluster.nodes_known}`} detail="online" />
         <ClusterMetric label="Metadata" value={cluster.metadata_availability === 'writable' ? 'Writable' : cluster.metadata_availability === 'read-only' ? 'Read-only' : 'Unavailable'} detail={`${cluster.metadata_voters_online}/${cluster.metadata_voters} voters · ${cluster.metadata_quorum_required} required`} />

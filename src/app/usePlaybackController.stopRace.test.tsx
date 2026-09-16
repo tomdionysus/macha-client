@@ -55,7 +55,7 @@ describe('usePlaybackController stop() vs. route-reconstruction race', () => {
 
     const { result, rerender } = renderHook(
       (runtimeState: PlaybackRuntimeSnapshot) => usePlaybackController({
-        api, platform, runtime, runtimeState, progressStore, queueStore, volumeStore,
+        api, platform, runtime, runtimeState, progressStore, queueStore, volumeStore, ready: true,
       }),
       { initialProps: { phase: 'playing', generation: 1, request: activeRequest } as PlaybackRuntimeSnapshot },
     );
@@ -91,7 +91,7 @@ describe('usePlaybackController stop() vs. route-reconstruction race', () => {
 
     const { result, rerender } = renderHook(
       (runtimeState: PlaybackRuntimeSnapshot) => usePlaybackController({
-        api, platform, runtime, runtimeState, progressStore, queueStore, volumeStore,
+        api, platform, runtime, runtimeState, progressStore, queueStore, volumeStore, ready: true,
       }),
       { initialProps: { phase: 'playing', generation: 1, request: activeRequest } as PlaybackRuntimeSnapshot },
     );

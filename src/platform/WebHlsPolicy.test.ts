@@ -116,6 +116,39 @@ describe('managed HLS error policy', () => {
     }
   });
 
+  it('does not judge a node while the viewer has playback paused', () => {
+    // Nobody is waiting, so a fatal error here is not evidence about anything
+    // the viewer wants. Spending the one network restart while paused leaves
+    // nothing for the resume, and the second fatal tore down a generation that
+    // was only ever filling a buffer — a pause that ended in a failure screen.
+    const recovery = new ManagedHlsMediaRecoveryBudget();
+    const error = { fatal: true, type: Hls.ErrorTypes.NETWORK_ERROR, details: 'fragLoadError' };
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      expect(managedHlsErrorAction(error, recovery, 0, true, false)).toEqual({
+        action: 'park-paused',
+        details: 'fragLoadError',
+      });
+    }
+    // The budget is untouched by any of that, so the viewer still gets their
+    // restart when they come back and the judgement is made with them present.
+    expect(managedHlsErrorAction(error, recovery, 0, true, true)).toEqual({
+      action: 'restart-network',
+      attempt: 1,
+    });
+  });
+
+  it('parks every fatal class while paused, and still ignores the nonfatal ones', () => {
+    const recovery = new ManagedHlsMediaRecoveryBudget();
+    expect(managedHlsErrorAction({ fatal: true, type: Hls.ErrorTypes.MEDIA_ERROR }, recovery, 0, true, false))
+      .toEqual({ action: 'park-paused', details: 'mediaError' });
+    expect(managedHlsErrorAction({ fatal: true, type: 'muxError', details: 'internalException' }, recovery, 0, true, false))
+      .toEqual({ action: 'park-paused', details: 'internalException' });
+    // A nonfatal error is still nothing to act on. Parking on one would stop
+    // the buffer filling for the ordinary wobble a pause exists to ride out.
+    expect(managedHlsErrorAction({ fatal: false, type: Hls.ErrorTypes.NETWORK_ERROR }, recovery, 0, true, false))
+      .toEqual({ action: 'nonfatal' });
+  });
+
   it('describes unrecoverable error classes without losing details', () => {
     expect(managedHlsErrorAction({ fatal: true, type: 'muxError', details: 'internalException' }, new ManagedHlsMediaRecoveryBudget(), 0)).toEqual({
       action: 'fail-terminal',
