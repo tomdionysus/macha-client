@@ -1,6 +1,6 @@
 import type Hls from 'hls.js';
 import { loadHls, managedHlsSupported, warmHls } from './hlsRuntime';
-import { createClientLogger, SERVER_SEGMENT_HOLD_MS } from '@machafoundation/core';
+import { createClientLogger, SERVER_SEGMENT_HOLD_MS, SERVER_STARTUP_TIMEOUT_MS } from '@machafoundation/core';
 import {
   PlaybackSourceError,
   type Platform,
@@ -107,17 +107,6 @@ async function readFirstResponseBytes(response: Response): Promise<boolean> {
     await reader.cancel().catch(() => undefined);
   }
 }
-
-/**
- * The server's own budget for bringing a transformation pipeline up, from
- * `streaming.startup_timeout_ms`.
- *
- * Restated rather than imported because core does not export it. Read from the
- * deployed node on 2026-09-17 (`es-1`, `/etc/macha/macha.yaml`) rather than from
- * the server's source, which is the standing rule here — a deployed cluster has
- * been two releases ahead of the source being read before now.
- */
-export const SERVER_STARTUP_TIMEOUT_MS = 15_000;
 
 /**
  * How long a preflight may wait before calling a node unable to serve a source.

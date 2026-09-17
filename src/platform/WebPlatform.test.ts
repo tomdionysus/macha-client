@@ -10,11 +10,10 @@ import {
   preflightWebHlsSource,
   webHlsPreflightTargets,
   HLS_PREFLIGHT_TIMEOUT_MS,
-  SERVER_STARTUP_TIMEOUT_MS,
   WebPlatform,
 } from './WebPlatform';
 import { ManagedHlsMediaRecoveryBudget } from './ManagedHlsRecovery';
-import { PlaybackSourceError, SERVER_SEGMENT_HOLD_MS } from '@machafoundation/core';
+import { PlaybackSourceError, SERVER_SEGMENT_HOLD_MS, SERVER_STARTUP_TIMEOUT_MS } from '@machafoundation/core';
 
 afterEach(() => vi.unstubAllGlobals());
 

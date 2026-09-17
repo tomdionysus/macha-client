@@ -290,11 +290,31 @@ exit, and that exit starts by condemning the node.
       at `ce8b596`: regenerates on the same node, keeps the position, charges
       nothing against the endpoint, never goes near a failover. Evidence in the
       document above.
-- [ ] **Blocked on core publishing `'not-found'`, and the tree says so.**
-      Unlinked, `npm run typecheck` fails with four errors — two missing status
-      exports and two `'not-found'` literals. That is deliberate and honest:
-      **do not deploy from this tree** until core ships a version carrying the
-      kind, then bump the range. Left red rather than papered over.
+- [x] **Gate cleared: `@machafoundation/core@0.13.0` is published and installed.**
+      The tree builds again for the first time since `cc85216` — typecheck clean,
+      **360/360 green**, from a real `node_modules` directory and not a link.
+      Verified through the module system before trusting it:
+      `playbackFailureKindForStatus(404) === 'not-found'` (500 `not-ready`, 503
+      `stream`), `SOURCE_NOT_FOUND_STATUS` 404, `SEGMENT_NOT_READY_STATUS` 500,
+      `BROKEN_GENERATION_STATUS` 503, `SERVER_STARTUP_TIMEOUT_MS` 15000, and
+      `isEndpointRetryablePlaybackFailure` false for the new kind. The local
+      `SERVER_STARTUP_TIMEOUT_MS` copy is deleted and imported from core.
+      **Install trap:** npm's local metadata cache can answer `ETARGET — no
+      matching version found` for a version that is demonstrably on the registry
+      over HTTP. `--prefer-online`, or `npm cache clean --force`. Same shape as
+      the Vite `node_modules/.vite` trap, one layer down.
+- [x] **`fail-not-found` reports without tearing down.** `reportSourceGone`, own
+      latch, wired to three sites: the hls fatal, the Direct Play element error
+      when the worker already reported the source gone for that generation, and
+      the stall once the buffer runs out. Seen red against real core by removing
+      the element-error branch, not merely red against an absent constant —
+      which is what the first red actually was, and would have passed for
+      evidence.
+      **This removes the only thing in this client that ends a dead playback.**
+      Core has taken that obligation and proved it is code: `failTerminal` sets
+      the snapshot's fatal error and the runtime stops the player. The stall
+      report is the *trigger* for core to build, not a backstop; core carries its
+      own deadline bounded by the viewer's remaining media.
 - [x] **This repo, the Direct Play half — the same fault, a different exit.**
       The worker's `retryableSourceStatus` is `408 || 425 || 429 || >= 500`, so a
       404 fell through to the success path and the media element was handed the
