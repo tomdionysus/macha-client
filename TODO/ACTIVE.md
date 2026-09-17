@@ -1,6 +1,6 @@
 # Active tasks and concepts to explore
 
-Last updated: 2026-09-16 (pause P0 added)
+Last updated: 2026-09-17 (video fit settled, boot measured, 0.17.1 deployed)
 
 This is the working backlog. Add new work here. When an item is implemented and
 its stated verification is complete, remove it from this file and add a dated
@@ -14,29 +14,44 @@ are related. Core is addressed as the `Macha NPM Core` session.
 
 ## Start here
 
-**0.16.0 is released.** It carries same-origin endpoint discovery, the Status
-condition that stopped reading as a warning, and the inbound-RPC line on the
-node page. `CHANGELOG.md` has the detail and `COMPLETED.md` the evidence.
+**0.17.1 is released, tagged and deployed.** It carries the pause fix, the
+post-sign-in redirect, the `busy` health status, `factsError` in the player
+options, and the cluster conditions Status now leaves to the node pages.
+`CHANGELOG.md` has the detail and `COMPLETED.md` the evidence. It is live on
+`fi-1` and `es-1` as of 2026-09-17.
 
 **One decision in it is still open — P1 below.** The confirmed same-origin
 endpoint is not persisted. Tom's view is that it should be, and the shape was
 not settled before the release went out, so 0.16.0 ships the non-persisted
 form.
 
-**The cluster is whole and on 0.42.1** as of 2026-09-15 — `es-1`, `fi-1` and
-`gbni-1`. `gbni-1` had been on 0.40.1, which is protocol 20 and could not
-handshake with the protocol-21 nodes at all. Nothing measured before today
-against a partial cluster should be quoted as current.
+**The cluster is partial as of 2026-09-17.** `fi-1` (10.35.1.50) and `es-1`
+(10.34.1.50) are up on server **0.44.0**; `macnessa` and `inverbeg` are offline.
+`ramaroja` answers and fronts one of the two through haproxy. Before that, on
+2026-09-15, the cluster was whole on 0.42.1 with `gbni-1` — which had been on
+0.40.1, protocol 20, unable to handshake with the protocol-21 nodes at all.
+Nothing measured against a partial cluster should be quoted as current, and
+anything measured on 2026-09-17 was measured against one.
 
 **The next thing is the core 0.11.0 port** — `AccountMenu.signOut` and
 `lastIdentityChange`, P1 below. It is the only item with another session
 waiting on it, and it is not mechanical: the wording a viewer sees depends on a
 measured fact about this cluster, recorded in that item.
 
+**2026-09-17, in one paragraph.** The scope-title P0 was diagnosed and closed on
+the client side: the bars are burnt into the source, `contain` is correct, and
+the fix is an ingest/server one — two sessions have now written a client-side
+rule for it and both were reverted, so read that item before touching the
+player's fit. Separately, Home's boot was measured: artwork is parallel and
+fast, the wait is 2.5 MB of catalogue JSON, and a node may serve it
+uncompressed. 0.17.1 was tagged, given a changelog entry, and deployed to
+`fi-1` and `es-1`.
+
 **The first P0 below is a business P0 and outranks the rest** — scope-ratio
 titles play small in a black window, which is the quality of the product on the
-titles people choose it for. It is blocked on a server fact and needs chasing
-rather than coding.
+titles people choose it for. 2026-09-16 settled where the black comes from: the
+bars are burnt into the source, the client's fit is correct, and the fix is an
+ingest/server one. [Evidence](2026-09-16-video-fit-mode.md).
 
 **After that, the P0s are the honest priority.** Every failover from an https
 page lands on an unreachable http node and shows "Failed to fetch" (2026-09-16 —
@@ -104,6 +119,33 @@ with `curl` and inject `{token, expiresAtMs, username, roles}` into
 `expires_unix_ms` is only a client-side hint — the server's own lifetime
 governs whether the token is accepted.
 
+## Deploying the client to a node
+
+The server serves the built client itself: `web.root` in `/etc/macha/macha.yaml`,
+which on `fi-1` and `es-1` is **`/etc/macha/web`** (not `/var/lib/macha/web`, which
+the server docs use as their example and which does not exist there). `npm run
+build` then rsync `dist/` into it. Files are owned `1000:50`; the index is served
+`no-cache` so a deploy is visible on the next load without a restart.
+
+```
+ssh root@10.35.1.50   # corvus-fi-1
+ssh root@10.34.1.50   # corvus-es-1
+tar -czf /etc/macha/web.bak-$(date +%Y%m%d-%H%M%S).tar.gz -C /etc/macha web
+rsync -a --omit-dir-times --chown=1000:50 dist/ root@<node>:/etc/macha/web/
+```
+
+**Deploy additively — no `--delete`.** The hashed assets of the previous build
+stay, so a session still running it does not 404 on a lazily-loaded chunk. The
+`hls` chunk is the one that matters: it is fetched on first playback, not at
+boot, so pruning it under a watching viewer breaks playback rather than the
+page. Prune deliberately, later, not as part of the deploy.
+
+Assets are gzipped by the server on demand (593 KB of JS goes out as 172 KB).
+There are no precompressed `.gz` siblings in `dist/`, which the server would
+prefer; generating them is a build change nobody has asked for yet.
+
+0.17.1 was deployed to both nodes on 2026-09-17, replacing the 2026-09-15 build.
+
 ## Core comes from npm, and the registry is the only resolution path
 
 `@machafoundation/core` is `^0.11.1` from the registry as of 0.17.0. A clone and
@@ -156,6 +198,39 @@ something outside this repo or needs groundwork before it can start safely.
   An absent `mutable` means "this node does not say", not "refused".
 - **Roles are literal.** A capability the server did not name is one the
   session does not have; unknown is not the same as none.
+
+## P0 — A scope title plays small in a black window
+
+Evidence, the one-line test that produced it, and where the fix belongs:
+[video fit mode](2026-09-16-video-fit-mode.md).
+
+**Settled 2026-09-16.** The source carries burnt-in letterboxing top and
+bottom — a ~2.3:1 picture in a 1920×1080 raster — and the bars left and right
+are `object-fit: contain` correctly fitting that 16:9 frame into a wider
+window. Two unrelated things stacked; neither is a client defect.
+
+Proved by painting the media element's background magenta on a `VIDEO COPY`
+session: the side bars turned magenta, the bands top and bottom stayed black.
+Keep that test — it answers "is this us?" for any fit question in one line.
+
+**The client changes nothing, and must not guess.** Nothing it can observe
+separates a title with burnt-in bars from one that fills its frame: the raster
+is all the session reports. Two rules that inferred it from aspect ratios were
+written and reverted the same day, and both crop real picture on every title
+that fills its frame. Do not write a third.
+
+**The fix is the server's**, and it is one fact rather than a pipeline change:
+`cropdetect` at ingest, stored against the media, reported on the play session
+as `aperture: {x, y, width, height}` on the source video stream, absent when
+unknown. Not cropped server-side — that forces a transcode on a title that
+would otherwise copy, and cannot help a direct session at all.
+
+- [ ] Server: detect and report it. Spec in the document.
+- [ ] Client, once it lands: fit to the aperture rather than the coded frame —
+      scale the element so the aperture fills the host, existing
+      `overflow: hidden` clips it. Unchanged for any title without one.
+- [ ] Note the payoff is windowed and ultrawide only: on a 16:9 screen a 2.3:1
+      picture is the same size either way.
 
 ## P0 — Any failover from an https page dies on an http node, and says "Failed to fetch"
 
@@ -1668,6 +1743,67 @@ untried.
       back navigation on every other screen is completely unaffected, since
       the hook is absent outside the player and `MainActivity` should fall
       through to its original behaviour there.
+
+## P1 — Home pulls the whole catalogue, and a node may send it uncompressed
+
+Measured 2026-09-17 against `ramaroja`, hard refresh, devtools open, with
+`macnessa` and `inverbeg` offline.
+
+**Artwork is not the problem, and was the first suspicion.** 34 artwork
+requests, HTTP/2, **23 in flight at once**, median 18 ms each, median stall
+before request start 13 ms. No queueing and no connection limit. They simply
+cannot start until the cards exist, and the first one goes out 35 ms after the
+last catalogue call lands. Anyone watching the waterfall sees a staircase and
+blames artwork scheduling; it is the wait in front of it.
+
+**What the wait is.** Home fires `type=movie` (416 KB), `type=episode`
+(1.19 MB) and `type=track` (850 KB): about **2.5 MB of JSON before a single
+card can draw**. Phase breakdown of the worst one, uncompressed at the time:
+
+```
+requestStart -> responseStart    329ms   server thinking
+responseStart -> responseEnd    5082ms   body arriving
+```
+
+The server answered the same call to `curl` in 0.97 s, and four concurrent
+calls finished no slower than four sequential ones, so neither the node nor its
+concurrency was the limit. From an idle page the same fetch takes 1.2 s. The
+seconds appear only during boot, when 2.5 MB shares one connection with the
+bundle.
+
+**Compression is the lever, and it is the server's.** At the time of measurement
+the catalogue response carried no `Content-Encoding` *and no
+`Vary: Accept-Encoding`* — and the server sets `Vary` before it tests size or
+`Accept-Encoding`, so its absence means the response never reached those tests.
+Re-measured later the same day, both nodes compress it correctly: **93 KB
+against 416 KB, a 4.5x saving**, direct and through the public name. The nodes
+that answered during the slow measurement have since gone offline, so which
+branch it took is not provable now.
+
+**`Vary: Accept-Encoding` present-or-absent is a one-request test for "is this
+node compressing at all".** Use it before theorising.
+
+- [ ] **Does Home need the entire catalogue by type?** 2.5 MB to draw a few
+      rails of twenty. Compression makes it ~550 KB, which may be enough that
+      this never needs answering — but it is a client design question and
+      nobody has asked it.
+- [ ] **`/api/v1/manage/unmatched` is fetched on every Home load** — 115 KB,
+      3.0 s on one load and 8.0 s on another, competing for the connection with
+      the data the screen actually needs. It feeds the count badge on the Manage
+      nav item: the screen needs a number and is downloading the list to count
+      it. Either a count endpoint (server) or defer it until Manage is opened
+      (here).
+
+**For the server session — some streams can be gzipped.** `compress_response`
+(`src/http.cpp:597`) skips every response carrying an `HttpBodySource`. That is
+right for media: already compressed, range-requested, sent zero-copy, and an
+encoding on one part of a representation cannot be reassembled. But `stream`
+there means "delivered through an HttpBodySource", not "media", and
+`HttpBodySource::resident()` (`src/http.hpp:51`) already names the difference —
+a `MemoryBody` has the whole payload in RAM. Those can be compressed exactly as
+a `body` is: one shot, known length, no chunked framing, no per-connection zlib
+state. Condition: `stream && stream->resident() && status == 200 && no Range &&
+compressible type`.
 
 ## P2 — Repo conventions
 
