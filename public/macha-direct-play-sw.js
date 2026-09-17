@@ -338,6 +338,34 @@ function retryableSourceStatus(status) {
   return status === 408 || status === 425 || status === 429 || status >= 500;
 }
 
+/**
+ * The node has no record of this source: its session was reaped, or the range
+ * is past the end of what the session covers.
+ *
+ * Restated here because this file is shipped as a plain worker script and
+ * cannot import `@machafoundation/core`; the TypeScript side takes the same
+ * number from core. Keep the two in step.
+ *
+ * It is not in `retryableSourceStatus` and must not be, because that predicate
+ * means "this node might answer if asked again" and a 404 never will. But it
+ * was previously *absent* from both, which meant a 404 fell through to the
+ * success path and the response was handed to the media element as though the
+ * error envelope were media. The element then raised a generic MediaError, the
+ * adapter reported `unsupported`, and a session that only needed re-creating
+ * became a terminal failure. A different node is a different session, so the
+ * walk continues; what changes is that a 404 is a failure of the source rather
+ * than content, and the status survives to the client so it can be recognised.
+ */
+function sourceNotFoundStatus(status) {
+  return status === 404;
+}
+
+function sourceFailure(message, status) {
+  const error = new Error(message);
+  error.status = status;
+  return error;
+}
+
 async function directFetchWithFailover(request, config, cache, signal, rangeOverride, excluded = new Set()) {
   let lastError;
   for (const sourceUrl of configuredSourceUrls(config)) {
@@ -345,9 +373,23 @@ async function directFetchWithFailover(request, config, cache, signal, rangeOver
     try {
       const response = await directFetch(request, sourceUrl, signal, rangeOverride);
       if (retryableSourceStatus(response.status)) {
-        lastError = new Error(`Direct Play source returned ${response.status}`);
+        lastError = sourceFailure(`Direct Play source returned ${response.status}`, response.status);
         if (response.body) void response.body.cancel().catch(() => undefined);
         continue;
+      }
+      // A 404 still goes back to the caller, and no alternate is spliced over
+      // it — that is deliberate and older than this branch. What was missing is
+      // that nobody was told. The response the element receives is an error
+      // envelope, so it raises a generic decode failure and the client learns
+      // only that the media was unplayable, never that the node had no record
+      // of this source. Reported here so the status survives, while the
+      // response itself travels exactly as it did before.
+      if (sourceNotFoundStatus(response.status) && cache) {
+        void postSourceFailure(
+          cache,
+          sourceUrl,
+          sourceFailure(`Direct Play source returned ${response.status}`, response.status),
+        );
       }
       preferSource(config, cache, sourceUrl);
       return { response, sourceUrl };
@@ -367,7 +409,17 @@ async function exactRangeReader(request, config, cache, signal, start, end, excl
     try {
       const response = await directFetch(request, sourceUrl, signal, range);
       if (retryableSourceStatus(response.status)) {
-        lastError = new Error(`Direct Play source returned ${response.status}`);
+        lastError = sourceFailure(`Direct Play source returned ${response.status}`, response.status);
+        if (response.body) void response.body.cancel().catch(() => undefined);
+        continue;
+      }
+      // This walk already moved past a 404, because it cannot satisfy the exact
+      // range check below either way. The only change is that the status now
+      // survives on the error, so an exhausted walk reports what the node said
+      // rather than "did not return exact range" — the same fact, in the
+      // vocabulary the client can act on.
+      if (sourceNotFoundStatus(response.status)) {
+        lastError = sourceFailure(`Direct Play source returned ${response.status}`, response.status);
         if (response.body) void response.body.cancel().catch(() => undefined);
         continue;
       }
@@ -412,6 +464,11 @@ async function postSourceFailure(cache, sourceUrl, error) {
     sourceUrl,
     message: error && error.message ? error.message : 'Direct Play read-ahead source failed',
   };
+  // Only when a response actually carried one. Absent must stay absent: the
+  // client reads a missing status as "transport failure, judge the node" and a
+  // present 404 as "this source is gone, re-create it", and defaulting either
+  // way collapses two different answers into one.
+  if (error && typeof error.status === 'number') payload.status = error.status;
   for (const client of clients) client.postMessage(payload);
 }
 

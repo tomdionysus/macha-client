@@ -363,6 +363,45 @@ describe('Direct Play read-ahead Service Worker', () => {
     expect(calls).toEqual(['https://node.test/direct.mp4']);
   });
 
+  it('reports a 404 as a source failure carrying the status, while still returning it', async () => {
+    // The node has no record of this source — most often a play session reaped
+    // out from under a long pause. Before 2026-09-17 nobody was told: the 404
+    // travelled to the media element, which raised a generic decode failure, so
+    // the client saw "unsupported media" and failed the node over rather than
+    // re-creating the session it actually needed. The response still travels as
+    // it did (the test above is the invariant); what is new is that the status
+    // reaches the client alongside it.
+    const harness = createHarness(async () => new Response('not found', { status: 404 }));
+    harness.configure();
+    releases.push(harness.release);
+
+    const response = await harness.request('bytes=0-3');
+
+    expect(response.status).toBe(404);
+    expect(harness.metrics).toContainEqual(expect.objectContaining({
+      type: 'macha-direct-read-ahead-source-failed',
+      status: 404,
+    }));
+  });
+
+  it('does not attach a status to a transport failure that never became a response', async () => {
+    // Absent is a different claim from 404 and must stay absent: a fetch that
+    // never landed says something about the node, and reporting it with a
+    // status would route it into the re-create path instead of failover.
+    const harness = createHarness(async () => { throw new TypeError('unreachable'); });
+    harness.configure();
+    releases.push(harness.release);
+
+    await expect(harness.request('bytes=0-3')).rejects.toThrow('unreachable');
+
+    const failures = harness.metrics.filter((message): message is { type: string; status?: number } => (
+      typeof message === 'object' && message !== null
+      && (message as { type?: unknown }).type === 'macha-direct-read-ahead-source-failed'
+    ));
+    expect(failures).not.toHaveLength(0);
+    for (const failure of failures) expect(failure.status).toBeUndefined();
+  });
+
   it('fails after bounded alternate exhaustion, reporting it as node degradation evidence', async () => {
     const calls: string[] = [];
     const harness = createHarness(async (url) => {

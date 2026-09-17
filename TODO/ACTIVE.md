@@ -295,6 +295,17 @@ exit, and that exit starts by condemning the node.
       exports and two `'not-found'` literals. That is deliberate and honest:
       **do not deploy from this tree** until core ships a version carrying the
       kind, then bump the range. Left red rather than papered over.
+- [x] **This repo, the Direct Play half — the same fault, a different exit.**
+      The worker's `retryableSourceStatus` is `408 || 425 || 429 || >= 500`, so a
+      404 fell through to the success path and the media element was handed the
+      error envelope as though it were media. It raised a generic `MediaError`,
+      which maps to `unsupported`/`media` and never `not-found`, so Direct Play
+      would still have failed terminally after core ships. The worker now
+      reports the failure with its status; the response travels exactly as
+      before, because not splicing an alternate over a 404 is a deliberate older
+      invariant and its test caught an early version of this that broke it.
+      **This is the path the original report's episode actually takes** in
+      Chrome on macOS, so a quiet release would have looked fine.
 - [ ] **Core: stop discarding the cover at `source-activate`.** The recovery
       works and the viewer still sees 5.16 s of spinner, because activation
       empties a media element holding 62 s of playable video. Raised; it is the

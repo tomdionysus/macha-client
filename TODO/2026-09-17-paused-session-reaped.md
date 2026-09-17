@@ -286,6 +286,36 @@ rather than once the cover is nearly spent — and that is core's. Raised with t
 second spinner, which is the difference between a fix and a better-behaved
 version of the same complaint.
 
+## The same fault reaches the viewer through Direct Play, differently and worse
+
+Found 2026-09-17 after the managed-HLS half was proven. **This matters more than
+it looks: the episode in the original report direct-plays in Chrome on macOS**,
+and only reaches the HLS code when transcode is asked for explicitly. So the
+default path on the reporting host does not exercise any of the fix above.
+
+`retryableSourceStatus` in the read-ahead worker is `408 || 425 || 429 || >= 500`.
+A 404 is in neither that set nor any other, so it fell through to the success
+path: `preferSource(...)` and the response returned. **The media element was
+handed the error envelope as though it were media.** It then raised a generic
+`MediaError`, `webMediaElementFailure` mapped code 3 to `media` and code 4 to
+`unsupported`, and neither is `not-found` — so a reaped Direct Play session
+would still have failed terminally with no regeneration after core ships.
+
+Proven by lifting `retryableSourceStatus` out of the shipped worker and
+executing it: `retryableSourceStatus(404) === false`.
+
+**The worker still does not splice an alternate over a 404, and must not.** That
+invariant predates this and has a test (`does not splice an alternate over a
+non-retryable HTTP response`); an early version of this change broke it and the
+existing test caught it. The response travels exactly as before. What changed is
+that the failure is now *reported*, carrying the status, so the client learns
+what the node said instead of only that the media was unplayable.
+
+An absent status stays absent, deliberately. No status means a transport failure
+that never became a response — evidence about the node, to be failed over. A
+`404` means this source is gone — to be re-created. Defaulting either way
+collapses two different answers into one.
+
 ## To reproduce without waiting thirty minutes
 
 1. Play anything the client negotiates to remux or transcode, and let it buffer.

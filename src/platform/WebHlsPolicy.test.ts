@@ -4,7 +4,14 @@ import Hls from 'hls.js';
 // of the boot bundle. If upstream ever changes them, this fails loudly.
 import { describe, expect, it } from 'vitest';
 import { ManagedHlsMediaRecoveryBudget } from './ManagedHlsRecovery';
-import { isHlsNetworkDegradation, isHlsSegmentHold, isHlsSourceNotFound, managedHlsErrorAction } from './WebHlsPolicy';
+import {
+  isHlsNetworkDegradation,
+  isHlsSegmentHold,
+  isHlsSourceNotFound,
+  managedHlsErrorAction,
+  SEGMENT_NOT_READY_STATUS,
+  SOURCE_NOT_FOUND_STATUS,
+} from './WebHlsPolicy';
 
 describe('managed HLS error policy', () => {
   it('treats even nonfatal network errors as early failover evidence', () => {
@@ -225,5 +232,17 @@ describe('managed HLS error policy', () => {
   it('keeps the restated hls.js error-type strings in step with the library', () => {
     expect(Hls.ErrorTypes.NETWORK_ERROR).toBe('networkError');
     expect(Hls.ErrorTypes.MEDIA_ERROR).toBe('mediaError');
+  });
+
+  it('keeps the status vocabulary in step with core, because absent reads as a match', () => {
+    // Both predicates compare `response.code` against these. An `undefined`
+    // constant therefore does not fail closed — it matches every network error
+    // that carries no status at all, which would classify an ordinary transport
+    // failure as a held segment or a missing source. So the values are asserted
+    // here rather than trusted, the same way the hls.js strings above are: a
+    // core that stops exporting them fails this test instead of silently
+    // misreading every error.
+    expect(SEGMENT_NOT_READY_STATUS).toBe(500);
+    expect(SOURCE_NOT_FOUND_STATUS).toBe(404);
   });
 });

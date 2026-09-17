@@ -30,6 +30,7 @@ import {
   isHlsSourceNotFound,
   managedHlsErrorAction,
   SEGMENT_NOT_READY_STATUS,
+  SOURCE_NOT_FOUND_STATUS,
   webHlsBufferConfig,
 } from './WebHlsPolicy';
 import {
@@ -635,6 +636,21 @@ class WebPlayer implements Player {
       if (directUrl !== source.url) {
         this.directReadAheadSourceUrl = source.url;
         this.unsubscribeDirectDegradation = subscribeDirectPlayReadAheadFailure(source.url, (error) => {
+          // The Direct Play half of the same judgement the managed-HLS error
+          // handler makes. A 404 means the node has no record of this source —
+          // a reaped session, or a range past the end of what it covers — and
+          // it is not evidence against the node. Without this the worker's
+          // failure arrives as `stream`, the node is condemned for answering
+          // honestly, and a session that only needed re-creating takes the
+          // viewer to a failure screen naming somewhere else entirely.
+          if (error.status === SOURCE_NOT_FOUND_STATUS) {
+            this.degradeSourceNotFound(
+              sourceGeneration,
+              new PlaybackSourceError(error.message, 'not-found', error),
+              { sourceUrl: source.url, status: error.status },
+            );
+            return;
+          }
           this.degradeSourceGeneration(
             sourceGeneration,
             new PlaybackSourceError(error.message, 'stream', error),

@@ -44,6 +44,26 @@ interface ReadAheadFailureMessage {
   sourceKey: string;
   sourceUrl?: string;
   message?: string;
+  /**
+   * The HTTP status that failed the source, when there was one.
+   *
+   * Absent for a transport failure that never became a response, which is the
+   * difference that matters: no status is not the same claim as a status the
+   * client does not recognise. A `404` here is the Direct Play equivalent of
+   * the managed-HLS `response.code` — the node declining to serve this source
+   * rather than the node being unwell — and it is what lets a reaped session be
+   * re-created instead of failing the node over.
+   */
+  status?: number;
+}
+
+/**
+ * A read-ahead failure that reached a response, carrying the status that failed
+ * it. Plain `Error` everywhere else, so a listener that does not care is
+ * unaffected and a transport failure simply has no `status`.
+ */
+export interface DirectPlayReadAheadError extends Error {
+  status?: number;
 }
 
 const log = createClientLogger('playback.readahead');
@@ -52,7 +72,7 @@ const PROXY_PATH = '__macha_direct_cache__';
 const metricsBySource = new Map<string, DirectPlayReadAheadMetrics>();
 const keyBySource = new Map<string, string>();
 const sourceByKey = new Map<string, string>();
-const failureListenersBySource = new Map<string, Set<(error: Error) => void>>();
+const failureListenersBySource = new Map<string, Set<(error: DirectPlayReadAheadError) => void>>();
 /** Last counters seen per source, so each message contributes only new bytes. */
 const lastTransferBySource = new Map<string, { fetchedBytes: number; fetchActiveMs: number }>();
 let transferListener: DirectPlayTransferListener | undefined;
@@ -120,8 +140,11 @@ function installMessageListener(): void {
       const failure = message as Partial<ReadAheadFailureMessage>;
       const sourceUrl = sourceByKey.get(message.sourceKey);
       if (!sourceUrl) return;
-      const error = new Error(failure.message || `Direct Play read-ahead failed for ${failure.sourceUrl || sourceUrl}`);
-      log.warn('source-degraded', { sourceUrl, failedSourceUrl: failure.sourceUrl, error });
+      const error: DirectPlayReadAheadError = new Error(
+        failure.message || `Direct Play read-ahead failed for ${failure.sourceUrl || sourceUrl}`,
+      );
+      if (typeof failure.status === 'number') error.status = failure.status;
+      log.warn('source-degraded', { sourceUrl, failedSourceUrl: failure.sourceUrl, status: failure.status, error });
       for (const listener of failureListenersBySource.get(sourceUrl) ?? []) listener(error);
       return;
     }
@@ -173,7 +196,10 @@ function reportTransfer(sourceUrl: string, metrics: DirectPlayReadAheadMetrics):
   transferListener(metrics.sourceOrigin, bytes, durationMs);
 }
 
-export function subscribeDirectPlayReadAheadFailure(sourceUrl: string, listener: (error: Error) => void): () => void {
+export function subscribeDirectPlayReadAheadFailure(
+  sourceUrl: string,
+  listener: (error: DirectPlayReadAheadError) => void,
+): () => void {
   installMessageListener();
   let listeners = failureListenersBySource.get(sourceUrl);
   if (!listeners) {
