@@ -1,6 +1,6 @@
 import type Hls from 'hls.js';
 import { loadHls, managedHlsSupported, warmHls } from './hlsRuntime';
-import { createClientLogger } from '@machafoundation/core';
+import { createClientLogger, SERVER_SEGMENT_HOLD_MS } from '@machafoundation/core';
 import {
   PlaybackSourceError,
   type Platform,
@@ -108,11 +108,49 @@ async function readFirstResponseBytes(response: Response): Promise<boolean> {
   }
 }
 
+/**
+ * The server's own budget for bringing a transformation pipeline up, from
+ * `streaming.startup_timeout_ms`.
+ *
+ * Restated rather than imported because core does not export it. Read from the
+ * deployed node on 2026-09-17 (`es-1`, `/etc/macha/macha.yaml`) rather than from
+ * the server's source, which is the standing rule here — a deployed cluster has
+ * been two releases ahead of the source being read before now.
+ */
+export const SERVER_STARTUP_TIMEOUT_MS = 15_000;
+
+/**
+ * How long a preflight may wait before calling a node unable to serve a source.
+ *
+ * **Derived, not chosen, and that is the whole point.** This was 5,000 ms — a
+ * number picked in isolation, against a server that gives itself 15,000 ms to
+ * start a pipeline. A standby is a freshly created transcode generation and the
+ * server's pipeline is lazy: nothing is produced until something asks, so the
+ * preflight's own request is what starts production and then waits for it.
+ * Measured against `es-1` on 2026-09-17 the first fragment of such a generation
+ * took **9.0 s**. Every standby slower than five seconds was therefore recorded
+ * as "that node cannot serve this" when it meant "that node had not finished
+ * starting", and the rescue was discarded — silently, and worst on exactly the
+ * cold, busy or distant nodes a standby exists for.
+ *
+ * So it clears what a healthy node is entitled to take: its full startup
+ * budget, plus one segment hold for the request that lands past the production
+ * frontier, plus room for two playlist round trips and the transfer itself.
+ * Two independently chosen numbers that were never compared is the fault this
+ * project keeps recording; this one is written as the sum it has to exceed.
+ *
+ * It bounds the whole walk — both playlists and both media ranges share it —
+ * and it is a **gate**, so it must eventually give up. Warming a pipeline is a
+ * different question that happens to make the same request, and must not
+ * borrow this number: a warm-up has no verdict to reach and no reason to stop.
+ */
+export const HLS_PREFLIGHT_TIMEOUT_MS = SERVER_STARTUP_TIMEOUT_MS + SERVER_SEGMENT_HOLD_MS + 4_000;
+
 /** Validate a playlist and its initial fMP4 data without attaching a decoder. */
 export async function preflightWebHlsSource(
   source: PlaybackSource,
   fetchImpl: typeof fetch = fetch,
-  timeoutMs = 5_000,
+  timeoutMs = HLS_PREFLIGHT_TIMEOUT_MS,
 ): Promise<boolean> {
   if (!source.isManifest) return false;
   const controller = new AbortController();

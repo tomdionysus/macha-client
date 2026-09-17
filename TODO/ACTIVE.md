@@ -326,22 +326,36 @@ exit, and that exit starts by condemning the node.
       the baseline arm on the same build before anyone commits to a shape.
       This also answers the look-ahead question: a generation created and left
       alone has not produced ahead, it has not produced at all.
-- [ ] **`preflightSource` is the warming seam, and its budget is too small.**
-      It is real: `preflightWebHlsSource` walks the playlists, takes the
-      `EXT-X-MAP` init segment and the first media segment, fetches both with
-      `Range: bytes=0-65535` and requires a non-empty chunk — the request that
-      starts production. But `timeoutMs = 5_000` covers the whole walk and
-      `preflightSource` passes no override, against a **measured 9.0 s** cold
-      first fragment. As it stands it would abort and report failure on a
-      healthy node that is merely still producing. Three client changes wanted,
-      to core's spec rather than guessed: a budget that a cold pipeline can
-      actually meet; `!source.isManifest` returning something other than plain
-      `false`, because Direct Play currently preflights as a failure before
-      making any request; and a failure vocabulary, since timeout, 404, empty
-      body and not-applicable are all the same bare `false` today.
-      **Whatever warms a source must not also decide whether to attach it** — a
-      cold pipeline taking 9 s is healthy, and only waiting tells it from a
-      broken one.
+- [x] **Preflight budget raised from 5 s to 25 s, derived.** A standby is a
+      freshly created transcode generation and the server's pipeline is lazy —
+      the preflight's own request is what starts production, then waits for it.
+      Measured 9.0 s for that first fragment; the node's own
+      `startup_timeout_ms` is **15 s**, read off `es-1`. So a 5 s gate had been
+      recording healthy-but-starting nodes as unable to serve, and core's
+      `prepareAlternate` discarded and closed the session on that `false` —
+      silently, and worst on the cold, busy or distant nodes a standby exists
+      for. Now `SERVER_STARTUP_TIMEOUT_MS + SERVER_SEGMENT_HOLD_MS + 4_000`,
+      written as the sum it has to exceed rather than a number picked alone.
+      Both tests seen red at 5 s first. Core still has to widen
+      `ALTERNATE_TRANSCODE_RECOVERY_WINDOW_MS` (8 s) or a standby that now
+      passes is still discarded before a cold pipeline could be useful.
+- [ ] **`warmSource` when core lands it.** Core is adding
+      `warmSource?(source): Promise<void>` rather than reusing preflight, on the
+      rule that whatever warms a source must not decide whether to attach it.
+      `Promise<void>` so it cannot become a verdict; budget generous enough
+      never to be the binding constraint (core races its own deadline); do not
+      abort on the way out, because nobody has measured whether an aborted range
+      request leaves the server still producing. Open choice to report back:
+      whether Direct Play warms by fetching the first byte range or resolves
+      immediately — the contract comment should say what is true, not what was
+      intended.
+- [ ] **Preflight's failure vocabulary is still thin.** Timeout, 404, empty body
+      and not-applicable all return the same bare `false`. Core does not need
+      causes today; the standby path is the one place "not ready yet" and
+      "refused" genuinely differ, and that is the argument for it whenever it is
+      worth making. Note `!source.isManifest` returns a bare `false` too, so
+      Direct Play reads as *refused* before any request is made — harmless while
+      nothing gates on it, wrong the moment something does.
 - [ ] **`runway-spent` is still unexercised, and may be unreachable here.**
       hls.js gives up ~28 s after the hold; `maxBufferLength` is 60. Any pause
       long enough to fill the buffer leaves more runway than hls.js has

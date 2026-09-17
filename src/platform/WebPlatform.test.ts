@@ -9,10 +9,12 @@ import {
   awaitNativeHlsFirstFragment,
   preflightWebHlsSource,
   webHlsPreflightTargets,
+  HLS_PREFLIGHT_TIMEOUT_MS,
+  SERVER_STARTUP_TIMEOUT_MS,
   WebPlatform,
 } from './WebPlatform';
 import { ManagedHlsMediaRecoveryBudget } from './ManagedHlsRecovery';
-import { PlaybackSourceError } from '@machafoundation/core';
+import { PlaybackSourceError, SERVER_SEGMENT_HOLD_MS } from '@machafoundation/core';
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -465,6 +467,45 @@ describe('Web HLS standby preflight', () => {
     };
 
     await expect(preflightWebHlsSource(source, fetchMock)).resolves.toBe(true);
+  });
+
+  it('waits longer than a healthy node is entitled to take to start a cold pipeline', async () => {
+    // A standby is a freshly created transcode generation, and the server's
+    // pipeline is lazy: nothing is produced until something asks. Measured
+    // against `es-1` on 2026-09-17, the first fragment of such a generation
+    // took **9.0 s** to arrive — and the node's own `startup_timeout_ms` is
+    // 15 s, so it is entitled to take three times the old 5 s budget and still
+    // be working correctly. Every one of those was being read as "that node
+    // cannot serve it" and the rescue thrown away.
+    vi.useFakeTimers();
+    try {
+      const slowFirstFragment = (init?: RequestInit) => new Promise<Response>((resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')), { once: true });
+        setTimeout(() => resolve(new Response(new Uint8Array([1, 2]), { status: 206 })), 9_000);
+      });
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce(new Response('#EXTM3U\n#EXTINF:4,\nfirst.m4s', { status: 200 }))
+        .mockImplementationOnce((_url: string, init?: RequestInit) => slowFirstFragment(init));
+      const source = {
+        mediaId: 'macha:one', url: 'https://node-b.test/generation/index.m3u8',
+        isManifest: true, mimeType: 'application/vnd.apple.mpegurl', mode: 'transcode' as const,
+      };
+
+      const preflight = preflightWebHlsSource(source, fetchMock);
+      await vi.advanceTimersByTimeAsync(9_000);
+      await expect(preflight).resolves.toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('derives the preflight budget from the server contract rather than picking one', () => {
+    // Two independently chosen numbers that were never compared is the fault
+    // this repo keeps writing down, and a 5 s client gate against a 15 s server
+    // startup was exactly that. Asserted so the budget cannot drift back under
+    // the thing it has to clear.
+    expect(HLS_PREFLIGHT_TIMEOUT_MS).toBeGreaterThan(SERVER_STARTUP_TIMEOUT_MS + SERVER_SEGMENT_HOLD_MS);
+    expect(SERVER_STARTUP_TIMEOUT_MS).toBe(15_000);
   });
 
   it('rejects a standby whose initial media data is unavailable', async () => {
