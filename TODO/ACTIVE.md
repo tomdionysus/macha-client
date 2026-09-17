@@ -362,6 +362,35 @@ exit, and that exit starts by condemning the node.
       with `max_ahead_segments: 4` the reshape reproduces the bug it fixes.
       Neither field is on the play session payload; asked the server session
       for a `look_ahead_ms` rather than hardcoding 8 and 4000.
+- [x] **`stream.look_ahead_ms` shipped in server 0.45.0 and is verified live.**
+      Confirmed end to end by this session on both nodes, because the server
+      session had no credentials to check its own release: `es-1` and `fi-1`
+      both report 0.45.0; a transcode session returns **32000** on each; it
+      survives a `PATCH {"seek_ms":...}` (generation 2, still 32000); and a
+      direct session returns **`null` with the key present**, so
+      `'look_ahead_ms' in stream` is true.
+      **Three states, and they are not interchangeable:** absent means a node
+      too old to say, `null` means direct play with no pipeline and nothing to
+      bound, a number is the answer. Zero would have read as "no look-ahead",
+      which is why the server chose null.
+      **It is a distance from `highest_requested`, not from the start of the
+      generation.** For a freshly created generation `highest_requested` is 0,
+      so the two readings agree perfectly — right up until anything requests a
+      later index, which is when the conflation would bite. The coincidence is
+      strongest exactly where a client is most likely to make the mistake.
+      **Read it per session, never cached against an endpoint.** It is
+      serialised from the live config, so an operator reload can change it
+      mid-session with no `PATCH` to announce it.
+      The 32000 matches what was measured before the field existed — segments
+      0/5/8/9 in ~0.6 s, segment 12 refused after 6.27 s — so eight four-second
+      fragments, arrived at from both directions.
+      **The field would not have prevented our 12.7 s freeze**, and the server's
+      changelog has been corrected to say so. `es-1` sets 8 and 4000 explicitly,
+      so the constant we would have hardcoded was right and the frontier really
+      was 32 s wide; the freeze was holding a generation 28 s and the viewer
+      then arriving past a correctly-read frontier. The field fixes the general
+      case — a differently configured node — which is a different bug from the
+      one we had.
 - [ ] **Do not "walk the frontier" — production is sequential.**
       `note_requested` raises `highest_requested` with `std::max`, but that moves
       only the *permission* boundary; the producer still appends strictly in

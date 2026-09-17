@@ -406,6 +406,8 @@ class WebPlayer implements Player {
   private degradedSourceGeneration?: number;
   /** Its own latch: see `degradeSourceNotFound` for why it is not the one above. */
   private notFoundSourceGeneration?: number;
+  /** A generation reported gone on the failure channel: see `reportSourceGone`. */
+  private goneReportedGeneration?: number;
   private unsubscribeDirectDegradation?: () => void;
   private hlsMediaRecovery?: ManagedHlsMediaRecoveryBudget;
   /** A managed-HLS load stopped by a fatal error raised while nobody was watching. */
@@ -491,6 +493,22 @@ class WebPlayer implements Player {
       // turn those media-element events into a generation failure.
       if (!this.activeSource || video !== this.video) return;
       if (this.attachedSourceGeneration !== this.sourceGeneration) return;
+      // Direct Play's version of the same judgement, and the only way to make
+      // it. The read-ahead worker hands a 404 body to the element as though it
+      // were media — deliberately, because not splicing an alternate over a 404
+      // is older than any of this — so the element raises a generic decode or
+      // unsupported error and the status is nowhere in it. What we do have is
+      // that the worker already told us this source was gone, for this same
+      // generation. Without that memory the reported title's own path, which is
+      // Direct Play on Chrome, would still condemn a healthy node.
+      if (this.notFoundSourceGeneration === this.sourceGeneration) {
+        this.reportSourceGone(
+          this.sourceGeneration,
+          new PlaybackSourceError('The node no longer has this source.', 'not-found', video.error),
+          videoState(video),
+        );
+        return;
+      }
       const failure = webMediaElementFailure(video.error);
       this.failSourceGeneration(this.sourceGeneration, failure, videoState(video));
     });
@@ -529,6 +547,7 @@ class WebPlayer implements Player {
     this.failedSourceGeneration = undefined;
     this.degradedSourceGeneration = undefined;
     this.notFoundSourceGeneration = undefined;
+    this.goneReportedGeneration = undefined;
     this.hlsLoadParkedWhilePaused = false;
     this.wantsPlayback = !startPaused;
     // Suppress media-element teardown events from the previous source. The new
@@ -1133,6 +1152,7 @@ class WebPlayer implements Player {
     this.failedSourceGeneration = undefined;
     this.degradedSourceGeneration = undefined;
     this.notFoundSourceGeneration = undefined;
+    this.goneReportedGeneration = undefined;
     this.hlsLoadParkedWhilePaused = false;
     this.wantsPlayback = false;
     this.activeSource = undefined;
@@ -1252,6 +1272,20 @@ class WebPlayer implements Player {
         mode: source.mode,
         url: source.url,
       };
+      // A generation already known to be gone has an explanation for its own
+      // stall, and it is not the node's fault. Reporting `stream` here would
+      // charge an endpoint that is answering correctly for the silence of a
+      // source it no longer has — and would tear down the buffer the recovery
+      // is running inside, which is the whole point of not doing that above.
+      if (this.notFoundSourceGeneration === sourceGeneration || this.goneReportedGeneration === sourceGeneration) {
+        this.log.warn('source-stalled-after-gone', detail);
+        this.reportSourceGone(
+          sourceGeneration,
+          new PlaybackSourceError('The node no longer has this source, and the buffer has run out.', 'not-found'),
+          detail,
+        );
+        return;
+      }
       this.log.error('source-stalled', detail);
       this.failSourceGeneration(
         sourceGeneration,
@@ -1288,6 +1322,41 @@ class WebPlayer implements Player {
     this.notFoundSourceGeneration = sourceGeneration;
     this.log.warn('source-not-found', { error, detail });
     for (const listener of this.degradationListeners) listener(error);
+  }
+
+  /**
+   * Report that the node no longer has this source, and do nothing else.
+   *
+   * **The one failure this player does not act on.** Everywhere else a terminal
+   * failure means the presentation is over, so `failSourceGeneration` destroys
+   * hls.js, pauses the element and drops the viewer's intent. That is right for
+   * a stream this browser cannot decode and wrong for a session the node has
+   * simply forgotten: the bytes already in the element are still good, still
+   * playing, and are the entire budget the coordinator has to recover inside.
+   *
+   * Measured before this existed: the teardown ran 6 ms after the fatal and
+   * took 61.5 s of playable video with it, so a recovery that had a minute to
+   * work in got none, and the viewer's picture froze for 12.7 s. hls.js gives
+   * up about 28 s after a source goes away, which is always sooner than a full
+   * buffer drains — so without this the coordinator is never allowed to choose
+   * its own moment, and the swap is always forced by the loader rather than
+   * timed by the runway.
+   *
+   * Core owns what the viewer is told from here, and has taken that on
+   * explicitly: if there is no replacement it sets the fatal error and stops
+   * the player. This player's job is to say what happened and keep the picture
+   * up meanwhile.
+   *
+   * Latched separately from `failedSourceGeneration`, deliberately. This is not
+   * a terminal failure, so it must not consume the one that comes after it — a
+   * generation whose source went away can still go on to raise a genuine decode
+   * failure, and that one does end the presentation.
+   */
+  private reportSourceGone(sourceGeneration: number, error: Error, detail?: unknown): void {
+    if (sourceGeneration !== this.sourceGeneration || this.goneReportedGeneration === sourceGeneration) return;
+    this.goneReportedGeneration = sourceGeneration;
+    this.log.error('source-gone', { error, detail });
+    for (const listener of this.failureListeners) listener(error);
   }
 
   private failSourceGeneration(sourceGeneration: number, error: Error, detail?: unknown): void {
@@ -1404,8 +1473,9 @@ class WebPlayer implements Player {
         // Reported as `not-found` so the coordinator regenerates on this node
         // rather than condemning it. The node is answering correctly and is the
         // one holding this title's pipeline; the source it was asked for is
-        // simply not there any more. No network restart was spent getting here.
-        this.failSourceGeneration(
+        // simply not there any more. No network restart was spent getting here,
+        // and nothing is torn down — the element keeps playing what it has.
+        this.reportSourceGone(
           sourceGeneration,
           new PlaybackSourceError(
             `Web HLS playback failed: the node no longer has this source (${action.details}).`,
