@@ -326,6 +326,22 @@ exit, and that exit starts by condemning the node.
       the baseline arm on the same build before anyone commits to a shape.
       This also answers the look-ahead question: a generation created and left
       alone has not produced ahead, it has not produced at all.
+- [ ] **`preflightSource` is the warming seam, and its budget is too small.**
+      It is real: `preflightWebHlsSource` walks the playlists, takes the
+      `EXT-X-MAP` init segment and the first media segment, fetches both with
+      `Range: bytes=0-65535` and requires a non-empty chunk — the request that
+      starts production. But `timeoutMs = 5_000` covers the whole walk and
+      `preflightSource` passes no override, against a **measured 9.0 s** cold
+      first fragment. As it stands it would abort and report failure on a
+      healthy node that is merely still producing. Three client changes wanted,
+      to core's spec rather than guessed: a budget that a cold pipeline can
+      actually meet; `!source.isManifest` returning something other than plain
+      `false`, because Direct Play currently preflights as a failure before
+      making any request; and a failure vocabulary, since timeout, 404, empty
+      body and not-applicable are all the same bare `false` today.
+      **Whatever warms a source must not also decide whether to attach it** — a
+      cold pipeline taking 9 s is healthy, and only waiting tells it from a
+      broken one.
 - [ ] **`runway-spent` is still unexercised, and may be unreachable here.**
       hls.js gives up ~28 s after the hold; `maxBufferLength` is 60. Any pause
       long enough to fill the buffer leaves more runway than hls.js has
