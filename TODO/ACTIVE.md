@@ -306,7 +306,33 @@ exit, and that exit starts by condemning the node.
       invariant and its test caught an early version of this that broke it.
       **This is the path the original report's episode actually takes** in
       Chrome on macOS, so a quiet release would have looked fine.
-- [ ] **Core: the deferral is built and it fails. Tested 2026-09-17.**
+- [ ] **The deferral works and makes the stall worse. Tested 2026-09-17 against
+      core `73abbdc`.** A swap finally happened — `replacement-held` ->
+      `source-failure-superseded-by-replacement` -> `replacement-swapped-in`, no
+      failover, no release-unused — and the viewer's picture froze for
+      **12,749 ms**, measured by sampling the element every 250 ms, against the
+      **5.16 s** baseline it was meant to remove.
+      **A held generation produces nothing while it is held.** Inside the stall:
+      manifest 0.55 s, then 2.7 s to the first fragment request, then **9.0 s
+      waiting on that one fragment**. The node starts producing on the first
+      stream request, and holding the replacement is exactly the decision not to
+      make one — so the session sat 28 s having produced nothing and the swap
+      paid the full cold start anyway. The floor cannot fix it: `media-emptied`
+      fires at the swap whatever the runway is, so the remaining 61.5 s was
+      discarded and then the viewer waited for a pipeline nobody had started.
+      Either core warms the replacement (spend the runway making the request
+      that starts production) or it goes back to activating at once and accepts
+      5.16 s. Raised with core; two data points, one per arm, so worth repeating
+      the baseline arm on the same build before anyone commits to a shape.
+      This also answers the look-ahead question: a generation created and left
+      alone has not produced ahead, it has not produced at all.
+- [ ] **`runway-spent` is still unexercised, and may be unreachable here.**
+      hls.js gives up ~28 s after the hold; `maxBufferLength` is 60. Any pause
+      long enough to fill the buffer leaves more runway than hls.js has
+      patience, so the fatal always wins while this adapter escalates it. That
+      raises the stakes on the teardown change below rather than lowering them.
+- [ ] **Superseded, kept for the record: run 1's failure, since fixed in
+      `73abbdc`.**
       `replacement-held` fires correctly (runway 110 s against a 15 s floor) and
       is thrown away 28 s later. hls.js keeps retrying the reaped session for
       ~30 s and goes fatal; core cannot probe that fatal because `regenerate()`
