@@ -351,6 +351,18 @@ const HANDOVER_JOIN_LEAD_MS = 400;
  * teardown path reaches the same place sooner.
  */
 const HANDOVER_MINIMUM_RUNWAY_MS = 3_000;
+/**
+ * How much playable media the replacement must hold *beyond* the join before it
+ * is worth promoting.
+ *
+ * Resident-at-the-join is not enough on its own: cutting the instant the join
+ * arrives promotes an element with nothing behind it, and it starves a couple of
+ * seconds later. The viewer sees the picture return and then drop again, which
+ * reads worse than the single gap it replaced. Waived when the outgoing element
+ * has already stopped, because then the margin is a luxury being paid for out of
+ * a frozen picture.
+ */
+const HANDOVER_MINIMUM_INCOMING_AHEAD_MS = 5_000;
 
 /** Resolve on a media element event, or `false` if it does not arrive in time. */
 function waitForMediaEvent(video: HTMLVideoElement, name: string, timeoutMs: number): Promise<boolean> {
@@ -938,6 +950,8 @@ class WebPlayer implements Player {
       let joinAtOldMs = 0;
       let targetMediaMs: number | undefined;
       const bufferDeadline = performance.now() + HANDOVER_BUFFER_TIMEOUT_MS;
+      let bufferLastSeenMs = livePositionMs();
+      let bufferLastAdvancedAt = performance.now();
       for (;;) {
         if (this.video !== outgoing) return abandon('superseded-while-buffering');
         if (outgoing.paused) return abandon('outgoing-paused-while-buffering');
@@ -947,7 +961,33 @@ class WebPlayer implements Player {
         const targetSeconds = targetMediaMs / 1000;
         const resident = playbackTimeRanges(incoming.buffered)
           .some((range) => range.startMs <= targetMediaMs! && range.endMs >= targetMediaMs!);
-        if (resident) break;
+        // Resident is not enough on its own. Cutting the moment the join
+        // arrives promotes an element holding almost nothing beyond it, and it
+        // starves seconds later — the viewer sees the picture come back and
+        // then drop again, which reads worse than the single gap it replaced.
+        // So the replacement must also hold a little road ahead of the join
+        // before it is worth showing.
+        const aheadOfJoinMs = playbackTimeRanges(incoming.buffered)
+          .filter((range) => range.startMs <= targetMediaMs! && range.endMs >= targetMediaMs!)
+          .reduce((ahead, range) => Math.max(ahead, range.endMs - targetMediaMs!), 0);
+        // Unless the outgoing element has already stopped, in which case the
+        // viewer is looking at a frozen picture and the margin is a luxury.
+        const nowMs = livePositionMs();
+        if (nowMs > bufferLastSeenMs + 1) {
+          bufferLastSeenMs = nowMs;
+          bufferLastAdvancedAt = performance.now();
+        }
+        const outgoingStalled = performance.now() - bufferLastAdvancedAt > HANDOVER_OUTGOING_STALL_MS;
+        if (resident && (aheadOfJoinMs >= HANDOVER_MINIMUM_INCOMING_AHEAD_MS || outgoingStalled)) {
+          this.log.info('handover-join-buffered', {
+            aheadOfJoinMs,
+            elapsedMs: Math.round(performance.now() - startedAt),
+            joinAtOldMs,
+            targetSeconds,
+            runwayMs: this.lastPublishedEvent?.forwardBufferMs,
+          });
+          break;
+        }
         if (performance.now() > bufferDeadline) {
           return abandon('join-never-buffered', { targetSeconds, buffered: playbackTimeRanges(incoming.buffered) });
         }
@@ -957,6 +997,10 @@ class WebPlayer implements Player {
       incoming.currentTime = targetMediaMs / 1000;
       if (!await waitForMediaEvent(incoming, 'seeked', HANDOVER_SEEK_TIMEOUT_MS)) return abandon('incoming-seek-timeout');
       if (this.video !== outgoing) return abandon('superseded-while-seeking');
+      this.log.info('handover-aligned', {
+        elapsedMs: Math.round(performance.now() - startedAt),
+        runwayMs: this.lastPublishedEvent?.forwardBufferMs,
+      });
 
       // Wait for the outgoing element to actually arrive at the join point, so
       // the cut is where it was planned rather than wherever the seek landed.
