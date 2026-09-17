@@ -10,6 +10,10 @@
 const HLS_NETWORK_ERROR = 'networkError';
 const HLS_MEDIA_ERROR = 'mediaError';
 import type { ManagedHlsMediaRecoveryBudget, ManagedHlsMediaRecoveryDecision } from './ManagedHlsRecovery';
+import {
+  SEGMENT_NOT_READY_STATUS as coreSegmentNotReadyStatus,
+  SOURCE_NOT_FOUND_STATUS as coreSourceNotFoundStatus,
+} from '@machafoundation/core';
 
 export function webHlsBufferConfig(): Record<string, number | boolean> {
   return {
@@ -25,6 +29,7 @@ export type ManagedHlsErrorAction =
   | { action: 'nonfatal' }
   | { action: 'park-paused'; details: string }
   | { action: 'fail-unbuffered'; occurrences: number; details: string }
+  | { action: 'fail-not-found'; details: string }
   | { action: 'restart-network'; attempt: number }
   | { action: 'fail-network'; attempts: number; details: string }
   | { action: 'recover-media'; recovery: ManagedHlsMediaRecoveryDecision }
@@ -64,7 +69,36 @@ export type ManagedHlsErrorAction =
  * `networkDetails`, which is loader-specific and undocumented. The status is
  * the one field every loader populates the same way.
  */
-export const SEGMENT_NOT_READY_STATUS = 500;
+export const SEGMENT_NOT_READY_STATUS = coreSegmentNotReadyStatus;
+
+/**
+ * The status a node answers for a source it will not serve: the session it
+ * names does not exist, or the fragment is past the end of the plan.
+ *
+ * **Both, and the client cannot tell which.** Measured against the same node in
+ * the same run on 2026-09-17: a segment past the end of a live session's plan
+ * answers `404 {"code":"not_found","message":"stream object not found"}`, and a
+ * session the node has reaped answers `404 {"code":"not_found","message":"stream
+ * not found"}`. Same status, same machine-readable code, one word of English
+ * apart — and the body never arrives anyway, because hls.js reports
+ * `{ code, text }` and drops it (see the constant above).
+ *
+ * So this says only what the node said. Deciding *which* 404 it is takes a
+ * question this layer has no business asking — `GET` the session and see — and
+ * core asks it, on the failure this raises. An adapter that guessed "the
+ * session was reaped" would regenerate forever against a player that simply
+ * asked for a fragment beyond the end.
+ *
+ * Core's number, not a copy of it — as is the one above. Both statuses were
+ * private to this file until 2026-09-17, for the good reason that core did not
+ * export either; `SERVER_SEGMENT_HOLD_MS` is a duration, which is a different
+ * thing. Core exports them now and this file takes them from there, because two
+ * clients holding private copies of a server constant is how the stall budget
+ * went wrong. They stay exported from here so the names read the same at the
+ * call sites, and so this file remains the one place the web adapter's HLS
+ * status vocabulary is explained.
+ */
+export const SOURCE_NOT_FOUND_STATUS = coreSourceNotFoundStatus;
 
 type HlsErrorShape = { type?: unknown; response?: { code?: unknown } | null };
 
@@ -81,16 +115,36 @@ export function isHlsSegmentHold(data: HlsErrorShape): boolean {
 }
 
 /**
+ * The node declined to serve this source. Not a fault in the node, and never
+ * evidence against it.
+ *
+ * Reached on the *nonfatal* events, which is the point: `response.code` is
+ * populated on the very first one, so a source that has gone away is knowable
+ * while the buffer built before it still has a minute to run. Measured on
+ * 2026-09-17 the first of these arrived 3.7 s before the viewer pressed play.
+ */
+export function isHlsSourceNotFound(data: HlsErrorShape): boolean {
+  return data.type === HLS_NETWORK_ERROR && data.response?.code === SOURCE_NOT_FOUND_STATUS;
+}
+
+/**
  * Any HLS network error is early node-health evidence, even before it is
- * fatal — except a held segment, which says nothing about the node at all.
+ * fatal — except the two that say nothing about the node at all: a held
+ * segment, and a source the node has no record of.
  *
  * Note what the default costs if this is wrong in the permissive direction:
  * `@machafoundation/core` treats a `'stream'` failure as endpoint evidence, so an
  * unclassified hold prepares a standby elsewhere and can escalate to failover
  * off a node that was working correctly.
+ *
+ * That is not hypothetical for the 404, which was unclassified until
+ * 2026-09-17: a session reaped during a pause raised one, this returned true,
+ * and the coordinator answered `alternate-preparation-start` — a standby on a
+ * different node — 3.7 s before the viewer had even pressed play. The node was
+ * healthy throughout and was the only one holding the title's pipeline.
  */
 export function isHlsNetworkDegradation(data: HlsErrorShape): boolean {
-  return data.type === HLS_NETWORK_ERROR && !isHlsSegmentHold(data);
+  return data.type === HLS_NETWORK_ERROR && !isHlsSegmentHold(data) && !isHlsSourceNotFound(data);
 }
 
 /**
@@ -102,7 +156,11 @@ export function isHlsNetworkDegradation(data: HlsErrorShape): boolean {
  *   it gets the judging behaviour rather than the silent one.
  */
 export function managedHlsErrorAction(
-  data: { fatal?: boolean; type?: unknown; details?: unknown },
+  // `response` is part of the contract, not an incidental extra: the 404 branch
+  // reads it, and an `HlsErrorShape` without one classifies as an ordinary
+  // network error. Declared so a caller that drops it fails to compile rather
+  // than quietly getting the old behaviour back.
+  data: HlsErrorShape & { fatal?: boolean; details?: unknown },
   recovery: ManagedHlsMediaRecoveryBudget,
   positionMs: number,
   buffered = true,
@@ -140,6 +198,22 @@ export function managedHlsErrorAction(
     return {
       action: 'park-paused',
       details: typeof data.details === 'string' ? data.details : String(data.type ?? 'unknown'),
+    };
+  }
+  // A node that answered 404 will answer 404 again. The network restart exists
+  // for a transport that might recover, and this is not one: the source is
+  // gone, and no amount of reloading the same URL brings it back. Spending the
+  // budget here cost 33 s and then failed anyway. Reported straight away
+  // instead, while the buffer built before the source went away still has time
+  // left to run — which is the whole margin a recovery has to be invisible in.
+  //
+  // Checked before the network branch and after the pause branch, deliberately:
+  // this is a network error, but it is the one kind of network error that is
+  // not about the network.
+  if (isHlsSourceNotFound(data)) {
+    return {
+      action: 'fail-not-found',
+      details: typeof data.details === 'string' ? data.details : 'fragLoadError',
     };
   }
   if (data.type === HLS_NETWORK_ERROR) {

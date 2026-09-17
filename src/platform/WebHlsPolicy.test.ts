@@ -4,7 +4,7 @@ import Hls from 'hls.js';
 // of the boot bundle. If upstream ever changes them, this fails loudly.
 import { describe, expect, it } from 'vitest';
 import { ManagedHlsMediaRecoveryBudget } from './ManagedHlsRecovery';
-import { isHlsNetworkDegradation, isHlsSegmentHold, managedHlsErrorAction } from './WebHlsPolicy';
+import { isHlsNetworkDegradation, isHlsSegmentHold, isHlsSourceNotFound, managedHlsErrorAction } from './WebHlsPolicy';
 
 describe('managed HLS error policy', () => {
   it('treats even nonfatal network errors as early failover evidence', () => {
@@ -45,8 +45,74 @@ describe('managed HLS error policy', () => {
       expect(isHlsNetworkDegradation(held)).toBe(false);
       expect(isHlsNetworkDegradation(broken)).toBe(true);
       expect(isHlsNetworkDegradation({ type: Hls.ErrorTypes.NETWORK_ERROR, response: null })).toBe(true);
-      expect(isHlsNetworkDegradation({ type: Hls.ErrorTypes.NETWORK_ERROR, response: { code: 404 } })).toBe(true);
       expect(isHlsNetworkDegradation({ type: Hls.ErrorTypes.NETWORK_ERROR, response: { code: 502 } })).toBe(true);
+    });
+  });
+
+  describe('a 404 is what the node says, not what the node is', () => {
+    // Measured live 2026-09-17, against a session the node had reaped after
+    // `streaming.session_idle_ms` (30 min) of a pause. The payload below is
+    // the real one, trimmed:
+    //
+    //   {"type":"networkError","details":"fragLoadError","fatal":false,
+    //    "error":{"message":"HTTP Error 404 "},"sn":33,
+    //    "response":{"code":404,"text":"","url":"..."}}
+    //
+    // Note `fatal: false` and `response.code` present: the status is readable
+    // from the very first event, which is what makes the buffered cover usable.
+    const notFound = { type: Hls.ErrorTypes.NETWORK_ERROR, response: { code: 404 } };
+
+    it('recognises a 404 network error and nothing else', () => {
+      expect(isHlsSourceNotFound(notFound)).toBe(true);
+      expect(isHlsSourceNotFound({ type: Hls.ErrorTypes.NETWORK_ERROR, response: { code: 500 } })).toBe(false);
+      expect(isHlsSourceNotFound({ type: Hls.ErrorTypes.NETWORK_ERROR, response: { code: 503 } })).toBe(false);
+      expect(isHlsSourceNotFound({ type: Hls.ErrorTypes.NETWORK_ERROR })).toBe(false);
+      // A media error carrying 404 is not the node refusing to serve a source.
+      expect(isHlsSourceNotFound({ type: Hls.ErrorTypes.MEDIA_ERROR, response: { code: 404 } })).toBe(false);
+    });
+
+    it('keeps a 404 out of node-health evidence, which it never was', () => {
+      // This assertion is the inverse of the one this suite carried until
+      // 2026-09-17. A 404 says the node did not serve *this source*; it says
+      // nothing about the node, which is answering perfectly well. Scoring it
+      // as degradation is what prepared a standby elsewhere and then failed
+      // over onto a node that was never serving the title.
+      expect(isHlsNetworkDegradation(notFound)).toBe(false);
+      expect(isHlsNetworkDegradation({ type: Hls.ErrorTypes.NETWORK_ERROR, response: { code: 502 } })).toBe(true);
+    });
+
+    it('fails a fatal 404 at once and spends no network restart on it', () => {
+      // A node that answered 404 will answer 404 again: the restart exists for
+      // a transport that might recover, and this is not one. Spending it here
+      // is what cost 33 seconds and then failed anyway. Reported immediately
+      // instead, so the recovery happens inside the buffered cover.
+      const recovery = new ManagedHlsMediaRecoveryBudget();
+      expect(managedHlsErrorAction({ fatal: true, ...notFound, details: 'fragLoadError' }, recovery, 0)).toEqual({
+        action: 'fail-not-found',
+        details: 'fragLoadError',
+      });
+      // The budget is untouched, so an ordinary transport failure later in the
+      // same generation still gets the restart it is entitled to.
+      expect(managedHlsErrorAction({ fatal: true, type: Hls.ErrorTypes.NETWORK_ERROR }, recovery, 0)).toEqual({
+        action: 'restart-network',
+        attempt: 1,
+      });
+    });
+
+    it('still parks a fatal 404 raised while nobody is watching', () => {
+      // The pause rule is unchanged and outranks this: with no viewer waiting
+      // there is nothing to recover for, and the nonfatal 404s have already
+      // told the coordinator on the degradation channel anyway.
+      const recovery = new ManagedHlsMediaRecoveryBudget();
+      expect(managedHlsErrorAction({ fatal: true, ...notFound, details: 'fragLoadError' }, recovery, 0, true, false))
+        .toEqual({ action: 'park-paused', details: 'fragLoadError' });
+    });
+
+    it('leaves the 500 hold exactly as it was', () => {
+      const held = { type: Hls.ErrorTypes.NETWORK_ERROR, response: { code: 500 } };
+      expect(isHlsSegmentHold(held)).toBe(true);
+      expect(isHlsSourceNotFound(held)).toBe(false);
+      expect(isHlsNetworkDegradation(held)).toBe(false);
     });
   });
 

@@ -1,6 +1,6 @@
 # Active tasks and concepts to explore
 
-Last updated: 2026-09-17 (video fit settled, boot measured, 0.17.1 deployed)
+Last updated: 2026-09-17 (paused session reaped at 30 min — new P0, reproduced)
 
 This is the working backlog. Add new work here. When an item is implemented and
 its stated verification is complete, remove it from this file and add a dated
@@ -53,9 +53,12 @@ titles people choose it for. 2026-09-16 settled where the black comes from: the
 bars are burnt into the source, the client's fit is correct, and the fix is an
 ingest/server one. [Evidence](2026-09-16-video-fit-mode.md).
 
-**After that, the P0s are the honest priority.** Every failover from an https
-page lands on an unreachable http node and shows "Failed to fetch" (2026-09-16 —
-the client half is fixed and in `COMPLETED.md`, the rest is core's). Three more
+**After that, the P0s are the honest priority.** A pause past thirty minutes
+leaves the node's reaper to erase the play session, and the resume never asks
+whether it is still there (2026-09-17, reproduced verbatim — core's). Every
+failover from an https page then lands on an unreachable http node and shows
+"Failed to fetch" (2026-09-16 — the client half is fixed and in `COMPLETED.md`,
+the rest is core's), which is the message both faults end in. Three more
 are playback correctness and all three are old: Direct Play stuck at
 `readyState 0`, any-node failover, and a ready standby discarded 33 s before it
 is used. The last is the server's, and only needs re-measuring.
@@ -148,7 +151,9 @@ prefer; generating them is a build change nobody has asked for yet.
 
 ## Core comes from npm, and the registry is the only resolution path
 
-`@machafoundation/core` is `^0.11.1` from the registry as of 0.17.0. A clone and
+`@machafoundation/core` is `^0.12.0` from the registry, and 0.12.0 is what is
+installed — this line said `^0.11.1` until 2026-09-17 and was wrong, which is
+the failure mode the section below is about. Read `package.json`. A clone and
 an `npm install` are the whole setup — no sibling checkout, which is the point:
 this repo has to work for someone who only downloaded it.
 
@@ -231,6 +236,73 @@ would otherwise copy, and cannot help a direct session at all.
       `overflow: hidden` clips it. Unchanged for any title without one.
 - [ ] Note the payoff is windowed and ultrawide only: on a 16:9 screen a 2.3:1
       picture is the same size either way.
+
+## P0 — A pause past the node's idle budget kills the session, and the resume never checks
+
+Reproduced live and verbatim 2026-09-17:
+[a paused session is reaped](2026-09-17-paused-session-reaped.md).
+
+Pause for thirty minutes or more and press play: the buffer plays out, then
+`Macha endpoint http://10.35.1.50:7438 failed: Failed to fetch`.
+
+`streaming.session_idle_ms` is **1800000 — thirty minutes exactly**, and `fi-1`
+runs the default. The reaper's clock runs from `touched`, which only a request
+refreshes; a paused client fills its bounded forward buffer, stops asking, and
+from then on the clock runs unopposed. **A pause longer than the budget is a
+certainty, not a risk.** A reaped session answers `404 not_found` on both the
+session and the stream routes.
+
+Nothing between the pause and the resume asks the node whether the session is
+still there. `resume()` restarts the parked load and asks the element to play;
+the 404s are retried blind for 62 s, the one permitted hls.js network recovery
+is spent on them, and the node is then failed over for having answered
+honestly — onto the unreachable http LAN address, which is the name the viewer
+is shown. Measured: the session was on `es-1`; the screen blamed `fi-1`.
+
+**There is more cover than the symptom suggests.** Instrumented, the first 404
+reaches the degradation channel **3.7 s before the viewer presses play** — hls.js
+meets the reaped session while topping up its buffer — on top of 62.8 s of
+buffer. Core is already told, on the right channel, at the right moment; it
+answers `alternate-preparation-start`, a standby on another node, purely because
+the kind says `'stream'`. Recovering inside that window is invisible to the
+viewer.
+
+Split with the `Macha Client Core` session 2026-09-17; it owns the core half and
+has confirmed the chain in its own source. Core's sharper statement of it:
+**core has no "regenerate here" verb** — every terminal source error has one
+exit, and that exit starts by condemning the node.
+
+- [ ] **Core: a failure kind for "this source is gone"**, not endpoint-retryable,
+      with a regenerate-in-place path on `ClusterPlaybackResolver` and an
+      explicit branch in `degrade()`. A resume probe is latency only, never
+      correctness.
+- [x] **This repo, policy layer.** `SOURCE_NOT_FOUND_STATUS` and
+      `isHlsSourceNotFound` beside `isHlsSegmentHold` in `WebHlsPolicy.ts`, the
+      404 excluded from `isHlsNetworkDegradation`, and a `fail-not-found` action
+      that spends no network restart. Tests seen red first — including the
+      inversion of an existing assertion that a 404 *is* degradation evidence.
+      Named for what the node said, not what it means: the adapter cannot tell a
+      reaped session from a fragment past the end of the plan, and must not
+      pretend to.
+- [x] **This repo, the wiring — written and proven live.** `WebPlatform` reports
+      a 404 as `'not-found'` on both channels, on its own degradation latch so an
+      earlier transient error cannot swallow it. Verified against a linked core
+      at `ce8b596`: regenerates on the same node, keeps the position, charges
+      nothing against the endpoint, never goes near a failover. Evidence in the
+      document above.
+- [ ] **Blocked on core publishing `'not-found'`, and the tree says so.**
+      Unlinked, `npm run typecheck` fails with four errors — two missing status
+      exports and two `'not-found'` literals. That is deliberate and honest:
+      **do not deploy from this tree** until core ships a version carrying the
+      kind, then bump the range. Left red rather than papered over.
+- [ ] **Core: stop discarding the cover at `source-activate`.** The recovery
+      works and the viewer still sees 5.16 s of spinner, because activation
+      empties a media element holding 62 s of playable video. Raised; it is the
+      gap between a fix and a tidier version of the same complaint.
+- [ ] **Do not fix it with a keepalive.** The transcode entitlement is held by
+      the session, not the pipeline, so a paused session held open pins the
+      node's only video transcode slot for as long as the tab is. The reaping is
+      correct; noticing it on the way back is what is missing.
 
 ## P0 — Any failover from an https page dies on an http node, and says "Failed to fetch"
 

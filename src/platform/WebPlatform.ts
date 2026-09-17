@@ -27,6 +27,7 @@ import { hlsEventSummary, videoState, WebMediaDiagnostics } from './WebMediaDiag
 import {
   isHlsNetworkDegradation,
   isHlsSegmentHold,
+  isHlsSourceNotFound,
   managedHlsErrorAction,
   SEGMENT_NOT_READY_STATUS,
   webHlsBufferConfig,
@@ -364,6 +365,8 @@ class WebPlayer implements Player {
   private attachedSourceGeneration?: number;
   private failedSourceGeneration?: number;
   private degradedSourceGeneration?: number;
+  /** Its own latch: see `degradeSourceNotFound` for why it is not the one above. */
+  private notFoundSourceGeneration?: number;
   private unsubscribeDirectDegradation?: () => void;
   private hlsMediaRecovery?: ManagedHlsMediaRecoveryBudget;
   /** A managed-HLS load stopped by a fatal error raised while nobody was watching. */
@@ -486,6 +489,7 @@ class WebPlayer implements Player {
     const sourceGeneration = ++this.sourceGeneration;
     this.failedSourceGeneration = undefined;
     this.degradedSourceGeneration = undefined;
+    this.notFoundSourceGeneration = undefined;
     this.hlsLoadParkedWhilePaused = false;
     this.wantsPlayback = !startPaused;
     // Suppress media-element teardown events from the previous source. The new
@@ -1074,6 +1078,7 @@ class WebPlayer implements Player {
     this.sourceGeneration += 1;
     this.failedSourceGeneration = undefined;
     this.degradedSourceGeneration = undefined;
+    this.notFoundSourceGeneration = undefined;
     this.hlsLoadParkedWhilePaused = false;
     this.wantsPlayback = false;
     this.activeSource = undefined;
@@ -1212,6 +1217,25 @@ class WebPlayer implements Player {
     for (const listener of this.degradationListeners) listener(error);
   }
 
+  /**
+   * A source the node has no record of, reported once per generation on its own
+   * latch rather than the shared one.
+   *
+   * Separate because the shared latch would swallow it. Ordinary degradation
+   * fires at most once per generation to keep repeated network wobble from
+   * spamming the coordinator — so a generation that had already seen one
+   * transient error would never report the 404 that followed, and the whole
+   * early recovery would be lost to a blip that had nothing to do with it.
+   * These are different claims: one says the node is struggling, the other says
+   * this source is gone, and only the second is recoverable in place.
+   */
+  private degradeSourceNotFound(sourceGeneration: number, error: Error, detail?: unknown): void {
+    if (sourceGeneration !== this.sourceGeneration || this.notFoundSourceGeneration === sourceGeneration) return;
+    this.notFoundSourceGeneration = sourceGeneration;
+    this.log.warn('source-not-found', { error, detail });
+    for (const listener of this.degradationListeners) listener(error);
+  }
+
   private failSourceGeneration(sourceGeneration: number, error: Error, detail?: unknown): void {
     if (sourceGeneration !== this.sourceGeneration || this.failedSourceGeneration === sourceGeneration) return;
     this.failedSourceGeneration = sourceGeneration;
@@ -1263,7 +1287,20 @@ class WebPlayer implements Player {
     hls.on(Hls.Events.ERROR, (_event, data) => {
       if (sourceGeneration !== this.sourceGeneration || this.hls !== hls) return;
       const payload = { data: hlsEventSummary(data), state: videoState(video) };
-      if (isHlsNetworkDegradation(data)) {
+      // The earliest and cheapest recovery this client has. hls.js populates
+      // `response.code` on the *nonfatal* fragment errors, so a source the node
+      // no longer has is knowable while the buffer built before it went away
+      // still has a minute to run — measured at 62.8 s of cover, and the first
+      // of these arrived 3.7 s before the viewer even pressed play. Reported on
+      // the degradation channel so the coordinator can regenerate on this node
+      // inside that margin and the viewer sees nothing at all.
+      if (isHlsSourceNotFound(data)) {
+        this.degradeSourceNotFound(
+          sourceGeneration,
+          new PlaybackSourceError(`Web HLS source not found (${data.details}).`, 'not-found', data),
+          payload,
+        );
+      } else if (isHlsNetworkDegradation(data)) {
         this.degradeSourceGeneration(
           sourceGeneration,
           new PlaybackSourceError(`Web HLS network degradation (${data.details}).`, 'stream', data),
@@ -1307,6 +1344,21 @@ class WebPlayer implements Player {
         this.log.warn('hls-load-parked-while-paused', { ...payload, details: action.details });
         this.hlsLoadParkedWhilePaused = true;
         hls.stopLoad();
+        return;
+      }
+      if (action.action === 'fail-not-found') {
+        // Reported as `not-found` so the coordinator regenerates on this node
+        // rather than condemning it. The node is answering correctly and is the
+        // one holding this title's pipeline; the source it was asked for is
+        // simply not there any more. No network restart was spent getting here.
+        this.failSourceGeneration(
+          sourceGeneration,
+          new PlaybackSourceError(
+            `Web HLS playback failed: the node no longer has this source (${action.details}).`,
+            'not-found',
+          ),
+          payload,
+        );
         return;
       }
       if (action.action === 'restart-network') {
