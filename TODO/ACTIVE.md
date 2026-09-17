@@ -466,6 +466,58 @@ exit, and that exit starts by condemning the node.
       long enough to fill the buffer leaves more runway than hls.js has
       patience, so the fatal always wins while this adapter escalates it. That
       raises the stakes on the teardown change below rather than lowering them.
+## P1 — Seamless generation swap, proven and not yet built
+
+**A second media element, prepared hidden, is the mechanism.** Demonstrated live
+2026-09-17 against `es-1`, transcode over fMP4, **with sound**, and confirmed
+seamless by ear as well as by the clock.
+
+```
+A playing from 20.05 min, audible
+B created at A + 25 s, attached to a second <video> with display:none
+B reached canplay in 1.35 s, buffered past 50 s while never rendered
+seek B to the join point while still hidden
+spin until A reaches that exact content position, then hand over in one tick
+  A 20.8998 min -> B 20.8997 min      ~6 ms of content error
+  handover                             0.6 ms
+```
+
+**`display: none` is enough**, which was the surprise — an unrendered element
+still buffers, and buffered *faster than realtime* (16 s of media in 12 s of
+wall clock). No stacking, no `opacity: 0`, no off-screen 1×1. Element visibility
+does not gate MSE; **tab** visibility gates everything, and a backgrounded tab
+stops decode dead (`readyState 0`, `networkState 2`, no error) — the same
+signature as the Direct Play investigation. Out of scope by decision: if nobody
+is looking, a gap is acceptable.
+
+**Alignment is the part that must be got right.** A first attempt promoted B at
+its own creation point while A had moved on, and replayed about two seconds —
+visible, and obvious with sound. B must be seeked to the join point *before*
+promotion, which is free because it happens hidden.
+
+**Why this is bigger than the reaped-session P0.** The same mechanism gives
+seamless node failover for transcoded media, which has never worked: the
+existing standby path is direct-only by construction (`addDirectSourceAlternative`
+→ the read-ahead worker's URL list), because byte ranges are interchangeable
+between nodes and transcode generations are not. Reaped session, dead node,
+quality change — all become the same operation.
+
+It also subsumes `preflightSource`: preparing on a hidden element *is* the
+preflight, and a better one, because it ends with media actually playing rather
+than a boolean saying bytes arrived.
+
+- [ ] Seam to agree with core: prepare a source without presenting it, and
+      promote a prepared source — replacing the direct-only alternative, with
+      today's teardown path as the fallback when preparation is impossible.
+- [ ] **Samsung is the open question.** A 2017 Tizen 3 panel forced onto native
+      HLS may not tolerate two decoding elements. If not, this is web/Android
+      and the TV keeps today's behaviour — a fallback, not a blocker, but it
+      decides whether this is *the* mechanism or *a* mechanism.
+- [ ] Bandwidth during the overlap: two transcoded streams run concurrently for
+      the seconds before the swap, which on the WAN link could starve the stream
+      still being watched. Argues for preparing late and keeping the overlap
+      short, which is what core's lead time already computes.
+
 - [ ] **Superseded, kept for the record: run 1's failure, since fixed in
       `73abbdc`.**
       `replacement-held` fires correctly (runway 110 s against a 15 s floor) and
