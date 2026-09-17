@@ -306,10 +306,32 @@ exit, and that exit starts by condemning the node.
       invariant and its test caught an early version of this that broke it.
       **This is the path the original report's episode actually takes** in
       Chrome on macOS, so a quiet release would have looked fine.
-- [ ] **Core: stop discarding the cover at `source-activate`.** The recovery
-      works and the viewer still sees 5.16 s of spinner, because activation
-      empties a media element holding 62 s of playable video. Raised; it is the
-      gap between a fix and a tidier version of the same complaint.
+- [ ] **Core: the deferral is built and it fails. Tested 2026-09-17.**
+      `replacement-held` fires correctly (runway 110 s against a 15 s floor) and
+      is thrown away 28 s later. hls.js keeps retrying the reaped session for
+      ~30 s and goes fatal; core cannot probe that fatal because `regenerate()`
+      has already released the old session, so `sessionAlive()` throws *"has no
+      endpoint provenance"*, which reads as "could not find out" and lands in
+      failover — releasing the held replacement on its way past. **Worse than
+      the 5.16 s stall it replaced**: 82 s of runway discarded, element emptied,
+      playback moved onto a different endpoint.
+- [ ] **This repo, once core decides.** A `not-found` terminal tears the element
+      down before core sees it: `failSourceGeneration` calls `hls.destroy()`,
+      `video.pause()` and clears `wantsPlayback` synchronously, so the viewer's
+      buffer is gone 6 ms after the fatal. Core's "drop the fatal and keep
+      holding" cannot work against that. Either core swaps in at once, or this
+      adapter stops tearing down for `fail-not-found` alone — **not both**. The
+      open question is what the viewer is told when there is no replacement and
+      the regeneration fails, which is the only thing the teardown provides now.
+- [ ] **Core is blind to Direct Play cover.** `forwardBufferMs` comes from
+      `video.buffered` only; the read-ahead worker's cache is not in it, so on
+      the path the reported title actually takes core swaps earlier than it
+      needs to. `directPlayReadAheadMetrics` already carries `residentBytes` and
+      `aheadBytes`, and `publish` already reads it for `streamOrigin` — wants a
+      separate `PlaybackEvent` field, never folded into `forwardBufferMs`.
+- [x] **Held replacements are released when the player closes.** Verified live
+      2026-09-17: closed inside the hold window, `session-stop` at teardown, and
+      the held session id answered 404 on the node afterwards. No slot leak.
 - [ ] **Do not fix it with a keepalive.** The transcode entitlement is held by
       the session, not the pipeline, so a paused session held open pins the
       node's only video transcode slot for as long as the tab is. The reaping is
