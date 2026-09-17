@@ -339,6 +339,34 @@ exit, and that exit starts by condemning the node.
       Both tests seen red at 5 s first. Core still has to widen
       `ALTERNATE_TRANSCODE_RECOVERY_WINDOW_MS` (8 s) or a standby that now
       passes is still discarded before a cold pipeline could be useful.
+- [x] **The pipeline is NOT lazy. Measured 2026-09-17, premise withdrawn.**
+      `POST /playback/sessions` calls `start_pipeline` and blocks on the first
+      fragment before answering 201 — the node's own journal for trace
+      `c04cacfb`: `first fragment ready elapsed_ms=1924 segments=1`, then
+      `session create complete elapsed_ms=1924`. Client side: create then
+      segment 0 immediately is **0.30 s** with no seek, **0.64 s** with
+      `seek_ms=434000`; and after holding a generation **28 s untouched**,
+      segments 0/5/8/9 all come back in ~0.6 s. A held generation is warm and
+      stays warm. "Holding bought no warmth" was wrong and core had already
+      built on it — corrected there.
+- [ ] **What actually costs the 9.0 s: the look-ahead does not follow the
+      viewer.** Production parks at `highest_requested + max_ahead_segments`, so
+      warming segment 0 buys 0..8 and no more. Same held generation:
+      `segment-000012` -> **500 after 6.27 s**, `segment-000014` -> **500 after
+      7.59 s**, with the node logging `stream refused ... reason=hold_timed_out`
+      for both. A replacement held 28 s has the viewer arriving past the
+      frontier, and the node produces forward to reach them at roughly realtime.
+      **`REPLACEMENT_LEAD_TIME_MS` (30 s) must be compared against the
+      look-ahead**, which on `es-1` is `max_ahead_segments: 8` ×
+      `segment_duration_ms: 4000` = 32 s. Two seconds of margin, and on a node
+      with `max_ahead_segments: 4` the reshape reproduces the bug it fixes.
+      Neither field is on the play session payload; asked the server session
+      for a `look_ahead_ms` rather than hardcoding 8 and 4000.
+- [ ] **`warmSource` must walk the frontier, not warm segment 0.** Every stream
+      request raises `highest_requested` monotonically and that is what advances
+      the producer, so warming has to cover the arrival point. Built to the spec
+      as written it would have warmed segment 0, covered 32 s and left exactly
+      the edge case above.
 - [ ] **`warmSource` when core lands it.** Core is adding
       `warmSource?(source): Promise<void>` rather than reusing preflight, on the
       rule that whatever warms a source must not decide whether to attach it.
