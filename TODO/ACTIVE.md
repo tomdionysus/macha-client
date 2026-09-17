@@ -362,11 +362,39 @@ exit, and that exit starts by condemning the node.
       with `max_ahead_segments: 4` the reshape reproduces the bug it fixes.
       Neither field is on the play session payload; asked the server session
       for a `look_ahead_ms` rather than hardcoding 8 and 4000.
-- [ ] **`warmSource` must walk the frontier, not warm segment 0.** Every stream
-      request raises `highest_requested` monotonically and that is what advances
-      the producer, so warming has to cover the arrival point. Built to the spec
-      as written it would have warmed segment 0, covered 32 s and left exactly
-      the edge case above.
+- [ ] **Do not "walk the frontier" — production is sequential.**
+      `note_requested` raises `highest_requested` with `std::max`, but that moves
+      only the *permission* boundary; the producer still appends strictly in
+      order. Asking for index 20 authorises production to 28 and then makes you
+      wait while 10..19 encode at roughly realtime. Walking one index at a time
+      costs the same wall clock as jumping. The 6.27 s and 7.59 s above were
+      that encoding, not a lookup. **The rule instead:** a fresh generation
+      seeked to the arrival point beats making an existing one encode its way
+      there — **1.92 s** cold start against **~9 s** of catch-up over a 28 s gap.
+      (Corrected 2026-09-17 after telling core the opposite; second wrong
+      instruction sent on this, both withdrawn before anything was built.)
+- [ ] **Bound the lead by the look-ahead and warming becomes unnecessary.**
+      Create at lead `L` at the position the viewer will reach; permission from
+      create covers 0..8; production runs at ~realtime with `L` of wall clock to
+      fill it; the viewer arrives at generation-local `L`. So if
+      `L <= lookAheadMs - margin` the viewer arrives inside permission and there
+      is nothing to warm. If `L` exceeds it, warming cannot fix it either,
+      because permission caps production regardless. `warmSource` is then worth
+      building for exactly one thing — raising permission early when a longer
+      lead is wanted deliberately — and the reshape must not be gated on it.
+- [ ] **Segment duration is already on the wire; only the count is not.**
+      `#EXT-X-TARGETDURATION` and per-fragment `#EXTINF`, plan complete from the
+      first fetch (`#EXT-X-ENDLIST`). Do not multiply a count by a duration, and
+      note the **first fragment of a transcode generation is 2 s by design**,
+      not the configured duration — read the real values.
+- [ ] **Write `hold_timed_out` down as a contract, not an observation.** 500
+      `segment_not_ready`, `Retry-After: 1`, `Cache-Control: no-store`, and
+      never a 404 — the playlist has already promised the object exists and a
+      404 would invite an intermediary to cache the absence. "Held then refused"
+      means the encoder did not reach that index inside the hold window, not
+      that the fragment is missing; retrying is correct and succeeds as
+      production advances. It is the one 5xx that must not read as node
+      ill-health, and it belongs beside `SEGMENT_NOT_READY_STATUS`.
 - [ ] **`warmSource` when core lands it.** Core is adding
       `warmSource?(source): Promise<void>` rather than reusing preflight, on the
       rule that whatever warms a source must not decide whether to attach it.
