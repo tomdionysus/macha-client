@@ -309,6 +309,64 @@ export async function awaitNativeHlsFirstFragment(
   return { ready: false, reason, waitedMs: now() - started, attempts };
 }
 
+/**
+ * Budgets for a seamless generation handover. All of them fail *towards* the
+ * teardown path: a handover that cannot be set up in time is abandoned and the
+ * viewer gets today's behaviour, which is worse but never worse than broken.
+ */
+const HANDOVER_READY_TIMEOUT_MS = 20_000;
+/**
+ * How long to wait for the replacement to buffer the join point.
+ *
+ * The join is `clockOffsetMs` into the replacement — however far the viewer
+ * travelled while core negotiated — so it is not resident at `canplay` and has
+ * to be fetched. Generous, because the cost of waiting is nothing (the viewer
+ * is still watching the outgoing source) and the cost of giving up is the
+ * teardown path.
+ */
+const HANDOVER_BUFFER_TIMEOUT_MS = 25_000;
+const HANDOVER_BUFFER_POLL_MS = 100;
+const HANDOVER_SEEK_TIMEOUT_MS = 8_000;
+const HANDOVER_JOIN_TIMEOUT_MS = 20_000;
+const HANDOVER_JOIN_POLL_MS = 20;
+/**
+ * How long the outgoing position may stand still before the cut is forced.
+ *
+ * Its buffer running out is the normal end of a reaped generation, and once the
+ * picture has stopped there is nothing left to protect — waiting for a position
+ * it can never reach only lengthens the gap.
+ */
+const HANDOVER_OUTGOING_STALL_MS = 400;
+/**
+ * How far ahead of the live position the join is placed.
+ *
+ * Far enough that the outgoing element has not already passed it by the time
+ * the seek completes, short enough that nobody waits for the cut. It is not a
+ * safety margin — the loop below waits for the position to actually arrive.
+ */
+const HANDOVER_JOIN_LEAD_MS = 400;
+/**
+ * Below this much buffered media, preparing a second element is not worth it:
+ * there is not enough runway to finish before the picture stops anyway, and the
+ * teardown path reaches the same place sooner.
+ */
+const HANDOVER_MINIMUM_RUNWAY_MS = 3_000;
+
+/** Resolve on a media element event, or `false` if it does not arrive in time. */
+function waitForMediaEvent(video: HTMLVideoElement, name: string, timeoutMs: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const done = (value: boolean) => {
+      if (timer !== undefined) clearTimeout(timer);
+      video.removeEventListener(name, onEvent);
+      resolve(value);
+    };
+    const onEvent = () => done(true);
+    video.addEventListener(name, onEvent, { once: true });
+    timer = setTimeout(() => done(false), timeoutMs);
+  });
+}
+
 function nativeHlsSupported(video: HTMLVideoElement): boolean {
   return video.canPlayType('application/vnd.apple.mpegurl') !== '' || video.canPlayType('application/x-mpegURL') !== '';
 }
@@ -445,6 +503,27 @@ class WebPlayer implements Player {
 
   private ensureMediaElement(): HTMLVideoElement {
     if (this.video) return this.video;
+    const video = this.createWiredMediaElement();
+    this.video = video;
+    const host = this.host;
+    if (host) {
+      while (host.firstChild) host.removeChild(host.firstChild);
+      host.appendChild(video);
+    }
+    return video;
+  }
+
+  /**
+   * A media element with every listener this player needs, owned by nobody yet.
+   *
+   * Split from `ensureMediaElement` so a replacement generation can be built and
+   * buffered on its own element while the current one keeps playing. Every
+   * listener below already guards on `video !== this.video`, so an element that
+   * is not the active one is wired and inert — it publishes nothing, fails
+   * nothing and resumes nothing until it is promoted. That property is what
+   * makes the handover safe, and it was already true for other reasons.
+   */
+  private createWiredMediaElement(): HTMLVideoElement {
     const video = document.createElement('video');
     video.className = 'native-video';
     video.autoplay = true;
@@ -520,17 +599,17 @@ class WebPlayer implements Player {
     video.addEventListener('loadedmetadata', resumeWhenReady);
     video.addEventListener('loadeddata', resumeWhenReady);
     video.addEventListener('canplay', resumeWhenReady);
-    this.video = video;
-    const host = this.host;
-    if (host) {
-      while (host.firstChild) host.removeChild(host.firstChild);
-      host.appendChild(video);
-    }
     return video;
   }
 
   async play(source: PlaybackSource, positionMs = 0, startPaused = false): Promise<boolean> {
     if (!this.host) throw new Error('Player must be attached before playback');
+    // Before anything is torn down, ask whether this generation can be replaced
+    // without the viewer seeing it. Nothing above the platform changes: core
+    // still says "play this source at this position" and the platform decides
+    // how to get there. A handover that cannot be set up falls through to the
+    // teardown path below, which is what every other target still does.
+    if (await this.handOverToSource(source, positionMs, startPaused)) return true;
     const playRequestGeneration = ++this.playRequestGeneration;
     const sourceGeneration = ++this.sourceGeneration;
     this.failedSourceGeneration = undefined;
@@ -742,6 +821,237 @@ class WebPlayer implements Player {
       state: videoState(video),
     });
     return true;
+  }
+
+  /**
+   * Replace the playing generation with another one without interrupting the
+   * picture, by preparing it on a second media element and promoting that
+   * element once it is buffered and aligned.
+   *
+   * **Why a second element and not a second source.** hls.js cannot be handed a
+   * new source in place: `loadSource()` on a live instance detaches the media,
+   * resets the buffer and empties the element, measured — so it destroys the
+   * runway exactly as a teardown does. Nor can two generations be appended to
+   * one SourceBuffer, because each carries its own timeline origin, init segment
+   * and fragment boundaries. The only way the viewer's media survives the swap
+   * is for the replacement to be decoding somewhere else first.
+   *
+   * This is the transcode counterpart of what the Direct Play read-ahead worker
+   * already does for a dying node. That works by holding several upstream URLs
+   * behind one stable proxy URL, which is only possible because a byte range is
+   * the same bytes from any node. A transcode generation is not interchangeable
+   * with another node's, so the swap has to happen a layer up — at the element,
+   * rather than at the URL.
+   *
+   * **Alignment is the part that must be exact.** The replacement is created for
+   * the position the viewer had reached when core asked for it, and the viewer
+   * keeps moving while it buffers. Promoting it at its own start therefore
+   * replays the difference; at two seconds that is plainly audible. So the
+   * offset between the two generations' clocks is taken at the moment of the
+   * request, a join point is chosen slightly ahead of the live position, the
+   * replacement is seeked there while still hidden, and the swap happens when
+   * the outgoing element actually reaches it. Measured live at ~6 ms of content
+   * error and a 0.6 ms handover, with sound, judged seamless by ear.
+   *
+   * Hidden means `display: none`, which is enough: an unrendered element still
+   * buffers, and buffered faster than realtime in testing. Element visibility
+   * does not gate MSE. **Tab** visibility gates everything — a backgrounded tab
+   * stops decoding entirely — and that case is deliberately not handled here,
+   * because a gap nobody is watching is not a gap worth paying for.
+   */
+  private async handOverToSource(source: PlaybackSource, positionMs: number, startPaused: boolean): Promise<boolean> {
+    const outgoing = this.video;
+    const host = this.host;
+    const outgoingEvent = this.lastPublishedEvent;
+    if (!host || !outgoing || !outgoingEvent || startPaused) return false;
+    // Only a generation that is actually playing has media to protect.
+    if (outgoing.paused || !this.wantsPlayback || !this.activeSource) return false;
+    // Both sides must be managed HLS. The native path owns its own element
+    // source, and Direct Play already fails over inside the worker.
+    if (!source.isManifest || !this.activeSource.isManifest) return false;
+    if (!shouldUseManagedHls(this.options.forceNativeHls, managedHlsSupported())) return false;
+    // Nothing to hand over from if the outgoing generation never established a
+    // clock, and nothing to hand over to if its buffer is already spent.
+    const runwayMs = (outgoingEvent.forwardBufferMs ?? 0);
+    if (runwayMs < HANDOVER_MINIMUM_RUNWAY_MS) return false;
+
+    const sourceGeneration = this.sourceGeneration + 1;
+    const startedAt = performance.now();
+    // The two generations' clocks differ by a fixed amount: at this instant the
+    // viewer is at `outgoingEvent.positionMs` on the old one and core is asking
+    // for `positionMs` on the new one, so those denote the same content.
+    const clockOffsetMs = positionMs - outgoingEvent.positionMs;
+    this.log.info('handover-begin', {
+      url: source.url,
+      requestedPositionMs: positionMs,
+      outgoingPositionMs: outgoingEvent.positionMs,
+      clockOffsetMs,
+      runwayMs,
+    });
+
+    let incoming: HTMLVideoElement | undefined;
+    let built: { hls: InstanceType<typeof import('hls.js').default>; recovery: ManagedHlsMediaRecoveryBudget } | undefined;
+    const abandon = (reason: string, detail?: unknown) => {
+      this.log.warn('handover-abandoned', { reason, detail, elapsedMs: Math.round(performance.now() - startedAt) });
+      try { built?.hls.destroy(); } catch { /* the fallback path rebuilds regardless */ }
+      try { incoming?.remove(); } catch { /* already detached */ }
+      return false;
+    };
+
+    try {
+      const hlsModule = await loadHls();
+      if (this.video !== outgoing) return abandon('superseded-while-loading-hls');
+      incoming = this.createWiredMediaElement();
+      incoming.style.display = 'none';
+      incoming.muted = true;
+      host.appendChild(incoming);
+      built = this.attachHls(hlsModule, incoming, source.url, sourceGeneration, false);
+
+      const ready = await waitForMediaEvent(incoming, 'canplay', HANDOVER_READY_TIMEOUT_MS);
+      if (!ready) return abandon('not-ready-in-time');
+      if (this.video !== outgoing) return abandon('superseded-while-preparing');
+
+      // The replacement's own clock, established from what it has buffered. It
+      // is a fresh generation, so its first resident fragment is its origin.
+      const timeline = new WebMediaTimeline(source.mode, 0);
+      const sampled = timeline.sample({
+        positionMs: incoming.currentTime * 1000,
+        bufferedRangesMs: playbackTimeRanges(incoming.buffered),
+        seekableRangesMs: playbackTimeRanges(incoming.seekable),
+      });
+      if (!sampled || !timeline.established) return abandon('incoming-timeline-unestablished');
+
+      const livePositionMs = () => (this.lastPublishedEvent?.positionMs ?? outgoingEvent.positionMs);
+
+      // Wait for the join point to be *buffered* before seeking to it.
+      //
+      // `canplay` means the first fragment arrived, not that the join is
+      // reachable — the join sits `clockOffsetMs` into the replacement, which is
+      // however far the viewer travelled while core was negotiating. Seeking
+      // there before it is resident makes the element wait for data instead of
+      // firing `seeked`, and the handover times out holding a perfectly good
+      // replacement. Measured doing exactly that: a 4.8 s join, an 8 s budget,
+      // and an abandoned handover with 46 s of runway still in hand.
+      //
+      // The join is recomputed each turn because the outgoing element keeps
+      // moving; a point chosen once goes stale while the data is still arriving.
+      let joinAtOldMs = 0;
+      let targetMediaMs: number | undefined;
+      const bufferDeadline = performance.now() + HANDOVER_BUFFER_TIMEOUT_MS;
+      for (;;) {
+        if (this.video !== outgoing) return abandon('superseded-while-buffering');
+        if (outgoing.paused) return abandon('outgoing-paused-while-buffering');
+        joinAtOldMs = livePositionMs() + HANDOVER_JOIN_LEAD_MS;
+        targetMediaMs = timeline.toMediaTime(joinAtOldMs + clockOffsetMs);
+        if (targetMediaMs === undefined) return abandon('incoming-join-unmappable');
+        const targetSeconds = targetMediaMs / 1000;
+        const resident = playbackTimeRanges(incoming.buffered)
+          .some((range) => range.startMs <= targetMediaMs! && range.endMs >= targetMediaMs!);
+        if (resident) break;
+        if (performance.now() > bufferDeadline) {
+          return abandon('join-never-buffered', { targetSeconds, buffered: playbackTimeRanges(incoming.buffered) });
+        }
+        await new Promise((resolve) => setTimeout(resolve, HANDOVER_BUFFER_POLL_MS));
+      }
+
+      incoming.currentTime = targetMediaMs / 1000;
+      if (!await waitForMediaEvent(incoming, 'seeked', HANDOVER_SEEK_TIMEOUT_MS)) return abandon('incoming-seek-timeout');
+      if (this.video !== outgoing) return abandon('superseded-while-seeking');
+
+      // Wait for the outgoing element to actually arrive at the join point, so
+      // the cut is where it was planned rather than wherever the seek landed.
+      //
+      // Unless it stops arriving. A generation whose source is gone runs out of
+      // buffer, and then the position it was supposed to reach never comes —
+      // measured stalling here for 25 s with a fully prepared replacement
+      // sitting a few frames away, which is far worse than the gap it was
+      // avoiding. So a stalled outgoing element ends the wait immediately and
+      // the cut happens where it stopped: a few hundred milliseconds of skip is
+      // the cheapest outcome available once the picture has already frozen.
+      const deadline = performance.now() + HANDOVER_JOIN_TIMEOUT_MS;
+      let lastSeenMs = livePositionMs();
+      let lastAdvancedAt = performance.now();
+      while (livePositionMs() < joinAtOldMs) {
+        if (performance.now() > deadline) return abandon('join-point-never-reached', { joinAtOldMs, at: livePositionMs() });
+        if (this.video !== outgoing) return abandon('superseded-while-waiting-for-join');
+        if (outgoing.paused) return abandon('outgoing-paused-before-join');
+        const now = livePositionMs();
+        if (now > lastSeenMs + 1) {
+          lastSeenMs = now;
+          lastAdvancedAt = performance.now();
+        } else if (performance.now() - lastAdvancedAt > HANDOVER_OUTGOING_STALL_MS) {
+          this.log.warn('handover-join-forced-by-stall', { joinAtOldMs, stalledAtMs: now });
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, HANDOVER_JOIN_POLL_MS));
+      }
+
+      this.promoteHandover(source, incoming, built, timeline, sourceGeneration, outgoing);
+      this.log.info('handover-complete', {
+        elapsedMs: Math.round(performance.now() - startedAt),
+        joinAtOldMs,
+        joinAtNewMs: joinAtOldMs + clockOffsetMs,
+        landedAtMs: this.lastPublishedEvent?.positionMs,
+      });
+      return true;
+    } catch (error) {
+      return abandon('threw', error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  /** The cut itself: one synchronous block, so nothing can be seen half-done. */
+  private promoteHandover(
+    source: PlaybackSource,
+    incoming: HTMLVideoElement,
+    built: { hls: InstanceType<typeof import('hls.js').default>; recovery: ManagedHlsMediaRecoveryBudget },
+    timeline: WebMediaTimeline,
+    sourceGeneration: number,
+    outgoing: HTMLVideoElement,
+  ): void {
+    const outgoingHls = this.hls;
+    // Silence the outgoing element before the incoming one speaks, so the join
+    // is never two soundtracks at once.
+    outgoing.muted = true;
+    incoming.style.display = '';
+    incoming.muted = false;
+    incoming.volume = this.volume;
+
+    this.playRequestGeneration += 1;
+    this.sourceGeneration = sourceGeneration;
+    this.attachedSourceGeneration = sourceGeneration;
+    this.failedSourceGeneration = undefined;
+    this.degradedSourceGeneration = undefined;
+    this.notFoundSourceGeneration = undefined;
+    this.goneReportedGeneration = undefined;
+    this.hlsLoadParkedWhilePaused = false;
+    this.initialSeekCleanup?.();
+    this.initialSeekCleanup = undefined;
+    this.unsubscribeDirectDegradation?.();
+    this.unsubscribeDirectDegradation = undefined;
+    this.activeSource = source;
+    this.mediaTimeline = timeline;
+    this.lastPublishedEvent = undefined;
+    this.video = incoming;
+    this.hls = built.hls;
+    this.hlsMediaRecovery = built.recovery;
+    this.wantsPlayback = true;
+
+    void incoming.play().catch((error) => this.log.warn('handover-play-rejected', { error }));
+    outgoing.pause();
+
+    this.startWatchdog.stop();
+    this.stallWatchdog.stop();
+    this.watchForStall(incoming, source, sourceGeneration);
+    void this.applySubtitle(incoming, source.subtitleUrl).catch((error) => {
+      this.log.warn('subtitle-initial-load-failed', { url: source.subtitleUrl, error: error instanceof Error ? error.message : String(error) });
+    });
+
+    // The outgoing generation is released after the cut, never before it.
+    try { outgoingHls?.destroy(); } catch { /* the element is going anyway */ }
+    outgoing.removeAttribute('src');
+    outgoing.load();
+    outgoing.remove();
+    this.publish(incoming);
   }
 
   async setSubtitle(subtitleUrl?: string): Promise<void> {
@@ -1362,15 +1672,30 @@ class WebPlayer implements Player {
     for (const listener of this.failureListeners) listener(error);
   }
 
-  private attachHls(Hls: typeof import('hls.js').default, video: HTMLVideoElement, url: string, sourceGeneration: number): void {
+  /**
+   * @param install Whether this instance becomes the active one immediately.
+   *   False while a replacement generation is being prepared on its own element:
+   *   the handlers below all guard on `this.hls !== hls`, so an uninstalled
+   *   instance loads and buffers while judging nothing, and starts being
+   *   listened to at the moment it is promoted.
+   */
+  private attachHls(
+    Hls: typeof import('hls.js').default,
+    video: HTMLVideoElement,
+    url: string,
+    sourceGeneration: number,
+    install = true,
+  ): { hls: InstanceType<typeof import('hls.js').default>; recovery: ManagedHlsMediaRecoveryBudget } {
     // hls.js's own startPosition seeks in raw source-local seconds and does not
     // know about mediaOriginMs; the initial-seek listener above is the sole
     // owner of the resume seek so hls.js and the app never race the same
     // MediaSource with two independent seeks to (possibly) different targets.
     const hls = new Hls(webHlsBufferConfig());
     const mediaRecovery = new ManagedHlsMediaRecoveryBudget();
-    this.hls = hls;
-    this.hlsMediaRecovery = mediaRecovery;
+    if (install) {
+      this.hls = hls;
+      this.hlsMediaRecovery = mediaRecovery;
+    }
     const attachedAt = performance.now();
 
     hls.on(Hls.Events.MEDIA_ATTACHED, () => {
@@ -1527,6 +1852,7 @@ class WebPlayer implements Player {
     });
     hls.loadSource(url);
     hls.attachMedia(video);
+    return { hls, recovery: mediaRecovery };
   }
 
   private publish(video: HTMLVideoElement): void {
