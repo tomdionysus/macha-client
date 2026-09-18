@@ -52,6 +52,16 @@ cut.
    be playing, and there must be enough buffered media to be worth protecting.
    Anything else falls through to the teardown path, which is what every other
    target still does.
+
+   **Both sides** is the guard that gets forgotten. The *outgoing*
+   `activeSource.isManifest` is checked as well as the incoming source's, so a
+   switch out of Direct Play — to remux or transcode — can never be seamless:
+   there is no second managed-HLS element to hand over to, and `play()` falls
+   through to teardown. The first transformed generation after a Direct Play
+   session therefore always tears down, however the transition is labelled, and
+   no reasoning about handover behaviour reaches it. Confirmed 2026-09-18 while
+   three sessions were separately explaining a stall on a run that had never
+   been a handover at all.
 2. **Take the clock offset.** At the moment core asks, the viewer is at
    `lastPublishedEvent.positionMs` on the outgoing generation and core is asking
    for `positionMs` on the incoming one. Those denote the same content, so
@@ -106,6 +116,20 @@ everything — a backgrounded tab stops decoding dead, `readyState 0`,
 readyState-0 investigation, and it was walked into twice while building this.
 That case is deliberately unhandled: a gap nobody is watching is not worth
 paying for.
+
+It throttles **loading** as well as decoding, which is the half that keeps
+catching people, because it looks like a server fault rather than a browser
+one. Chrome throttles a background tab's timers to roughly one firing a
+minute, and hls.js drives its fragment loop on a timer. Measured 2026-09-18 in
+a tab opened programmatically and never foregrounded: `hls-manifest-parsed` at
+02:00:50, first `hls-fragment-loading` at **02:02:43** — 113 s in which the
+node's journal records the client asking it for nothing at all, while the node
+reclaimed the idle pipeline out from under it at 60 s. Nothing was wrong with
+either end.
+
+**So record `document.hidden` in every sample series.** It is one field, and
+without it a throttled harness is indistinguishable from a client that is
+genuinely slow to start — which is a claim worth a server engineer's day.
 
 **Alignment is the part that must be exact.** The replacement is created for the
 position the viewer had reached when core asked, and the viewer keeps moving

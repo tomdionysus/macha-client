@@ -1,6 +1,6 @@
 # Active tasks and concepts to explore
 
-Last updated: 2026-09-17 (paused session reaped at 30 min — new P0, reproduced)
+Last updated: 2026-09-18 (seek symptoms combined into one P0, against the 0.46.0 seek contract)
 
 This is the working backlog. Add new work here. When an item is implemented and
 its stated verification is complete, remove it from this file and add a dated
@@ -466,6 +466,285 @@ exit, and that exit starts by condemning the node.
       long enough to fill the buffer leaves more runway than hls.js has
       patience, so the fatal always wins while this adapter escalates it. That
       raises the stakes on the teardown change below rather than lowering them.
+
+## P0 — Seek misbehaviour: the node now does what it is told, and this client's clock does not follow
+
+**Read this before adding anything here.** The governing document is the
+server's `TODO/2026-09-18-seek-does-what-it-is-told-plan.md` in the `macha`
+repo. It was agreed with this session and the core session *before* it was
+written, and it shipped in **server 0.46.0**. Three sessions have since
+re-derived parts of it from symptoms and two of those derivations were wrong,
+which is the reason this item exists as one place rather than five. Raw
+measurements stay in `2026-09-18-playback-symptoms-observed.md`; the keyframe
+index that would let a client avoid the offset altogether is the P2 further
+down.
+
+### The contract, as the node behaves now
+
+Confirmed against the es-1 journal by the `Macha Server` session, 2026-09-18.
+
+| field | meaning |
+| --- | --- |
+| `seek_ms` | where the generation's media actually begins — the first sample the client receives |
+| `seek_offset_ms` | how far into that generation the requested position sits; never negative |
+| `seek_requested_ms` | the position the node honoured, after clamping |
+
+`seek_ms + seek_offset_ms == seek_requested_ms`, exactly, in integer
+milliseconds.
+
+- **Transcode** now starts exactly on the requested frame and `seek_offset_ms`
+  is 0. The forward snap is gone from this path outright.
+- **Remux** starts on the **last indexed keyframe at or before** the request and
+  carries the remainder as the offset. The snap did not stop here, it reversed
+  direction: a stream copy has no decoder and an fMP4 fragment must begin on a
+  sync sample, so this is the only split the container permits.
+- **Direct** has no generation; offset 0.
+
+So **the first frame the client receives is at `seek_ms`, not at the position
+asked for.** The playlist timeline starts there and the generation's media clock
+origin is exactly `seek_ms`. The pre-roll between that keyframe and the request
+is fetched and must never be presented, because **the client is required to
+attach `seek_offset_ms` into the generation**. That is this repo's half of the
+contract, and it is the half that does not work.
+
+One live plan from the node's journal, same episode, remux:
+
+```
+seek_ms=1282531  seek_offset_ms=8348  seek_requested_ms=1290879
+entries=237  longest_gap_s=10.428  median_gap_s=10.427
+```
+
+On this title an off-keyframe remux seek therefore carries **seconds** of
+offset, up to about 10.4 — and so does every Continue Watching resume into a
+remux generation, because a resume position is no likelier to land on a keyframe
+than a seek target is.
+
+### The client fault, demonstrated
+
+`WebMediaTimeline.establishOrigin` (`src/platform/WebMediaTimeline.ts:95`) has
+two branches and chooses between them on the requested position alone:
+
+- requested at or near zero — the origin is the first resident media timestamp;
+- requested non-zero — the origin is `rawPosition - requested`, guarded only by
+  the raw position being inside residency.
+
+The second branch was written for the **handover**, where `attachHls` sets
+hls.js's `startPosition` and the element's `currentTime` genuinely does land at
+the requested position before anything samples it. The **teardown** path builds
+the same timeline with the same non-zero argument
+(`src/platform/WebPlatform.ts:681`) — but there the loader starts at zero, and
+the initial-seek listener calls `publish()` *before* it seeks
+(`WebPlatform.ts:690-711`), deliberately, so that the origin is established
+first. The sample it learns from therefore has `currentTime` 0, which is inside
+residency, so the guard passes and the branch subtracts the offset from zero.
+
+Demonstrated against the current source with a throwaway vitest case — offset
+18,120 ms, buffered `[0, 4000]`, position 0, which is the shape the teardown
+path presents at `loadedmetadata`:
+
+```
+originMs: -18120   reportedLocalMs: 18120   initialSeekTargetMediaMs: 0
+```
+
+Two consequences, and both are the reported symptom:
+
+1. **The initial seek targets media time 0**, so playback begins at `seek_ms` —
+   the keyframe, up to a GOP *before* where the viewer asked — and the pre-roll
+   the contract says is never presented is presented.
+2. **Every position afterwards is reported `seek_offset_ms` too high**, because
+   `toLocalTime` subtracts a negative origin. Core adds `session.seekMs` on top,
+   so the readout sits at the requested position from the first frame while the
+   picture is behind it, and stays exactly that far ahead for the life of the
+   generation.
+
+A negative origin is also nonsense on its face — a transformed generation's
+media clock cannot precede its own start — and `canonicalOrigin` does not reject
+one.
+
+**Which activations reach it.** Any `play()` at a non-zero position that does
+not take the handover path: after core's `9954656` that is every `relocate`, and
+every `continue` whose handover cannot be set up. Core computes that position as
+`absolute - session.seekMs` (`generationLocalPosition`), which is exactly
+`seek_offset_ms`, and it is right to. `startInternal` activates the *first*
+generation the same way — `activateSession(session, currentDesired,
+'relocate')` — so **a Continue Watching resume into remux is enough on its own**;
+no seek is needed to reach this.
+
+**Why the suite is green.** The two cases in `WebMediaTimeline.test.ts` that
+exercise a non-zero origin both assert `originMs: 300_000`, the absolute-clock
+shape where MSE preserves the source timestamps. Nothing feeds the branch a
+zero-based clock with a non-zero requested position, which is the only shape the
+teardown path produces. The standing note that this branch "has still never run
+against a real non-zero offset" was right about the live runs and wrong to read
+that as safe.
+
+### What this explains, and what it does not
+
+The 18.12 s measurement fits the mechanism exactly: an element duration of
+1,748.9 s against a title of 2,464.462 s puts `seek_ms` at 715,560 ms, and a
+reported position 733.68 s ahead of `currentTime` is that baseline plus an
+18,120 ms offset.
+
+**Not established: why that offset was 18.12 s.** The node's index for this
+title has a longest indexed gap of 10.428 s, so keyframe alignment alone cannot
+reach 18.12 s. A `continue` activation uses the live intent position, which goes
+on advancing while the node spends 10–13 s building, so offset plus travel would
+cover the difference — but that is arithmetic, not evidence, the coordinator's
+intent handling has not been read, and the server has no journal line at that
+value. The mechanism is demonstrated; the value is unsourced.
+
+### The other four symptoms, with what is now known
+
+- **Seek freeze, still video with audio continuing (5.40 s).** Still open, and
+  the only one with no mechanism. The node's first transcode fragment for this
+  title took **11,672 ms** to encode — 4K HEVC decoded and re-encoded to H.264
+  in software — so "the video track has no decodable data at this position yet"
+  now has a production-shaped candidate beside the decoder-shaped one. Do not
+  choose between them from the outside. The reading that separates them is
+  per-track `SourceBuffer.buffered` with
+  `getVideoPlaybackQuality().totalVideoFrames`, and it has not been taken.
+- **The failure message names the wrong event.** Core's
+  `recoverFromSourceFailure` ends with
+  `failTerminal(terminalRecoveryError(error, failoverError))`, and
+  `terminalRecoveryError` returns the *originating* error, attaching the
+  failover error only as `.cause`. So the screen shows what started the
+  recovery — here the stall watchdog's line for a generation already reported
+  gone — and never what ended it. Core's to decide, and raised with the `Macha
+  Client Core` session: either the message carries both, or hosts are told to
+  render `.cause`. This repo renders whichever it settles on.
+- **Node build time against the client's attempt budget. Fixed in core,
+  2026-09-18.** The node's own timings for the 13,433 ms seek: fast path taken
+  in ~1 ms, container seek 39 ms, first fragment ready at 11,672 ms. That is an
+  encoder, not a planning step, and no change to the seek path will move it.
+  When the budget lost, `releaseGenerationAdmittedLate` DELETEd the generation
+  that finished 1.4 s late and failover started the same encode again on the
+  other node. The cause was structural rather than a bad value: core's
+  `GENERATION_ATTEMPT_BUDGET_MS` was 12,000 ms against a server entitled to
+  15,000 ms, so core abandoned every node three seconds inside its own bound.
+  Server 0.46.2 now reports `playback.startup_timeout_ms` and
+  `segment_timeout_ms` per node on `GET /api/v1/status`; core derives the budget
+  per endpoint from them and the 12,000 ms constant has been **deleted**. This
+  repo supplied the measurement and owes the live verification.
+- **The outgoing generation stops resolving 0.8–1.7 s after the PATCH.**
+  Answered by the server session, and deliberate: the PATCH handler marks the
+  old segment store superseded before building the replacement, which ends the
+  *wait* for fragments the old pipeline has not yet produced. **Already produced
+  fragments still serve.** `stop_pipeline` does not run until the replacement's
+  first fragment is ready, and the flag is cleared if that fails, so it is not a
+  teardown. The consequence is structural rather than a bug: buffered runway
+  covers a seek only as far as the old generation had already encoded, which on
+  a transcode generation is a few fragments.
+
+### The split, formally agreed with core on 2026-09-18
+
+Agreed in an exchange with the `Macha Client Core` session, and written down
+here because this item exists precisely because agreements that lived only in
+transcripts were re-derived wrongly by later sessions. Each side went and read
+the other's source or the server's doc rather than defend a position, and both
+sides were corrected at least once in the process.
+
+**Core's, and deliberately not this repo's:**
+
+- **The invariant check.** `seek_ms + seek_offset_ms == seek_requested_ms` is
+  verified once, in core, and **this client does not re-check it**. Tom's
+  ruling, 2026-09-18: a client-side check is testing whether the server's C++
+  and core's JS can do arithmetic, which is not this repo's job. Core's own
+  argument reached the same place — a duplicate check earns its cost only if it
+  can act on what it finds, and a host that detects a violation can do nothing
+  core has not already done. Core's undertaking against the real risk, which was
+  silence: the check is **loud** (reported through diagnostics, never swallowed)
+  and it **never triggers renegotiation**, because rejecting a generation is
+  what livelocked on 2026-09-17.
+- `seekOffsetMs` / `seekRequestedMs` on `PlaybackSession`, both optional, where
+  **absent means the node cannot say and never zero** — on a pre-0.46.0 node the
+  generation may begin *after* the request by up to the measured 9.3 s.
+- The player is never given `seekOffsetMs`. Core keeps handing it a
+  generation-local position via `generationLocalPosition`; the offset arithmetic
+  is universal, the conversion into a browser MSE clock is this repo's.
+- `activationPosition` collapses into `generationLocalPosition`. The livelock
+  happened because the old server snapped *forward*, so re-asking returned the
+  same unusable generation for ever (147 negotiations in 33.3 s, identical
+  `serverSeekMs`). 0.46.0 snaps backward, so renegotiation converges in one
+  round.
+- The terminal message composition, and the stale `startInternal` comment.
+
+**This repo's:** the timeline fix below, the retry behaviour inside the native
+first-fragment wait, live verification, and rendering whatever phase state core
+ends up exposing.
+
+One correction owed to the server's plan: its line that "the client confirmed
+both attach paths already do this" was wrong for the teardown path, and core had
+relied on it.
+
+### Tasks
+
+- [x] **Separate the two origin cases instead of inferring them from the
+      position.** Done 2026-09-18. `WebMediaTimeline` takes a third argument,
+      `WebMediaLoaderStart` — `generation-start` for the teardown path, where
+      the loader is given no start position and the first resident timestamp is
+      the origin, and `requested-position` for the handover, where `attachHls`
+      sets hls.js's `startPosition` so `currentTime` genuinely is the requested
+      position. The position-based inference is gone entirely. The argument is
+      required rather than defaulted, so a future call site cannot inherit the
+      wrong case silently.
+- [x] **See it fail first.** Done. The teardown-shape case reproduced
+      `originMs: -18120` against the unfixed file, exactly the live figure, and
+      a second case covers the handover sampled before its position is resident.
+      Both red first, then green. Suite 362 across 48 files, typecheck clean.
+- [x] Reject a negative origin outright. `canonicalOrigin` now returns
+      `undefined` rather than a negative, so nothing is established and the next
+      sample gets another go, instead of the nonsense being baked into every
+      later mapping. Only the `requested-position` branch can produce one.
+- [x] Verify live on a **resume**, not only on a seek. Done 2026-09-18 against
+      `ramaroja.macha.network`, signed in as the test account, on a Continue
+      Watching resume into a **transcode** generation carrying a non-zero
+      offset. The node put the generation origin at 1,532,781 ms against a
+      resume position of 1,536,111.9 ms, so the client was handed a local
+      position of **3,330.9 ms** — the teardown branch, with a real non-zero
+      offset.
+
+      ```
+      initial-local-seek  requestedPositionMs=3330.902
+                          targetMediaMs=3330.902   mediaOriginMs=0
+                          before: currentTime=0 readyState=HAVE_METADATA buffered=[]
+      ```
+
+      The unfixed file turns that exact sample into `mediaOriginMs=-3330.9` and
+      `targetMediaMs=0`. Four readings, all clean:
+
+      - origin `0`, not negative, from a sample taken at `currentTime` 0;
+      - the initial seek targeted **3,330.902 ms**, not the generation's start;
+      - the element's first moving sample was `currentTime` **3.330902 s**, so
+        playback began at the requested position and the pre-roll between the
+        generation origin and the request was never presented;
+      - readout minus picture across 318 samples at `readyState` 4: mean
+        **−132.6 ms**, range −754 to +447, which is the scrubber's whole-second
+        quantisation centred on zero. The fault is a *constant* +3,330.9 ms.
+
+      The arithmetic closes end to end: generation origin 1,532,781 + element
+      duration 1,173,555 = **2,706,336 ms**, exactly the scrubber's maximum.
+
+      **Not covered:** the `relocate` seek path. A synthetic scrubber commit did
+      not start a negotiation, and it was not worth fighting the UI for — a seek
+      reaches the same branch by the same call site, so this is confirmatory
+      rather than new. Worth doing by hand next time the player is open.
+
+      **Noticed, not diagnosed, and not this repo's:** the generation was
+      `transcode` yet carried a 3,330.9 ms offset. Under the 0.46.0 contract
+      transcode starts on the requested frame with `seek_offset_ms` 0, so either
+      the node behind `ramaroja` is not on 0.46.x or something else is moving
+      the position. Raised rather than explained — see
+      [read the other side before asserting it].
+- [ ] Take the per-track buffer and `getVideoPlaybackQuality()` reading for the
+      audio-without-video freeze. The server session is holding for it.
+- [ ] Adopt `PlaybackSource.budgets` (core, built 2026-09-18): `deadlineMs` as
+      the stop time for `awaitNativeHlsFirstFragment` and for
+      `HLS_PREFLIGHT_TIMEOUT_MS`, and `MediaStallWatchdog.useSourceBudgets()` at
+      attach so the stall budget follows the serving node's hold. This repo's
+      constants stay as the fallback for a node that does not report, which
+      lengthens rather than shortens and is the direction `streaming.md:188`
+      requires.
+
 ## P1 — Seamless generation swap, proven and not yet built
 
 **A second media element, prepared hidden, is the mechanism.** Demonstrated live
@@ -2174,6 +2453,50 @@ exists.
   client already has an optional `releaseDate` field and displays a neutral
   placeholder until the server supplies it; do not introduce a provisional
   wire field beforehand.
+
+## P2 — Seeks are blind: no keyframe index reaches the client
+
+Blocked on the server; recorded here because the client is the thing that
+would use it. Detail, measurements and sizing in
+`2026-09-18-keyframe-index-for-exact-seeks.md`. **This is the optimisation half
+of the seek P0 above** — that item is the correctness half and comes first.
+
+Neither this repo nor core has any keyframe data for the media being played.
+`MediaTechnicalProfile` carries format, container, duration, bitrate, size and
+streams, and nothing about sync samples. So every seek names a millisecond
+blind and finds out afterwards how far the node had to travel to reach a point
+it can start a stream on.
+
+Measured 2026-09-17/18 across five generations on one episode, remux, two
+nodes: overshoots of **449 ms, 1,810.8 ms, 4,779 ms, 8,933 ms and 9,293.9 ms**.
+Same title, same mode — a 20x spread the client cannot predict.
+
+**The content loss is gone; the blindness is not.** Server 0.46.0 aligns remux
+backward to the keyframe at or before the request and reports the remainder as
+`seek_offset_ms`, so nothing is skipped any more — see the seek P0 for the
+contract. What remains is that a client still cannot tell, before asking,
+whether a seek will be exact or several seconds of offset, and an offset still
+costs a fragment fetched and discarded.
+
+The server already has the data (`video_random_access_points`, derived from
+the demuxer index at open) and already states the contract: **a position in
+that set yields offset zero in both remux and transcode.** The client cannot
+take that offer because it does not know where the points are.
+
+Sizing: ~20–25 KB gzipped for a dense three-hour film, ~4–10 KB for this
+library's density — one to two percent of a single Original-quality segment,
+and immutable per file so it is fetched once and cached indefinitely.
+
+- [ ] Server: expose the random access points for a title, cacheable per
+  source file. (Server-side; tracked here only because the client waits on it.)
+- [ ] Core: model them so the platform and coordinator can read them.
+- [ ] Client: snap a seek target to the nearest point at or before the request
+  before sending, so `seek_offset_ms` is zero, nothing is skipped, and the
+  node's seek fast path becomes reachable.
+- [ ] Client: consider snapping the scrubber to those points while dragging,
+  and decide whether snapping is unconditional or a preference — transcode can
+  still serve an exact frame at the cost of a decode pre-roll, so the precise
+  option must stay reachable.
 
 ## P2 — Native platform players
 

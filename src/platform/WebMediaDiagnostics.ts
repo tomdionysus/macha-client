@@ -60,6 +60,17 @@ export function videoState(video: HTMLVideoElement): Record<string, unknown> {
     playbackRate: video.playbackRate,
     currentSrc: video.currentSrc,
     decodedBytes: decodedBytes(video),
+    // Whether anything can actually see this. A backgrounded tab throttles the
+    // fragment loading loop as well as decoding — Chrome drops a background
+    // tab's timers to roughly one firing a minute, and hls.js drives its loop
+    // on a timer — so the player looks hung from here and the client looks
+    // dead from the node, with `readyState 0`, nothing buffered and no error.
+    // Measured 2026-09-18: 113 s between `hls-manifest-parsed` and the first
+    // `hls-fragment-loading`, during which the node was asked for nothing and
+    // reclaimed the idle pipeline out from under it. Three sessions spent an
+    // hour on it. One field makes it self-evident rather than deduced, and it
+    // has to be here rather than in a sampler someone remembers to add.
+    hidden: typeof document === 'undefined' ? undefined : document.hidden,
     error,
   };
 }

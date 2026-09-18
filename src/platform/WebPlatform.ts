@@ -9,7 +9,7 @@ import {
   type PlaybackListener,
   type Player,
 } from '@machafoundation/core';
-import type { MediaTechnicalProfile, PlaybackCapabilities, PlaybackEvent, PlaybackSource, PlaybackTimeRange } from '@machafoundation/core';
+import type { MediaTechnicalProfile, PlaybackCapabilities, PlaybackEvent, PlaybackSource, PlaybackTimeRange, PlaybackTransition } from '@machafoundation/core';
 import { ManagedHlsMediaRecoveryBudget } from './ManagedHlsRecovery';
 import { MediaStallWatchdog, MediaStartWatchdog } from '@machafoundation/core';
 import { browserMediaWatchdogEnvironment } from './mediaWatchdogEnvironment';
@@ -614,14 +614,23 @@ class WebPlayer implements Player {
     return video;
   }
 
-  async play(source: PlaybackSource, positionMs = 0, startPaused = false): Promise<boolean> {
+  async play(
+    source: PlaybackSource,
+    positionMs = 0,
+    startPaused = false,
+    transition: PlaybackTransition = 'relocate',
+  ): Promise<boolean> {
     if (!this.host) throw new Error('Player must be attached before playback');
     // Before anything is torn down, ask whether this generation can be replaced
-    // without the viewer seeing it. Nothing above the platform changes: core
-    // still says "play this source at this position" and the platform decides
-    // how to get there. A handover that cannot be set up falls through to the
-    // teardown path below, which is what every other target still does.
-    if (await this.handOverToSource(source, positionMs, startPaused)) return true;
+    // without the viewer seeing it — but only when the viewer did not ask to
+    // move. Hiding a replacement they requested means holding them at the old
+    // position while it prepares: measured at 14.5 s of the previous scene with
+    // the clock already reading the destination, which is a worse lie than the
+    // interruption it avoids. A relocation therefore falls through to the
+    // teardown path, which attaches at the new position and lets them see it
+    // happen — the behaviour every target had before handovers existed, and
+    // the default here, so a coordinator too old to say stays correct.
+    if (transition === 'continue' && await this.handOverToSource(source, positionMs, startPaused)) return true;
     const playRequestGeneration = ++this.playRequestGeneration;
     const sourceGeneration = ++this.sourceGeneration;
     this.failedSourceGeneration = undefined;
@@ -669,7 +678,12 @@ class WebPlayer implements Player {
     }
 
     this.activeSource = source;
-    this.mediaTimeline = new WebMediaTimeline(source.mode, positionMs);
+    // `generation-start`: the loader below is not given a start position, so it
+    // fetches from the generation's own beginning and the initial-seek listener
+    // samples at `currentTime` 0 before it seeks. `positionMs` here is the
+    // server's `seek_offset_ms` into the generation — where to seek to, never
+    // where the media clock begins.
+    this.mediaTimeline = new WebMediaTimeline(source.mode, positionMs, 'generation-start');
 
     const publish = () => this.publish(video);
     if (positionMs > 0) {
@@ -917,15 +931,26 @@ class WebPlayer implements Player {
       incoming.style.display = 'none';
       incoming.muted = true;
       host.appendChild(incoming);
-      built = this.attachHls(hlsModule, incoming, source.url, sourceGeneration, false);
+      // Where the cut will land, near enough: the viewer is at `positionMs` on
+      // the replacement's clock the moment core asks, and will have moved a
+      // little further by the time this is ready. Only a starting hint — the
+      // buffered-join loop below still decides the exact point.
+      const expectedJoinMs = Math.max(0, positionMs + HANDOVER_JOIN_LEAD_MS);
+      built = this.attachHls(hlsModule, incoming, source.url, sourceGeneration, false, expectedJoinMs);
 
       const ready = await waitForMediaEvent(incoming, 'canplay', HANDOVER_READY_TIMEOUT_MS);
       if (!ready) return abandon('not-ready-in-time');
       if (this.video !== outgoing) return abandon('superseded-while-preparing');
 
-      // The replacement's own clock, established from what it has buffered. It
-      // is a fresh generation, so its first resident fragment is its origin.
-      const timeline = new WebMediaTimeline(source.mode, 0);
+      // The replacement's own clock, established from what it has buffered.
+      //
+      // Told the position it was started at, not zero. Now that the loader
+      // begins at the join, the first resident fragment is *not* the generation
+      // origin, and a timeline that assumed it was would place every later
+      // mapping a join's width out. hls.js puts `currentTime` at its
+      // `startPosition` once metadata lands, which is inside residency, so the
+      // origin resolves from the position rather than from the buffer's edge.
+      const timeline = new WebMediaTimeline(source.mode, expectedJoinMs, 'requested-position');
       const sampled = timeline.sample({
         positionMs: incoming.currentTime * 1000,
         bufferedRangesMs: playbackTimeRanges(incoming.buffered),
@@ -1729,12 +1754,22 @@ class WebPlayer implements Player {
     url: string,
     sourceGeneration: number,
     install = true,
+    startPositionMs?: number,
   ): { hls: InstanceType<typeof import('hls.js').default>; recovery: ManagedHlsMediaRecoveryBudget } {
     // hls.js's own startPosition seeks in raw source-local seconds and does not
     // know about mediaOriginMs; the initial-seek listener above is the sole
     // owner of the resume seek so hls.js and the app never race the same
     // MediaSource with two independent seeks to (possibly) different targets.
-    const hls = new Hls(webHlsBufferConfig());
+    //
+    // A handover is the one case where it is both safe and necessary. The
+    // replacement is not presented and nothing else will seek it, and the join
+    // is several seconds in — so loading from zero fetches every fragment
+    // before the join and throws them away. Measured: 9.03 s of a 9.54 s
+    // handover was that fetch. Starting the loader at the join asks for the one
+    // fragment the cut actually needs.
+    const hls = new Hls(startPositionMs === undefined
+      ? webHlsBufferConfig()
+      : { ...webHlsBufferConfig(), startPosition: startPositionMs / 1000 });
     const mediaRecovery = new ManagedHlsMediaRecoveryBudget();
     if (install) {
       this.hls = hls;
