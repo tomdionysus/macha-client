@@ -745,6 +745,44 @@ relied on it.
       lengthens rather than shortens and is the direction `streaming.md:188`
       requires.
 
+## P1 — Fractional milliseconds may be wrong in more places than the one that was found
+
+**A change has been made for the known instance and it is NOT yet verified;
+nothing else has been looked at.** This is a placeholder for a survey that has
+deliberately not been done, not a report of one.
+
+`publish()` emitted `video.currentTime * 1000`, which is sub-millisecond. That
+value becomes the intent position, the persisted resume position, and the
+`seekMs` sent back to a node. The seek contract is stated in **integer
+milliseconds with no rounding slack**, so the client was asking in a precision
+the wire does not carry.
+
+What that cost, measured live on 2026-09-18: asked for 2,018,389.921 ms, the
+node answered with a generation starting at 2,018,390, and core's
+`generationLocalPosition` read `absolute < generationStart` as "this generation
+begins after the viewer". It refused to activate, re-asked with the same
+fractional number, and the node rounded to the same integer — 25 rounds, no
+error raised anywhere, `player.play()` never called once, and the media simply
+never played. It bites only when the node honours the *exact* position and
+rounds up, which is a frame-accurate transcode, so it appears intermittent.
+
+`publish()` now rounds. **That has not been seen to cure the livelock on a live
+node** — it is typecheck-clean and the suite is green, but nothing in the suite
+reaches this and it has not run against a cluster. Until a node has been watched
+activating a generation it previously refused, treat the rounding as a proposed
+fix and not a closed one.
+
+**The open question beyond it is where else this repo lets a fractional
+millisecond escape** — other published fields, persisted progress and
+queue records, buffered and seekable range edges, anything compared against a
+server value with `<` or `===`. Ranges are the interesting case: they are
+compared for containment when admitting a local seek, and a boundary that is
+0.08 ms out decides differently from one that is not.
+
+Not surveyed, on purpose, so it is not half-done: one problem at a time. When it
+is picked up, the rule to apply is that anything crossing the wire or reaching
+storage is whole milliseconds, and the element's own clock keeps its precision.
+
 ## P1 — Seamless generation swap, proven and not yet built
 
 **A second media element, prepared hidden, is the mechanism.** Demonstrated live

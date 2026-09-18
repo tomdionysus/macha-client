@@ -419,21 +419,42 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
     }
   }, [interactionControlled, runtime, showControls]);
 
+  // Freeze the picture the moment a seek is committed, before core has decided
+  // whether it can be served from the buffer. Holding first and releasing on the
+  // cheap path is the only ordering that acts at the instant the viewer asked:
+  // core tells the player nothing about a relocation until the replacement
+  // exists, which is a whole negotiation later. An unnecessary hold costs
+  // nothing — core calls `player.seek()` synchronously for a buffered target, so
+  // it is released in the same tick and never reaches a frame.
+  const holdPicture = useCallback(() => {
+    (platform as Partial<{ holdPicture(): void }>).holdPicture?.();
+  }, [platform]);
+
+  const releasePicture = useCallback(() => {
+    (platform as Partial<{ releasePicture(): void }>).releasePicture?.();
+  }, [platform]);
+
   const seek = useCallback((positionMs: number) => {
     setLocalNotice(undefined);
     setScrubPosition(undefined);
+    holdPicture();
     const accepted = runtime.seek(positionMs);
-    if (!accepted) setLocalNotice(runtime.getPlaybackSnapshot()?.notice);
+    // A stream that cannot seek never moves, so nothing should have stopped.
+    if (!accepted) {
+      releasePicture();
+      setLocalNotice(runtime.getPlaybackSnapshot()?.notice);
+    }
     if (!interactionControlled) showControls();
     return accepted;
-  }, [interactionControlled, runtime, setScrubPosition, showControls]);
+  }, [holdPicture, interactionControlled, releasePicture, runtime, setScrubPosition, showControls]);
 
   const seekBy = useCallback((deltaMs: number) => {
     setLocalNotice(undefined);
     setScrubPosition(undefined);
-    runtime.seekBy(deltaMs);
+    holdPicture();
+    if (!runtime.seekBy(deltaMs)) releasePicture();
     if (!interactionControlled) showControls();
-  }, [interactionControlled, runtime, setScrubPosition, showControls]);
+  }, [holdPicture, interactionControlled, releasePicture, runtime, setScrubPosition, showControls]);
 
   const playFromStart = useCallback(() => {
     log.info('restart-ui-request', {

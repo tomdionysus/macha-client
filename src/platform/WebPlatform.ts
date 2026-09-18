@@ -472,6 +472,8 @@ class WebPlayer implements Player {
   /** A managed-HLS load stopped by a fatal error raised while nobody was watching. */
   private hlsLoadParkedWhilePaused = false;
   private mediaTimeline?: WebMediaTimeline;
+  /** A picture frozen at the control while a seek's destination is decided. */
+  private pictureHold?: { resumeWanted: boolean };
   private lastPublishedEvent?: PlaybackEvent;
   private readonly startWatchdog = new MediaStartWatchdog(browserMediaWatchdogEnvironment);
   private readonly stallWatchdog = new MediaStallWatchdog(browserMediaWatchdogEnvironment);
@@ -631,6 +633,11 @@ class WebPlayer implements Player {
     // happen — the behaviour every target had before handovers existed, and
     // the default here, so a coordinator too old to say stays correct.
     if (transition === 'continue' && await this.handOverToSource(source, positionMs, startPaused)) return true;
+    // A relocation the viewer asked for. The teardown path below blanks the
+    // element, because hls.js is handed a MediaSource object URL and attaching a
+    // new one resets whatever was showing. Hold the picture instead: pause where
+    // they were, build the replacement beside it, and swap when it can present.
+    if (transition !== 'continue' && await this.holdThroughRelocation(source, positionMs, startPaused)) return true;
     const playRequestGeneration = ++this.playRequestGeneration;
     const sourceGeneration = ++this.sourceGeneration;
     this.failedSourceGeneration = undefined;
@@ -1068,6 +1075,117 @@ class WebPlayer implements Player {
     }
   }
 
+  /**
+   * Pause on the last frame through a seek, instead of blanking the element.
+   *
+   * Measured live 2026-09-18, every out-of-buffer seek: the element went to
+   * `readyState` 0 with nothing buffered and `paused` **false** throughout, so
+   * it was trying to play with no media — a black screen for as long as the node
+   * took, 1.2 s on a fast remux and 10–13 s on a transcode.
+   *
+   * The old frame cannot survive on the element hls.js is attaching to, so the
+   * replacement is prepared on a second one while the outgoing element stays
+   * exactly where it is, paused. This differs from the design rejected for
+   * relocations above in the one way that matters: that one kept *playing* the
+   * outgoing generation, so the viewer watched the previous scene while the
+   * clock read the destination. A frozen frame claims nothing.
+   *
+   * The replacement is loaded from the generation's own start and then seeked to
+   * the offset, which is exactly what the teardown path does — the same origin
+   * rules, on a hidden element. Pointing hls.js's `startPosition` at the offset
+   * would save fetching the pre-roll, but it changes where the media clock
+   * begins and that is a separate question from this one.
+   *
+   * Declines to anything it cannot do cleanly and the caller falls through to
+   * the teardown path, so this is never worse than the behaviour it replaces.
+   */
+  private async holdThroughRelocation(source: PlaybackSource, positionMs: number, startPaused: boolean): Promise<boolean> {
+    const outgoing = this.video;
+    const host = this.host;
+    if (!host || !outgoing || !this.activeSource) return false;
+    // Both sides managed HLS: the native path owns its own element source, and
+    // Direct Play never rebuilds a generation to seek.
+    if (!source.isManifest || !this.activeSource.isManifest) return false;
+    if (!shouldUseManagedHls(this.options.forceNativeHls, managedHlsSupported())) return false;
+    // Nothing to hold unless the outgoing element actually has a frame up. This
+    // is also what declines the first generation of a session, where there is
+    // nothing on screen and blanking costs the viewer nothing.
+    if (outgoing.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return false;
+
+    // Usually already frozen: the control holds the picture the moment the seek
+    // is asked for, which is a whole negotiation earlier than this. Taken here
+    // too for the relocations that do not come from a control — a failover, or a
+    // coordinator too old to hold anything. `wantsPlayback` goes with it so no
+    // readiness event on the outgoing element can quietly start it playing again
+    // while it is meant to be held.
+    const restoreIntent = this.pictureHold?.resumeWanted ?? this.wantsPlayback;
+    this.pictureHold = { resumeWanted: restoreIntent };
+    outgoing.pause();
+    this.wantsPlayback = false;
+    this.publish(outgoing);
+
+    const sourceGeneration = this.sourceGeneration + 1;
+    const startedAt = performance.now();
+    this.log.info('relocation-hold-begin', {
+      url: source.url,
+      requestedPositionMs: positionMs,
+      heldAtMs: this.lastPublishedEvent?.positionMs,
+    });
+
+    let incoming: HTMLVideoElement | undefined;
+    let built: { hls: InstanceType<typeof import('hls.js').default>; recovery: ManagedHlsMediaRecoveryBudget } | undefined;
+    const abandon = (reason: string, detail?: unknown) => {
+      this.log.warn('relocation-hold-abandoned', { reason, detail, elapsedMs: Math.round(performance.now() - startedAt) });
+      try { built?.hls.destroy(); } catch { /* the fallback path rebuilds regardless */ }
+      try { incoming?.remove(); } catch { /* already detached */ }
+      this.pictureHold = undefined;
+      this.wantsPlayback = restoreIntent;
+      return false;
+    };
+
+    try {
+      const hlsModule = await loadHls();
+      if (this.video !== outgoing) return abandon('superseded-while-loading-hls');
+      incoming = this.createWiredMediaElement();
+      incoming.style.display = 'none';
+      incoming.muted = true;
+      host.appendChild(incoming);
+      built = this.attachHls(hlsModule, incoming, source.url, sourceGeneration, false);
+
+      if (!await waitForMediaEvent(incoming, 'canplay', HANDOVER_READY_TIMEOUT_MS)) return abandon('not-ready-in-time');
+      if (this.video !== outgoing) return abandon('superseded-while-preparing');
+
+      // Same rules as the teardown path: the loader began at the generation's
+      // own start, so the first resident timestamp is the origin.
+      const timeline = new WebMediaTimeline(source.mode, positionMs, 'generation-start');
+      const sampled = timeline.sample({
+        positionMs: incoming.currentTime * 1000,
+        bufferedRangesMs: playbackTimeRanges(incoming.buffered),
+        seekableRangesMs: playbackTimeRanges(incoming.seekable),
+      });
+      if (!sampled || !timeline.established) return abandon('incoming-timeline-unestablished');
+
+      const targetMediaMs = timeline.toMediaTime(positionMs);
+      if (targetMediaMs === undefined) return abandon('incoming-target-unmappable');
+      if (Math.abs(incoming.currentTime * 1000 - targetMediaMs) > 250) {
+        incoming.currentTime = targetMediaMs / 1000;
+        if (!await waitForMediaEvent(incoming, 'seeked', HANDOVER_SEEK_TIMEOUT_MS)) return abandon('incoming-seek-timeout');
+        if (this.video !== outgoing) return abandon('superseded-while-seeking');
+      }
+
+      this.promoteHandover(source, incoming, built, timeline, sourceGeneration, outgoing, startPaused);
+      this.log.info('relocation-hold-complete', {
+        elapsedMs: Math.round(performance.now() - startedAt),
+        requestedPositionMs: positionMs,
+        landedAtMs: this.lastPublishedEvent?.positionMs,
+        startPaused,
+      });
+      return true;
+    } catch (error) {
+      return abandon('threw', error instanceof Error ? error.message : String(error));
+    }
+  }
+
   /** The cut itself: one synchronous block, so nothing can be seen half-done. */
   private promoteHandover(
     source: PlaybackSource,
@@ -1076,6 +1194,8 @@ class WebPlayer implements Player {
     timeline: WebMediaTimeline,
     sourceGeneration: number,
     outgoing: HTMLVideoElement,
+    /** A relocation may promote into a paused player; a handover never does. */
+    startPaused = false,
   ): void {
     const outgoingHls = this.hls;
     // Silence the outgoing element before the incoming one speaks, so the join
@@ -1103,9 +1223,12 @@ class WebPlayer implements Player {
     this.video = incoming;
     this.hls = built.hls;
     this.hlsMediaRecovery = built.recovery;
-    this.wantsPlayback = true;
+    // The replacement is up, so whatever froze the outgoing picture is spent.
+    this.pictureHold = undefined;
+    this.wantsPlayback = !startPaused;
 
-    void incoming.play().catch((error) => this.log.warn('handover-play-rejected', { error }));
+    if (startPaused) incoming.pause();
+    else void incoming.play().catch((error) => this.log.warn('handover-play-rejected', { error }));
     outgoing.pause();
 
     this.startWatchdog.stop();
@@ -1463,6 +1586,42 @@ class WebPlayer implements Player {
     }
   }
 
+  /**
+   * Freeze the picture the instant a seek is asked for, before anyone knows
+   * whether it needs a new generation.
+   *
+   * The player is told nothing at the moment of a seek: core decides locally
+   * whether the target is covered, and the first the player hears of a
+   * relocation is `play()`, which arrives after the node has answered — 420 ms
+   * on a fast remux, 10–13 s on a transcode. For all of that the outgoing
+   * generation keeps playing a scene the viewer has already left.
+   *
+   * So the hold is taken optimistically by the control and released by whichever
+   * path core actually takes: `seek()` for a target inside the buffer, which
+   * core calls synchronously, so an unnecessary hold is undone in the same tick
+   * and never reaches a frame; `holdThroughRelocation` for one outside it, which
+   * carries the freeze through to the swap.
+   */
+  holdPicture(): void {
+    const video = this.video;
+    if (!video || this.pictureHold || video.paused) return;
+    this.pictureHold = { resumeWanted: this.wantsPlayback };
+    this.wantsPlayback = false;
+    video.pause();
+    this.log.info('picture-held', { positionMs: this.lastPublishedEvent?.positionMs });
+    this.publish(video);
+  }
+
+  /** Undo a hold that turned out not to be needed. */
+  releasePicture(): void {
+    const hold = this.pictureHold;
+    if (!hold) return;
+    this.pictureHold = undefined;
+    this.wantsPlayback = hold.resumeWanted;
+    const video = this.video;
+    if (video && hold.resumeWanted) this.requestPlay(video, 'picture-hold-released');
+  }
+
   localSeekCoverage(): readonly PlaybackTimeRange[] {
     const source = this.activeSource;
     if (!source) return [];
@@ -1482,6 +1641,10 @@ class WebPlayer implements Player {
       this.log.warn('local-seek-without-media', { positionMs });
       return;
     }
+    // Core reached here, so the target is inside the buffer after all and the
+    // hold taken at the control is not needed. Released before the seek so the
+    // element is already running when it lands.
+    this.releasePicture();
 
     this.publish(video);
     const targetMediaMs = this.mediaTimeline?.toMediaTime(positionMs);
@@ -1971,7 +2134,22 @@ class WebPlayer implements Player {
       !video.paused && !video.ended && !video.seeking,
     );
     const event: PlaybackEvent = {
-      positionMs: currentMs,
+      // Whole milliseconds, because this number leaves the client: it is kept as
+      // the resume position and goes back to the node as `seekMs`, and the seek
+      // contract is stated in integer milliseconds with no rounding slack.
+      //
+      // Sub-millisecond precision here stops playback dead. Asked for
+      // 2,018,389.921 ms the node answers with a generation starting at
+      // 2,018,390, core reads `absolute < generationStart` as "this generation
+      // begins after the viewer", refuses to activate, and re-asks with the same
+      // fractional number for ever. Measured 2026-09-18: 25 identical
+      // negotiation rounds, no error raised, and `player.play()` never called at
+      // all. It bites only when the node honours the exact position and rounds
+      // up — a frame-accurate transcode — which is why it comes and goes.
+      //
+      // The element's own clock keeps its full precision; only what is published
+      // is rounded.
+      positionMs: Math.round(currentMs),
       durationMs: duration,
       paused: video.paused,
       ended: video.ended,
@@ -2020,6 +2198,7 @@ function supportedMime(media: HTMLMediaElement, mime: string): boolean {
 export class WebPlatform implements Platform {
   readonly name = 'web' as const;
   private readonly log = createClientLogger('playback.capabilities');
+  private activePlayer?: WebPlayer;
 
   constructor(private readonly playerOptions: WebPlayerOptions = {}) {}
 
@@ -2088,6 +2267,24 @@ export class WebPlatform implements Platform {
   }
 
   createPlayer(): Player {
-    return new WebPlayer(this.playerOptions);
+    this.activePlayer = new WebPlayer(this.playerOptions);
+    return this.activePlayer;
+  }
+
+  /**
+   * Freeze the picture for a seek that is about to need a new generation.
+   *
+   * Reached from the control rather than from the coordinator, because the
+   * coordinator tells a player nothing until the replacement exists and the
+   * point of this is to act before that. The runtime keeps its player private,
+   * so the platform that made it is the one thing both sides can see.
+   */
+  holdPicture(): void {
+    this.activePlayer?.holdPicture();
+  }
+
+  /** Undo a hold whose seek turned out to be servable from the buffer. */
+  releasePicture(): void {
+    this.activePlayer?.releasePicture();
   }
 }
