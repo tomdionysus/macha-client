@@ -1607,6 +1607,15 @@ class WebPlayer implements Player {
     if (!video || this.pictureHold || video.paused) return;
     this.pictureHold = { resumeWanted: this.wantsPlayback };
     this.wantsPlayback = false;
+    // Stood down for the same reason `pause()` stands it down: the picture has
+    // stopped because we stopped it, and a countdown measuring "nothing is
+    // moving" cannot tell that from a node that has died. Left running it
+    // expires against a freeze we asked for — measured 2026-09-18, a seek held
+    // at 51.2 s reported `source-terminal-failure` at 58.1 s, 6,864 ms later,
+    // while the node was still building the replacement it delivered at 61.0 s.
+    // Core re-arms on the first report after playback advances again, so a node
+    // that dies during the hold is still judged the moment anyone is waiting.
+    this.stallWatchdog.suspend();
     video.pause();
     this.log.info('picture-held', { positionMs: this.lastPublishedEvent?.positionMs });
     this.publish(video);

@@ -2440,6 +2440,26 @@ a `body` is: one shot, known length, no chunked framing, no per-connection zlib
 state. Condition: `stream && stream->resident() && status == 200 && no Range &&
 compressible type`.
 
+## P1 — The mouse cursor stays hidden once it is hidden
+
+Moving the mouse must bring the cursor back. It does not.
+
+`PlayerScreen` applies `cursor-hidden` whenever `fullscreen && !controlsVisible
+&& !fatalError`, and `.player-page.cursor-hidden { cursor: none; }` in
+`base.css:677` does the hiding. The class only comes off when `controlsVisible`
+turns back on, and nothing listens for pointer movement to do that — the
+`showControls()` calls are wired to key presses, transport actions, seeks and
+`fullscreenchange`, but there is no `mousemove`/`pointermove` handler anywhere on
+the player page. So once the chrome auto-hides in fullscreen the pointer is
+invisible until the viewer presses something, which on a desktop is the one
+input they are most likely to reach for first.
+
+Revealing the chrome on movement is probably right rather than only restoring
+the cursor, since that is what the hidden state is paired with — but a pointer
+that moves must at minimum become visible again. Worth checking the mini player
+and the non-fullscreen page at the same time, since the class is gated on
+`fullscreen` and the behaviour should not differ in a way nobody chose.
+
 ## P2 — Repo conventions
 
 Tom set these 2026-09-13 and asked every session be told.
