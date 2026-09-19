@@ -18,7 +18,7 @@ why. Add a cause here only once it has been demonstrated, and say how.
 - Media `tmdb:episode:7203311`, title duration 2,464.462 s.
 - Foreground tab, `document.hidden` false in every sample. These are not the
   backgrounded-tab artefact described in
-  `docs/seamless-generation-handover.md`.
+  `docs/playback-handover.md`.
 - Sampling at 100 ms over the media element, plus the client's own log lines.
 
 ## 1. Timeline jumps with no user interaction

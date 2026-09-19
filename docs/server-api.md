@@ -1,36 +1,33 @@
 # Macha server integration
 
-The client matches Macha's current catalogue HTTP API. **The wire types and every HTTP adapter live in `@machafoundation/core`** (`macha-ts/src/api/`), not in this repo: `CatalogueApi.ts` is the contract, `MachaCatalogueApi.ts` the adapter, and the `Cluster*Api` classes route the same calls across endpoints. React screens consume the higher-level `MediaApi` facade and never parse Macha JSON directly.
+The wire types and every HTTP adapter live in `@machafoundation/core`, not in
+this repo: `CatalogueApi.ts` is the contract, `MachaCatalogueApi.ts` the
+adapter, and the `Cluster*Api` classes route the same calls across endpoints.
+React screens consume the higher-level `MediaApi` facade and never parse Macha
+JSON directly.
 
-## Current endpoints
+## Catalogue
 
 ```text
 GET /api/v1/catalogue/status
 GET /api/v1/catalogue/items?type=show&parent=...
-GET /api/v1/catalogue/search?q=expanse&limit=50
+GET /api/v1/catalogue/search?q=<query>&limit=50
 GET /api/v1/catalogue/items/{id}
 GET /api/v1/catalogue/media/{media_id}/profile
 GET /api/v1/catalogue/artwork/{sha256}
 ```
 
-The server also exposes catalogue mutation and artwork upload endpoints, but the television client does not need them.
+The server also exposes catalogue mutation and artwork upload endpoints, which
+this client does not use.
 
-List and search responses are wrapped:
-
-```json
-{
-  "items": []
-}
-```
-
-A catalogue item is:
+List and search responses are wrapped as `{ "items": [] }`. An item is:
 
 ```json
 {
   "id": "episode-id",
   "kind": "episode",
-  "title": "Cooking the Books",
-  "sort_title": "Cooking the Books",
+  "title": "Episode title",
+  "sort_title": "Episode title",
   "synopsis": "...",
   "parent_id": "season-id",
   "year": 2000,
@@ -41,107 +38,71 @@ A catalogue item is:
   "aliases": [],
   "external_ids": {},
   "media_ids": ["logical-media-id"],
-  "artwork": [
-    {
-      "role": "still",
-      "id": "<sha256>",
-      "mime_type": "image/jpeg"
-    }
-  ],
+  "artwork": [{ "role": "still", "id": "<sha256>", "mime_type": "image/jpeg" }],
   "revision": 1,
   "updated_ns": 0
 }
 ```
 
-Supported catalogue kinds are `movie`, `show`, `season`, `episode`, `artist`, `album` and `track`.
+Kinds are `movie`, `show`, `season`, `episode`, `artist`, `album` and `track`.
 
-## Immutable media profiles
+### Hierarchy
 
-Server support for `GET /api/v1/catalogue/media/{media_id}/profile` is deployed
-on the tested 0.22 nodes as of 2026-09-01. The client requests it
-only for immutable `macha:` identities. A positive schema-v1 response is checked
-against the requested identity, coalesced, and cached by that identity; mutable
-paths are never profile keys. `202 profile_pending`, `404 profile_not_available` and generic route 404s
-from older nodes are temporary negatives and are not cached. Detail screens add
-the resulting duration, dimensions, codecs, and bitrate asynchronously, so
-profile rollout cannot delay or disable existing playback-session negotiation.
+Hierarchy is expressed through `parent_id`. A series page retrieves the show and
+lists seasons with `type=season&parent=<show-id>`; a season page retrieves that
+season and lists episodes with `type=episode&parent=<season-id>`. No
+client-specific nested response or Home endpoint is required.
 
-Immutable profile state is not a playback-admission dependency. The client never
-performs a profile preflight: it begins ordinary session negotiation regardless
-of whether an independent profile GET returns `200`, `202 profile_pending`, a
-temporary `404`, or remains in flight. Profile completion may update detail UI
-later. Session creation must proceed through the server's normal media-engine
-planning fallback and must not return `425 profile_pending`; asynchronous
-profile-pending responses belong only to the optional profile GET (currently
-`202 Accepted`). As mixed-version protection, the cluster client
-treats such a non-conforming session response as an endpoint failure and may
-continue on another node with the same logical `Idempotency-Key`; it never polls
-the bad response in the viewer path.
+### Dates
 
-## Hierarchy
+The catalogue wire model has `year` and no full release or air date. The UI
+treats a full date as optional and shows a placeholder when absent. No
+provisional wire field is assumed.
 
-Macha stores hierarchy through `parent_id`.
+### Immutable media profiles
 
-The series page retrieves the show and lists seasons with `type=season&parent=<show-id>`. It does not fetch episode lists.
+`GET /api/v1/catalogue/media/{media_id}/profile` is requested only for immutable
+`macha:` identities. A positive schema-v1 response is checked against the
+requested identity, coalesced, and cached by that identity; mutable paths are
+never profile keys. `202 profile_pending`, `404 profile_not_available` and
+generic route 404s are temporary negatives and are not cached. Detail screens
+add duration, dimensions, codecs and bitrate asynchronously.
 
-The separate season page retrieves that season and lists episodes with `type=episode&parent=<season-id>`. This keeps the amount of catalogue work proportional to what is actually on screen.
-
-The server therefore does not need a client-specific nested show response or a special Home endpoint.
-
-## Dates
-
-The current catalogue wire model has `year`, but no full release/air date. The UI deliberately treats `releaseDate` as optional and shows a placeholder when it is absent.
-
-Server/provider TODO: add an optional full date to the catalogue model and populate it from TMDB movie `release_date`, series `first_air_date`, season `air_date` and episode `air_date`. No provisional wire field is assumed by this client until the server contract is changed. This work is tracked in the [active client roadmap](../TODO/ACTIVE.md).
+**A profile is never a playback-admission dependency.** The client performs no
+profile preflight and begins session negotiation regardless of whether a profile
+GET has returned. Session creation must proceed through the server's normal
+planning fallback; a session response of `425 profile_pending` is non-conforming
+and is treated as an endpoint failure, retried on another node under the same
+`Idempotency-Key`, and never polled in the viewer path.
 
 ## Authentication
 
-If `catalogue.api.token_file` is configured on the node, every request uses:
+Where `catalogue.api.token_file` is configured on the node, every request
+carries `Authorization: Bearer <token>`. The token is stored locally and sent
+only to configured or cluster-advertised Macha API endpoints.
 
-```text
-Authorization: Bearer <token>
-```
+Artwork is fetched with `fetch()` and converted to an object URL rather than
+placed in `<img src>`, because an image element cannot attach the header.
 
-Artwork is fetched with `fetch()` and converted to a local object URL. It is not placed directly in `<img src>`, because a normal image element cannot attach the Bearer header.
+Returned `/api/v1/playback/stream/...` and subtitle URLs are capability URLs and
+are loaded *without* the Bearer token.
 
-The token is stored locally by this client. It is sent only to configured or
-cluster-advertised Macha API endpoints.
+## Endpoints and discovery
 
-## Bootstrap and endpoint discovery
+Configured API URLs are bootstrap seeds, not an authoritative membership list.
+The client keeps the last successful endpoint sticky and may refresh discovered
+candidates without persisting them as user configuration.
 
-The configured API URLs are bootstrap seeds, not an authoritative membership
-list. With the current server, the client tries those seeds directly and keeps
-the last successful endpoint sticky. A future successful bootstrap response may
-advertise durable node IDs and one or more browser-reachable API base URLs per
-node; the client registry can refresh those discovered candidates without
-persisting them as user configuration.
+Cluster transport addresses, such as the status `host` and `port` fields, are
+not HTTP API advertisements, and the client never infers an API URL from them.
 
-Cluster transport addresses such as the current status `host` and `port` fields
-are not HTTP API advertisements. The client never guesses an API URL from them.
-The future wire contract must explicitly identify client-facing HTTP(S) bases,
-including any LAN/WAN or address-family alternatives and their validity period.
+A client served from a node's own origin confirms that origin before offering an
+endpoint form, and requires a JSON body whose `status` is `ok`, `starting` or
+`failed` and whose `service`, when present, is `macha`. A `200` alone is not
+sufficient, because a static host serving this bundle answers `200` for unknown
+paths by design.
 
-## Browser deployment
-
-Macha does not currently serve the web application itself. The client talks to
-explicitly configured Macha HTTP(S) API bases using the server's CORS support.
-Blank or same-origin endpoint entries are invalid: the Web/Vite origin serves
-only the client and is never probed as a Macha API.
-
-Because the client now uses browser-history routes, a production static server must also return the application `index.html` for paths such as `/movies/<id>` and `/series/<id>/seasons/<id>`. This is a static-hosting concern, not a new catalogue endpoint.
-
-## Continue Watching
-
-Continue Watching is intentionally not a server API. It is local client state:
-
-- maximum three items;
-- item appears after 30 seconds;
-- item is removed at 92% completion;
-- no account or user identity;
-- no progress upload.
 ## Playback
-
-The player uses the server playback-session API rather than constructing media URLs itself:
 
 ```text
 GET    /api/v1/playback/status
@@ -151,33 +112,114 @@ PATCH  /api/v1/playback/sessions/{id}
 DELETE /api/v1/playback/sessions/{id}
 ```
 
-Session creation sends the catalogue `item_id`, the latest resume/start position as `seek_ms`, and the platform capability profile: direct containers/codecs and fragmented-MP4 HLS support, plus optional decoder resolution limits when a platform can report real limits. The returned keyframe-aligned `seek_ms` is accepted as the immutable transformed generation origin; the client does not create a second startup generation merely to force exact alignment. The Web client deliberately does not use screen dimensions as decoder limits. The server response is authoritative and separates `preferences` (what the user selected), top-level `mode` (what negotiation resolved), `source` (original container and elementary-stream metadata), `output` (copy/transcode result for selected video/audio), `selection`, `stream`, and server-generated `options`.
+Session creation sends the catalogue `item_id`, the resume or start position as
+`seek_ms`, and the platform capability profile: direct containers and codecs,
+fMP4 HLS support, and optional decoder resolution limits where a platform can
+report real ones. The Web client does not use screen dimensions as decoder
+limits.
 
-Every playback-session `POST` carries `Macha-Viewer-Session`, an opaque identity
-created once by the application-scoped persistent `PlaybackRuntime`. The value
-is retained across source reloads, seeks, retries, representation changes,
-standby preparation and node failover. It identifies one logical viewer and its
-single transcode entitlement; it is not an account, authorization credential or
-progress identity. Each distinct admission operation creates a fresh
-`Idempotency-Key`, while retries of that same operation across endpoints retain
-the key and exact request body. `PATCH` and `DELETE` continue to address the
-returned playback session ID.
+**Positions on the wire are integer milliseconds.** The client rounds before
+sending; sub-millisecond precision against a node that answers in whole
+milliseconds cannot be reconciled and prevents activation entirely.
 
-The client does not derive quality availability locally. `quality_heights`, `audio_streams`, `subtitle_streams` and `media_ids` drive those controls. `options.modes` drives Remux and Transcode availability, while Direct is always exposed next to Auto as an explicit user override and is sent to the server when selected even if capability negotiation omitted it from `options.modes`. Source and copied elementary-stream bitrates are displayed when supplied; transcoded output is displayed from the actual output description, and an unknown CRF video bitrate is left unknown rather than inferred.
+The response is authoritative and separates `preferences` (what the user
+selected), top-level `mode` (what negotiation resolved), `source` (original
+container and elementary streams), `output` (copy or transcode per selected
+stream), `selection`, `stream`, and server-generated `options`.
 
-The Audio controls always expose server-advertised audio tracks and display the independently resolved `output.audio.transform`. The current server preference schema does not expose a per-stream transform override, so mixed cases such as video copy + audio transcode are displayed when the server negotiates them but the client does not invent an unsupported “transcode audio only” PATCH field.
+### Where a generation begins
 
-`PATCH` is used for source-generation changes: mode, quality limits, audio stream, subtitle stream, media representation, and the exceptional transformed seek whose target predates the active immutable HLS generation. Direct seeks and transformed seeks inside the active generation are local player operations and never PATCH transport state back to the server. A transformed source-generation change may replace the HLS generation while retaining the same logical session. Macha server 0.12 adds an in-place subtitle-only PATCH: the returned session is still authoritative, but its A/V stream URL/generation is unchanged and the client replaces only `stream.subtitle_url`. Current servers expose that URL as a Macha segmented-WebVTT manifest; the Web player fetches only subtitle segments around its current playback position.
+Three fields describe the relationship between what was asked for and what the
+generation contains:
 
-Direct mode is handed straight to the platform player. Remux/transcode mode returns fragmented-MP4 HLS. Modern Web deliberately uses hls.js/MSE first so Macha controls a bounded forward VOD buffer and nearby seeks stay in browser memory; Samsung's legacy Chromium target keeps its native-HLS compatibility path.
+| field | meaning |
+| --- | --- |
+| `seek_ms` | where the generation's media begins — the first sample the client receives, and the generation's clock origin |
+| `seek_offset_ms` | how far into that generation the requested position sits; never negative |
+| `seek_requested_ms` | the position the server honoured, after clamping |
 
-The API Bearer token is attached to session create/control requests. Returned `/api/v1/playback/stream/...` and subtitle URLs are capability URLs and are loaded without the permanent Bearer token.
+`seek_ms + seek_offset_ms == seek_requested_ms`, exactly. `seek_requested_ms`
+exists so a client can distinguish a violation from an ordinary clamp near the
+end of a title.
 
-The client explicitly deletes the playback session when leaving the player.
+Per mode: **transcode** begins on the requested frame with a zero offset;
+**remux** begins at the last keyframe at or before the request and carries the
+remainder as the offset, because a stream copy has no decoder and an fMP4
+fragment must begin on a sync sample; **direct** has no generation.
+
+The offset is fetched but never presented — the client attaches *at* the offset.
+`seek_offset_ms` and `seek_requested_ms` are optional, and absent means the node
+cannot say rather than zero. Core consumes all three and hands the player a
+generation-local position; the client does not apply the offset a second time.
+
+### Budgets
+
+Per-node entries of `GET /api/v1/status` carry a `playback` object beside
+`runtime`:
+
+```json
+"playback": { "startup_timeout_ms": 15000, "segment_timeout_ms": 6000 }
+```
+
+`startup_timeout_ms` is how long that node may take to bring a transformed
+generation's first fragment up; `segment_timeout_ms` is how long it holds a
+request for a fragment not yet ready. Each is that node's statement about
+itself. Absence means the node cannot say, never a default, and a client must
+not shorten a budget on a missing field or substitute another node's figure.
+
+Core derives per-endpoint budgets from these and passes them to the player on
+`PlaybackSource.budgets`.
+
+### Sessions and generations
+
+Every session `POST` carries `Macha-Viewer-Session`, an opaque identity created
+once by the persistent `PlaybackRuntime` and retained across reloads, seeks,
+retries, representation changes, standby preparation and failover. It identifies
+one logical viewer and its single transcode entitlement; it is not an account,
+credential or progress identity. Each distinct admission creates a fresh
+`Idempotency-Key`, while retries of that admission across endpoints retain it.
+
+`PATCH` performs source-generation changes: mode, quality limits, audio stream,
+subtitle stream, media representation, and a transformed seek whose target lies
+outside the active generation. Direct seeks and transformed seeks *inside* the
+active generation are local player operations and never reach the server. A
+subtitle-only PATCH returns an authoritative session whose A/V stream and
+generation are unchanged, and the client replaces only `stream.subtitle_url`;
+that URL is a segmented WebVTT manifest, and the player fetches only the
+segments around its current position.
+
+Direct mode is handed to the platform player. Remux and transcode return fMP4
+HLS. Web and Android TV use hls.js/MSE so the client controls a bounded forward
+buffer and nearby seeks stay in browser memory; Samsung uses native HLS with
+MPEG-TS segments.
+
+The client deletes the session explicitly when leaving the player.
+
+### Controls
+
+Quality availability is not derived locally. `quality_heights`,
+`audio_streams`, `subtitle_streams` and `media_ids` drive those controls, and
+`options.modes` drives Remux and Transcode availability. Direct is always
+offered beside Auto as an explicit override and is sent even when capability
+negotiation omitted it from `options.modes`.
+
+Source and copied elementary-stream bitrates are displayed when supplied.
+Transcoded output is displayed from the actual output description, and an
+unknown CRF video bitrate is left unknown rather than inferred.
+
+Audio controls expose server-advertised tracks and display the independently
+resolved `output.audio.transform`. A session reports `transcode` when any stream
+is encoded, so video copy with audio transcode is a legitimate combination and
+is displayed as negotiated; the preference schema has no per-stream transform
+override and the client does not invent one.
+
+## Continue Watching
+
+Deliberately not a server API. It is local client state: at most three items, an
+item appears after 30 seconds, it is removed at 92% completion, and there is no
+account, identity or progress upload.
 
 ## Cluster status and management
-
-The Status section consumes the cluster status API rather than inferring server health from playback:
 
 ```text
 GET  /api/v1/status
@@ -186,9 +228,10 @@ POST /api/v1/status/connectivity/check
 POST /api/v1/status/nodes/{node_id}/connectivity/check
 ```
 
-Node observations explicitly distinguish `live`, `stale`, and `last_known`. Cluster storage/cache totals distinguish known capacity from currently online capacity.
+Node observations distinguish `live`, `stale` and `last_known`. Cluster storage
+and cache totals distinguish known capacity from currently online capacity.
 
-Administrative mutations use the separate management namespace. The Status UI currently exposes the cluster-wide stale identity-association reset:
+Administrative mutations use the management namespace:
 
 ```text
 GET  /api/v1/manage
@@ -196,4 +239,20 @@ POST /api/v1/manage/identity-associations/reset
 POST /api/v1/manage/nodes/{node_id}/identity-association/reset
 ```
 
-The general reset requires only a host/IP. Port and NodeId are optional so an obsolete association can still be cleared after the node identity is unknown; omitting the port clears stale associations for all ports on that host. The operation does not delete persisted node state or MachaDFS data and is guarded by an explicit confirmation in the UI.
+The general reset requires only a host or IP; port and node ID are optional, so
+an obsolete association can be cleared after the node identity is unknown, and
+omitting the port clears all ports on that host. It deletes no persisted node
+state or MachaDFS data and is guarded by an explicit confirmation.
+
+## Roles
+
+Roles are capabilities, not a ladder: `media_viewer`, `importer`, `manager`,
+`manage_users`. They are resolved server-side when a session is minted, so the
+array is closed and the client neither expands nor infers it. A capability the
+server did not name is one the session does not have.
+
+Protected accounts are identified by the per-record `mutable` block — `rename`,
+`delete`, `set_password`, `set_roles` — never by username. An absent `mutable`
+block means the node did not say, which is not the same as refused.
+
+`401` means re-mint; `403` is terminal and must never trigger a re-mint.
