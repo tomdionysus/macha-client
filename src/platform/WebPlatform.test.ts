@@ -9,6 +9,7 @@ import {
   handoverJoinLost,
   forwardBufferMsAt,
   handoverFallbackPositionMs,
+  canHoldThroughRelocation,
   webMediaElementFailure,
   awaitNativeHlsFirstFragment,
   preflightWebHlsSource,
@@ -817,6 +818,49 @@ describe('Handover fallback position', () => {
     // that is behind it is a stale sample, not a destination.
     expect(handoverFallbackPositionMs(3_718, -25_843, 29_561)).toBe(3_718);
     expect(handoverFallbackPositionMs(3_718, -25_843, 20_000)).toBe(3_718);
+  });
+});
+
+describe('Holding the picture through a relocation', () => {
+  // The live measurement this exists for, 2026-09-20: selecting Transcode from
+  // Direct Play mid-playback blanked the element for 16.5 s. It is a
+  // representation change, so the handover path is never reached; the hold that
+  // would have kept the frame up declined because the *outgoing* source was not
+  // a manifest, which is a fact about media the hold never touches.
+
+  it('holds a Direct Play frame while a transcode replacement is built', () => {
+    expect(canHoldThroughRelocation({
+      incomingIsManifest: true, managedHls: true, outgoingReadyState: 4,
+    })).toBe(true);
+  });
+
+  it('holds across a transcode relocation, as it always has', () => {
+    expect(canHoldThroughRelocation({
+      incomingIsManifest: true, managedHls: true, outgoingReadyState: 2,
+    })).toBe(true);
+  });
+
+  it('declines when the replacement is not hls.js-driven', () => {
+    // A native player and a plain URL are both loaded by the element itself,
+    // and that element is the one holding the frame. There is nowhere to
+    // prepare a replacement out of sight.
+    expect(canHoldThroughRelocation({
+      incomingIsManifest: true, managedHls: false, outgoingReadyState: 4,
+    })).toBe(false);
+    expect(canHoldThroughRelocation({
+      incomingIsManifest: false, managedHls: true, outgoingReadyState: 4,
+    })).toBe(false);
+  });
+
+  it('declines when there is no frame to hold', () => {
+    // The first generation of a session: nothing is on screen, so blanking
+    // costs the viewer nothing and the teardown path is the cheaper answer.
+    expect(canHoldThroughRelocation({
+      incomingIsManifest: true, managedHls: true, outgoingReadyState: 1,
+    })).toBe(false);
+    expect(canHoldThroughRelocation({
+      incomingIsManifest: true, managedHls: true, outgoingReadyState: undefined,
+    })).toBe(false);
   });
 });
 

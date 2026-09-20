@@ -385,6 +385,7 @@ const HANDOVER_JOIN_LEAD_MS = 400;
  * teardown path reaches the same place sooner.
  */
 const HANDOVER_MINIMUM_RUNWAY_MS = 3_000;
+
 /**
  * How much playable media the replacement must hold *beyond* the join before it
  * is worth promoting.
@@ -470,6 +471,43 @@ export function handoverFallbackPositionMs(
   livePositionMs: number,
 ): number {
   return Math.max(requestedMs, livePositionMs + clockOffsetMs);
+}
+
+/** What the hold needs to know about the two sides of a relocation. */
+export interface RelocationHoldSubject {
+  /** The replacement, as the resolver declared it — never sniffed from a URL. */
+  incomingIsManifest: boolean;
+  /** Whether hls.js drives the replacement, rather than the element itself. */
+  managedHls: boolean;
+  /** `readyState` of the element showing now, or `undefined` if there is none. */
+  outgoingReadyState: number | undefined;
+}
+
+/** `HTMLMediaElement.HAVE_CURRENT_DATA`, named so the rule reads without a DOM. */
+const HAVE_CURRENT_DATA = 2;
+
+/**
+ * Whether the picture can be held while the replacement is built beside it.
+ *
+ * **The question is about the replacement, not about what is on screen.** The
+ * replacement has to be prepared on a second element, and only hls.js can be
+ * pointed at one the viewer cannot see: a native HLS player and a plain URL are
+ * both loaded by the element itself, which is the element showing the frame
+ * this exists to keep.
+ *
+ * The outgoing side is never touched, only frozen, so what it happens to be
+ * playing does not bear on it. Requiring a manifest there too cost a measured
+ * **16.5 s of black screen** on 2026-09-20: selecting Transcode from Direct
+ * Play mid-playback is a representation change, the outgoing element held a
+ * Direct Play source, and the hold declined on that alone — the one transition
+ * a viewer asks for by hand and watches for the whole of.
+ */
+export function canHoldThroughRelocation(subject: RelocationHoldSubject): boolean {
+  if (!subject.incomingIsManifest || !subject.managedHls) return false;
+  // Nothing to hold unless the outgoing element actually has a frame up. This
+  // is also what declines the first generation of a session, where there is
+  // nothing on screen and blanking costs the viewer nothing.
+  return (subject.outgoingReadyState ?? 0) >= HAVE_CURRENT_DATA;
 }
 
 /**
@@ -593,6 +631,18 @@ class WebPlayer implements Player {
   private host?: HTMLElement;
   private video?: HTMLVideoElement;
   private hls?: Hls;
+  /**
+   * A generation that has failed and been stopped, but not yet destroyed.
+   *
+   * `destroy()` detaches the MediaSource, and the element goes black the moment
+   * it does. Doing that at the point of diagnosis puts the picture out seconds
+   * before anything can replace it — measured 2026-09-21 on a killed node at
+   * ~9 s of black, all of it after the failure was already known. So a failed
+   * generation is stopped where it fails and destroyed where it is replaced,
+   * which is the rule `promoteHandover` already states: release the outgoing
+   * generation after the cut, never before it.
+   */
+  private retiredHls?: Hls;
   private listeners = new Set<PlaybackListener>();
   private failureListeners = new Set<PlaybackFailureListener>();
   private degradationListeners = new Set<PlaybackDegradationListener>();
@@ -801,11 +851,29 @@ class WebPlayer implements Player {
       // or the fallback for a slow handover is a rewind of however long it took.
       positionMs = handover.resumeAtMs ?? positionMs;
     }
-    // A relocation the viewer asked for. The teardown path below blanks the
-    // element, because hls.js is handed a MediaSource object URL and attaching a
-    // new one resets whatever was showing. Hold the picture instead: pause where
-    // they were, build the replacement beside it, and swap when it can present.
-    if (transition !== 'continue' && await this.holdThroughRelocation(source, positionMs, startPaused)) return true;
+    // The teardown path below blanks the element, because hls.js is handed a
+    // MediaSource object URL and attaching a new one resets whatever was
+    // showing. Hold the picture instead: pause where they were, build the
+    // replacement beside it, and swap when it can present.
+    //
+    // **Asked for on both transitions, and for a reason measured on 2026-09-21.**
+    // A mode switch arrives as `continue`, and with Direct Play outgoing the
+    // handover above declines without preparing anything — so gating the hold
+    // on `transition !== 'continue'` meant the one transition a viewer makes by
+    // hand, and watches for the whole of, was the one that could not hold its
+    // picture. Measured before this: `source-load-begin`, `media-element-reused`
+    // and `readyState` 0 with no hold attempted at all.
+    //
+    // **An abandoned handover is not a reason to skip it, and watching one
+    // proved that.** The gate here was `resumeAtMs !== undefined` — "the
+    // handover spent time, so do not make the viewer wait twice" — and on
+    // 2026-09-21 a handover abandoned at 6 s
+    // (`join-receding-faster-than-it-fills`) left the outgoing generation with
+    // about 10 s of runway still on the element and a picture the viewer was
+    // still watching, and this threw it away. Time spent is not the question;
+    // whether there is still a frame to keep is, and
+    // `canHoldThroughRelocation()` asks exactly that.
+    if (await this.holdThroughRelocation(source, positionMs, startPaused)) return true;
     const playRequestGeneration = ++this.playRequestGeneration;
     const sourceGeneration = ++this.sourceGeneration;
     this.failedSourceGeneration = undefined;
@@ -839,6 +907,9 @@ class WebPlayer implements Player {
     this.hls?.destroy();
     this.hls = undefined;
     this.hlsMediaRecovery = undefined;
+    // Whatever a failed generation was still holding on screen: this path is
+    // about to blank the element anyway.
+    this.destroyRetiredHls();
     this.startWatchdog.stop();
     this.stallWatchdog.stop();
 
@@ -1331,7 +1402,9 @@ class WebPlayer implements Player {
   }
 
   /**
-   * Pause on the last frame through a seek, instead of blanking the element.
+   * Pause on the last frame through a relocation, instead of blanking the
+   * element — a seek the node has to build a generation for, or a mode the
+   * viewer has just chosen.
    *
    * Measured live 2026-09-18, every out-of-buffer seek: the element went to
    * `readyState` 0 with nothing buffered and `paused` **false** throughout, so
@@ -1351,6 +1424,12 @@ class WebPlayer implements Player {
    * would save fetching the pre-roll, but it changes where the media clock
    * begins and that is a separate question from this one.
    *
+   * A representation change arrives here too, and on 2026-09-20 it was the
+   * expensive one: selecting Transcode from Direct Play blanked the picture for
+   * 16.5 s, because the rule asked the outgoing side to be a manifest as well.
+   * `canHoldThroughRelocation()` owns that rule now and asks only what the
+   * replacement needs.
+   *
    * Declines to anything it cannot do cleanly and the caller falls through to
    * the teardown path, so this is never worse than the behaviour it replaces.
    */
@@ -1358,14 +1437,11 @@ class WebPlayer implements Player {
     const outgoing = this.video;
     const host = this.host;
     if (!host || !outgoing || !this.activeSource) return false;
-    // Both sides managed HLS: the native path owns its own element source, and
-    // Direct Play never rebuilds a generation to seek.
-    if (!source.isManifest || !this.activeSource.isManifest) return false;
-    if (!shouldUseManagedHls(this.options.forceNativeHls, managedHlsSupported())) return false;
-    // Nothing to hold unless the outgoing element actually has a frame up. This
-    // is also what declines the first generation of a session, where there is
-    // nothing on screen and blanking costs the viewer nothing.
-    if (outgoing.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return false;
+    if (!canHoldThroughRelocation({
+      incomingIsManifest: source.isManifest,
+      managedHls: shouldUseManagedHls(this.options.forceNativeHls, managedHlsSupported()),
+      outgoingReadyState: outgoing.readyState,
+    })) return false;
 
     // Usually already frozen: the control holds the picture the moment the seek
     // is asked for, which is a whole negotiation earlier than this. Taken here
@@ -1377,6 +1453,12 @@ class WebPlayer implements Player {
     this.pictureHold = { resumeWanted: restoreIntent };
     outgoing.pause();
     this.wantsPlayback = false;
+    // A hold no control asked for — a mode switch, a failover — arrives with the
+    // stall budget still armed, and a picture frozen on purpose reads to it
+    // exactly like a node that has died. `holdPicture()` stands it down for the
+    // same reason and records what it cost when nobody did; core re-arms on the
+    // first report after playback advances again, so nothing is switched off.
+    this.stallWatchdog.suspend();
     this.publish(outgoing);
 
     const sourceGeneration = this.sourceGeneration + 1;
@@ -1493,11 +1575,19 @@ class WebPlayer implements Player {
       this.log.warn('subtitle-initial-load-failed', { url: source.subtitleUrl, error: error instanceof Error ? error.message : String(error) });
     });
 
-    // The outgoing generation is released after the cut, never before it.
+    // The outgoing generation is released after the cut, never before it — and
+    // so is a failed one that was kept alive to hold the picture until now.
     try { outgoingHls?.destroy(); } catch { /* the element is going anyway */ }
+    this.destroyRetiredHls();
     outgoing.removeAttribute('src');
     outgoing.load();
     outgoing.remove();
+    // The outgoing side can be Direct Play — a mode switch promotes a transcode
+    // over one — and then it left a read-ahead behind it. The teardown path
+    // releases this on its way past; the cut has to do it too, or the worker
+    // goes on fetching a source nothing will ever play again.
+    releaseDirectPlayReadAhead(this.directReadAheadSourceUrl);
+    this.directReadAheadSourceUrl = undefined;
     this.publish(incoming);
   }
 
@@ -1959,6 +2049,7 @@ class WebPlayer implements Player {
     this.hls?.destroy();
     this.hls = undefined;
     this.hlsMediaRecovery = undefined;
+    this.destroyRetiredHls();
     this.initialSeekCleanup?.();
     this.initialSeekCleanup = undefined;
     this.unsubscribeDirectDegradation?.();
@@ -2170,9 +2261,35 @@ class WebPlayer implements Player {
     const hls = this.hls;
     this.hls = undefined;
     this.hlsMediaRecovery = undefined;
-    hls?.destroy();
+    // Stopped, not destroyed: it must fetch nothing more from a node that has
+    // just failed, and it must keep the last frame on screen until something
+    // can replace it. `retiredHls` is destroyed by whichever path takes the
+    // element next.
+    this.retireHls(hls);
     this.video?.pause();
     for (const listener of this.failureListeners) listener(error);
+  }
+
+  /** Stop a failed generation fetching, and hold it for destruction at the cut. */
+  private retireHls(hls: Hls | undefined): void {
+    this.destroyRetiredHls();
+    if (!hls) return;
+    try {
+      hls.stopLoad();
+      this.retiredHls = hls;
+    } catch (error) {
+      // Nothing is worth a second failure here: destroy it and take the blank.
+      this.log.warn('retired-hls-stop-failed', { error: error instanceof Error ? error.message : String(error) });
+      try { hls.destroy(); } catch { /* already gone */ }
+    }
+  }
+
+  /** Release a retired generation. Called only where the element is being taken. */
+  private destroyRetiredHls(): void {
+    const retired = this.retiredHls;
+    this.retiredHls = undefined;
+    if (!retired) return;
+    try { retired.destroy(); } catch { /* the element is going anyway */ }
   }
 
   /**
