@@ -1287,14 +1287,44 @@ milliseconds, and the element's own clock keeps its precision.
       clamp and round, which is the livelock's own precondition. **Floored, not
       rounded:** a duration must not claim media the element does not have,
       because a seek to the end is clamped against it.
-- [x] **`bufferedRangesMs` was published raw**, and these are what core admits
-      a local seek against. The target is whole and the boundary was not, which
-      is the 0.08 ms case named above. Made whole **outward** — floor the
-      start, ceil the end — and the direction is the decision: narrowing
+
+      **How much this buys, stated honestly** (core session, 2026-09-20).
+      Core's own published event takes `session?.durationMs || next.durationMs`
+      and `generationLocalPosition` clamps a direct position against the
+      session's figure, so the node's integer wins wherever a session has one
+      and the element's fractional duration could never escape into a seek
+      through core's path. Two windows are left, and both are this repo's: the
+      Continue Watching record takes `event.durationMs` **unconditionally**,
+      so storage always had the fraction; and `firstUsableDurationMs` prefers
+      the session's figure but falls back to the element's, so the scrubber's
+      `max` is fractional whenever the session states no duration. The
+      scrubber-to-node path was real, and it was ours.
+- [x] **`bufferedRangesMs` was published raw.** Made whole **outward** — floor
+      the start, ceil the end — and the direction is the decision: narrowing
       refuses a seek the element could have served and charges the viewer a
       whole generation negotiation for it, while widening claims at most one
       millisecond it does not hold, which is a fraction of one frame and lands
       the element inside media it has.
+
+      **One clause of the reasoning was wrong and is corrected.** It said
+      these ranges "are what core admits a local seek against". They are not:
+      core's `rangeContainsPosition` reads `localSeekCoverage()`, a different
+      method on this adapter (core session, 2026-09-20). The conclusion
+      survives for a reason worth writing down rather than being lucky — on
+      this adapter `localSeekCoverage()` *is* computed from them, calling
+      `publish()` synchronously and returning `lastPublishedEvent
+      .bufferedRangesMs`, deliberately, so that local-seek admission and the
+      buffer indicator have one authority. The widening reaches the admission
+      path through that. Core confirms the direction independently for
+      `localSeekCoverage()`: widening costs a seek to a position the element
+      may have to fetch, which is a rebuffer and not a wrong position, since
+      the element clamps to what it has.
+
+      Where `bufferedRangesMs` itself reaches core, neither use admits a seek:
+      `reportedElementRunwayMs` reads it **only when `forwardBufferMs` is
+      absent**, and this client always publishes that; and the presentation
+      path merges ranges within 1 ms of each other, so outward widening can
+      merge a sub-millisecond gap — presentation only, and harmless.
 - [x] **`forwardBufferMs` was published raw.** No known cost — it is compared
       against thresholds in seconds — rounded so that everything leaving the
       player is whole, rather than leaving one field to be reasoned about
