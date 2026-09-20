@@ -16,7 +16,6 @@ import {
   fixedBearerToken,
   MachaCatalogueApi,
   MachaPlaybackFactsApi,
-  mintAnonymousSession,
 } from '@machafoundation/core';
 import { readFileSync } from 'node:fs';
 
@@ -57,7 +56,31 @@ const overrides = POLICIES[arg('policy', 'none')] ?? {};
 
 configureMachaHost({ origin: NODE });
 
-const { token } = await mintAnonymousSession(NODE);
+/**
+ * The cluster gives an unauthenticated session no roles, so this signs in as
+ * the test account the way any client does. Core stopped exporting a mint
+ * helper in 0.10.0 — "one account model, no special anonymous" — and the
+ * endpoint is two lines, so this asks the node directly rather than standing
+ * up a `SessionManager` for one token.
+ */
+async function mint(node) {
+  const username = process.env.MACHA_TEST_USER;
+  const password = process.env.MACHA_TEST_PASSWORD;
+  if (!username || !password) {
+    throw new Error('Set MACHA_TEST_USER and MACHA_TEST_PASSWORD (they are in .env.local).');
+  }
+  const response = await fetch(`${node}/api/v1/session`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    // Nested, deliberately: a flat body is accepted and returns an anonymous
+    // session holding no roles, which then 403s on the catalogue.
+    body: JSON.stringify({ credentials: { username, password } }),
+  });
+  if (!response.ok) throw new Error(`session mint failed: ${response.status}`);
+  return response.json();
+}
+
+const { token } = await mint(NODE);
 const auth = fixedBearerToken(token);
 const catalogue = new MachaCatalogueApi(NODE, auth);
 const facts = new MachaPlaybackFactsApi(NODE, auth);
@@ -101,6 +124,11 @@ for (const item of items) {
     segment: instruction.container ?? '-',
   });
 }
+
+// The node caps sessions at 4096 and a repeated run would fill it, so this
+// run gives its own back rather than leaving it to expire.
+await fetch(`${NODE}/api/v1/session`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } })
+  .catch((error) => console.error(`  (session revoke failed: ${error.message})`));
 
 console.log(`\n# Playback instruction baseline — ${probed} probed, ${failed} unavailable`);
 console.log(`# node ${NODE}  policy ${arg('policy', 'none')}\n`);
