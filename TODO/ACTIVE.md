@@ -1,6 +1,6 @@
 # Active tasks and concepts to explore
 
-Last updated: 2026-09-20 (transcode handover: the join race is now decided instead of waited out, and the fallback stops rewinding; budgets adopted; rationalised against what has shipped)
+Last updated: 2026-09-20 (eight changes landed and none watched live — see COMPLETED.md; the next thing is a run, not a change)
 
 This is the working backlog. Add new work here. When an item is implemented and
 its stated verification is complete, remove it from this file and add a dated
@@ -38,18 +38,32 @@ the seek contract and the per-node `playback` budgets. `macnessa` and
 `inverbeg` were offline through 2026-09-17. Nothing measured against a partial
 cluster should be quoted as current.
 
-**The budgets adoption is done** — all three call sites, in one change, with
-its own P1 below recording what was changed and what remains unproven.
+**Eight changes are on `develop` and none has been run against a node.** They
+are listed with their commits and their unproven halves in `COMPLETED.md`
+under 2026-09-20. Nothing is released and nothing is deployed: `fi-1` and
+`es-1` are still on **0.17.1** from 2026-09-17, so they do not carry 0.17.2
+either.
 
-**The next thing is a live run, not a change.** Everything built since 0.17.2
-— the budgets, `readAheadBytes`, and now the transcode handover's convergence
-exit and its fallback position — is typecheck-clean and unit-covered and
-**none of it has been watched against a node.** Each says under its own
-heading what a run would have to show. The client work queued behind that is
-small and named: render core's playback phase when it arrives. The failure
-screen now reads out core's chained terminal error rather than only its head —
-it was checked, it was not doing it, and it is recorded under the https
-failover P0.
+**The next thing is a live run, and it is the only thing.** No further client
+change is queued behind it — the small named items are done. What a session
+picking this up should do, in order:
+
+1. **Deploy, or decide not to.** The procedure is below. Nothing since
+   2026-09-17 is in front of a viewer.
+2. **Re-measure the transcode handover.** The one measurement that produced a
+   P0 — 30 s of waiting on an unreachable join, then a 20 s rewind — against a
+   client that now decides that race in about six seconds. Both halves of the
+   fix are unwatched.
+3. **Take the capture at `debug`, not `warn`.** Core's seek-invariant reports
+   are the difference between three readings of the transcode offset question,
+   and the third one is only visible at `debug`.
+4. **Record `document.hidden` in every sample.** A backgrounded tab cost the
+   first attempt at the measurement above, reading exactly like a failure to
+   start.
+
+**What needs Tom, and nothing else does.** A television needs him in front of
+it. So does a deployment, and so does the decision below. The cluster itself
+does not — the test account signs in from any browser.
 
 **One decision is still open — P1 below.** The confirmed same-origin endpoint
 is not persisted. Tom's view is that it should be, and the shape was not

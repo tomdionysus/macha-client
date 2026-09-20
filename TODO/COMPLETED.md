@@ -1,6 +1,48 @@
 # Completed and tested
 
-Last updated: 2026-09-19
+Last updated: 2026-09-20
+
+## 2026-09-20 — eight changes landed on `develop`, none watched live
+
+**Read this first if you are picking the work up.** Everything below is
+committed, typecheck-clean and unit-covered, each fault was watched failing
+before it was fixed, and **not one of them has been run against a node.** They
+are recorded here because a new session needs to know they landed; their
+entries stay open in `ACTIVE.md` because what is open is the live
+verification, and each entry says what a run would have to show. Nothing here
+is released or deployed: `fi-1` and `es-1` are still on **0.17.1** from
+2026-09-17, which does not even carry 0.17.2.
+
+Two of the twelve commits are corrections to entries written earlier the same
+day, and one is a note from the core session; those are not changes to the
+client.
+
+| what | commit | what is unproven |
+| --- | --- | --- |
+| Every playback deadline comes from the node serving the source — `awaitNativeHlsFirstFragment`, `preflightWebHlsSource`, `stallWatchdog.useSourceBudgets` | `38c42ec` | Both nodes on this cluster state the same figures the constants were derived from, so the adoption is currently indistinguishable from the old behaviour at runtime. A node configured differently is what would prove it. |
+| Direct Play's read-ahead cover reported to core as `readAheadBytes`, absent rather than zero where there is no cache | `2503ff5` | Core did its runway arithmetic from element buffer alone on 453 of 748 titles; that it now does not has not been watched. |
+| The transcode handover decides its race to the join instead of waiting the budget out, and its fallback attaches where the viewer actually is | `c16ce90` | The live measurement that produced it — 30 s of waiting then a 20 s rewind — has not been repeated. A run should show `join-receding-faster-than-it-fills` at about 6 s and a `resumeAtMs` within a second or two of the viewer. |
+| The failure screen reads out the failures core chained beneath the head | `e61cd00` | Needs the failover it belongs to: two sentences at once, the node that was serving and the candidate that could not be reached. |
+| The handover's runway gate reads the element rather than the last event | `bafba54` | The case it fixes is an element that has stopped emitting, which is not reachable on demand. |
+| Everything leaving the player is whole milliseconds — duration, buffered ranges, forward buffer, and the committed seek | `90adb87` | The livelock the original rounding addressed has never been watched being cured on a node. The scrubber path that could reproduce it can no longer produce a fraction. |
+| The viewer is told how long the node has been taking to start | `534c4e9` | Shown after five seconds; no run has taken that long under observation. |
+| A cluster that refuses a session puts the viewer on the sign-in wall | `0e0039c` | Not reproducible here by waiting — an unauthenticated mint on this cluster succeeds with no roles, which is the other branch. A refusal needs a node with anonymous sessions disabled. |
+
+**Two findings worth carrying forward, neither of them a change.**
+
+`reportSourceGone` reads no buffer figure at all, and `localSeekCoverage()` and
+`seek()` both publish synchronously before reading, so the handover's gate was
+the only decision in this repo reading a figure of unbounded age. That survey
+is finished and does not need repeating.
+
+Core's `checkSeekInvariant` reports `seek-invariant-violated` at **error**
+level, which reaches this client's diagnostics buffer and its failure trail
+without any change. It is mode-agnostic, so a clean capture says nothing about
+whether transcode starts on the requested frame — only that a node's two
+fields add up. Separately: the `3,330.9 ms` offset measured on 2026-09-20 is
+not an integer, and the contract states those fields in whole milliseconds.
+
+
 
 ## The generation clock stopped running backwards (client 0.17.2)
 
