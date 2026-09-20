@@ -765,6 +765,10 @@ h2 { font-size: clamp(1.2rem, 2vw, 1.75rem); letter-spacing: -.01em; margin: 1.1
 }
 .player-fatal-error strong { color: #dedee2; font-size: 1.05rem; }
 .player-fatal-error span { color: #ffb4b4; overflow-wrap: anywhere; }
+/* The failures underneath the one being named. Dimmer than the head, because
+   the head is what happened and these are what it led to — present without
+   competing with it. */
+.player-fatal-error .player-failure-cause { color: #c79a9a; font-size: .85rem; }
 /* The evidence behind the failure, in the failure's own words. Quieter than
    the message itself and left-aligned: it is read line by line, and centring
    a list of timings makes the column of numbers unfollowable. */

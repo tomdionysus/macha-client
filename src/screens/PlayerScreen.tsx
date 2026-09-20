@@ -15,6 +15,7 @@ import { uiSettings } from '../settings';
 import { describePlaybackSession } from '@machafoundation/core';
 import { playbackFailureTrail, type PlaybackFailureTrailEntry } from './player/failureTrail';
 import { failureTrailEnabled } from '../diagnostics/failureTrailSetting';
+import { failureCauseMessages } from '../diagnostics/failureCauses';
 import { bufferedTimelineSegments } from '@machafoundation/core';
 import type { MediaSummary, PlaybackEvent, PlaybackProgress } from '@machafoundation/core';
 import { PlayerOptions } from './player/PlayerOptions';
@@ -752,6 +753,12 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
         <div className="player-fatal-error" role="alert">
           <strong>Playback failed</strong>
           <span>{fatalError.message}</span>
+          {/* What core chained beneath it. The head names the failure that
+              started the recovery; these are the attempts that ended it, and
+              a viewer reporting only one of the two reports half of it. */}
+          {failureCauseMessages(fatalError).map((message) => (
+            <span className="player-failure-cause" key={message}>{message}</span>
+          ))}
           {failureTrail.length > 0 && (
             <ol className="player-failure-trail">
               {failureTrail.map((entry) => (
