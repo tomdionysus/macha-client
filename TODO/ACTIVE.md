@@ -1771,21 +1771,42 @@ the change *means* — the wording is this client's to choose. Choose it knowing
 the above, rather than writing "your session timed out" and leaving a viewer
 staring at an empty library.
 
-## P1 — Use core's `lastMintFailure` so a refusal stops raising the connection gate
+## P1 — `lastMintFailure` is read, and the heading's premise had already moved
 
-Outstanding since core 0.9.0 and **not done**. The other two items from that
-release were taken up in 0.14.0 — `sessionPermits`/`sessionLockedOut` are in
-`App.tsx`, and `EndpointCandidate.ready` drives the Status cooling-down split.
-This one was not, and `grep lastMintFailure src` still returns nothing while
-core still exports it.
+**Done 2026-09-20 — but not the thing the heading describes.** The title said
+"so a refusal stops raising the connection gate", and core 0.14.0 already
+stops it: `mintNow` calls `reportClusterUnreachable()` only
+`if (this.mintFailure.reason !== 'refused')`, with the argument written in the
+source. Read before building, so what was left turned out to be the opposite
+problem.
 
-A node that answered **403 in forty milliseconds has been reached**. Telling
-the viewer every endpoint is unreachable sends them to check a server that is
-working exactly as configured — and on this cluster that is the ordinary case,
-not an edge one, because the anonymous account holds no roles and an
-unauthenticated mint is refused by design. `lastMintFailure` distinguishes a
-refusal from a failure to connect; the connection gate should be raised only by
-the second.
+**The client was not lying about a refusal. It was silent about one.** Roles
+stay `undefined` through a failed mint, `sessionPermits` answers its
+permissive "unknown is not none", and the whole navigation therefore rendered
+as usual over a session that does not exist: every section visible, every
+request refused, and nothing on screen admitting it. A node that answered
+**403 in forty milliseconds has been reached** and has stated a policy — which
+is exactly why no connection gate appears, and exactly why something else had
+to.
+
+- [x] `useSession` publishes `mintFailure` from the subscription it already
+      holds, which is where core says to read it — "every change to it is
+      published through `subscribe()`", together with `isReady`.
+- [x] A refusal now lands on the **sign-in wall**, the same one a role-less
+      session gets: `sessionLockedOut(roles) || mintFailure?.reason ===
+      'refused'`. Two different facts — a session that may do nothing, and no
+      session at all — with one honest answer, because signing in is the one
+      thing a viewer can do about either.
+- [x] The server's own sentence is **not** shown. Core's contract states it is
+      never assumed fit for a viewer.
+- [x] Seen failing first: the hook test stubs a 403 with `anonymous_disabled`
+      and asserts `reason: 'refused'` with its status, and was watched red
+      before the field existed. A second test pins that an adopted session
+      reports no failure at all, so the field cannot become sticky.
+- [ ] **Not verified live**, and the refusal is not reproducible on this
+      cluster by waiting: an unauthenticated mint here *succeeds* with
+      `roles: []`, which is the locked case and a different branch. Producing
+      a refusal needs a node configured to disable anonymous sessions.
 
 Related to the port below, and worth doing in the same sitting: both are about
 telling a viewer the truth about why they cannot see anything.

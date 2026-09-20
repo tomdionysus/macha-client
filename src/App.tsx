@@ -367,7 +367,7 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
     );
     return () => setDirectPlayTransferListener(undefined);
   }, [endpointRegistry]);
-  const { auth, ready: sessionReady, roles } = useSession({
+  const { auth, ready: sessionReady, roles, mintFailure } = useSession({
     connectionRequired,
     serverConfigured: effectiveEndpoints.length > 0,
     endpointRegistry,
@@ -404,7 +404,26 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
    * core's, so all four clients answer it identically.
    */
   const permits = useCallback((role: UserRole) => sessionPermits(roles, role), [roles]);
-  const locked = sessionLockedOut(roles);
+  /**
+   * No session, and the cluster is the reason — two facts with one honest
+   * answer for the viewer.
+   *
+   * `sessionLockedOut` is a session that exists and may do nothing.
+   * `mintFailure.reason === 'refused'` is no session at all: a node answered
+   * and stated a policy, which is a different thing from a node that could not
+   * be asked. Core withholds the unreachable report for a refusal precisely so
+   * that a client does not send a viewer to check a server that is up and
+   * working exactly as configured — and until now this client had nothing to
+   * say in its place. Roles stay `undefined` through a refusal, so `permits`
+   * answers its permissive "unknown is not none" and the whole navigation
+   * rendered as usual over a session that does not exist: every section
+   * visible, every request refused, and nothing on screen admitting it.
+   *
+   * Both land on the sign-in wall, which is the one thing a viewer can
+   * actually do about either. The server's own sentence is deliberately not
+   * shown — core's contract is that it is never assumed fit for a viewer.
+   */
+  const locked = sessionLockedOut(roles) || mintFailure?.reason === 'refused';
   // Users is the exception, and deliberately the other way round: the screen
   // exists only because the server has accounts, so an unknown answer means
   // there is nothing there to show rather than something to reveal. `hasRole`

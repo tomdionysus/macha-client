@@ -52,6 +52,31 @@ describe('useSession', () => {
     await vi.waitFor(() => expect(result.current.ready).toBe(true));
   });
 
+  it('carries why the mint failed, and tells a refusal from a silence', async () => {
+    // A node that answered 403 in forty milliseconds has been reached and has
+    // stated a policy. Core withholds the connection gate for exactly that
+    // case — so without this the cluster is up, there is no session, and this
+    // client has nothing to say about it: every section stays visible, every
+    // request 401s, and the viewer is left reading an app that looks fine.
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ error: 'anonymous_disabled', message: 'anonymous sessions are disabled' }),
+      { status: 403, headers: { 'Content-Type': 'application/json' } },
+    )));
+    const { result } = renderSession();
+
+    await vi.waitFor(() => expect(result.current.ready).toBe(true));
+    expect(result.current.mintFailure?.reason).toBe('refused');
+    expect(result.current.mintFailure?.status).toBe(403);
+  });
+
+  it('says nothing about a failure once a session is adopted', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(sessionResponse()));
+    const { result } = renderSession();
+
+    await vi.waitFor(() => expect(result.current.ready).toBe(true));
+    expect(result.current.mintFailure).toBeUndefined();
+  });
+
   it('is immediately ready when no connection is required (override mode)', () => {
     const fetchMock = vi.fn().mockResolvedValue(sessionResponse());
     vi.stubGlobal('fetch', fetchMock);

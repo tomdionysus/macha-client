@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { sessionManager, type AuthenticatedFetch, type SessionManager, type UserRole } from '@machafoundation/core';
+import { useCallback, useEffect, useState } from 'react';
+import { sessionManager, type AuthenticatedFetch, type SessionManager, type SessionMintFailure, type UserRole } from '@machafoundation/core';
 import type { EndpointRegistry } from '@machafoundation/core';
 
 export interface Session {
@@ -21,6 +21,20 @@ export interface Session {
    * `sessionLockedOut`, which encode that rule so no call site can forget it.
    */
   roles: UserRole[] | undefined;
+  /**
+   * Why there is no session, or `undefined` when there is one.
+   *
+   * Read with `ready`: not ready means the question is still open. It is the
+   * difference between a cluster that could not be asked and one that answered
+   * and said no — and only the first is a connection problem. Core withholds
+   * the unreachable report for a refusal precisely so that a client does not
+   * send a viewer to check a server that is up and working as configured;
+   * this is the other half, which is having something to say instead.
+   *
+   * The `message` on it is the server's own sentence where it sent one, and
+   * core's contract is that it is never assumed fit to show a viewer.
+   */
+  mintFailure: SessionMintFailure | undefined;
 }
 
 /**
@@ -41,12 +55,14 @@ export function useSession(options: {
   endpointRegistry: EndpointRegistry;
 }, manager: SessionManager = sessionManager): Session {
   const { connectionRequired, serverConfigured, endpointRegistry } = options;
-  const [managerState, setManagerState] = useState(() => ({ ready: manager.isReady, roles: manager.roles }));
+  const read = useCallback(() => ({
+    ready: manager.isReady,
+    roles: manager.roles,
+    mintFailure: manager.lastMintFailure,
+  }), [manager]);
+  const [managerState, setManagerState] = useState(read);
 
-  useEffect(
-    () => manager.subscribe(() => setManagerState({ ready: manager.isReady, roles: manager.roles })),
-    [manager],
-  );
+  useEffect(() => manager.subscribe(() => setManagerState(read())), [manager, read]);
 
   useEffect(() => {
     if (!connectionRequired || !serverConfigured) {
@@ -61,5 +77,6 @@ export function useSession(options: {
     auth: manager,
     ready: !connectionRequired || !serverConfigured || managerState.ready,
     roles: managerState.roles,
+    mintFailure: managerState.mintFailure,
   };
 }
