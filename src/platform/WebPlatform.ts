@@ -135,11 +135,20 @@ async function readFirstResponseBytes(response: Response): Promise<boolean> {
  */
 export const HLS_PREFLIGHT_TIMEOUT_MS = SERVER_STARTUP_TIMEOUT_MS + SERVER_SEGMENT_HOLD_MS + 4_000;
 
-/** Validate a playlist and its initial fMP4 data without attaching a decoder. */
+/**
+ * Validate a playlist and its initial fMP4 data without attaching a decoder.
+ *
+ * The deadline comes from the node serving this source when it stated one, and
+ * falls back to the derived constant above when it did not. Absence means the
+ * node could not say, never zero — and the fallback is the longer of the two,
+ * which is the safe direction: a host must not shorten a budget on a missing
+ * field, because the shorter of two deadlines silently wins and the other layer
+ * then looks broken.
+ */
 export async function preflightWebHlsSource(
   source: PlaybackSource,
   fetchImpl: typeof fetch = fetch,
-  timeoutMs = HLS_PREFLIGHT_TIMEOUT_MS,
+  timeoutMs = source.budgets?.deadlineMs ?? HLS_PREFLIGHT_TIMEOUT_MS,
 ): Promise<boolean> {
   if (!source.isManifest) return false;
   const controller = new AbortController();
@@ -176,11 +185,25 @@ export async function preflightWebHlsSource(
  * How long a node is given to produce the first fragment of a fresh
  * generation before the wait becomes evidence against it.
  *
+ * **The fallback only.** The real deadline is `source.budgets.deadlineMs`, from
+ * the node actually serving the source, and the call site passes it. This value
+ * is what a node too old to state one gets.
+ *
  * Generous deliberately. `500 segment_not_ready` is the node stating that it
  * is working on a fragment it has already promised, and abandoning it costs
  * more than waiting does: the replacement starts its own generation from
  * nothing, so the viewer waits out a cold start instead of the tail of a warm
- * one. Thirty seconds is five of the server's own six-second holds.
+ * one.
+ *
+ * It used to be justified as "five of the server's own six-second holds", and
+ * that reasoning is withdrawn: the multiplier was invented to stand in for a
+ * figure the client had no way to read. The node's `startup_timeout_ms` *is*
+ * the bound on what this wait is waiting for — `macha/docs/streaming.md` states
+ * that it "independently bounds the wait for the first transformed fragment" —
+ * so a node that has not served by then has stopped trying, and waiting past it
+ * spends the time on something that cannot arrive. The number is unchanged
+ * because a conservative fallback is the safe direction when nothing is stated;
+ * only the claim behind it is.
  */
 export const NATIVE_HLS_FIRST_FRAGMENT_TIMEOUT_MS = 30_000;
 
@@ -762,6 +785,10 @@ class WebPlayer implements Player {
         // being charged to its replacement — is handled by
         // `attachedSourceGeneration` instead, which costs the element nothing.
         const readiness = await awaitNativeHlsFirstFragment(source.url, {
+          // The serving node's own bound on bringing a first fragment up, or
+          // the conservative fallback when it did not state one. Never shorter
+          // than the constant on the strength of a missing field.
+          timeoutMs: source.budgets?.deadlineMs ?? NATIVE_HLS_FIRST_FRAGMENT_TIMEOUT_MS,
           superseded: () => sourceGeneration !== this.sourceGeneration,
         });
         if (sourceGeneration !== this.sourceGeneration || video !== this.video) return false;
@@ -1798,6 +1825,13 @@ class WebPlayer implements Player {
    * swallowed the failure and never raised `MediaError`.
    */
   private watchForStall(video: HTMLVideoElement, source: PlaybackSource, sourceGeneration: number): void {
+    // Take the stall budget from the node serving *this* source. The watchdog
+    // outlives any one generation while the figure belongs to a node, so it is
+    // set here — at the one place every attach path passes through — rather
+    // than at each of them, where a new path would forget it. A node
+    // configured with a longer hold than the compiled-in default was being
+    // called dead for answering at its own frontier.
+    this.stallWatchdog.useSourceBudgets(source);
     this.stallWatchdog.watch(({ visibleMs, positionMs, bufferedEndMs }) => {
       if (sourceGeneration !== this.sourceGeneration || video !== this.video) return;
       const detail = {

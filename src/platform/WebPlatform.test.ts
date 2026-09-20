@@ -430,6 +430,43 @@ describe('Web HLS standby preflight', () => {
     ]);
   });
 
+  it('bounds a preflight by the serving node\'s stated deadline, not its own constant', async () => {
+    // A node that states a deadline governs the wait. Asserted against the
+    // observed abort rather than by reading the default, because a budget that
+    // is plumbed but never applied is exactly the silent failure here: the
+    // shorter of two deadlines wins and the other layer looks broken.
+    let observedSignal: AbortSignal | undefined;
+    const fetchMock = vi.fn((_url: string | URL | Request, init?: RequestInit) => {
+      observedSignal = init?.signal ?? undefined;
+      return new Promise<Response>((_resolve, reject) => {
+        observedSignal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')), { once: true });
+      });
+    });
+    const source = {
+      mediaId: 'macha:one', url: 'https://node-b.test/generation/index.m3u8',
+      isManifest: true, mimeType: 'application/vnd.apple.mpegurl', mode: 'remux' as const,
+      budgets: { deadlineMs: 1, segmentHoldMs: 6_000 },
+    };
+
+    await expect(preflightWebHlsSource(source, fetchMock)).rejects.toMatchObject({ name: 'AbortError' });
+    expect(observedSignal?.aborted).toBe(true);
+  });
+
+  it('falls back to its own constant when the node states no deadline', async () => {
+    // Absent is not zero. A missing field must lengthen the budget to the
+    // conservative default, never shorten it — so this must NOT abort.
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response('#EXTM3U\n#EXT-X-MAP:URI="init.mp4"\n#EXTINF:4,\nfirst.m4s', { status: 200 }))
+      .mockResolvedValueOnce(new Response(new Uint8Array([1, 2]), { status: 206 }))
+      .mockResolvedValueOnce(new Response(new Uint8Array([3, 4]), { status: 206 }));
+    const source = {
+      mediaId: 'macha:one', url: 'https://node-b.test/generation/index.m3u8',
+      isManifest: true, mimeType: 'application/vnd.apple.mpegurl', mode: 'remux' as const,
+    };
+
+    await expect(preflightWebHlsSource(source, fetchMock)).resolves.toBe(true);
+  });
+
   it('bounds a stalled standby preflight TCP request', async () => {
     let observedSignal: AbortSignal | undefined;
     const fetchMock = vi.fn((_url: string | URL | Request, init?: RequestInit) => {
