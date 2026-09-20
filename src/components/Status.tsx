@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import errorIconUrl from '../assets/error.svg?url';
 import { uiSettings } from '../settings';
 
-export function Loading({ delayMs = uiSettings.loadingIndicatorDelayMs }: { delayMs?: number } = {}) {
+export function Loading({ delayMs = uiSettings.loadingIndicatorDelayMs, note }: { delayMs?: number; note?: string } = {}) {
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {
@@ -15,6 +15,10 @@ export function Loading({ delayMs = uiSettings.loadingIndicatorDelayMs }: { dela
   return (
     <div className="loading-overlay" role="status" aria-live="polite" aria-label="Loading">
       <div className="loading-spinner" aria-hidden="true" />
+      {/* Inside the overlay rather than beside it, so the wait and what is
+          being said about it cannot drift apart on screen — and inside the
+          `aria-live` region, so it is announced when it appears. */}
+      {note && <p className="loading-note">{note}</p>}
     </div>
   );
 }

@@ -5,6 +5,7 @@ import { Loading } from '../components/Status';
 import { createClientLogger } from '@machafoundation/core';
 import { useArtworkUrl } from '../hooks/useArtworkUrl';
 import { requestTvDefaultFocus } from '../hooks/useTvNavigation';
+import { useElapsedMs } from '../hooks/useElapsedMs';
 import type { Platform } from '@machafoundation/core';
 import { platformTraits } from '../platform/traits';
 import type { PlaybackUpdate } from '@machafoundation/core';
@@ -55,6 +56,31 @@ interface Props {
  * formatter intact. Stating the requirement makes the fallback a decision
  * rather than a side effect of truthiness.
  */
+/**
+ * What to tell a viewer whose title has not started yet.
+ *
+ * An unmarked spinner says only that something is happening. The three budgets
+ * that bound a start — negotiating a generation, waiting for its first
+ * fragment, and starvation once a URL is attached — are sequential and nothing
+ * bounds their sum, so a cold node can spend the better part of a minute with
+ * every budget behaving exactly as written. Law 2: a degraded state must be
+ * visible and actionable rather than becoming indefinite waiting, and a viewer
+ * told what is being waited for and for how long is in a different position
+ * from one watching a spinner, even though the wait is identical.
+ *
+ * Only a start. A rebuffer mid-film has the picture behind it to say what is
+ * going on, and a timer over that would turn every brief hesitation into an
+ * announcement.
+ *
+ * Core says `starting` and not yet which of the three phases it is in; when it
+ * does, this is where that belongs — the sentence gets more specific and the
+ * number stays where it is.
+ */
+export function startWaitNotice(starting: boolean, elapsedMs: number): string | undefined {
+  if (!starting || elapsedMs < uiSettings.playerStartWaitNoticeMs) return undefined;
+  return `Waiting for the node to start the stream — ${Math.floor(elapsedMs / 1_000)}s`;
+}
+
 export function firstUsableDurationMs(...candidates: (number | undefined)[]): number {
   for (const candidate of candidates) {
     if (candidate !== undefined && Number.isFinite(candidate) && candidate > 0) return candidate;
@@ -718,6 +744,10 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
   const queueLabel = queuePosition && queuePosition.total > 1 ? `${queuePosition.index + 1} of ${queuePosition.total}` : undefined;
   const playerSubtitle = [mediaSubtitle, queueLabel].filter(Boolean).join(' · ');
   const showBuffering = !fatalError && (playback.starting || Boolean(event.buffering));
+  // How long this start has been going on, for telling the viewer. Counted
+  // here rather than from a timestamp on the snapshot, because core says
+  // `starting` without saying since when.
+  const startWaitMs = useElapsedMs(playback.starting);
 
   return (
     <section
@@ -753,7 +783,12 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
           {cover ? <img src={cover} alt="" /> : <div className="audio-player-placeholder">♪</div>}
         </div>
       )}
-      {showBuffering && <Loading delayMs={playback.starting ? 0 : uiSettings.playerSeekSpinnerDelayMs} />}
+      {showBuffering && (
+        <Loading
+          delayMs={playback.starting ? 0 : uiSettings.playerSeekSpinnerDelayMs}
+          note={startWaitNotice(playback.starting, startWaitMs)}
+        />
+      )}
 
       {fatalError && (
         <div className="player-fatal-error" role="alert">

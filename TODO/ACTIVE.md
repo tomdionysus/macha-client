@@ -1140,9 +1140,17 @@ that never became a response. Do not derive a deadline from `segmentHoldMs`;
 it shapes retries, it does not bound them. Absence lengthens a budget rather
 than shortening it, which is the direction `streaming.md:188` requires.
 
-## P1 — Render core's playback phase when it arrives
+## P1 — The wait is now told; which phase it is in is still core's
 
-Small, and recorded so it is not forgotten when core ships it. The three
+**Half done 2026-09-20, and the heading used to say "when it arrives".** Part
+of it had already arrived and this session said otherwise: core 0.14.0 exports
+`PlaybackRuntimePhase` (`idle | starting | playing | paused | stopping |
+failed`) and this client has always consumed it —
+`PlayerScreen.tsx` drives the spinner off `phase === 'starting'` and
+`usePlaybackController` gates the player's visibility on `'stopping'`. There
+is a second one as well, `NodePhase`/`StartupPhase` with `startupPhaseLabel()`
+from cluster status, rendered on the Status screen. Tom caught the claim that
+there was none. The three
 budgets bound three sequential phases — negotiating a generation, waiting for
 its first fragment, and starvation after a URL is attached — and nothing
 bounds the sum: a cold node can spend 12 s + 30 s + 20 s before anything is
@@ -1153,9 +1161,28 @@ snapshot, and let the host decide what a viewer sees. Law 2 — failure and
 degraded states must be visible and actionable rather than becoming indefinite
 waiting.
 
-- [ ] When the snapshot carries a phase, show it. A viewer told "waiting for
-      the node to start the stream (12 s)" is in a different position from one
-      staring at a spinner, even though the wait is the same.
+- [x] **The number needed no core change and is in.** `starting` is one word
+      covering all three phases, but *how long it has been going on* is
+      knowable from here: `useElapsedMs` times the phase and
+      `startWaitNotice()` puts "Waiting for the node to start the stream —
+      12s" under the spinner after five seconds. Below that it says nothing,
+      because most starts are a second or two and a message that appears and
+      vanishes reads as a fault of its own. Only a start, never a rebuffer: a
+      rebuffer has the picture behind it to say what is going on, and a timer
+      over that would announce every brief hesitation.
+
+      **The elapsed figure reads the clock rather than counting ticks**, and
+      the test for that had to be rewritten before it meant anything. The first
+      version advanced the timer and the clock together, which passes against a
+      tick-counter as happily as against a clock — a check that agrees with
+      whatever was written. Driving the clock independently of the timer —
+      30 s of wall time against a single firing, which is a throttled
+      background tab in miniature — distinguishes them: the tick-counter
+      answers 1,000 and was watched doing it.
+- [ ] **Which of the three phases, which is core's half.** When the snapshot
+      says whether it is negotiating, waiting for a first fragment, or starved,
+      the sentence gets more specific and the number stays where it is —
+      `startWaitNotice()` is where that lands.
 
 ## P1 — The relocation hold has run once, and three of its paths never have
 

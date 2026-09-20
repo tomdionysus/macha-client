@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { boundedPlayerSeekTarget, firstUsableDurationMs, isSubtitleOnlyUpdate, playerBackAction, playerBufferedTimelineEnabled, playerControlShowsPlay, playerMediaSubtitle, samsungTransportSeekDirection, webSeekDeltaForKey } from './PlayerScreen';
+import { boundedPlayerSeekTarget, firstUsableDurationMs, startWaitNotice, isSubtitleOnlyUpdate, playerBackAction, playerBufferedTimelineEnabled, playerControlShowsPlay, playerMediaSubtitle, samsungTransportSeekDirection, webSeekDeltaForKey } from './PlayerScreen';
 import type { MediaSummary } from '@machafoundation/core';
 
 describe('player UI transport bindings', () => {
@@ -119,5 +119,34 @@ describe('the duration the scrubber renders and divides by', () => {
     // duration at all is the ordinary state before the first event.
     expect(firstUsableDurationMs(undefined, Number.NaN, Number.POSITIVE_INFINITY)).toBe(1);
     expect(firstUsableDurationMs()).toBe(1);
+  });
+});
+
+describe('what to tell a viewer whose title has not started yet', () => {
+  it('says nothing while a start is still ordinary', () => {
+    // Most starts are a second or two. A message that appears and vanishes
+    // reads as a fault of its own, and saying "this is taking a while" about
+    // something that took a moment is simply wrong.
+    expect(startWaitNotice(true, 0)).toBeUndefined();
+    expect(startWaitNotice(true, 4_999)).toBeUndefined();
+  });
+
+  it('names what is being waited for, and how long it has been', () => {
+    // Law 2: a failure or a degraded state must be visible and actionable
+    // rather than becoming indefinite waiting. The budgets bound three
+    // sequential phases and nothing bounds their sum, so a cold node can
+    // legitimately spend the better part of a minute before anything is
+    // declared wrong. A viewer told what is happening and for how long is in
+    // a different position from one watching an unmarked spinner, even though
+    // the wait itself is identical.
+    expect(startWaitNotice(true, 5_000)).toBe('Waiting for the node to start the stream — 5s');
+    expect(startWaitNotice(true, 12_400)).toBe('Waiting for the node to start the stream — 12s');
+  });
+
+  it('says nothing about a rebuffer', () => {
+    // Only a start. A rebuffer mid-film already has the picture behind it to
+    // say what is going on, and a timer over it would turn every brief
+    // hesitation into an announcement.
+    expect(startWaitNotice(false, 30_000)).toBeUndefined();
   });
 });
