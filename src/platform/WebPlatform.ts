@@ -348,6 +348,17 @@ const HANDOVER_READY_TIMEOUT_MS = 20_000;
  * teardown path.
  */
 const HANDOVER_BUFFER_TIMEOUT_MS = 25_000;
+/**
+ * How long the replacement is watched before its progress towards the join is
+ * treated as a measurement rather than as noise.
+ *
+ * A segment arrives whole, so a rate taken across less than one is measuring
+ * quantisation rather than production. Six seconds covers a segment and the
+ * hold a node may put on it. Deliberately **not** derived from
+ * `budgets.segmentHoldMs`: that figure shapes retries and does not bound them,
+ * and this is an observation window rather than a deadline.
+ */
+const HANDOVER_CONVERGENCE_WINDOW_MS = 6_000;
 const HANDOVER_BUFFER_POLL_MS = 100;
 const HANDOVER_SEEK_TIMEOUT_MS = 8_000;
 const HANDOVER_JOIN_TIMEOUT_MS = 20_000;
@@ -386,6 +397,92 @@ const HANDOVER_MINIMUM_RUNWAY_MS = 3_000;
  * a frozen picture.
  */
 const HANDOVER_MINIMUM_INCOMING_AHEAD_MS = 5_000;
+
+/** What the replacement's progress towards the join looks like over a span of wall clock. */
+export interface HandoverJoinObservation {
+  /** How far the join was beyond the replacement's buffered edge when the observation began. */
+  startDeficitMs: number;
+  /** The same distance now. */
+  deficitMs: number;
+  /** The wall-clock span those two readings are taken across. */
+  observedMs: number;
+  /** What is left of the budget for reaching the join. */
+  remainingMs: number;
+  /** Overridable only so a test can state its own window. */
+  windowMs?: number;
+}
+
+/**
+ * Whether the replacement has lost its race to the join, as opposed to merely
+ * not having won it yet.
+ *
+ * **The join is not a fixed point.** It is recomputed from the live position
+ * every turn, so it recedes at whatever rate the viewer is watching, while the
+ * replacement fills at whatever rate its node produces. A node encodes a
+ * generation sequentially from its own start, so the replacement can only ever
+ * arrive if it produces faster than the viewer consumes. A stream copy does,
+ * comfortably. A software transcode of a large source does not, and then the
+ * distance never closes — measured live on 2026-09-20 at ~2 s buffered against
+ * a join at 33.9 s, still diverging when the 25 s budget expired, after which
+ * the fallback rewound the viewer 20 s. The handover had no way to arrive and
+ * spent the whole budget finding that out.
+ *
+ * **Both rates are measured, never assumed.** Not `source.mode`, which says
+ * what a node is doing and not how fast; not a constant for the viewer's rate,
+ * which a trick-play speed would falsify. Only the distance and whether it is
+ * closing, which is the quantity the answer actually depends on and is
+ * observable from here.
+ *
+ * Answers `false` until a window has passed, because a segment arrives whole
+ * and a rate read from inside one is quantisation rather than production —
+ * giving up on that would abandon handovers that work today.
+ */
+export function handoverJoinLost(observation: HandoverJoinObservation): boolean {
+  const {
+    startDeficitMs, deficitMs, observedMs, remainingMs,
+    windowMs = HANDOVER_CONVERGENCE_WINDOW_MS,
+  } = observation;
+  if (observedMs < windowMs) return false;
+  const closedMs = startDeficitMs - deficitMs;
+  // Holding station or losing ground: no budget is long enough for a distance
+  // that is not shrinking.
+  if (closedMs <= 0) return true;
+  return deficitMs / (closedMs / observedMs) > remainingMs;
+}
+
+/**
+ * Where the teardown path should attach after a handover was abandoned.
+ *
+ * Core computed its request before the attempt began; the viewer then watched
+ * through however long the attempt took. `clockOffsetMs` is what maps one
+ * generation's clock onto the other's — taken at the moment of the request,
+ * when both denoted the same content — so the live position expressed in the
+ * replacement's clock is where they have genuinely got to.
+ *
+ * **Only ever forward.** A position that has not moved leaves the request
+ * exactly as core made it, because going backwards is the fault this exists to
+ * fix rather than an outcome to allow: measured live 2026-09-20 at a 20 s
+ * rewind after a 30 s wait.
+ */
+export function handoverFallbackPositionMs(
+  requestedMs: number,
+  clockOffsetMs: number,
+  livePositionMs: number,
+): number {
+  return Math.max(requestedMs, livePositionMs + clockOffsetMs);
+}
+
+/**
+ * What a handover attempt leaves behind for the path that follows it.
+ *
+ * `resumeAtMs` is where the viewer has actually reached, in the replacement
+ * generation's clock, and is present only when the attempt took time the viewer
+ * spent watching. Absent means the request core made still describes them.
+ */
+type HandoverOutcome = { handedOver: true } | { handedOver: false; resumeAtMs?: number };
+
+/** Declined before a second element existed, so no time has passed and nothing has moved. */
+const DECLINED_HANDOVER: HandoverOutcome = { handedOver: false };
 
 /** Resolve on a media element event, or `false` if it does not arrive in time. */
 function waitForMediaEvent(video: HTMLVideoElement, name: string, timeoutMs: number): Promise<boolean> {
@@ -655,7 +752,14 @@ class WebPlayer implements Player {
     // teardown path, which attaches at the new position and lets them see it
     // happen — the behaviour every target had before handovers existed, and
     // the default here, so a coordinator too old to say stays correct.
-    if (transition === 'continue' && await this.handOverToSource(source, positionMs, startPaused)) return true;
+    if (transition === 'continue') {
+      const handover = await this.handOverToSource(source, positionMs, startPaused);
+      if (handover.handedOver) return true;
+      // The attempt is over and the viewer kept watching through it. Attach at
+      // where they are now, not at the position core computed before it began,
+      // or the fallback for a slow handover is a rewind of however long it took.
+      positionMs = handover.resumeAtMs ?? positionMs;
+    }
     // A relocation the viewer asked for. The teardown path below blanks the
     // element, because hls.js is handed a MediaSource object URL and attaching a
     // new one resets whatever was showing. Hold the picture instead: pause where
@@ -919,21 +1023,27 @@ class WebPlayer implements Player {
    * stops decoding entirely — and that case is deliberately not handled here,
    * because a gap nobody is watching is not a gap worth paying for.
    */
-  private async handOverToSource(source: PlaybackSource, positionMs: number, startPaused: boolean): Promise<boolean> {
+  private async handOverToSource(
+    source: PlaybackSource,
+    positionMs: number,
+    startPaused: boolean,
+  ): Promise<HandoverOutcome> {
     const outgoing = this.video;
     const host = this.host;
     const outgoingEvent = this.lastPublishedEvent;
-    if (!host || !outgoing || !outgoingEvent || startPaused) return false;
+    // Declined before anything is prepared: no time has passed, so the position
+    // core asked for is still the position the viewer is at.
+    if (!host || !outgoing || !outgoingEvent || startPaused) return DECLINED_HANDOVER;
     // Only a generation that is actually playing has media to protect.
-    if (outgoing.paused || !this.wantsPlayback || !this.activeSource) return false;
+    if (outgoing.paused || !this.wantsPlayback || !this.activeSource) return DECLINED_HANDOVER;
     // Both sides must be managed HLS. The native path owns its own element
     // source, and Direct Play already fails over inside the worker.
-    if (!source.isManifest || !this.activeSource.isManifest) return false;
-    if (!shouldUseManagedHls(this.options.forceNativeHls, managedHlsSupported())) return false;
+    if (!source.isManifest || !this.activeSource.isManifest) return DECLINED_HANDOVER;
+    if (!shouldUseManagedHls(this.options.forceNativeHls, managedHlsSupported())) return DECLINED_HANDOVER;
     // Nothing to hand over from if the outgoing generation never established a
     // clock, and nothing to hand over to if its buffer is already spent.
     const runwayMs = (outgoingEvent.forwardBufferMs ?? 0);
-    if (runwayMs < HANDOVER_MINIMUM_RUNWAY_MS) return false;
+    if (runwayMs < HANDOVER_MINIMUM_RUNWAY_MS) return DECLINED_HANDOVER;
 
     const sourceGeneration = this.sourceGeneration + 1;
     const startedAt = performance.now();
@@ -949,13 +1059,40 @@ class WebPlayer implements Player {
       runwayMs,
     });
 
+    const livePositionMs = () => (this.lastPublishedEvent?.positionMs ?? outgoingEvent.positionMs);
+
     let incoming: HTMLVideoElement | undefined;
     let built: { hls: InstanceType<typeof import('hls.js').default>; recovery: ManagedHlsMediaRecoveryBudget } | undefined;
-    const abandon = (reason: string, detail?: unknown) => {
-      this.log.warn('handover-abandoned', { reason, detail, elapsedMs: Math.round(performance.now() - startedAt) });
+    const abandon = (reason: string, detail?: unknown): HandoverOutcome => {
+      // Where the viewer has actually reached, stated in the replacement's
+      // clock, so the teardown path attaches at the position they are at rather
+      // than the one core computed before the attempt.
+      //
+      // Measured live 2026-09-20: 30 s spent on a handover that could not
+      // arrive, and then the fallback put the viewer back 20 s, because
+      // `positionMs` is where they were when core asked. Every abandonment has
+      // spent some time, and all of it is content the viewer has now watched.
+      //
+      // Only ever forward. `Math.max` because a position that has not moved —
+      // an outgoing element that stopped, or a decline taken immediately — must
+      // leave the request exactly as core made it, and because going backwards
+      // is the fault being fixed rather than a place to land.
+      //
+      // Withheld once the element is no longer ours: a superseded handover's
+      // live position belongs to whatever replaced it, and the clock offset
+      // taken at the start does not describe it.
+      const resumeAtMs = this.video === outgoing
+        ? handoverFallbackPositionMs(positionMs, clockOffsetMs, livePositionMs())
+        : undefined;
+      this.log.warn('handover-abandoned', {
+        reason,
+        detail,
+        elapsedMs: Math.round(performance.now() - startedAt),
+        resumeAtMs,
+      });
       try { built?.hls.destroy(); } catch { /* the fallback path rebuilds regardless */ }
       try { incoming?.remove(); } catch { /* already detached */ }
-      return false;
+      return { handedOver: false, resumeAtMs };
     };
 
     try {
@@ -992,8 +1129,6 @@ class WebPlayer implements Player {
       });
       if (!sampled || !timeline.established) return abandon('incoming-timeline-unestablished');
 
-      const livePositionMs = () => (this.lastPublishedEvent?.positionMs ?? outgoingEvent.positionMs);
-
       // Wait for the join point to be *buffered* before seeking to it.
       //
       // `canplay` means the first fragment arrived, not that the join is
@@ -1011,6 +1146,11 @@ class WebPlayer implements Player {
       const bufferDeadline = performance.now() + HANDOVER_BUFFER_TIMEOUT_MS;
       let bufferLastSeenMs = livePositionMs();
       let bufferLastAdvancedAt = performance.now();
+      // Where the race stood when it began, so that whether the replacement is
+      // gaining on the join can be measured rather than waited out. Taken on
+      // the first turn because the join is only computed inside the loop.
+      let convergenceStartedAt: number | undefined;
+      let convergenceStartDeficitMs = 0;
       for (;;) {
         if (this.video !== outgoing) return abandon('superseded-while-buffering');
         if (outgoing.paused) return abandon('outgoing-paused-while-buffering');
@@ -1049,6 +1189,39 @@ class WebPlayer implements Player {
         }
         if (performance.now() > bufferDeadline) {
           return abandon('join-never-buffered', { targetSeconds, buffered: playbackTimeRanges(incoming.buffered) });
+        }
+        // Give up as soon as the race is decided, rather than at the budget.
+        // The budget's own reasoning — that waiting costs nothing because the
+        // viewer is still watching the outgoing source — holds only while the
+        // wait can end in a handover. Once the join is receding faster than the
+        // replacement fills, the whole budget is spent on an outcome that
+        // cannot happen, and the viewer pays for it twice: once in the delay
+        // and again in the rewind the fallback lands on.
+        const bufferedEndMs = playbackTimeRanges(incoming.buffered)
+          .reduce((end, range) => Math.max(end, range.endMs), 0);
+        const deficitMs = targetMediaMs - bufferedEndMs;
+        if (convergenceStartedAt === undefined) {
+          convergenceStartedAt = performance.now();
+          convergenceStartDeficitMs = deficitMs;
+        }
+        const observedMs = performance.now() - convergenceStartedAt;
+        // Only while the join is still out of reach. A replacement that holds
+        // the join and is merely short of the margin ahead of it is one this
+        // loop can still promote — on a stalled outgoing element it does
+        // exactly that — so it is not something to throw away for being slow.
+        if (!resident && handoverJoinLost({
+          startDeficitMs: convergenceStartDeficitMs,
+          deficitMs,
+          observedMs,
+          remainingMs: bufferDeadline - performance.now(),
+        })) {
+          return abandon('join-receding-faster-than-it-fills', {
+            targetSeconds,
+            bufferedEndMs,
+            deficitMs: Math.round(deficitMs),
+            startDeficitMs: Math.round(convergenceStartDeficitMs),
+            observedMs: Math.round(observedMs),
+          });
         }
         await new Promise((resolve) => setTimeout(resolve, HANDOVER_BUFFER_POLL_MS));
       }
@@ -1096,7 +1269,7 @@ class WebPlayer implements Player {
         joinAtNewMs: joinAtOldMs + clockOffsetMs,
         landedAtMs: this.lastPublishedEvent?.positionMs,
       });
-      return true;
+      return { handedOver: true };
     } catch (error) {
       return abandon('threw', error instanceof Error ? error.message : String(error));
     }

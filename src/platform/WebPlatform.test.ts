@@ -5,6 +5,8 @@ import {
   webHlsBufferConfig,
   webLocalSeekCoverage,
   webPlaybackEventsEqual,
+  handoverJoinLost,
+  handoverFallbackPositionMs,
   webMediaElementFailure,
   awaitNativeHlsFirstFragment,
   preflightWebHlsSource,
@@ -659,6 +661,67 @@ describe('Web HLS buffer policy', () => {
       backBufferLength: 30,
     });
     expect(webHlsBufferConfig()).not.toHaveProperty('startPosition');
+  });
+});
+
+describe('Handover join convergence', () => {
+  // The live measurement this exists for, 2026-09-20: a transcode replacement
+  // holding ~2 s against a join at 33.9 s, still diverging when the 25 s budget
+  // expired, after which the viewer was rewound 20 s. The node encodes a
+  // generation sequentially from its own start, so a replacement only arrives
+  // at the join if it produces media faster than the viewer consumes it — and
+  // the join recedes at the rate the viewer is watching.
+
+  it('declares the join lost when the replacement is losing ground to it', () => {
+    // The measured shape, in miniature: the gap opened over the window rather
+    // than closing, so no amount of remaining budget brings the join within
+    // reach. This is the case that waits 25 s today.
+    expect(handoverJoinLost({
+      startDeficitMs: 20_000, deficitMs: 26_000, observedMs: 6_000, remainingMs: 19_000,
+    })).toBe(true);
+  });
+
+  it('declares it lost when the gap closes too slowly to close in the budget', () => {
+    // Gaining, but at 0.1 ms per ms: 18 s of gap needs 180 s and there are 19.
+    expect(handoverJoinLost({
+      startDeficitMs: 19_200, deficitMs: 18_600, observedMs: 6_000, remainingMs: 19_000,
+    })).toBe(true);
+  });
+
+  it('keeps waiting while the replacement is closing fast enough to arrive', () => {
+    // A stream copy produces far faster than realtime: 12 s of gap closed in
+    // 6 s leaves 8 s needing about 4. Nothing here should give up.
+    expect(handoverJoinLost({
+      startDeficitMs: 20_000, deficitMs: 8_000, observedMs: 6_000, remainingMs: 19_000,
+    })).toBe(false);
+  });
+
+  it('says nothing before a segment has had time to arrive', () => {
+    // Too early to be a measurement. A segment arrives whole, so a sample taken
+    // inside one reads as zero production for a source that is perfectly
+    // healthy — and abandoning on that would break handovers that work today.
+    expect(handoverJoinLost({
+      startDeficitMs: 20_000, deficitMs: 26_000, observedMs: 900, remainingMs: 24_000,
+    })).toBe(false);
+  });
+});
+
+describe('Handover fallback position', () => {
+  it('attaches where the viewer got to, not where core asked before the attempt', () => {
+    // The measured shape, 2026-09-20: core asked for 3,718 ms into a
+    // replacement while the viewer sat at 29,561 ms on the outgoing generation,
+    // so the clocks differ by -25,843 ms. Thirty seconds later the viewer is at
+    // 59,561 ms on the old clock — 33,718 ms on the new one. Falling back to
+    // 3,718 is the 30 s rewind that was measured.
+    expect(handoverFallbackPositionMs(3_718, -25_843, 59_561)).toBe(33_718);
+  });
+
+  it('never moves the viewer backwards when nothing advanced', () => {
+    // An immediate abandonment, or an outgoing element that had already frozen:
+    // the request core made still describes where they are, and a live position
+    // that is behind it is a stale sample, not a destination.
+    expect(handoverFallbackPositionMs(3_718, -25_843, 29_561)).toBe(3_718);
+    expect(handoverFallbackPositionMs(3_718, -25_843, 20_000)).toBe(3_718);
   });
 });
 
