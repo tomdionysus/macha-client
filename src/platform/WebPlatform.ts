@@ -539,6 +539,24 @@ export function webLocalSeekCoverage(
  * same arithmetic serve the published event, which works in generation time,
  * and a direct reading of an element, which works in its own media time.
  */
+/**
+ * Ranges stated in whole milliseconds, widened rather than narrowed.
+ *
+ * These are what core admits a local seek against, and the target it checks is
+ * a whole millisecond. A boundary 0.08 ms inside the request decides
+ * differently from one that is not, so the edges have to be made whole — and
+ * the direction is not arbitrary. Narrowing refuses a seek the element could
+ * have served, and the viewer pays a whole generation negotiation for it.
+ * Widening claims at most one millisecond it does not hold, which is a
+ * fraction of one frame and lands the element inside media it has.
+ */
+export function wholeMillisecondRanges(ranges: PlaybackTimeRange[]): PlaybackTimeRange[] {
+  return ranges.map((range) => ({
+    startMs: Math.floor(range.startMs),
+    endMs: Math.ceil(range.endMs),
+  }));
+}
+
 export function forwardBufferMsAt(positionMs: number, ranges: PlaybackTimeRange[]): number {
   let forwardMs = 0;
   for (const range of ranges) {
@@ -2402,15 +2420,21 @@ class WebPlayer implements Player {
       // The element's own clock keeps its full precision; only what is published
       // is rounded.
       positionMs: Math.round(currentMs),
-      durationMs: duration,
+      // Floored, not rounded, and for a different reason than the position.
+      // This figure reaches `localStorage` through Continue Watching, and it is
+      // the scrubber's `max` — the one value an `<input type="range">` hands
+      // back off its own step grid, so dragging to the far right commits
+      // exactly this number as a seek. A duration must never claim media the
+      // element does not have, because a seek to the end is clamped against it.
+      durationMs: Math.floor(duration),
       paused: video.paused,
       ended: video.ended,
       seeking: video.seeking,
       buffering: !video.paused
         && !video.ended
         && (video.seeking || video.readyState < HTMLMediaElement.HAVE_FUTURE_DATA),
-      bufferedRangesMs: normalized.bufferedRangesMs,
-      forwardBufferMs,
+      bufferedRangesMs: wholeMillisecondRanges(normalized.bufferedRangesMs),
+      forwardBufferMs: Math.round(forwardBufferMs),
       streamOrigin: readAheadMetrics?.sourceOrigin || undefined,
       // The worker's cover, which `forwardBufferMs` cannot see: that is
       // `video.buffered` only, and on Direct Play the element has taken a

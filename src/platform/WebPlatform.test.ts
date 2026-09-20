@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { PlaybackEvent } from '@machafoundation/core';
 import {
   hlsEventSummary,
   shouldUseManagedHls,
@@ -19,6 +20,42 @@ import { ManagedHlsMediaRecoveryBudget } from './ManagedHlsRecovery';
 import { PlaybackSourceError, SERVER_SEGMENT_HOLD_MS, SERVER_STARTUP_TIMEOUT_MS } from '@machafoundation/core';
 
 afterEach(() => vi.unstubAllGlobals());
+
+function fakeVideo() {
+  const emptyRanges = { length: 0, start: () => 0, end: () => 0 } as unknown as TimeRanges;
+  return {
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    removeAttribute: vi.fn(),
+    setAttribute: vi.fn(),
+    load: vi.fn(),
+    pause: vi.fn(),
+    // Teardown clears any subtitle <track> children through this.
+    querySelectorAll: vi.fn(() => [] as unknown as NodeListOf<Element>),
+    canPlayType: vi.fn(() => ''),
+    parentNode: null,
+    paused: true,
+    volume: 1,
+    src: '',
+    currentTime: 0,
+    duration: NaN,
+    ended: false,
+    seeking: false,
+    readyState: 0,
+    networkState: 0,
+    buffered: emptyRanges,
+    seekable: emptyRanges,
+    playbackRate: 1,
+    currentSrc: '',
+    error: null,
+  } as unknown as HTMLVideoElement;
+}
+
+/** Fire an event on the fake element by replaying its captured handlers. */
+function emit(video: HTMLVideoElement, event: string): void {
+  const registered = (video.addEventListener as unknown as { mock: { calls: [string, () => void][] } }).mock.calls;
+  for (const [name, handler] of registered) if (name === event) handler();
+}
 
 describe('Web player preparation', () => {
   it('constructs and configures one reusable media element before a presentation host exists', () => {
@@ -55,42 +92,6 @@ describe('Web player preparation', () => {
 });
 
 describe('Web player source reassignment', () => {
-  function fakeVideo() {
-    const emptyRanges = { length: 0, start: () => 0, end: () => 0 } as unknown as TimeRanges;
-    return {
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-      removeAttribute: vi.fn(),
-      setAttribute: vi.fn(),
-      load: vi.fn(),
-      pause: vi.fn(),
-      // Teardown clears any subtitle <track> children through this.
-      querySelectorAll: vi.fn(() => [] as unknown as NodeListOf<Element>),
-      canPlayType: vi.fn(() => ''),
-      parentNode: null,
-      paused: true,
-      volume: 1,
-      src: '',
-      currentTime: 0,
-      duration: NaN,
-      ended: false,
-      seeking: false,
-      readyState: 0,
-      networkState: 0,
-      buffered: emptyRanges,
-      seekable: emptyRanges,
-      playbackRate: 1,
-      currentSrc: '',
-      error: null,
-    } as unknown as HTMLVideoElement;
-  }
-
-  /** Fire an event on the fake element by replaying its captured handlers. */
-  function emit(video: HTMLVideoElement, event: string): void {
-    const registered = (video.addEventListener as unknown as { mock: { calls: [string, () => void][] } }).mock.calls;
-    for (const [name, handler] of registered) if (name === event) handler();
-  }
-
   it('does not reset the reused media element via removeAttribute/load before assigning a new direct-play source', async () => {
     const video = fakeVideo();
     vi.stubGlobal('document', { createElement: vi.fn(() => video) });
@@ -386,6 +387,70 @@ describe('Web player source reassignment', () => {
     });
   });
 
+});
+
+describe('What leaves the player is whole milliseconds', () => {
+  /**
+   * The rule, and the fault behind it. A position that leaves this client
+   * becomes the resume position, the `seekMs` sent to a node, and the record in
+   * storage, and the seek contract is stated in integer milliseconds with no
+   * rounding slack. Measured live 2026-09-18: a request for 2,018,389.921 ms
+   * against a node that answered with a generation starting at 2,018,390 —
+   * core read `absolute < generationStart`, refused to activate, re-asked with
+   * the same fraction, and 25 rounds later nothing had played at all.
+   *
+   * `positionMs` was rounded when that was found. These are the others: the
+   * duration reaches `localStorage` through Continue Watching and sets the
+   * scrubber's maximum, which is the one value an `<input type="range">` hands
+   * back off its own step grid; and the buffered ranges are what core admits a
+   * local seek against, where a whole-millisecond target and a fractional
+   * boundary decide differently.
+   */
+  const directSource = {
+    mediaId: 'm1', url: 'https://node.test/stream', isManifest: false,
+    mimeType: 'video/mp4', mode: 'direct' as const,
+  };
+
+  function ranges(pairs: [number, number][]): TimeRanges {
+    return {
+      length: pairs.length,
+      start: (index: number) => pairs[index][0],
+      end: (index: number) => pairs[index][1],
+    } as unknown as TimeRanges;
+  }
+
+  it('rounds every time it publishes, not only the position', async () => {
+    vi.stubGlobal('HTMLMediaElement', { HAVE_FUTURE_DATA: 3 });
+    const video = fakeVideo();
+    vi.stubGlobal('document', { createElement: vi.fn(() => video) });
+    const player = new WebPlatform().createPlayer();
+    player.attach({ firstChild: null, appendChild: vi.fn() } as unknown as HTMLElement);
+
+    const events: PlaybackEvent[] = [];
+    player.subscribe?.((event) => events.push(event));
+    await player.play(directSource, 0, true);
+
+    // A real element's figures: seconds carrying float error, which become
+    // fractional milliseconds the moment they are multiplied up.
+    Object.assign(video, {
+      currentTime: 12.3456789,
+      duration: 2706.336031,
+      buffered: ranges([[0.040961, 120.99939]]),
+      readyState: 4,
+    });
+    emit(video, 'timeupdate');
+
+    const event = events.at(-1)!;
+    expect(event.positionMs).toBe(12_346);
+    // Floored, never rounded: a duration must not claim media the element does
+    // not have, because it is what a seek to the end gets clamped against.
+    expect(event.durationMs).toBe(2_706_336);
+    expect(event.forwardBufferMs).toBe(108_654);
+    // Widened outward. The other direction refuses a seek the element could
+    // have served, and the cost of that is a whole generation negotiation
+    // against the sub-frame of media the widening claims.
+    expect(event.bufferedRangesMs).toEqual([{ startMs: 40, endMs: 121_000 }]);
+  });
 });
 
 describe('Web HLS engine policy', () => {

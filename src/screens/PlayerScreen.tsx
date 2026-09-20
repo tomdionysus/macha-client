@@ -439,7 +439,13 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
     setLocalNotice(undefined);
     setScrubPosition(undefined);
     holdPicture();
-    const accepted = runtime.seek(positionMs);
+    // Whole milliseconds, at the one place every committed seek passes through.
+    // The scrubber's own value is on a one-second grid except at its maximum,
+    // which an `<input type="range">` hands back exactly as given — so a drag
+    // to the far right commits the duration itself, and that is the end of the
+    // title, where a node is most likely to clamp and round. The element's
+    // clock keeps its precision; what is asked of a node does not.
+    const accepted = runtime.seek(Math.round(positionMs));
     // A stream that cannot seek never moves, so nothing should have stopped.
     if (!accepted) {
       releasePicture();

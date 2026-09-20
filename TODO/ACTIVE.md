@@ -1222,7 +1222,7 @@ that. Core has recorded the staleness as a core item.
       is the fault in one line. A live run would show `handover-begin` with a
       runway that matches the element rather than the last event.
 
-## P1 — Fractional milliseconds may be wrong in more places than the one that was found
+## P1 — Fractional milliseconds were wrong in three more places (surveyed)
 
 **A change has been made for the known instance and it is NOT yet verified;
 nothing else has been looked at.** This is a placeholder for a survey that has
@@ -1249,16 +1249,46 @@ reaches this and it has not run against a cluster. Until a node has been watched
 activating a generation it previously refused, treat the rounding as a proposed
 fix and not a closed one.
 
-**The open question beyond it is where else this repo lets a fractional
-millisecond escape** — other published fields, persisted progress and
-queue records, buffered and seekable range edges, anything compared against a
-server value with `<` or `===`. Ranges are the interesting case: they are
-compared for containment when admitting a local seek, and a boundary that is
-0.08 ms out decides differently from one that is not.
+**Surveyed 2026-09-20, and it was wrong in three more places.** The rule
+applied throughout: anything crossing the wire or reaching storage is whole
+milliseconds, and the element's own clock keeps its precision.
 
-Not surveyed, on purpose, so it is not half-done: one problem at a time. When it
-is picked up, the rule to apply is that anything crossing the wire or reaching
-storage is whole milliseconds, and the element's own clock keeps its precision.
+- [x] **`durationMs` was published raw** — `video.duration * 1000`. It reaches
+      `localStorage` through Continue Watching, and it is the scrubber's `max`.
+      That second one is the live escape: an `<input type="range">` snaps to
+      its step grid *except at the maximum*, which it hands back exactly as
+      given, so a drag to the far right committed the fractional duration as a
+      seek — at the end of the title, which is where a node is most likely to
+      clamp and round, which is the livelock's own precondition. **Floored, not
+      rounded:** a duration must not claim media the element does not have,
+      because a seek to the end is clamped against it.
+- [x] **`bufferedRangesMs` was published raw**, and these are what core admits
+      a local seek against. The target is whole and the boundary was not, which
+      is the 0.08 ms case named above. Made whole **outward** — floor the
+      start, ceil the end — and the direction is the decision: narrowing
+      refuses a seek the element could have served and charges the viewer a
+      whole generation negotiation for it, while widening claims at most one
+      millisecond it does not hold, which is a fraction of one frame and lands
+      the element inside media it has.
+- [x] **`forwardBufferMs` was published raw.** No known cost — it is compared
+      against thresholds in seconds — rounded so that everything leaving the
+      player is whole, rather than leaving one field to be reasoned about
+      separately next time.
+- [x] **`seek()` rounds at the commit**, which is the one place every committed
+      seek in the UI passes through, so a fractional target from a path nobody
+      has thought of yet still leaves whole.
+- [x] **Checked and already clean:** the persisted queue position and the
+      Continue Watching position both come from `event.positionMs`, which was
+      rounded when the original fault was fixed. `seekBy` adds whole constants
+      to a whole base. Seekable ranges are not published.
+- [x] **Seen failing first, at the level that matters.** The test drives the
+      real player through `play()` and a `timeupdate` and asserts on the event
+      that actually leaves it, rather than on a helper: it was watched failing
+      with `expected 2706336.031 to be 2706336`, a genuine element's figure.
+
+**Still not verified live**, and this is the part to keep separate: the
+original rounding has never been watched curing the livelock on a node, and
+neither has any of this. Suite 379, typecheck clean.
 
 ## P1 — Generation replacement on a second element: open questions
 
