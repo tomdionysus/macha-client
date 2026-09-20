@@ -2176,6 +2176,10 @@ class WebPlayer implements Player {
       currentMs,
       !video.paused && !video.ended && !video.seeking,
     );
+    // Read once and used twice below. Undefined for a transformed source or
+    // where the worker never registered, which is the distinction the event
+    // carries downstream.
+    const readAheadMetrics = directPlayReadAheadMetrics(this.directReadAheadSourceUrl);
     const event: PlaybackEvent = {
       // Whole milliseconds, because this number leaves the client: it is kept as
       // the resume position and goes back to the node as `seekMs`, and the seek
@@ -2202,7 +2206,19 @@ class WebPlayer implements Player {
         && (video.seeking || video.readyState < HTMLMediaElement.HAVE_FUTURE_DATA),
       bufferedRangesMs: normalized.bufferedRangesMs,
       forwardBufferMs,
-      streamOrigin: directPlayReadAheadMetrics(this.directReadAheadSourceUrl)?.sourceOrigin || undefined,
+      streamOrigin: readAheadMetrics?.sourceOrigin || undefined,
+      // The worker's cover, which `forwardBufferMs` cannot see: that is
+      // `video.buffered` only, and on Direct Play the element has taken a
+      // fraction of what the cache holds in front of it. `aheadBytes` is
+      // measured beyond `lastServedOffset`, which is what "beyond what the
+      // element has taken" means.
+      //
+      // Spread so the key is **absent** rather than zero when there is no
+      // read-ahead at all — no worker, or a transformed source. Core reads
+      // absent as "this host has no such cache" and zero as "it holds
+      // nothing", and on a transformed generation the second would be a claim
+      // about a cache that does not exist.
+      ...(readAheadMetrics ? { readAheadBytes: readAheadMetrics.aheadBytes } : {}),
     };
     if (webPlaybackEventsEqual(this.lastPublishedEvent, event)) return;
     this.lastPublishedEvent = event;
@@ -2220,6 +2236,12 @@ export function webPlaybackEventsEqual(previous: PlaybackEvent | undefined, next
     || previous.buffering !== next.buffering
     || previous.forwardBufferMs !== next.forwardBufferMs) return false;
   if (previous.streamOrigin !== next.streamOrigin) return false;
+  // `readAheadBytes` is deliberately **not** compared, which looks like an
+  // omission and is not. It changes on every prefetch response, so comparing
+  // it would make almost every sample a new event and turn a dedupe into a
+  // firehose — on the one path that is already moving the most bytes. It rides
+  // along on events published for a reason that matters, recomputed each time,
+  // so it is never older than the event carrying it.
 
   const previousRanges = previous.bufferedRangesMs ?? [];
   const nextRanges = next.bufferedRangesMs ?? [];
