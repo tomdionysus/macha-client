@@ -851,13 +851,38 @@ relied on it.
       diagnostics buffer on `window.machaDiagnostics`, and the failure trail
       the player screen reads out, which takes warnings and errors. So on the
       next run: **look for it, and record its absence as well as its
-      presence.** Absence rules the node's arithmetic out and leaves core's
-      own — `generationLocalPosition`, which is the absolute for `direct` and
-      the absolute minus `seekMs` for everything else. An end-of-title clamp
-      cannot trip it, because the node reports the clamped value as
-      `seek_requested_ms` and the sum still balances; a node too old to state
-      both fields produces silence rather than a report, which is a third
-      reading to keep apart from the other two.
+      presence.**
+
+      **Corrected 2026-09-20, same day, by the core session — the reading
+      above was too strong and is withdrawn.** The check is **mode-agnostic**:
+      it compares `seek_ms + seek_offset_ms === seek_requested_ms` and nothing
+      else. A transcode generation carrying `seek_offset_ms: 3330.9` satisfies
+      it whenever `seek_ms` is 3,330.9 lower than the request, so **silence
+      from this check says nothing about whether transcode starts on the
+      requested frame.** Those are two different statements and core only tests
+      the arithmetic one; whether 0.46.0 requires a zero offset for transcode is
+      a server-contract question this check cannot answer either way. What
+      absence does still rule out is a node whose two fields do not add up.
+
+      **A finding that stands on its own:** `3,330.9` is not an integer, and
+      the contract states these fields in whole milliseconds — core compares
+      them with `===` on integers. Whatever else is true of that generation, the
+      node is not stating the field in the units the contract describes. Worth
+      keeping separate from the zero-versus-non-zero question, and it is the
+      same class of fault as [the fractional milliseconds] this client was
+      found committing in the other direction.
+
+      An end-of-title clamp cannot trip the check, because the node reports the
+      clamped value as `seek_requested_ms` and the sum still balances. A node
+      too old to state both fields was silent, which made "held" and "could not
+      check" the same silence; core's `develop` now leaves
+      `seek-invariant-not-stated` for that case, carrying which field was
+      missing — **at `debug`**, deliberately, since an old node in a mixed
+      cluster is ordinary rather than a failure, and warnings land on the
+      television through the failure trail. The consequence here is a capture
+      setting, not a code change: **a capture taken at `warn` still cannot
+      separate the two, and one taken at `debug` can.** Not in the 0.14.0 this
+      repo resolves.
 - [ ] Take the per-track buffer and `getVideoPlaybackQuality()` reading for the
       audio-without-video freeze. The server session is holding for it.
 - [ ] Adopt `PlaybackSource.budgets` — **moved to its own P1** ("Adopt
