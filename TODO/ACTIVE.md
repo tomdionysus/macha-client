@@ -24,12 +24,25 @@ attach path, a seek holds the picture instead of blanking the element, and
 positions leave the client in whole milliseconds. `CHANGELOG.md` has the
 detail.
 
-**Core is `^0.14.0` from npm.** It carries the seek contract,
+**Core is `^0.14.0` from npm as this is written, and a `file:../macha-ts` link
+is expected to come back.** It carries the seek contract,
 `PlaybackSource.budgets`, `useSourceBudgets()` and the derivation helpers, and
-`GENERATION_ATTEMPT_BUDGET_MS` is gone. During 0.17.2's development core was
-briefly a `file:../macha-ts` link again; that is reverted and the release
-commit was amended so the tag points at something a user can install. Treat a
-link in `node_modules` as a fault to be fixed, not a state to work in.
+`GENERATION_ATTEMPT_BUDGET_MS` is gone.
+
+**Do not unlink core because you found a link.** Tom, 2026-09-20: core
+development is starting again, and a direct link to core's tree during
+development is how the two projects are worked on together — making core spend
+a version number on every verify-fix-verify turn is not how that happens. An
+earlier version of this paragraph said to treat a link as a fault to be fixed;
+that is withdrawn and it was never the rule, only a badly compressed version
+of the one below.
+
+**The rule is a gate before `main`, not a ban.** Switch to a published version,
+`npm install`, prove the link is gone with `test -L
+node_modules/@machafoundation/core`, and run the suite against the registry
+copy — then merge. A link is a development instrument and must never be what a
+release resolves against; 0.17.2 nearly shipped a tag nobody could install
+from. The full procedure is under "Core comes from npm" below.
 
 **The cluster, as used on 2026-09-19.** `ramaroja.macha.network` answers and
 fronts the cluster over https; `fi-1` (10.35.1.50) and `es-1` (10.34.1.50)
