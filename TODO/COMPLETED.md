@@ -1,6 +1,139 @@
 # Completed and tested
 
-Last updated: 2026-09-16
+Last updated: 2026-09-19
+
+## The generation clock stopped running backwards (client 0.17.2)
+
+2026-09-18. `WebMediaTimeline.establishOrigin` chose between its two branches
+on the requested position alone, and was wrong on the path taken most.
+
+**The mechanism.** The teardown attach path builds the timeline with a non-zero
+position but starts the loader at zero, and its initial-seek listener publishes
+*before* it seeks, deliberately, so the origin is established first. The sample
+it learned from therefore had `currentTime` 0, which is inside residency, so
+the guard passed and the branch subtracted the offset from zero. Two
+consequences, both reported as symptoms: the initial seek targeted media time
+0, so playback began at the generation's own start and presented the pre-roll
+the seek contract says is never presented; and every position afterwards was
+reported `seek_offset_ms` too high for the life of the generation.
+
+Reach is wider than "a seek": core activates the first generation of a session
+by `relocate` too, so a Continue Watching resume into remux hit this with no
+seek involved.
+
+**Seen failing first.** A case at the teardown shape — zero-based clock,
+non-zero requested position, sample at `currentTime` 0 — reproduced the live
+figure exactly against the unfixed file: `originMs: -18120`.
+
+**The fix.** `WebMediaTimeline` takes a required third argument,
+`WebMediaLoaderStart`: `generation-start` where the loader begins at the
+generation and the first resident timestamp is the origin, `requested-position`
+where hls.js's `startPosition` is set and `currentTime` genuinely is the
+requested position. Both call sites already knew which they were. Required
+rather than defaulted, so a new call site cannot inherit the wrong case
+silently. `canonicalOrigin` refuses a negative candidate outright and stays
+unestablished rather than encoding nonsense into every later mapping.
+
+**Verified live on a resume**, which is the activation that reaches this with
+no seek at all. Continue Watching into a transcode generation whose origin sat
+3,330.9 ms before the resume position: origin 0 rather than negative, the
+initial seek targeting 3,330.902 ms rather than 0, the element's first moving
+sample at `currentTime` 3.330902 s, and readout against picture over 318
+samples at a mean of −132.6 ms within a −754 to +447 range — the scrubber's
+whole-second quantisation centred on zero, rather than the constant offset the
+fault produces. Generation origin 1,532,781 plus element duration 1,173,555
+equals the scrubber maximum, 2,706,336, exactly.
+
+**Not covered:** the `relocate` seek path reaches the same branch through the
+same call site and was not exercised separately.
+
+One correction owed to the server's plan, which recorded that "the client
+confirmed both attach paths already do this": that was wrong for the teardown
+path, and core had relied on it.
+
+## A seek holds the picture instead of blanking it (client 0.17.2)
+
+2026-09-18. Measured on every out-of-buffer seek: the element went to
+`readyState` 0 with nothing buffered and `paused` **false** — trying to play
+with no media, which is a black screen for as long as the node takes. 1.2 s on
+a fast remux generation, 10–13 s on a transcode.
+
+The old frame cannot survive on the element hls.js is attaching to, because it
+is handed a MediaSource object URL and attaching a new one resets it. So the
+replacement is prepared on a second element while the outgoing one stays where
+it is, paused, and the two are swapped once the replacement can present the
+position asked for. This is not the design rejected for relocations earlier:
+that one kept *playing* the outgoing generation, so the viewer watched 14.5 s
+of the previous scene with the clock already reading the destination. A frozen
+frame claims nothing.
+
+**The pause is taken by the control**, because core tells a player nothing
+about a relocation until `play()`, a whole negotiation later. It is released by
+whichever path core then takes: a buffered target reaches `player.seek()`
+synchronously and the hold is undone in the same tick, an unbuffered one
+carries the freeze to the swap, a refused seek releases immediately.
+
+**Verified live**, seven seeks. Five servable from the buffer: `picture-held`
+and `seek-local` on the same millisecond each time, never reaching a frame. Two
+relocations: picture frozen 886 ms before the player was told anything,
+`relocation-hold-complete` 1,568 ms after the seek, two `<video>` elements
+across both, and paused spans of 1,600 ms and 2,000 ms that ended on the
+replacement rather than on black.
+
+**One fault found by that run and fixed before release.** The hold paused the
+element without calling `stallWatchdog.suspend()`, which `pause()` has always
+done. A countdown measuring "nothing is moving" cannot tell a freeze the client
+asked for from a node that has died: a seek held at 51.2 s reported
+`source-terminal-failure` at 58.1 s — 6,864 ms, the segment-hold budget plus
+margin — while the node was still building the generation it delivered at
+61.0 s. Three seeks worked and the fourth did not because the fourth was the
+slow one. The `suspend()` call is in and is **not verified live**; the
+remaining unexercised paths are a P1 in `ACTIVE.md`.
+
+## Positions leave the client in whole milliseconds (client 0.17.2)
+
+2026-09-18. `currentTime * 1000` is sub-millisecond, and it becomes the resume
+position and the `seekMs` sent back to a node, where the contract is integer
+milliseconds with no slack — core rounds the same way on its own wire.
+
+Asked for 2,018,389.921 ms, a node answers with a generation starting at
+2,018,390. Core reads `absolute < generationStart` as "this generation begins
+after the viewer", refuses to activate, and re-asks with the same fractional
+number for ever: **25 identical negotiation rounds, no error raised anywhere,
+`player.play()` never called once, and nothing played at all.** It bites only
+when the node honours the exact position and rounds up, which is a
+frame-accurate transcode, so it appeared intermittent.
+
+`publish()` now rounds. **Whether that is the whole of it is not established**
+— nothing in the suite reaches this path, and the survey of where else a
+fractional millisecond escapes this repo has deliberately not been done. Both
+are recorded as a P1 in `ACTIVE.md`.
+
+## Still-frame-with-audio after a seek, measured and attributed (not ours)
+
+2026-09-18. Reported as a still picture near the new position with sound
+running for seconds before video joins, in sync. Recorded here because the
+investigation is finished, not because this repo changed.
+
+Across four swaps, video restarts when `currentTime` *arrives* at a point
+rather than after a fixed wait — 124 ms/0.062 s, 115 ms/0.046 s,
+2,264 ms/2.208 s, 5,951 ms/5.888 s — while audio decoded bytes climb from the
+start, video decoded bytes sit frozen (95,980 unchanged for six seconds in the
+worst case), `totalVideoFrames` sticks at 5, `readyState` is 4 throughout and
+the buffer reports one contiguous range from 0 with no hole. One muxed source
+buffer per generation, so both tracks share it.
+
+Remux on a long-GOP title, where a bad draw lands 8.8 s from a keyframe, is
+tight: the server snaps back to a keyframe and both copied tracks begin there.
+A transcode session that copies the video while re-encoding the audio is asked
+to start on a frame the copied video cannot start on, so sound begins at the
+requested position and picture at the next keyframe.
+
+The client presents at the generation's start, correctly, and
+`localPositionMs` was 0 on every measured case. Handed to the server session.
+Core cannot build a per-mode invariant check from the session `mode` alone,
+because a session reports `transcode` when *any* stream is encoded; it needs
+`output.video.transform`, which this client has not yet captured for the case.
 
 ## A pause is no longer read as a dead node
 
