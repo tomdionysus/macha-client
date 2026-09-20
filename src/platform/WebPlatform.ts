@@ -526,6 +526,29 @@ export function webLocalSeekCoverage(
     : bufferedRanges;
 }
 
+/**
+ * How much playable media sits in front of a position, in the ranges given.
+ *
+ * Only a range that covers the position counts: media beyond a hole is not
+ * runway, because the element stops at the hole. A range starting just ahead is
+ * allowed the same 250 ms of slack the published figure has always used, since
+ * the element and the ranges it reports do not agree to the millisecond.
+ *
+ * Position and ranges must share a clock; which clock does not matter, because
+ * an origin common to both cancels in the subtraction. That is what lets the
+ * same arithmetic serve the published event, which works in generation time,
+ * and a direct reading of an element, which works in its own media time.
+ */
+export function forwardBufferMsAt(positionMs: number, ranges: PlaybackTimeRange[]): number {
+  let forwardMs = 0;
+  for (const range of ranges) {
+    if (range.startMs <= positionMs + 250 && range.endMs >= positionMs) {
+      forwardMs = Math.max(forwardMs, range.endMs - positionMs);
+    }
+  }
+  return forwardMs;
+}
+
 function playbackTimeRanges(rangesValue: TimeRanges): PlaybackTimeRange[] {
   const out: PlaybackTimeRange[] = [];
   for (let index = 0; index < rangesValue.length; index += 1) {
@@ -1042,7 +1065,21 @@ class WebPlayer implements Player {
     if (!shouldUseManagedHls(this.options.forceNativeHls, managedHlsSupported())) return DECLINED_HANDOVER;
     // Nothing to hand over from if the outgoing generation never established a
     // clock, and nothing to hand over to if its buffer is already spent.
-    const runwayMs = (outgoingEvent.forwardBufferMs ?? 0);
+    //
+    // **Read from the element, not from the event.** `outgoingEvent` is the
+    // sample core replied to, and how old it is has no bound: `publish()`
+    // reports while the element is playing, so an element that has stopped
+    // emitting leaves a figure that can only overestimate the runway — and an
+    // element that has stopped is exactly the one this gate must not be
+    // generous about. The element itself answers for now. Raised by the
+    // Android TV client on 2026-09-19, which hit the same shape harder because
+    // it reads its runway for a failure decision.
+    //
+    // The clock offset below still comes from `outgoingEvent`, and must: core
+    // computed its request from that sample, so those two positions denote the
+    // same content by construction. A fresher position there would pair the
+    // viewer's place with a request that was never about it.
+    const runwayMs = forwardBufferMsAt(outgoing.currentTime * 1000, playbackTimeRanges(outgoing.buffered));
     if (runwayMs < HANDOVER_MINIMUM_RUNWAY_MS) return DECLINED_HANDOVER;
 
     const sourceGeneration = this.sourceGeneration + 1;
@@ -2339,12 +2376,7 @@ class WebPlayer implements Player {
 
     const duration = Number.isFinite(video.duration) ? video.duration * 1000 : 0;
     const currentMs = normalized.positionMs;
-    let forwardBufferMs = 0;
-    for (const range of normalized.bufferedRangesMs) {
-      if (range.startMs <= currentMs + 250 && range.endMs >= currentMs) {
-        forwardBufferMs = Math.max(forwardBufferMs, range.endMs - currentMs);
-      }
-    }
+    const forwardBufferMs = forwardBufferMsAt(currentMs, normalized.bufferedRangesMs);
     this.hlsMediaRecovery?.observePlaybackPosition(
       currentMs,
       !video.paused && !video.ended && !video.seeking,

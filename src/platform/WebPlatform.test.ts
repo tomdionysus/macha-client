@@ -6,6 +6,7 @@ import {
   webLocalSeekCoverage,
   webPlaybackEventsEqual,
   handoverJoinLost,
+  forwardBufferMsAt,
   handoverFallbackPositionMs,
   webMediaElementFailure,
   awaitNativeHlsFirstFragment,
@@ -661,6 +662,35 @@ describe('Web HLS buffer policy', () => {
       backBufferLength: 30,
     });
     expect(webHlsBufferConfig()).not.toHaveProperty('startPosition');
+  });
+});
+
+describe('The media in front of a position', () => {
+  it('counts only the range the position is actually in', () => {
+    // Media beyond a hole is not runway: the element stops at the hole. A
+    // buffer indicator may draw it; a decision about how long the picture can
+    // survive must not count it.
+    const ranges = [{ startMs: 0, endMs: 12_000 }, { startMs: 30_000, endMs: 90_000 }];
+    expect(forwardBufferMsAt(5_000, ranges)).toBe(7_000);
+  });
+
+  it('allows a range that begins just ahead of the position', () => {
+    // The element and the ranges it reports do not agree to the millisecond,
+    // and treating 40 ms of disagreement as an empty buffer would decline
+    // every handover at a fragment boundary.
+    expect(forwardBufferMsAt(5_000, [{ startMs: 5_040, endMs: 20_000 }])).toBe(15_000);
+    expect(forwardBufferMsAt(5_000, [{ startMs: 5_400, endMs: 20_000 }])).toBe(0);
+  });
+
+  it('is the quantity a stale sample overstates, by the age of the sample', () => {
+    // Why the handover gate reads the element rather than the event core
+    // replied to. The same buffer, seen 8 s apart with nothing arriving: the
+    // older reading claims 9 s of cover where 1 s is left. `publish()` reports
+    // only while the element is playing, so the sample an element that stopped
+    // emitting leaves behind is precisely the one this would trust.
+    const ranges = [{ startMs: 0, endMs: 30_000 }];
+    expect(forwardBufferMsAt(21_000, ranges)).toBe(9_000);
+    expect(forwardBufferMsAt(29_000, ranges)).toBe(1_000);
   });
 });
 

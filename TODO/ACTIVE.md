@@ -1147,7 +1147,7 @@ picture was frozen 886 ms before `play()` was called, and
 The thing that would settle most of it is one session on a title whose
 generations take ten seconds or more to build, which is a 4K HEVC transcode.
 
-## P1 — The handover reads its runway from a figure that stops updating
+## P1 — The handover read its runway from a figure that stops updating (fixed)
 
 `handOverToSource` takes `const runwayMs = outgoingEvent.forwardBufferMs ?? 0`
 (`WebPlatform.ts:908`) — the last event the stream carried — and uses it to
@@ -1169,10 +1169,35 @@ precisely the thing that stops emitting, so its gap is unbounded by
 construction. It now subtracts the event's age, and its test fails without
 that. Core has recorded the staleness as a core item.
 
-**To check:** whether any decision here reads a buffer figure whose sample age
-is not bounded — the handover's runway gate is the one found, and
-`reportSourceGone`'s path is the other place to look, because it can fire long
-after the element last published.
+**Done 2026-09-20, and the survey with it.**
+
+- [x] **The handover's runway gate reads the element, not the event.** Not the
+      event's age subtracted from its figure, which is what the RN client does
+      and is right for a client that cannot re-read its player: this one can.
+      `forwardBufferMsAt(outgoing.currentTime * 1000, …)` answers for now, so
+      the staleness stops being discounted and stops existing. The arithmetic
+      is the same function `publish()` uses — position and ranges need only
+      share a clock, because an origin common to both cancels in the
+      subtraction — so the figure cannot drift from the published one.
+- [x] **The clock offset still comes from the event, and must.** Core computed
+      its request from that sample, so the two positions denote the same
+      content by construction; a fresher position there would pair the viewer's
+      place with a request that was never about it. Worth writing down because
+      the obvious tidy — refresh everything at the top of the handover, which
+      is the idiom two other call sites in this file use — is wrong here for
+      exactly that reason.
+- [x] **The other places were checked, and are clean.** `localSeekCoverage()`
+      and `seek()` both call `publish()` synchronously before reading, so their
+      sample age is bounded at zero by construction. `reportSourceGone` reads
+      no buffer figure at all — it reports and does nothing else — so the worry
+      recorded about it does not apply; it was a reasonable place to look and
+      it is not one of these.
+- [ ] **The call-site change is not unit-covered**, and saying so rather than
+      implying the arithmetic tests cover it: `handOverToSource` has no test
+      harness, so what is covered is `forwardBufferMsAt` — including the case
+      that a sample taken 8 s ago claims 9 s of cover where 1 s is left, which
+      is the fault in one line. A live run would show `handover-begin` with a
+      runway that matches the element rather than the last event.
 
 ## P1 — Fractional milliseconds may be wrong in more places than the one that was found
 
