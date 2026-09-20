@@ -835,6 +835,29 @@ relied on it.
       the node behind `ramaroja` is not on 0.46.x or something else is moving
       the position. Raised rather than explained — see
       [read the other side before asserting it].
+
+      **There is a capture that answers half of it, and it is already
+      reaching this client.** The core session reported on 2026-09-20 that
+      `MachaPlaybackResolver.mapSession` calls `checkSeekInvariant` on its
+      first line in the 0.14.0 this repo resolves — verified in its tag and
+      its `dist`, and pinned by its own test — and writes one client-
+      diagnostics entry at **error** level, event `seek-invariant-violated`,
+      carrying `sessionId`, `mode`, `seekMs`, `seekOffsetMs`,
+      `seekRequestedMs` and `differenceMs`, whenever
+      `seek_ms + seek_offset_ms !== seek_requested_ms`. It is reported and
+      never acted on: nothing refuses the generation or renegotiates.
+
+      Error level means this repo already has it in two places — the
+      diagnostics buffer on `window.machaDiagnostics`, and the failure trail
+      the player screen reads out, which takes warnings and errors. So on the
+      next run: **look for it, and record its absence as well as its
+      presence.** Absence rules the node's arithmetic out and leaves core's
+      own — `generationLocalPosition`, which is the absolute for `direct` and
+      the absolute minus `seekMs` for everything else. An end-of-title clamp
+      cannot trip it, because the node reports the clamped value as
+      `seek_requested_ms` and the sum still balances; a node too old to state
+      both fields produces silence rather than a report, which is a third
+      reading to keep apart from the other two.
 - [ ] Take the per-track buffer and `getVideoPlaybackQuality()` reading for the
       audio-without-video freeze. The server session is holding for it.
 - [ ] Adopt `PlaybackSource.budgets` — **moved to its own P1** ("Adopt
