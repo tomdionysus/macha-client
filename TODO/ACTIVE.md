@@ -1,6 +1,6 @@
 # Active tasks and concepts to explore
 
-Last updated: 2026-09-21 (0.17.3 tagged and pushed, deployed nowhere; a failover driven live — the mode switch and the failover both keep the picture now, and the seamless half was tried and rolled back)
+Last updated: 2026-09-21 (410 tolerance landed for the server's route change; 0.17.3 tagged and pushed, deployed nowhere; a failover driven live — the mode switch and the failover both keep the picture now, and the seamless half was tried and rolled back)
 
 This is the working backlog. Add new work here. When an item is implemented and
 its stated verification is complete, remove it from this file and add a dated
@@ -422,6 +422,143 @@ question; it is retired until the library gains eac3 rips.
 The capability files used were scratchpad, not repo — reproducing it means
 writing two `--caps` JSON files from the `CHROME` shape at the top of the
 script and changing only `hlsAudioCodecs`.
+
+## The playback session and stream route change
+
+**Typecheck with `npm run typecheck`, not `npx tsc --noEmit`.** They are not the
+same check: the script runs `tsconfig.app.json` and `tsconfig.node.json`, the
+bare command runs `tsconfig.json`, and on 2026-09-21 the bare one passed while
+the real gate found an unused import and a test calling a function with the
+wrong argument type. A check pointed at the wrong project is the same hazard as
+a test pointed at the wrong artefact.
+
+The server is making a playback session a REST resource and moving streams
+under it, breaking the contract deliberately with no dual-serve window. The
+plan is the server's (`macha/TODO/2026-09-21-playback-sessions-as-a-resource-plan.md`),
+agreed with Tom, and core is co-ordinating the client transition.
+
+```
+GET /api/v1/playback/sessions/{id}/stream/{token}/{generation}/{name}
+GET /api/v1/playback/sessions/{id}/stream/{token}/direct
+GET /api/v1/playback/stream/{id}/{token}/...            REMOVED OUTRIGHT
+```
+
+**For this client the route move is a no-op, and that is now asserted rather
+than believed.** Nothing here composes a stream or segment path: the read-ahead
+builds a *same-origin* proxy URL and carries the node's URL opaquely in
+`?source=`, the worker only checks it parses as http(s), and the HLS preflight
+resolves `new URL(uri, manifestUrl)` over URIs the node itself put in its
+manifest. Two tests hold that property — one per side — and both were watched
+going red against a deliberately rebuilt path. The fakes and fixtures were
+moved to the post-change shape at the same time, so what the suite describes is
+the wire a node will actually serve.
+
+**What did need building is `410 generation_superseded`.** A 410 on a segment
+never reaches core as a status: hls.js raises it and this client's classifier
+sorts it first, where `500` is a hold, `404` is not-found, and everything else
+fell to a network-degradation branch reported as `stream` — which core reads as
+evidence against the endpoint. A healthy node answering correctly about a
+replaced generation would have been condemned. Found here on 2026-09-21 and
+folded into the server's plan, which now has this client in step 1 of its
+sequencing beside core. Three sites carry it, all behind one predicate
+(`isSourceGoneStatus`): the managed-HLS classifier, Direct Play's read-ahead
+failure branch, and the native preflight, whose readiness now reports `gone` so
+the Samsung path asks for a new generation instead of blaming the node.
+
+Core maps 410 onto its existing `not-found` kind rather than adding a seventh,
+deliberately — the required action is identical, and a new kind would put that
+obligation behind a value existing hosts meet as `default`. This client follows
+that, so a 410 reaches core as `not-found` and keeps the obligation not to tear
+the presentation down.
+
+- [x] **`SOURCE_SUPERSEDED_STATUS` comes from core, and this client is linked
+      to core's tree to get it.** Tom's instruction, relayed 2026-09-21: *"we're
+      nowhere near ready to publish npm"* and *"they should hotlink for now so
+      we can actually test this works."* `@machafoundation/core` is
+      `file:../macha-ts`. **Do not cut a release while linked** — `main` pins
+      published versions, and core's tree carries symbols that exist in no
+      published one. `npm view @machafoundation/core versions` still ends at
+      0.14.0.
+- [x] **The status mapping is core's, asked for rather than repeated.**
+      `isSourceGoneStatus` now narrows hls.js's `unknown` and delegates to
+      core's `playbackFailureKindForStatus`, so the next status core adds
+      arrives here for free — which is exactly what did not happen when 410 was
+      added and left this classifier condemning healthy nodes. Watched failing:
+      pointing it at `'not-ready'` turns eight assertions red.
+- [ ] **Identify the linked core by SHA, not by its version, because the tree
+      moves under a fixed number by design.** Core is *building* `0.17.0`: a
+      version is only immutable once it is published, so until then it is the
+      name of the thing being built and work goes on accumulating under it.
+      Tom, 2026-09-21: *"It's 0.17.0 because the rest of the world hasn't seen
+      that yet."* `0.15.0` and `0.16.0` were waypoints from that morning and are
+      not releases to pin. `0.17.0` is the number this client will eventually
+      pin, and `npm view @machafoundation/core versions` ends at `0.14.0` until
+      the work is proven on hardware.
+
+      **A link resolves the working tree, not a commit**, so the identity has
+      three parts and the middle one is easy to forget: what this client
+      compiled against was core `5485db4`, clean, `dist` hash `f662293ec1c0`.
+      Hash from *inside* `dist` — `shasum` includes the path it is given, so
+      two runs from different directories disagree about identical bytes.
+      Measured, not quoted: an hour earlier the same tree answered `0.17.0` on
+      disk while its HEAD had committed something else, which is why the
+      version is not the thing to write down. Re-measured after core moved:
+      `a8e50d9`, clean, `dist` `8351d54d21b4`, and the suite and build were run
+      again against it rather than left green against the tree they were run
+      on. Core has taken the same rule the other way — do not leave the tree
+      dirty while anyone is linked, since a linked client compiles at a moment
+      of its choosing rather than core's.
+- [x] **The failure screen names the account when the cap refuses.**
+      `accountSessionLimitNotice` leads the fatal-error block when core's
+      `isAccountSessionLimit` recognises the refusal, with core's own message
+      still beneath it because that is what a viewer would quote in a report.
+      The match is core's rather than a code string matched here, since four
+      clients matching it separately is how they drift. Three tests, seen red.
+      **Unverifiable live until the server ships the cap**, and this client
+      cannot produce a `429 account_session_limit` on demand.
+- [ ] **Superseded, kept for the shape of the argument.** Core 0.17.0 exports `playbackFailureCode(error)`
+      and `isAccountSessionLimit(error)`, which walk the cause chain cycle-safe.
+      The cap answers `429 account_session_limit`. Nothing here misclassifies it
+      today, but the sentence a viewer gets reads as a breakage when the node is
+      working exactly as designed, and this client — unlike the television — has
+      an address bar behind the failure screen, so a viewer told the truth has
+      somewhere to go.
+- [ ] **Use core's `playbackFailureStatus` in `signInComplaint`, and not
+      today.** `LoginScreen.tsx` reads `.status` one level off `cause` to decide
+      whether to say "that username and password were not recognised", so the
+      moment anything wraps a `401` in something carrying no status of its own
+      — which is what `endpointFailure()` does, and what cost the phone client a
+      live bug in a branch that had never executed — a wrong password silently
+      becomes a generic complaint. Core's accessor is the fix and its name is
+      narrower than its behaviour: read rather than taken on trust, it is a
+      cycle-safe walk of any error chain for a finite numeric `status`, with
+      nothing playback-specific in it, and core has put that in the docblock so
+      the name does not talk somebody into writing a third walk. **Held back
+      because today's instruction was the session and stream routes and this is
+      the auth path** — it is a one-line swap when it is wanted, and it wants
+      a test that fails on a wrapped 401 first.
+- [ ] **Two endpoints in this client's registry can be one node, which is why
+      "strictly advancing" cannot be enforced from here.** The 2026-09-21 run
+      held five endpoints: three node addresses configured by hand and two
+      discovered cluster names. A generation created "on" `ramaroja` lands on
+      whichever node haproxy fronts, so a cascade can return to a node it has
+      already stranded a session on without the client being able to know it.
+      That bears directly on a per-node cap being exhausted by a cascade, and it
+      is the client half of the question the server asked.
+- [ ] **Nothing is needed here for the per-account cap**, and that should be
+      re-checked when the server lands the code. This client never creates a
+      playback session — core does — and it classifies no create failure, so a
+      `429 account_session_limit` arrives as core's message on the failure
+      screen. The hazard this repo contributed evidence for is on the server's
+      side: a session on a node that has just died cannot be DELETEd, so a cap
+      counting those refuses the create a failover depends on. Measured here
+      2026-09-21 (`session-stop-failed`, `failed-session-close-retry`) and
+      recorded in the server's plan.
+- [ ] **Adoption is not implemented and needs nothing yet.** This client never
+      holds a session id — core does, keyed `${endpoint.id}::${nodeSessionId}` —
+      so there is no bare id to pair with a node. If adoption ever reaches this
+      client, the listing is node-local by decision, and an adopted id without
+      its endpoint is unusable: core's `sessionAlive` throws on it.
 
 ## Priorities
 
