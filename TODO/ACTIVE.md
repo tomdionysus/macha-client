@@ -15,10 +15,12 @@ are related. Core is addressed as the `Macha NPM Core` session.
 ## Start here
 
 **0.17.3 is released, tagged, merged and pushed — and NOT deployed.** Tagged
-`0.17.3` on 2026-09-21, `main` and `develop` both at `9409780`. Every node is
-still serving the **0.17.2** bundle `index-BGrNH6KR.js`, so nothing in this
-release is in front of a viewer until somebody rsyncs `dist/`. The procedure is
-below. The release built clean from `main` as `index-CnpOpAES.js`.
+`0.17.3` on 2026-09-21, `main` and `develop` both at `9409780`. The release
+built clean from `main` as `index-CnpOpAES.js` — and that bundle has still
+never been deployed. What every node serves as of 14:37 on 2026-09-21 is the
+**develop** build against hot-linked core `648474d`, `index-NDVfpduh.js`,
+deployed on Tom's instruction because these nodes are not production; see the
+deploy section. So the nodes are ahead of 0.17.3, not on it.
 
 It carries ten changes, and `CHANGELOG.md` says which of them have been watched
 against a node: **two have** — the picture now survives a mode switch (16.5 s
@@ -238,7 +240,20 @@ Assets are gzipped by the server on demand (593 KB of JS goes out as 172 KB).
 There are no precompressed `.gz` siblings in `dist/`, which the server would
 prefer; generating them is a build change nobody has asked for yet.
 
-**All three nodes run the same build as of 2026-09-20.** `3476e34` (0.17.2,
+**All three nodes now serve the develop build with the hot-linked core,
+deployed 2026-09-21 14:37 on Tom's instruction ("they are NOT production").**
+Bundle `index-NDVfpduh.js`, 624,128 bytes, `shasum` `be3dc9c3367a` — identical
+on `fi-1`, `es-1` and `gbni-1` and to the local artefact — built from
+`develop` against linked core `648474d`, **not** from `main`, so this is
+ahead of released 0.17.3 (`index-CnpOpAES.js`) rather than being it. It is the
+first bundle in front of a viewer that carries the 410 mapping. Backups taken
+first on all three at `/etc/macha/web.bak-20260921-143750.tar.gz`; rsync was
+additive, no `--delete`, so the 0.17.2 assets are still there. Verified
+served, not just copied: each node answers `index-NDVfpduh.js` on
+`http://127.0.0.1:7438/` with the bundle and CSS both `200`, and
+`ramaroja.macha.network` and `macnessa.macha.network` both serve it too.
+
+**Previously, all three nodes ran the same build as of 2026-09-20.** `3476e34` (0.17.2,
 bundle `index-BGrNH6KR.js`) is on `fi-1`, `es-1` and `gbni-1`, deployed on Tom's
 instruction with backups at `/etc/macha/web.bak-20260920-220338.tar.gz` on the
 first two (`gbni-1` had no web root to back up). The earlier hashed bundles are still in place on all of them. So is
@@ -514,6 +529,64 @@ the presentation down.
       of those three. Core has taken the same rule the other way — do not leave the tree
       dirty while anyone is linked, since a linked client compiles at a moment
       of its choosing rather than core's.
+
+      **Re-measured 2026-09-21 18:15 after dropping the subclass: core
+      `8db9d26`, `dist` `bb88949a916b`, bundle `index-Bv4GTP94.js`, 628,490
+      bytes, `shasum` `8cdee13f3b21`.** The bundle name and size moved
+      because the client changed, not only core: `prefer()` (core `8db9d26`)
+      replaced `PinnedEndpointRegistry` here. Re-read in the minified bytes
+      rather than assumed — `Nj=410` with `s===Tj||s===Nj?"not-found"` for
+      the status mapping, `standby-preparation-refused` for the cap, and
+      `Kj=1e4,Qj=8e3` for the two standby windows; no `playback/stream`
+      string, `playback/sessions` present. Suite 433 green, typecheck clean.
+      **This bundle is built but not deployed** — the nodes still serve
+      `index-NDVfpduh.js` from 14:37.
+
+      **`vite dev` does not notice that a linked core changed.** The
+      production build resolves the link fresh every time, but the dev
+      server pre-bundles `@machafoundation/core` into
+      `node_modules/.vite/deps` and keeps serving that copy: the first live
+      test of `prefer()` failed with `endpointRegistry.prefer is not a
+      function` against a tree where the method plainly existed, and the
+      built bundle was fine at the same moment. `npm run dev -- --force`, or
+      delete `node_modules/.vite`, after core moves. Core recorded the same
+      trap from its own side as *"a build system may not notice core changed
+      at all"*.
+
+      Core also carries `7b4548a` in this range: **a per-account cap refusal
+      now walks the cluster and charges nobody**, because the cap is counted
+      per node. `isAccountSessionLimit` is unchanged, so
+      `accountSessionLimitNotice` still fires as before — fewer viewers will
+      reach it.
+
+      **Superseded, kept for the shape of the measurement: core `648474d`,
+      `dist` `fb4b23dcffd5`, same bundle bytes.** Core moved 5aa3f6f → 648474d across
+      three files; the only non-test one is comment-only in
+      `PlaybackCoordinator.ts` (`git diff -U0` over it yields no changed line
+      that is not a comment, and the floor still reads `10_000`), so
+      minification strips the whole change and it cannot reach the artefact.
+      Re-measured here rather than taken from core's word: suite 402/402,
+      typecheck clean, `vite build` output `index-NDVfpduh.js` at 624,128
+      bytes, `cmp` IDENTICAL to the 12:12 artefact, and the same four markers
+      re-read in the minified bytes — `jj=410`, `a===Ej||a===jj?"not-found"`,
+      `standby-preparation-refused`, `Vj=1e4,Fj=8e3` — with no
+      `playback/stream` string and `playback/sessions` present. **So the
+      deployable artefact has not changed since 12:12; only the core SHA
+      beside it has.** The `dist` hash is `cd dist && find . -type f | sort |
+      xargs shasum | shasum`, first twelve characters — written down because
+      an unlabelled hash cannot be checked by the next session.
+
+      **Three sessions, three correct hashes of one artefact**, which is why
+      the command is part of the value rather than a footnote. Core
+      reproduced `fb4b23dcffd5` from the same dist with the same command; the
+      same command given an absolute path instead of `cd`-ing in yields
+      `b780999efb68`, and scoped to `*.js` it yields `8c835ad33000`, which is
+      what the phone session recorded for that dist at that SHA. All three
+      are right under their own method and none is comparable to the others.
+      This repo keeps the all-files method above, deliberately: it covers the
+      `.d.ts` files, so a type-only change in core moves this hash where a
+      JS-only one would not — and a type-only change is exactly the kind a
+      linked client compiles against without noticing.
 - [x] **The failure screen names the account when the cap refuses.**
       `accountSessionLimitNotice` leads the fatal-error block when core's
       `isAccountSessionLimit` recognises the refusal, with core's own message
@@ -571,6 +644,24 @@ the presentation down.
       nobody sees anything wrong** — the cap working as designed while seamless
       failover quietly gets worse, which is the only state here that produces
       no symptom at all.
+
+      **The cap phase cannot run on the shipped config, and that is mechanical
+      rather than bad luck.** `reserve_session_slot` (`macha/src/playback.cpp:
+      1402-1410`) checks node-wide first — `streaming.max_sessions`, throwing
+      `ResourceLimitError` → `429 resource_limit`, shared with both transcode
+      limits — and only then the per-account cap four lines later. Shipped
+      config is `max_sessions` 8 against `max_sessions_per_account` 32, so the
+      node limit always refuses first and `account_session_limit` is
+      unreachable on every live node. Raising `max_sessions` on all three
+      nodes is a precondition for the phase existing, not a tuning step.
+      Two further traps for reading a log: the account check sits inside
+      `if (config.max_sessions_per_account)`, so unset or zero disables it
+      **silently** — a node that never refuses looks exactly like a client
+      handling the refusal correctly — and `too_many_sessions` /
+      `try_later` on `/api/v1/session` are a different subsystem entirely
+      (auth store full; password-check rate limiting), not this cap.
+      Settled from the server source 2026-09-21 with the `Macha Mobile Phone
+      Client` session, which caught the attribution wrong here first.
 - [ ] **Nothing else is needed here for the per-account cap**, and that should
       be re-checked when the server lands the code. This client never creates a
       playback session — core does — and it classifies no create failure, so a
@@ -585,6 +676,308 @@ the presentation down.
       so there is no bare id to pair with a node. If adoption ever reaches this
       client, the listing is node-local by decision, and an adopted id without
       its endpoint is unusable: core's `sessionAlive` throws on it.
+- [ ] **Segmented subtitles are the one place this client still holds a server
+      fact, and it is parked on purpose.** Tom, 2026-09-21: *"Tell the other
+      clients and the core to ignore subtitle issues FOR NOW."* Everywhere else
+      the rule holds: core resolves playback, `stream.url` and `subtitle_url`
+      are taken whole, every judgement about a status is core's
+      (`playbackFailureKindForStatus`, `isAccountSessionLimit`), and the only
+      other `new URL(` in production code resolves a playlist URI against the
+      URL the node served it from. The exception is the whole segmented
+      subtitle path, and it is three things rather than one line:
+      `WebPlatform.ts:1688` composes `segment-${index}.vtt` against the
+      manifest URL, which invents a server filename; `SubtitleSegmentManifest`
+      (`WebSubtitles.ts`) is a wire type core has never heard of — zero
+      occurrences in `macha-ts`, which passes `subtitleUrl` through opaquely;
+      and `isLegacyWebVtt`'s `.vtt` sniff is a wire fact in the same position.
+
+      **Not avoidable as things stand, which is why it is written down rather
+      than fixed.** The manifest carries `format`, `version`, `stream_index`
+      and `segment_durations_ms` — durations only, no names and no URLs — so
+      the convention has to live somewhere. The server builds it that way at
+      `macha/src/playback.cpp:2031-2040` and *parses* the convention twenty
+      lines later in `subtitle_segment_index` — `segment-` + digits + `.vtt`,
+      playback.cpp:2042-2051 — with its own tests hand-building
+      `segment-0.vtt`. So it is a server fact the server only ever parses and
+      never states, and this client is the only place on the other side of the
+      wire that writes it down.
+
+      **Two ways out, both above this repo.** The server puts segment names or
+      URLs in the manifest — cheap, since the durations vector is in hand at
+      the moment the manifest is built — or core takes the manifest type and
+      the URL builder, so there is one declaration and the clients import it.
+
+      **Why it can wait, measured in the other trees rather than assumed.**
+      There is exactly one copy of the composition and the manifest type:
+      both RN sessions searched their own repos on 2026-09-21 and neither has
+      a segmented subtitle path at all — the phone has track selection only
+      (`PlaybackOptionsSheet.tsx`), and the TV side-loads a single
+      `subtitleUrl` into media3 (`PlayerEngine.kt:195-212`) without building a
+      URL. The cost arrives the day a second copy grows, because two private
+      copies of an unstated convention can disagree. **The `.vtt` sniff is
+      already at two**, though: the TV derives the mime type from the
+      extension at `PlayerEngine.kt:296` the way `isLegacyWebVtt` does here.
+      That one is cheap to reconcile and is not what makes this urgent. Until
+      then this is a known hole, not a live fault. Found by the `Macha Client
+      Core` session sweeping the clients against Tom's rule that no client
+      composes a path it can avoid.
+
+- [ ] **Smoke test of the deployed build, 2026-09-21 14:45-15:20, sixteen
+      titles against the live cluster.** Driven through the UI in Chrome
+      against `vite dev` (same develop tree as the deployed bundle, `/api`
+      proxied to `gbni-1`), signed in as `webclient`. Every title was played,
+      seeked, rewound, paused, resumed and stopped; eleven of them with
+      **large** seeks — dragging the scrubber to ~75% and back to ~20% of the
+      title, not arrow-key nudges. All three modes covered, with the mode read
+      off the player's own plan overlay rather than inferred:
+      - **Direct** (`DIRECT · H264/HEVC` + `DIRECT · AAC`): six titles,
+        including a 3-minute short and an MP3 music track. Big seeks settle in
+        0.4-12 s.
+      - **Remux** (`VIDEO COPY` + `AUDIO TRANSCODE`, the AC-3/E-AC-3 titles):
+        six titles, two of them TV episodes. Big seeks settle in 2-19 s.
+      - **Transcode** (`VIDEO TRANSCODE · SOURCE · H264 → H264`): forced from
+        the player's MODE selector, since nothing in this library needs it —
+        Chrome decodes both H.264 and HEVC here. Big seeks 14.8 s forward,
+        18.8 s back.
+
+      **Three things worth chasing, none of them a regression in this build.**
+      1. A big seek on a remux stream sometimes fails its first generation:
+         `seek-needs-generation` → `http-error-response` →
+         `generation-update-failed`, surfaced to the viewer as *"Macha endpoint
+         http://10.35.1.50:7438 failed: ... timed out waiting for first
+         fragmented-MP4 segment"*. Seen twice. Both times the next seek
+         succeeded, and on one occasion the client recovered by itself —
+         `source-terminal-failure` → `source-failover-start` →
+         `failed-session-closed` → `source-failover-ready` — which is the
+         failover path doing its job on the seek path.
+      2. **`max_video_transcodes` is 1 on every node.** Asking a session that
+         already holds the slot to switch to Transcode answers
+         `429 resource_limit` ("video transcode limit reached"), the player
+         shows the refusal, and the mode the viewer asked for is silently not
+         applied — no walk to a node that could serve it. A fresh session gets
+         the slot and transcodes first time. Node-scoped refusal, so walking
+         would be correct here.
+      3. ~~The seek UI commits on pointer release only.~~ **Fixed the same
+         day.** A focused scrubber moved its thumb on every arrow and page
+         key — the browser's own range behaviour, arriving as a new preview
+         position — while the commit fired only for a television's seek keys
+         or Home/End, so the playhead drew in the new place and playback
+         carried on where it was until focus left and `onBlur` committed it.
+         Measured before: five `PageUp` presses moved the scrubber to 50% of a
+         two-hour film and left the position at 59 s. `committingScrubberKey`
+         now names every key a range input moves itself on; watched failing
+         against the old list first, and re-measured live afterwards — five
+         presses from 22:07 landed at 1:39:27, playing.
+
+      **And a correction to the cap numbers this repo was given.** All three
+      nodes read `streaming.max_sessions: 64`, `max_sessions_per_account: 32`,
+      `max_video_transcodes: 1`, `max_audio_transcodes: 4`, so the per-account
+      cap is reachable here and the cap phase is not blocked on a raise for
+      these nodes. Read off each node's deployed `/etc/macha/macha.yaml`, not
+      the example — `corvus-fi-1` 5262 bytes md5 `9e8e7ffcf38e` lines 181-184,
+      `corvus-es-1` 6749 bytes `0ddf30935716` lines 235-238, `corvus-gbni-1`
+      6476 bytes `4e6606a93029` lines 232-235, all uncommented. Worth the
+      three hashes: the example carries the identical four values, es-1 and
+      gbni-1 each keep a `macha.yaml.example` beside the real file, and the
+      `Macha Client Core` session was right to ask which one had been read.
+      All three configs were written at the same instant, 11:34 UTC that day,
+      with each service entering active state two minutes later, so the
+      running server holds these numbers. **The 8-against-32 contradiction is
+      real but lives in the compiled defaults** — `config.hpp:502`
+      `max_sessions{8}` against `:540` `max_sessions_per_account{32}` — and
+      bites only a node that does not set the value. The example sets it, and
+      says at 597-599 why.
+
+- [ ] **A viewer can choose the node, and it works by starting a new
+      generation there rather than moving the old one.** Tom, 2026-09-21:
+      *"there's no reason we can't get a new session, and stream, at the same
+      time index and play it."* Pills in the player's options panel, right-hand
+      area, one per node, the serving node highlighted: `PlayerOptions` renders
+      `playerNodeChoices`, `PlayerScreen.selectNode` pins the choice and calls
+      `runtime.play({media, startPositionMs: current})`, which closes the old
+      generation first so the node being left is not holding a transcode slot.
+      Measured live: 2:11.795 on `fi-1` to 2:12.197 on `gbni-1`, **13.2 s of
+      gap**.
+
+      **The pin is an ordering preference, never a health record.**
+      `PinnedEndpointRegistry` promotes the chosen node's endpoints in
+      `candidates()` and touches nothing else. The obvious alternative,
+      core's `recordSuccess(id)`, sets the sticky preference *and* writes a
+      successful round trip that never happened, dating a success onto the
+      Status screen. The pin is also skipped while the chosen endpoint is not
+      `ready`, so failover still walks away from a node that is failing.
+
+      **Grouped by `nodeId`, sorted by name.** One node is commonly two
+      entries — a LAN address and an advertised name — and core stamps
+      identity from `api_endpoint` only, so the LAN entry stays *Unidentified
+      node* and the same machine appears twice. `useNodeIdentity` advertises
+      each node's `host:port` alongside its `api_endpoint`, restricted to URLs
+      the registry already holds so nothing invents a discovered endpoint.
+      Order is numeric-aware by label, tie-broken on id, because the
+      registry's own order is a live ranking that re-arranges under a pointer
+      on the way to a click. Dozens of nodes wrap into justified rows that
+      scroll inside their own area; the panel itself never scrolls.
+
+      **Three pieces of this are stopgaps with a named retirement, not
+      permanent client code.** Core replied on 2026-09-21 and is taking all
+      three:
+      - ~~`EndpointRegistry.prefer(id)`~~ **landed and the subclass is
+        gone**, same day. Core `8db9d26` carries it — sticky endpoint,
+        notifies, writes no health, ignores an unknown id, and still ranks
+        availability above preference — so `PinnedEndpointRegistry` and its
+        skip-if-not-ready guard were deleted rather than kept in parallel.
+        What remains on this side is `preferredEndpointForNode`, which exists
+        only because a viewer picks a *node* and `prefer()` names an
+        *endpoint*: it states the preference against a ready door onto that
+        node, falling back to the first so a choice still registers while the
+        node is cooling.
+      - `moveTo` is next in core's current phase, and the shape is settled by
+        the server: **a session is permanently bound to the node that created
+        it** — the session map is in-process and node-local, with no
+        replication and no control-call forwarding — so a move can only be
+        create-there, promote, release-here. That is `prepareAlternate` plus
+        promotion, entered deliberately rather than only on failure. The
+        13.2 s gap measured here is the cost of close-then-start, not
+        anything the server imposes: **the account cap is counted per node**,
+        so acquiring the new session before releasing the old one costs
+        nothing against it. When `moveTo` lands, `selectNode` should call it
+        and the `runtime.play()` restart goes.
+      - Node identity belongs in `EndpointHealthMonitor`, where
+        `apiBaseUrls: [node.api_endpoint!]` is built single-element; core has
+        it as phase 2. `useNodeIdentity` retires then. The restriction to
+        URLs the registry already holds is what makes it safe either side —
+        it invents nothing, so it threads the fail-closed reasoning about
+        nodes deliberately behind TLS rather than overriding it.
+
+- [ ] **A mode press never asks a node to copy audio this device cannot
+      decode.** `MODE_TRANSFORMS` had `remux: {video: copy, audio: copy}`,
+      unconditional, so pressing Remux on an AC-3 title asked the node to
+      copy audio this browser has no decoder for. Two endings, both measured
+      2026-09-21 against `fi-1`: the node produced no first fragment —
+      `readyState` 0, position 0, six `hls-error-nonfatal` over ~35 s then
+      two `hls-error-fatal` at 59 s — and, had it served, a silent film. The
+      mobile client had written the same table independently
+      (`transformFor(mode)`) and hit it the same afternoon; the television
+      reproduced the symptom too.
+
+      **The server defined the fix by refusing the obvious one.** Asked for
+      `mode=remux` with `audio=transcode` it answers *"remux repackages and
+      copies every stream: to re-encode one, ask for mode=transcode with
+      video=copy or audio=copy for the stream that is being copied"*. So a
+      remux press that cannot copy the audio becomes
+      **`mode=transcode, video=copy, audio=transcode`** — the same plan the
+      server's own chooser produces for these titles, and the one the press
+      was throwing away. `modeRequest` decides it from
+      `hlsAudioCodecs ?? audioCodecs`, because remux is delivered as fMP4 and
+      the delivery decoder is not always the element's; an unknown codec or
+      absent capabilities transcode rather than gamble. Re-measured live on
+      the title that stalled: the press now keeps playing, `VIDEO COPY` plus
+      `AUDIO TRANSCODE`.
+
+      **This rule is core's, for the automatic path only.**
+      `choosePlaybackInstruction.ts:399-401` already decides exactly this,
+      with core's own docblock saying it "is not something each client should
+      reinvent, so it lives here" — but a viewer pressing a mode *by name*
+      has no entry point into it, which is why this client and the phone
+      wrote the same table independently and hit the same bug on the same
+      afternoon. Core has the gap on its list with both bugs as evidence.
+      `modeRequest` delegates the day there is something to delegate to; the
+      capability lookup is the part that should not be here.
+
+      **What is the server's, and deliberately not recorded here:** why an
+      AC-3 copy stalls at all. A mechanism was relayed and then retracted —
+      `delay_moov` turns out to be documented as the *fix* for this class of
+      503, measured on 2026-09-07 — so the cause is open and this repo should
+      not carry a guess at it — and the mux path has since been cleared by
+      experiment, so it is not that either. Two facts of ours that survive
+      whatever it turns out to be: AAC audio-copy remux succeeds on the same node in the
+      same minutes, and **the same client request produced a declined copy
+      once and a true copy minutes later**, so the difference is inside the
+      node rather than in what was asked.
+
+- [x] **Withdrawn: the "direct-play stall" was my own instrumentation.**
+      Recorded because the retraction is worth more than the claim was. While
+      running the server's orphan reproduction I saw direct play sit at
+      `readyState` 0 for minutes and reported, in order: that the element was
+      not on the proxy URL (wrong — I grepped for `macha-direct-read-ahead`
+      when the path is `__macha_direct_cache__`), and then that the Service
+      Worker never answers an open-ended range (wrong — my probe awaited
+      `arrayBuffer()` on a 1.76 GB body, so it was my own read that never
+      finished).
+
+      Measured properly afterwards, on the same title and node: the worker
+      answers `bytes=0-` in **46 ms** with `206` and
+      `content-range: bytes 0-1763346940/1763346941`, and a tail range in
+      **53 ms**. A clean page load reaches `loadedmetadata` in **801 ms** and
+      playing in **1.0 s**. There is no reproducible fault here. The stalls
+      were real but produced by the state I had made: a force-stopped tab, a
+      Service Worker I had unregistered and re-registered three times, and
+      1.7 GB streaming probes competing with the element for the same link.
+
+      **The lesson is the entry.** Both wrong claims were inferences from a
+      black player dressed as measurements, and both were sent to other
+      sessions who acted on them. A stalled player is a symptom; the first
+      question is what the element is actually fetching and how the thing
+      serving it answers, asked with a probe that does not itself consume
+      the link. The server session recorded the mirror image of this in its
+      own backlog the same evening: four mechanisms written for the AC-3
+      stall, every one killed by measurement. Theirs were about a server and
+      mine were about a client, and the failure was identical.
+
+- [ ] **Unexplained: a player that sits at `readyState` 0 while the node
+      says it served.** Seen three times on 2026-09-21, on both playback
+      paths, and it is the one live symptom nothing has accounted for. The
+      two client-side explanations offered for it — the element not being on
+      the proxy URL, and the worker not answering an open-ended range — were
+      both measured and both wrong, so this entry deliberately states the
+      shape and no cause.
+
+      **What is known, from both sides.** Transformed path: es-1 logged
+      `first fragment ready` at 247 ms and 208 ms for a session whose element
+      never left `readyState` 0, with a `blob:` source and nothing buffered
+      three minutes on. Direct path: the same title that had loaded metadata
+      in 801 ms an hour earlier sat at `readyState` 0 with `networkState` 2,
+      while the read-ahead worker answered `bytes=0-65535` from that
+      element's own `currentSrc` in **50 ms** with a `206` and 1,448 bytes of
+      body. So in both cases the bytes were available and something between
+      the source and the decoder did not consume them.
+
+      **It is intermittent and correlates with a session-heavy run**, which
+      is the part that makes it hard: a cold page plays the same title in a
+      second. Next step is to watch it from the client with `hls.js` error
+      detail flattened to text and the element's own event sequence recorded
+      from before `src` is set — not to theorise from a black player, which
+      has now cost three wrong answers in one day.
+
+- [ ] **Diagnostic timestamps are Zulu, because the cluster spans
+      timezones.** Tom, 2026-09-21: *"Macha absolutely needs to handle
+      multiple timezones across sites. They WILL be in different timezones.
+      We should be using hard Zulu, UTC."* Tonight the three nodes ran EEST,
+      CEST and BST, and a session timeline handed to the server session was
+      an hour out because this machine matched one node's zone and was read
+      against another's. Nobody was confused for long, which is the danger:
+      the error is silent, plausible and survives review.
+
+      **The rule, in his refinement of it: present in local, deal in UTC
+      everywhere else — timezones are a presentation problem.** So
+      `src/diagnostics/timestamps.ts` has two forms and they are not
+      interchangeable. `presentedTime` is what a screen shows: the reader's
+      own zone, **labelled with it** (`21 Sep 2026, 18:51:52 GMT+3`), because
+      an unlabelled hour read beside a journal written in another zone is the
+      exact ambiguity that cost the hour. `zuluTimestamp` is the interchange
+      form, `2026-09-21 15:51:52Z`, for anything leaving this client for
+      another machine or another person's terminal. Zero and absent are `—`
+      rather than 1970 in both.
+
+      My first pass put Zulu on the screens as well and Tom corrected it: a
+      viewer should not have to convert their own clock to read when a node
+      was last seen. The zone label is what makes local safe; UTC is what
+      makes correlation safe.
+
+      **The rest is not this repo's to fix and is raised with the other
+      sessions.** Server logs print node-local time with no offset, which is
+      what actually cost the hour; the API's `*_unix_ms` fields are already
+      unambiguous and are the reason this fix was cheap here.
 
 ## Priorities
 

@@ -22,6 +22,7 @@ import { RefreshIcon } from '../components/ManageIcons';
 import { probeKnownEndpoints } from '@machafoundation/core';
 import type { AuthenticatedFetch } from '@machafoundation/core';
 import { reportClusterReachable, reportClusterUnreachable } from '@machafoundation/core';
+import { presentedTime, presentedTimeOfDay } from '../diagnostics/timestamps';
 
 function formatBytes(value: number): string {
   if (!Number.isFinite(value) || value <= 0) return '0 B';
@@ -144,7 +145,7 @@ function freshnessLabel(node: ClusterNodeStatus): string {
   if (node.telemetry_freshness === 'live') return 'Live';
   if (node.telemetry_freshness === 'stale') return `Stale · ${formatDuration(node.live_age_ms)}`;
   if (!node.observed_at_unix_ms) return 'Last known';
-  return `Last known · ${new Date(node.observed_at_unix_ms).toLocaleString()}`;
+  return `Last known · ${presentedTime(node.observed_at_unix_ms)}`;
 }
 
 // A node can be `state: 'online'` (connected and gossiping) while
@@ -258,7 +259,7 @@ export function statusSectionVisibility(section: StatusSection) {
 }
 
 function timestamp(value?: number): string {
-  return value ? new Date(value).toLocaleString() : '—';
+  return presentedTime(value);
 }
 
 function ClientApiEndpoints({ registry }: { registry: EndpointRegistry }) {
@@ -334,7 +335,7 @@ function PublicConnectivity({ connectivity }: { connectivity: PublicConnectivity
           <DetailItem label="Source">{source}</DetailItem>
           <DetailItem label="Self probe">{probeLabel(connectivity)}</DetailItem>
           <DetailItem label="Externally verified">{yesNo(connectivity.check.externally_verified)}</DetailItem>
-          {connectivity.check.checked_at_unix_ms > 0 && <DetailItem label="Checked">{new Date(connectivity.check.checked_at_unix_ms).toLocaleString()}</DetailItem>}
+          {connectivity.check.checked_at_unix_ms > 0 && <DetailItem label="Checked">{presentedTime(connectivity.check.checked_at_unix_ms)}</DetailItem>}
           {connectivity.check.error && <DetailItem label="Probe error"><span className="cluster-connectivity-error">{connectivity.check.error}</span></DetailItem>}
         </dl></article>
 
@@ -576,7 +577,7 @@ export function StatusScreen({ api, endpointRegistry, manageApi, platform, secti
       </>}
 
       {visible.connectivity && <>
-        {check && <p className="cluster-check-result">Connectivity: {reachable}/{check.results.length} nodes reachable · checked {new Date(check.checked_at_unix_ms).toLocaleTimeString()}</p>}
+        {check && <p className="cluster-check-result">Connectivity: {reachable}/{check.results.length} nodes reachable · checked {presentedTimeOfDay(check.checked_at_unix_ms)}</p>}
         {snapshot.connectivity
           ? <PublicConnectivity connectivity={snapshot.connectivity} />
           : <div className="manage-empty">Connectivity status is not available from this node.</div>}
@@ -714,10 +715,10 @@ export function NodeStatusScreen({ api }: { api: ClusterStatusApi }) {
         <article className="node-detail-card"><h2>Metadata</h2><dl>
           <DetailItem label="Generation">{node.metadata_generation}</DetailItem>
           <DetailItem label="Voter">{node.roles.includes('metadata-voter') ? 'Yes' : 'No'}</DetailItem>
-          <DetailItem label="Observed">{node.observed_at_unix_ms ? new Date(node.observed_at_unix_ms).toLocaleString() : '—'}</DetailItem>
+          <DetailItem label="Observed">{presentedTime(node.observed_at_unix_ms)}</DetailItem>
           <DetailItem label="Live age"><span className={telemetryAgeClassName(node)}>{node.live_age_ms != null ? formatDuration(node.live_age_ms) : '—'}</span></DetailItem>
           {node.identity_association_reset && <>
-            <DetailItem label="Last identity reset">{new Date(node.identity_association_reset.reset_at_unix_ms).toLocaleString()}</DetailItem>
+            <DetailItem label="Last identity reset">{presentedTime(node.identity_association_reset.reset_at_unix_ms)}</DetailItem>
             <DetailItem label="Reset epoch">{node.identity_association_reset.epoch}</DetailItem>
             <DetailItem label="Reset scope">{node.identity_association_reset.scope}</DetailItem>
             {node.identity_association_reset.audit_state && <DetailItem label="Audit state">{node.identity_association_reset.audit_state}</DetailItem>}

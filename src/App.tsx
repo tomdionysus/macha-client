@@ -17,7 +17,7 @@ import type { PlaybackResolver } from '@machafoundation/core';
 import { reportClusterReachable, SERVER_REACHABLE_EVENT, SERVER_UNREACHABLE_EVENT, SERVER_UNREACHABLE_MESSAGE } from '@machafoundation/core';
 import type { Episode, MediaSummary, PlaybackProgress, SeasonSummary } from '@machafoundation/core';
 import { ContinueWatchingStore } from '@machafoundation/core';
-import { hasRole, sessionLockedOut, sessionManager, sessionPermits, type UserRole } from '@machafoundation/core';
+import { hasRole, sessionManager, sessionPermits, type UserRole } from '@machafoundation/core';
 import { useCurrentSession } from './app/useCurrentSession';
 import { PlaybackQueueStore } from '@machafoundation/core';
 import { MusicPlaylistStore } from '@machafoundation/core';
@@ -55,6 +55,10 @@ import { playerRouteItemId } from '@machafoundation/core';
 import { useMachaServices } from './app/useMachaServices';
 import { useSession } from './app/useSession';
 import { EndpointRegistry, bootstrapEndpoints as bootstrapClusterEndpoints } from '@machafoundation/core';
+import { preferredEndpointForNode } from './cluster/preferredEndpoint';
+import { lockoutNotice, lockoutReason } from './app/lockoutNotice';
+import { useEndpointCandidates } from './cluster/useEndpointCandidates';
+import { useNodeIdentity } from './cluster/useNodeIdentity';
 import { setDirectPlayTransferListener } from './playback/directPlayReadAhead';
 import { Loading } from './components/Status';
 import { useMediaRouteBack } from './app/useMediaRouteBack';
@@ -343,6 +347,24 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
     ], Date.now),
     [endpointKey],
   );
+  const endpointCandidates = useEndpointCandidates(endpointRegistry);
+  /**
+   * The viewer's node choice, stated to core as what it is: a routing
+   * preference that asserts nothing about the node.
+   *
+   * Kept here because the registry is — a player is created and destroyed per
+   * item, and a choice that died with the player would have to be made again
+   * on the next one. `prefer()` arrived in core on 2026-09-21 for exactly
+   * this; before it, the only public way to be preferred was `recordSuccess`,
+   * which also wrote a successful round trip that never happened.
+   */
+  const pinEndpoint = useCallback(
+    (endpointIds: readonly string[]) => {
+      const endpointId = preferredEndpointForNode(endpointRegistry.candidates(), endpointIds);
+      if (endpointId !== undefined) endpointRegistry.prefer(endpointId);
+    },
+    [endpointRegistry],
+  );
   /**
    * Media is where the bytes are, and core cannot see them.
    *
@@ -385,6 +407,9 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
     managementAvailable,
   } = useMachaServices({ endpointRegistry, auth, apiOverride, playbackOverride });
   useEndpointHealthMonitor(endpointRegistry, clusterStatusApi, auth, connectionRequired && effectiveEndpoints.length > 0 && !effectiveConnectionGate);
+  // Same condition, different question: the health loop asks how the nodes
+  // are, this asks which endpoints are the same node.
+  useNodeIdentity(endpointRegistry, clusterStatusApi, auth, connectionRequired && effectiveEndpoints.length > 0 && !effectiveConnectionGate);
   // Not before the session has settled. `SessionManager.fetch` retries a 401
   // only when it actually sent a token, so a whoami that goes out during the
   // cold-start mint is answered 401, returned as-is, and the roles are never
@@ -423,7 +448,8 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
    * actually do about either. The server's own sentence is deliberately not
    * shown — core's contract is that it is never assumed fit for a viewer.
    */
-  const locked = sessionLockedOut(roles) || mintFailure?.reason === 'refused';
+  const lockout = lockoutReason(roles, mintFailure?.reason === 'refused');
+  const locked = lockout !== undefined;
   // Users is the exception, and deliberately the other way round: the screen
   // exists only because the server has accounts, so an unknown answer means
   // there is nothing there to show rather than something to reveal. `hasRole`
@@ -653,6 +679,8 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
 
   const miniPlayerActive = Boolean(playback.playerVisible && !playback.playerRouteActive);
   const playerHost = playback.playerVisible && activePlayback ? <PlayerHost
+    endpoints={endpointCandidates}
+    onPinEndpoint={pinEndpoint}
     api={api}
     request={activePlayback}
     platform={platform}
@@ -734,6 +762,7 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
       : <LoginScreen
           guestAllowed={false}
           connectionReachable
+          notice={lockoutNotice(lockout)}
           onSignIn={(username, password) => sessionManager.signIn({ username, password })}
           onSignedIn={finishSignIn}
         />}

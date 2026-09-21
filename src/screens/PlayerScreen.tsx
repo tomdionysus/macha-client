@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent } from 'react';
-import type { MediaApi } from '@machafoundation/core';
+import type { EndpointCandidate, MediaApi, PlaybackCapabilities } from '@machafoundation/core';
 import { PlayIcon, RestartIcon } from '../components/PlaybackIcons';
 import { Loading } from '../components/Status';
 import { createClientLogger } from '@machafoundation/core';
@@ -15,12 +15,13 @@ import { formatPlaybackTime } from '@machafoundation/core';
 import { uiSettings } from '../settings';
 import { describePlaybackSession } from '@machafoundation/core';
 import { playbackFailureTrail, type PlaybackFailureTrailEntry } from './player/failureTrail';
+import { playerNodeChoices } from './player/nodeChoices';
 import { failureTrailEnabled } from '../diagnostics/failureTrailSetting';
 import { accountSessionLimitNotice, failureCauseMessages } from '../diagnostics/failureCauses';
 import { bufferedTimelineSegments } from '@machafoundation/core';
 import type { MediaSummary, PlaybackEvent, PlaybackProgress } from '@machafoundation/core';
 import { PlayerOptions } from './player/PlayerOptions';
-import { accelerateSeek, seekDirectionForKey, type SeekDirection, type SeekHold } from './player/seekAcceleration';
+import { accelerateSeek, committingScrubberKey, seekDirectionForKey, type SeekDirection, type SeekHold } from './player/seekAcceleration';
 import { samsungMediaCommand } from '../platform/SamsungMediaKeys';
 
 interface Props {
@@ -42,6 +43,15 @@ interface Props {
   queuePosition?: { index: number; total: number };
   volume: number;
   onVolumeChange: (volume: number) => void;
+  /** Every node this client knows, so the viewer can send the stream to one. */
+  endpoints?: readonly EndpointCandidate[];
+  /**
+   * Put this node at the head of the candidate order and keep it there.
+   *
+   * The registry belongs to the app, not to a player that comes and goes, so
+   * the pin is set where the registry lives and this player only says which.
+   */
+  onPinEndpoint?: (endpointIds: readonly string[]) => void;
 }
 
 
@@ -246,7 +256,7 @@ export function webArrowTargetOwnsKey(target: EventTarget | null): boolean {
 
 export const isSubtitleOnlyUpdate = isSubtitleOnlyPlaybackUpdate;
 
-function PlayerSession({ api, media, platform, runtime, startPositionMs, presentation, onProgress, onPosition, onMinimize, onExpand, onStop, onPrevious, onNext, onEnded, canPrevious, canNext, queuePosition, volume, onVolumeChange }: Omit<Props, 'request'> & { media: MediaSummary; startPositionMs: number }) {
+function PlayerSession({ api, media, platform, runtime, startPositionMs, presentation, onProgress, onPosition, onMinimize, onExpand, onStop, onPrevious, onNext, onEnded, canPrevious, canNext, queuePosition, volume, onVolumeChange, endpoints, onPinEndpoint, returnTo }: Omit<Props, 'request'> & { media: MediaSummary; startPositionMs: number; returnTo: string }) {
   const pageRef = useRef<HTMLElement | null>(null);
   const hostRef = useRef<HTMLDivElement | null>(null);
   const chromeRef = useRef<HTMLDivElement | null>(null);
@@ -504,6 +514,62 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
     runtime.update(update);
   }, [runtime]);
 
+  /**
+   * Send this stream to the node the viewer picked, from where they are.
+   *
+   * **A new generation, not a redirected one.** A playback session belongs to
+   * the node that created it, so "stream from that node instead" is a session
+   * on that node at this position — which is what `play()` does, closing the
+   * one on screen first so the node it leaves is not left holding a
+   * transcode slot.
+   *
+   * **The pin is set before the request, and outlives it.** Ordering is what
+   * makes the resolver choose, so the choice has to be in the registry before
+   * anything resolves; leaving it there is what keeps the next seek, mode
+   * change and recovery on the node the viewer asked for.
+   *
+   * **Not seamless yet, and the gap is real.** Core already has the machinery
+   * that would make it so — `prepareAlternate` builds a standby on another
+   * node and promotion swaps to it under the picture, which is how failover
+   * moves a viewer without a black frame — but it is reached from inside the
+   * coordinator, on failure, and there is no public way to ask for it by
+   * name. Until there is, this costs what starting a stream costs.
+   */
+  const nodeChoices = useMemo(
+    () => playerNodeChoices(endpoints ?? [], playback.session?.endpoint?.id),
+    [endpoints, playback.session?.endpoint?.id],
+  );
+  // What this device can decode, asked once per player. It decides what a
+  // remux press may ask the node to copy; without it every remux press would
+  // have to assume the safe answer and transcode audio that was fine as it
+  // was.
+  const [capabilities, setCapabilities] = useState<PlaybackCapabilities | undefined>(undefined);
+  useEffect(() => {
+    let cancelled = false;
+    void platform.capabilities()
+      .then((detected) => { if (!cancelled) setCapabilities(detected); })
+      .catch(() => { /* Unknown capabilities make remux transcode audio, which always works. */ });
+    return () => { cancelled = true; };
+  }, [platform]);
+  const [movingToNode, setMovingToNode] = useState<string | undefined>(undefined);
+  const selectNode = useCallback((nodeId: string) => {
+    const choice = nodeChoices.find((node) => node.id === nodeId);
+    if (!onPinEndpoint || !choice) return;
+    const positionMs = Math.max(0, Math.round(scrubValueRef.current ?? playback.intent.positionMs));
+    log.info('node-move-request', {
+      from: playback.session?.endpoint?.id,
+      to: choice.endpointIds,
+      positionMs,
+      sessionId: playback.session?.sessionId,
+    });
+    setLocalNotice(undefined);
+    setMovingToNode(nodeId);
+    onPinEndpoint(choice.endpointIds);
+    // The viewer's own choices follow them across, or the move would quietly
+    // undo the mode and the audio track they had picked.
+    void runtime.play({ media, startPositionMs: positionMs, returnTo }, playback.session?.preferences);
+  }, [log, media, nodeChoices, onPinEndpoint, playback.intent.positionMs, playback.session?.endpoint?.id, playback.session?.preferences, playback.session?.sessionId, returnTo, runtime]);
+
   useEffect(() => {
     if (presentation === 'full') {
       if (hideTimerRef.current !== undefined) window.clearTimeout(hideTimerRef.current);
@@ -716,6 +782,14 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
 
   const session = playback.session;
   const event = playback.event;
+  // The move is over when a generation is playing, wherever it landed. It can
+  // land somewhere else — the node may refuse, and recovery is entitled to
+  // walk — so this clears on arrival rather than on arrival *there*, or the
+  // note would sit under the pills for the rest of the film.
+  useEffect(() => {
+    if (movingToNode === undefined) return;
+    if (session?.endpoint?.id !== undefined && !playback.starting) setMovingToNode(undefined);
+  }, [movingToNode, playback.starting, session?.endpoint?.id]);
   const duration = firstUsableDurationMs(session?.durationMs, event.durationMs, media.durationMs);
   const displayedProgress = scrubValue ?? Math.min(duration, playback.intent.positionMs);
   const playedPercent = Math.max(0, Math.min(100, displayedProgress / Math.max(1, duration) * 100));
@@ -881,7 +955,16 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
 
         {optionsVisible && (
           session ? (
-            <PlayerOptions session={session} pendingPreferences={playback.pendingPreferences} instruction={runtimePlayback?.instruction} onApply={reconfigure} />
+            <PlayerOptions
+              session={session}
+              pendingPreferences={playback.pendingPreferences}
+              instruction={runtimePlayback?.instruction}
+              capabilities={capabilities}
+              nodes={nodeChoices}
+              movingToNode={movingToNode}
+              onApply={reconfigure}
+              onSelectNode={onPinEndpoint ? selectNode : undefined}
+            />
           ) : (
             <div className="player-options player-options-loading" aria-live="polite">
               Playback options are loading. Transport controls remain available.
@@ -927,7 +1010,7 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
                 const seekKey = samsungControls
                   ? seekDirectionForKey(keyEvent.key, keyEvent.keyCode)
                   : undefined;
-                const commit = seekKey !== undefined || ['Home', 'End'].includes(keyEvent.key);
+                const commit = seekKey !== undefined || committingScrubberKey(keyEvent.key);
                 if (seekKey !== undefined) {
                   keyEvent.preventDefault();
                   keyEvent.stopPropagation();
@@ -1016,6 +1099,7 @@ export function PlayerHost(props: Props) {
       {...sessionProps}
       media={request.media}
       startPositionMs={request.startPositionMs}
+      returnTo={request.returnTo}
     />
   );
 }

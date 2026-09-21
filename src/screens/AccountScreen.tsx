@@ -11,6 +11,7 @@ import {
 } from '@machafoundation/core';
 import { useAsync } from '../hooks/useAsync';
 import { ErrorMessage, Loading } from '../components/Status';
+import { presentedTime } from '../diagnostics/timestamps';
 
 const ROLE_LABELS: Record<UserRole, string> = {
   media_viewer: 'View media',
@@ -22,7 +23,7 @@ const ROLE_LABELS: Record<UserRole, string> = {
 
 function when(unixMs: number | undefined): string {
   if (!unixMs) return 'Unknown';
-  return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(unixMs));
+  return presentedTime(unixMs);
 }
 
 /**

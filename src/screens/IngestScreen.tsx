@@ -8,6 +8,7 @@ import type {
 } from '@machafoundation/core';
 import { usePollingTask } from '../hooks/usePollingTask';
 import { errorMessage } from '@machafoundation/core';
+import { presentedTime } from '../diagnostics/timestamps';
 
 interface Props {
   api: AcquisitionApi;
@@ -55,7 +56,7 @@ function percent(progress: number | null, completed: number, total: number): num
 }
 
 function formatTimestamp(value: number): string {
-  return value > 0 ? new Date(value).toLocaleString() : '—';
+  return presentedTime(value);
 }
 
 // Elapsed time, floored: an ETA rounds up because it promises no earlier than

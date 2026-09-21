@@ -181,6 +181,10 @@
    for a viewer who cannot get in, not a second way in — but it must still take
    D-pad focus visibly, because on a television it is the only control besides
    the form itself. */
+/* The one sentence on this screen a viewer has to read: their credentials
+   worked and bought them nothing, so the form below cannot help them. Given
+   the accent rather than the body colour for that reason. */
+.login-lockout-notice { color: var(--accent); }
 .login-connection-escape { margin-top: 1.5rem; text-align: center; font-size: .85rem; }
 .login-connection-escape a { color: var(--text-muted, #9aa0a6); text-decoration: underline; }
 .login-connection-escape a:hover,

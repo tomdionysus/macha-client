@@ -44,6 +44,27 @@ export function seekDirectionForKey(key: string, keyCode: number): SeekDirection
 }
 
 /**
+ * Keys a range input moves itself on, and therefore keys whose release has to
+ * commit a seek.
+ *
+ * **The bug this exists to stop:** a focused scrubber moved its thumb on
+ * every arrow and page key — the browser's own behaviour, reported through
+ * `onChange` as a new preview position — while the commit only ever fired for
+ * a television's seek keys or Home/End. So on a keyboard the playhead drew in
+ * the new place and playback carried on where it was, until focus happened to
+ * leave and `onBlur` finally committed it. Measured on 2026-09-21: five
+ * `PageUp` presses moved the scrubber to 50% of a two-hour film and left the
+ * position at 59 s.
+ */
+export function committingScrubberKey(key: string): boolean {
+  return key === 'ArrowLeft' || key === 'ArrowRight'
+    || key === 'ArrowUp' || key === 'ArrowDown'
+    || key === 'Left' || key === 'Right' || key === 'Up' || key === 'Down'
+    || key === 'PageUp' || key === 'PageDown'
+    || key === 'Home' || key === 'End';
+}
+
+/**
  * Advance a hold by one key event, returning the signed distance to move and
  * the hold to carry into the next event. Reversing direction restarts the
  * ladder: changing your mind is a new search, not a continuation of the old

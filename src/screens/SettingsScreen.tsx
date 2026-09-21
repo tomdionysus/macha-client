@@ -8,6 +8,7 @@ import { routes } from '@machafoundation/core';
 import { clientVersion } from '../version';
 import { ConnectionForm } from '../components/ConnectionForm';
 import { failureTrailEnabled, setFailureTrailEnabled } from '../diagnostics/failureTrailSetting';
+import { presentedTime } from '../diagnostics/timestamps';
 
 interface Props {
   api: MediaApi;
@@ -34,7 +35,7 @@ function playbackState(status: ServerStatus | undefined): string {
 
 function formatLastSync(unixMs: number): string {
   if (!unixMs) return 'Never';
-  return new Date(unixMs).toLocaleString();
+  return presentedTime(unixMs);
 }
 
 export function SettingsScreen({ api, serverApi, bootstrapEndpoints, usingHost, connectionNotice, onSave }: Props) {

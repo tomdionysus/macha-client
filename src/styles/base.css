@@ -694,18 +694,73 @@ h2 { font-size: clamp(1.2rem, 2vw, 1.75rem); letter-spacing: -.01em; margin: 1.1
 .player-stream-status { flex: 0 0 auto; display: grid; justify-items: end; gap: .18rem; min-width: max-content; color: #9b9ba3; text-align: right; }
 .player-stream-status small { display: block; max-width: none; white-space: nowrap; }
 .player-options {
-  display: grid;
-  gap: .65rem;
-  max-height: min(34vh, 320px);
+  /* Two areas side by side, each packing its own rows: everything about
+     *what* the node sends on the left, *which node* sends it on the right.
+     Two areas rather than one grid, because a right-hand cell spanning every
+     row stretches the left rows apart to match its height — the controls end
+     up floating in space with the film showing between them. */
+  display: flex;
+  align-items: flex-start;
+  gap: 2rem;
   margin: 0 0 1rem;
   padding: .8rem 0 .2rem;
-  overflow-y: auto;
-  scrollbar-width: thin;
+}
+.player-options-controls {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 46rem;
+  display: grid;
+  gap: .65rem;
+  align-content: start;
 }
 .player-option-group { display: grid; grid-template-columns: 6.5rem 1fr; gap: .8rem; align-items: start; }
 .player-option-group > span { padding-top: .45rem; color: var(--text-faint); font-size: .78rem; text-transform: uppercase; letter-spacing: .08em; }
 .player-option-group > div { display: flex; flex-wrap: wrap; gap: .4rem; }
 .player-option-note { grid-column: 2; color: var(--text-faint); font-size: .75rem; line-height: 1.35; }
+/* The node group is the same group, mirrored: label on the right, pills
+   flush against the same edge as the `CONTAINER : origin` line above them.
+   Same grid, same pills, opposite hand — the format controls say what the
+   node sends, this says which node. */
+.player-options > .player-option-group-node {
+  flex: 0 1 auto;
+  width: min(26rem, 38%);
+  margin-left: auto;
+  grid-template-columns: auto;
+  gap: .4rem;
+  justify-items: end;
+  /* Two areas rather than one list with a straggler: the rule is the seam
+     between what the node sends and which node sends it. */
+  padding-left: 1.4rem;
+  border-left: 1px solid #ffffff12;
+}
+.player-option-group-node > span { grid-column: 1; padding-top: 0; }
+/* Stacked, one node per line: they are alternatives to each other, and a
+   wrapping row of them read as a sentence rather than a list. */
+.player-option-group-node > div {
+  grid-column: 1;
+  /* Pills wrap and justify against the right edge rather than running down
+     one per line: a dozen short names fit three or four to a row, the block
+     keeps a straight edge under the label, and the area stays as wide as it
+     is rather than as tall as the cluster. Bounded and scrolling for the
+     case where there really are dozens. */
+  flex-direction: row;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: flex-start;
+  width: 100%;
+  max-height: min(24vh, 200px);
+  overflow-y: auto;
+  scrollbar-width: thin;
+  padding-right: .15rem;
+}
+.player-option-group-node > .player-option-note { grid-column: 1; max-width: 13rem; text-align: right; }
+/* A host is not a word: `capitalize` turns macnessa.macha.network into
+   Macnessa.Macha.Network, which is not the name of anything. */
+.player-option-group.player-option-group-node button { text-transform: none; }
+/* The node you are on is disabled because there is nothing to ask for, not
+   because it is unavailable — so it keeps the highlight every other selected
+   pill has instead of being dimmed like a refusal. */
+.player-option-group.player-option-group-node button.selected:disabled { opacity: 1; }
 /* A fallback instruction is the one case here worth reading, so it is the one case that is not faint. */
 .player-option-warning { color: var(--accent); }
 .player-options-loading { color: var(--text-faint); font-size: .82rem; }
@@ -935,6 +990,23 @@ h2 { font-size: clamp(1.2rem, 2vw, 1.75rem); letter-spacing: -.01em; margin: 1.1
   .player-option-group { grid-template-columns: 1fr; gap: .25rem; }
   .player-option-group > span { padding-top: 0; }
   .player-option-note { grid-column: 1; }
+  /* One column leaves no right-hand side to sit on, so the node group stops
+     pretending there is one and reads like every other group. */
+  /* One column leaves no right-hand side to sit on, so the node group stops
+     pretending there is one and reads like every other group. */
+  .player-options { flex-direction: column; gap: .65rem; }
+  .player-options-controls { max-width: none; width: 100%; }
+  .player-options > .player-option-group-node {
+    width: 100%;
+    margin-left: 0;
+    justify-items: stretch;
+    padding-left: 0;
+    padding-top: .55rem;
+    border-left: 0;
+    border-top: 1px solid #ffffff12;
+  }
+  .player-option-group-node > div { justify-content: flex-start; align-items: center; max-height: 7.5rem; }
+  .player-option-group-node > .player-option-note { max-width: none; text-align: left; }
   .player-presentation-mini { left: .5rem; right: .5rem; bottom: .5rem; }
   .player-presentation-mini .player-host { width: 104px; }
   .player-presentation-mini .player-mini-chrome { left: 104px; }

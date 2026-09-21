@@ -14,6 +14,15 @@ interface Props {
    */
   onSignedIn: () => void | Promise<void>;
   /**
+   * Why this wall is standing here, when it is standing rather than sitting
+   * beside the application.
+   *
+   * A viewer whose account holds no roles cannot be helped by this form —
+   * their credentials were accepted and bought them nothing — so the screen
+   * has to say that rather than invite them to try the same thing again.
+   */
+  notice?: string;
+  /**
    * Whether there is anything to browse without signing in.
    *
    * False where the server grants the anonymous account no roles, which makes
@@ -90,7 +99,7 @@ function signInComplaint(cause: unknown): string {
  * application instead of beside it. The only difference is this one: what the
  * server permits decides which it is, not a separate screen or a build flag.
  */
-export function LoginScreen({ onSignIn, onSignedIn, guestAllowed = true, connectionReachable = false }: Props) {
+export function LoginScreen({ onSignIn, onSignedIn, guestAllowed = true, connectionReachable = false, notice }: Props) {
   const navigate = useNavigate();
   const location = useLocation();
   /**
@@ -143,9 +152,13 @@ export function LoginScreen({ onSignIn, onSignedIn, guestAllowed = true, connect
         <img className="connection-gate-logo" src={logoUrl} alt="" />
         <p className="eyebrow">Macha media client</p>
         <h1>Log in</h1>
-        <p>{guestAllowed
+        {/* The notice replaces the standing invitation rather than joining
+            it: a viewer whose account holds no roles is not here to be told
+            what signing in would buy them, because they have signed in and
+            it bought them nothing. */}
+        <p className={notice ? 'login-lockout-notice' : undefined} role={notice ? 'alert' : undefined}>{notice ?? (guestAllowed
           ? 'Sign in to reach everything your account allows, or browse as a guest.'
-          : 'This server requires an account. Sign in to continue.'}</p>
+          : 'This server requires an account. Sign in to continue.')}</p>
 
         <form className="connection-form" onSubmit={(event) => { event.preventDefault(); void submit(); }}>
           <label htmlFor="login-username">Username</label>

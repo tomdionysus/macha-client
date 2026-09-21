@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   accelerateSeek,
+  committingScrubberKey,
   SEEK_HOLD_RELEASE_MS,
   SEEK_LADDER_MS,
   SEEK_RUNG_ADVANCE_MS,
@@ -87,5 +88,23 @@ describe('seek acceleration', () => {
     const reversed = accelerateSeek(fast.hold, -1, fast.hold.lastEventAtMs + 100);
     expect(reversed.deltaMs).toBe(-1_000);
     expect(reversed.hold.startedAtMs).toBe(fast.hold.lastEventAtMs + 100);
+  });
+});
+
+describe('committingScrubberKey', () => {
+  it('commits every key a range input moves itself on', () => {
+    for (const key of ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End']) {
+      expect(committingScrubberKey(key)).toBe(true);
+    }
+  });
+
+  it('commits the older key names a television sends', () => {
+    for (const key of ['Left', 'Right', 'Up', 'Down']) expect(committingScrubberKey(key)).toBe(true);
+  });
+
+  it('leaves keys the scrubber does not move on alone', () => {
+    for (const key of ['Enter', ' ', 'Escape', 'Tab', 'a', 'F5']) {
+      expect(committingScrubberKey(key)).toBe(false);
+    }
   });
 });

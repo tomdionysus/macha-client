@@ -6,7 +6,10 @@ import type {
   PlaybackStreamInfo,
   PlaybackUpdate,
 } from '@machafoundation/core';
-import type { PlaybackMode } from '@machafoundation/core';
+import type { PlaybackCapabilities, PlaybackMode } from '@machafoundation/core';
+import { useEffect, useRef } from 'react';
+import type { PlayerNodeChoice } from './nodeChoices';
+import { modeRequest } from './modeTransforms';
 
 function streamLabel(stream: PlaybackStreamInfo, fallback: string): string {
   const parts = [stream.language ? stream.language.toUpperCase() : fallback, stream.codec.toUpperCase()];
@@ -14,13 +17,6 @@ function streamLabel(stream: PlaybackStreamInfo, fallback: string): string {
   if (stream.forced) parts.push('forced');
   return parts.join(' · ');
 }
-
-/** What each mode means per stream, in the server's own terms. */
-const MODE_TRANSFORMS: Record<PlaybackMode, { video: 'copy' | 'transcode'; audio: 'copy' | 'transcode' }> = {
-  direct: { video: 'copy', audio: 'copy' },
-  remux: { video: 'copy', audio: 'copy' },
-  transcode: { video: 'transcode', audio: 'transcode' },
-};
 
 const REASON_TEXT: Record<PlaybackDecisionReason, string> = {
   'source-plays-as-is': 'this device plays the file as it is',
@@ -102,11 +98,18 @@ function assumptionNote(instruction: PlaybackInstructionReport | undefined): str
   return `Decided without: ${instruction.assumed.join(', ')}.`;
 }
 
-export function PlayerOptions({ session, pendingPreferences, instruction, onApply }: {
+export function PlayerOptions({ session, pendingPreferences, instruction, capabilities, nodes = [], movingToNode, onApply, onSelectNode }: {
   session: PlaybackSession;
+  /** What this device can actually decode, which decides what remux may copy. */
+  capabilities?: PlaybackCapabilities;
   pendingPreferences?: PlaybackPreferencesUpdate;
   instruction?: PlaybackInstructionReport;
+  /** Every node this client knows, already in a stable display order. */
+  nodes?: readonly PlayerNodeChoice[];
+  /** The node a move is in flight to, so the pill can say so rather than look ignored. */
+  movingToNode?: string;
   onApply: (update: PlaybackUpdate) => void;
+  onSelectNode?: (nodeId: string) => void;
 }) {
   const effectivePreferences = { ...session.preferences, ...pendingPreferences };
   const selectedAudio = pendingPreferences?.audioStream ?? session.selected.audioStream;
@@ -129,18 +132,30 @@ export function PlayerOptions({ session, pendingPreferences, instruction, onAppl
   // place. The server then reads the result as a contradiction and refuses the
   // whole update: "direct serves the source file untouched and copies every
   // stream". The viewer pressed one button and got an error about a request
-  // they did not make. Direct and remux copy both streams by definition, and
-  // transcode as a viewer's explicit choice means re-encode, not re-encode
-  // whatever the last instruction left alone; saying so outright leaves
-  // nothing to be merged with, and nothing to disagree about.
+  // they did not make. Saying the whole transform outright leaves nothing to
+  // be merged with, and nothing to disagree about.
+  //
+  // What it says is `modeTransform`'s to decide, and remux is the one that
+  // has a decision: copying audio this device cannot decode is how a mode
+  // press turned into a node that never produced a first fragment. See there
+  // for the measurement.
+  const audioCodec = session.options.audioStreams.find((stream) => stream.index === selectedAudio)?.codec
+    ?? session.output.audio?.codec;
   const mode = (value: PlaybackMode | 'choose') => onApply({
-    preferences: value === 'choose' ? { mode: value } : { mode: value, ...MODE_TRANSFORMS[value] },
+    preferences: value === 'choose' ? { mode: value } : modeRequest(value, audioCodec, capabilities),
   });
   const chosenByViewer = effectivePreferences.mode !== undefined && effectivePreferences.mode !== 'choose';
+  // With dozens of nodes the one you are on can be off the bottom of its own
+  // list, which reads as no node being selected at all.
+  const activeNodeRef = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => {
+    activeNodeRef.current?.scrollIntoView?.({ block: 'nearest' });
+  }, [nodes]);
   const preferences = (update: PlaybackPreferencesUpdate) => onApply({ preferences: update });
 
   return (
     <div className="player-options" aria-label="Playback options">
+      <div className="player-options-controls">
       <div className="player-option-group">
         <span>Mode</span>
         <div>
@@ -188,6 +203,38 @@ export function PlayerOptions({ session, pendingPreferences, instruction, onAppl
       {session.options.canSwitchMedia && session.options.mediaIds.length > 1 && <div className="player-option-group">
         <span>Source</span>
         <div>{session.options.mediaIds.map((mediaId, index) => <button type="button" key={mediaId} data-tv-focusable="true" className={session.mediaId === mediaId ? 'selected' : undefined} title={mediaId} onClick={() => onApply({ mediaId })}>Source {index + 1}</button>)}</div>
+      </div>}
+      </div>
+
+      {/* Right-hand side, unlike everything above it, and that placement is
+          the point: the format controls change what the node sends, this
+          changes which node sends it. It is also where the node already
+          appears — the `CONTAINER : origin` line in the title bar is
+          right-aligned, so the answer and the control that changes it sit on
+          the same edge. */}
+      {onSelectNode && nodes.length > 1 && <div className="player-option-group player-option-group-node">
+        <span>Node</span>
+        <div>
+          {nodes.map((node) => (
+            <button
+              type="button"
+              key={node.id}
+              ref={node.active ? activeNodeRef : undefined}
+              data-tv-focusable="true"
+              className={node.active ? 'selected' : undefined}
+              title={node.detail}
+              disabled={node.active || node.id === movingToNode}
+              onClick={() => onSelectNode(node.id)}
+            >
+              {node.label}
+            </button>
+          ))}
+        </div>
+        <small className="player-option-note">
+          {movingToNode
+            ? 'Moving this stream to the node you picked, from where you are now…'
+            : 'Plays from the node you pick, at the position you are at. Recovery still moves you off a node that fails.'}
+        </small>
       </div>}
     </div>
   );
