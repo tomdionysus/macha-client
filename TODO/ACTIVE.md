@@ -17,13 +17,13 @@ are related. Core is addressed as the `Macha NPM Core` session.
 
 ## Start here
 
-**Where the repo is.** `develop` is at `dca9788`, six commits ahead of `main`
-(`2b1bbaa`). The last tag is **0.17.3** (`9409780`, on `main`). **0.18.0 is a
-version number on `develop`, not a release**: `5b8bff5` bumps `package.json`,
-carries the five changes `CHANGELOG.md` lists under that number, is pushed,
-and is neither tagged nor merged. It cannot be merged as it stands, because
-`develop` links core (`file:../macha-ts`) while `main` pins `^0.14.0` — the
-gate is in the core section below. The working tree is clean apart from
+**Where the repo is.** **0.18.0 is released on `main`**, which resolves
+`@machafoundation/core` as `^0.18.0` from the registry, with the gate below
+passed against that copy: no symlink, typecheck clean, 461 tests green, and
+`vite build` producing `index-CKNh5Q9D.js`. `develop` carries the same tree
+with the core link restored, which is how core and this client are developed
+together. **It is not tagged** — the `0.18.0` tag is Tom's to cut, and every
+release before it has one. The working tree is clean apart from
 `CLAUDE.local.md` and `basemind.toml`, which are untracked on purpose.
 
 **What the nodes serve, verified at the time of writing.** All five hosts —
@@ -47,16 +47,23 @@ change entries below: the transcode entitlement is released after **five
 minutes** idle rather than held for the session's thirty, and the per-account
 cap has replaced one-session-per-bearer (server 0.48.0).
 
-**Core.** Linked to `../macha-ts` at **`aab8028`**, clean, `dist`
-`ff5d065c5da7` by core's own `npm run dist:hash`. That is three commits past
-`5077468`, which the last local build and the handover document were measured
-against, and one of the three changes behaviour in `src`: `76d94ba`, node
-identity claimed through `claimNodeId` rather than announced through
+**Core is published at 0.18.0**, which is `latest` on the registry and what
+`main` resolves. It carries everything this client compiles against —
+`prefer()`, `moveTo()`, `claimNodeId()`, `SOURCE_SUPERSEDED_STATUS`,
+`playbackFailureDetail()` — each confirmed present in the *published tarball*
+rather than in the tree beside it. It includes `76d94ba`, where node identity
+is claimed through `claimNodeId` rather than announced through
 `applyAdvertisement`, because the latter states membership and deleted the
-cluster. **The suite and typecheck are green against it** — 461 tests across
-56 files, run for this rationalisation — and nothing has been built for a node
-or run against one with it. The registry still ends at **0.14.0**; core's tree
-calls itself 0.17.0 and that number is not published.
+cluster; that is what makes the first job below a deletion.
+
+**The published copy and the linked tree both answered `0.18.0` at the moment
+of the cutover, and that is the trap, not a reassurance.** The first
+`npm install` on `main` left the symlink in place — `package-lock.json` still
+held `"link": true` against `../macha-ts`, so npm reused it, and
+`require(...).version` cheerfully agreed because core's local tree had also
+reached 0.18.0. Only `test -L` caught it. The lockfile entry had to go before
+npm would fetch the tarball. **A version check agreed with a stale link,
+live**, which is the failure this file has described twice in the abstract.
 
 **Verified live on 2026-09-21, and nothing since:** the picture surviving a
 mode switch and a failover (0.17.3), and all five 0.18.0 changes, each against
@@ -285,11 +292,10 @@ would disagree about the same generation.
 
 **Read `package.json` rather than this paragraph** — this section has been
 wrong about the resolution three times, which is the failure mode the rest of
-it is about. As this is written, `develop` has `@machafoundation/core` as
-`file:../macha-ts`, `node_modules/@machafoundation/core` is a symlink to that
-tree, and `main` pins `^0.14.0`. The registry's `latest` is 0.14.0; core's
-tree calls itself 0.17.0 and `npm view @machafoundation/core versions` does
-not list it.
+it is about. As this is written, `main` has `@machafoundation/core` as
+`^0.18.0` and installs a real directory from the registry; `develop` has
+`file:../macha-ts` and a symlink to core's working tree. The registry's
+`latest` is **0.18.0**.
 
 **Tom's ruling, 2026-09-20 and again 2026-09-21.** A direct link to core's
 tree during development is **fine** — *"we're nowhere near ready to publish
@@ -318,10 +324,17 @@ amended back before it mattered. Concretely, before any merge to `main`:
    pointed at.
 4. Then merge and push — Tom's action, on his request.
 
-Today that gate cannot be passed: `develop` compiles against symbols
-(`SOURCE_SUPERSEDED_STATUS`, `prefer()`, `claimNodeId`, `moveTo`) that exist
-in no published core. **0.18.0 waits on core publishing**, and the number it
-will pin is whatever core publishes the current tree as.
+**The gate was run for 0.18.0 and it caught something**, which is the
+argument for step 2 rather than a formality. Deleting
+`node_modules/@machafoundation/core` and running `npm install` was not enough:
+`package-lock.json` carried a `"link": true` entry resolved at `../macha-ts`,
+so npm recreated the symlink, and the version check agreed with it because
+core's linked tree had reached 0.18.0 too. `test -L` was the only thing that
+failed. Removing the two lockfile entries — `../macha-ts` and
+`node_modules/@machafoundation/core` — and reinstalling produced a real
+directory with a registry `resolved` URL and an integrity hash. **Check the
+lockfile for `"link": true`, not only the symlink**, and the symbols in the
+published tarball rather than in the tree beside it.
 
 **Identify a linked core by SHA and `dist` hash, never by its version.** A
 link resolves the *working tree*, not a commit, so the identity of what this
