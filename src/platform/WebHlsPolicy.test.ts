@@ -11,6 +11,8 @@ import {
   managedHlsErrorAction,
   SEGMENT_NOT_READY_STATUS,
   SOURCE_NOT_FOUND_STATUS,
+  SOURCE_SUPERSEDED_STATUS,
+  isSourceGoneStatus,
 } from './WebHlsPolicy';
 
 describe('managed HLS error policy', () => {
@@ -244,5 +246,47 @@ describe('managed HLS error policy', () => {
     // misreading every error.
     expect(SEGMENT_NOT_READY_STATUS).toBe(500);
     expect(SOURCE_NOT_FOUND_STATUS).toBe(404);
+    expect(SOURCE_SUPERSEDED_STATUS).toBe(410);
+  });
+});
+
+describe('a superseded generation is gone, not a sick node', () => {
+  // The server is moving playback sessions to a REST resource and will answer
+  // `410 generation_superseded` for a generation that has been replaced. Core
+  // maps 410 onto its existing `not-found` kind rather than adding a seventh:
+  // the required action is identical — the object is gone, the node is fine,
+  // ask the session route — and a new kind would put that obligation behind a
+  // value existing hosts meet as `default`.
+  //
+  // A 410 on a *segment* never reaches core as a status. hls.js raises it and
+  // this classifier sorts it first, so without a branch here it falls to the
+  // network-degradation default and is reported as `stream`, which core reads
+  // as evidence against the endpoint — a healthy node condemned for answering
+  // a question about a generation correctly.
+  const superseded = { type: Hls.ErrorTypes.NETWORK_ERROR, response: { code: 410 } };
+
+  it('reads a 410 fragment as a source the node no longer has', () => {
+    expect(isHlsSourceNotFound(superseded)).toBe(true);
+  });
+
+  it('keeps a 410 out of node-health evidence', () => {
+    expect(isHlsNetworkDegradation(superseded)).toBe(false);
+  });
+
+  it('fails a fatal 410 as not-found, so the presentation is not torn down', () => {
+    const action = managedHlsErrorAction(
+      { ...superseded, fatal: true, details: 'fragLoadError' },
+      new ManagedHlsMediaRecoveryBudget(),
+      12_000,
+    );
+    expect(action.action).toBe('fail-not-found');
+  });
+
+  it('answers for both gone statuses and nothing else', () => {
+    expect(isSourceGoneStatus(404)).toBe(true);
+    expect(isSourceGoneStatus(410)).toBe(true);
+    expect(isSourceGoneStatus(500)).toBe(false);
+    expect(isSourceGoneStatus(503)).toBe(false);
+    expect(isSourceGoneStatus(undefined)).toBe(false);
   });
 });

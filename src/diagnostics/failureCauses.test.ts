@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { failureCauseMessages } from './failureCauses';
+import { accountSessionLimitNotice, failureCauseMessages } from './failureCauses';
 
 describe('the failures beneath the one being named', () => {
   it('reads out the chain core attached, in the order it happened', () => {
@@ -41,5 +41,33 @@ describe('the failures beneath the one being named', () => {
   it('has nothing to say about something that is not an error', () => {
     expect(failureCauseMessages(undefined)).toEqual([]);
     expect(failureCauseMessages('a string that got thrown')).toEqual([]);
+  });
+});
+
+describe('a cap refusal is about the account, not the node', () => {
+  // The server's session change brings a per-account cap answering
+  // `429 account_session_limit`. Nothing here misclassifies it — this client
+  // creates no playback session and reads no status off a caught error — but
+  // "Playback failed" in front of a node that is working exactly as designed
+  // reads as a breakage, and sends a viewer to check a server that is fine.
+  //
+  // The match is core's (`isAccountSessionLimit` walks the chain, cycle-safe)
+  // rather than a code string matched here, because the code is core's to
+  // track and four clients matching it separately is how they drift.
+  it('names the account when core says the cap refused', () => {
+    const refusal = new Error('Macha playback request failed');
+    (refusal as { code?: string }).code = 'account_session_limit';
+    expect(accountSessionLimitNotice(refusal)).toMatch(/account/i);
+  });
+
+  it('finds it beneath a wrapper that states no code of its own', () => {
+    const inner = new Error('refused');
+    (inner as { code?: string }).code = 'account_session_limit';
+    expect(accountSessionLimitNotice(new Error('Macha playback request failed', { cause: inner }))).toMatch(/account/i);
+  });
+
+  it('says nothing about an ordinary failure', () => {
+    expect(accountSessionLimitNotice(new Error('The node did not serve the first fragment'))).toBeUndefined();
+    expect(accountSessionLimitNotice(undefined)).toBeUndefined();
   });
 });

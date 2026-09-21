@@ -1,3 +1,5 @@
+import { isAccountSessionLimit } from '@machafoundation/core';
+
 /**
  * The failures beneath the one a screen is naming, in the order they happened.
  *
@@ -37,4 +39,25 @@ export function failureCauseMessages(error: unknown): string[] {
     next = next.cause;
   }
   return messages;
+}
+
+/**
+ * The one playback failure a viewer can actually act on, said in those terms.
+ *
+ * The server's per-account session cap answers `429 account_session_limit`, and
+ * what reaches this screen otherwise is core's message — *"Macha playback
+ * request failed"* — in front of a node that is behaving exactly as designed.
+ * That reads as a breakage and sends somebody to check a server that is fine.
+ *
+ * **The match is core's, deliberately.** `isAccountSessionLimit` walks the
+ * cause chain cycle-safe and owns the code string; four clients each matching
+ * that string themselves is how they drift apart, and this client would be the
+ * one that kept matching it after core changed it.
+ *
+ * Worth more here than on a television: this screen has an address bar behind
+ * it, so a viewer told which screen to close has somewhere to go.
+ */
+export function accountSessionLimitNotice(error: unknown): string | undefined {
+  if (!isAccountSessionLimit(error)) return undefined;
+  return 'This account already has as many things playing as it is allowed. Stop playback on another screen and try again.';
 }

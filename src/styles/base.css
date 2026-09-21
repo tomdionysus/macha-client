@@ -780,6 +780,10 @@ h2 { font-size: clamp(1.2rem, 2vw, 1.75rem); letter-spacing: -.01em; margin: 1.1
 }
 .player-fatal-error strong { color: #dedee2; font-size: 1.05rem; }
 .player-fatal-error span { color: #ffb4b4; overflow-wrap: anywhere; }
+/* The account's cap refusing, which is the one failure here a viewer can act
+   on. Brighter than the message beneath it, because it is the sentence that
+   sends them to the right place rather than to check a healthy server. */
+.player-fatal-error .player-failure-notice { color: #f2dede; }
 /* The failures underneath the one being named. Dimmer than the head, because
    the head is what happened and these are what it led to — present without
    competing with it. */

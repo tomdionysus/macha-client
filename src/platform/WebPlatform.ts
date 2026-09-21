@@ -28,9 +28,9 @@ import {
   isHlsNetworkDegradation,
   isHlsSegmentHold,
   isHlsSourceNotFound,
+  isSourceGoneStatus,
   managedHlsErrorAction,
   SEGMENT_NOT_READY_STATUS,
-  SOURCE_NOT_FOUND_STATUS,
   webHlsBufferConfig,
 } from './WebHlsPolicy';
 import {
@@ -217,13 +217,20 @@ export interface NativeHlsReadiness {
   ready: boolean;
   /** Why not, in the terms the node stated it. */
   reason?: string;
+  /**
+   * The refusal was about the object rather than the node: 404, or 410 for a
+   * generation that has been superseded. Reported separately because the two
+   * demand opposite things of the caller — one asks for a new generation, the
+   * other is evidence against the endpoint.
+   */
+  gone: boolean;
   waitedMs: number;
   attempts: number;
 }
 
 type FragmentProbe =
   | { ready: true }
-  | { ready: false; hold: boolean; reason: string; retryMs?: number };
+  | { ready: false; hold: boolean; gone?: boolean; reason: string; retryMs?: number };
 
 function statedRetryMs(response: Response): number | undefined {
   const stated = response.headers.get('Retry-After');
@@ -237,6 +244,7 @@ function refusal(response: Response, what: string): FragmentProbe {
   return {
     ready: false,
     hold: response.status === SEGMENT_NOT_READY_STATUS,
+    gone: isSourceGoneStatus(response.status),
     reason: `${what} answered ${response.status}`,
     retryMs: statedRetryMs(response),
   };
@@ -309,6 +317,7 @@ export async function awaitNativeHlsFirstFragment(
   const deadline = started + timeoutMs;
   let attempts = 0;
   let reason = 'superseded before the node was asked';
+  let gone = false;
   while (!superseded()) {
     attempts += 1;
     let probe: FragmentProbe;
@@ -319,8 +328,9 @@ export async function awaitNativeHlsFirstFragment(
       // never about the fragment, so it is not something to wait out.
       probe = { ready: false, hold: false, reason: error instanceof Error ? error.message : String(error) };
     }
-    if (probe.ready) return { ready: true, waitedMs: now() - started, attempts };
+    if (probe.ready) return { ready: true, gone: false, waitedMs: now() - started, attempts };
     reason = probe.reason;
+    gone = probe.gone ?? false;
     if (!probe.hold) break;
     const retryMs = probe.retryMs ?? NATIVE_HLS_HOLD_RETRY_MS;
     if (now() + retryMs >= deadline) {
@@ -329,7 +339,7 @@ export async function awaitNativeHlsFirstFragment(
     }
     await sleep(retryMs);
   }
-  return { ready: false, reason, waitedMs: now() - started, attempts };
+  return { ready: false, reason, gone, waitedMs: now() - started, attempts };
 }
 
 /**
@@ -1016,9 +1026,16 @@ class WebPlayer implements Player {
         if (readiness.attempts > 1) this.log.warn('hls-native-first-fragment-held', waited);
         else this.log.info('hls-native-first-fragment', waited);
         if (!readiness.ready) {
+          // A generation that is gone is not a node that is unwell, and the
+          // difference decides whether this endpoint is condemned or asked for
+          // a replacement. `not-found` also carries the obligation not to tear
+          // the presentation down, which is what keeps the picture up while
+          // core regenerates.
           this.failSourceGeneration(
             sourceGeneration,
-            new PlaybackSourceError(`The node did not serve the first fragment: ${readiness.reason}.`, 'stream'),
+            readiness.gone
+              ? new PlaybackSourceError(`The node no longer has this generation: ${readiness.reason}.`, 'not-found')
+              : new PlaybackSourceError(`The node did not serve the first fragment: ${readiness.reason}.`, 'stream'),
             readiness,
           );
           return false;
@@ -1039,12 +1056,13 @@ class WebPlayer implements Player {
         this.unsubscribeDirectDegradation = subscribeDirectPlayReadAheadFailure(source.url, (error) => {
           // The Direct Play half of the same judgement the managed-HLS error
           // handler makes. A 404 means the node has no record of this source —
-          // a reaped session, or a range past the end of what it covers — and
-          // it is not evidence against the node. Without this the worker's
+          // a reaped session, or a range past the end of what it covers — and a
+          // 410 means the generation it belonged to has been superseded.
+          // Neither is evidence against the node. Without this the worker's
           // failure arrives as `stream`, the node is condemned for answering
           // honestly, and a session that only needed re-creating takes the
           // viewer to a failure screen naming somewhere else entirely.
-          if (error.status === SOURCE_NOT_FOUND_STATUS) {
+          if (isSourceGoneStatus(error.status)) {
             this.degradeSourceNotFound(
               sourceGeneration,
               new PlaybackSourceError(error.message, 'not-found', error),

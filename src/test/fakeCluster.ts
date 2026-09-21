@@ -17,6 +17,13 @@ export interface WireSessionOverrides {
  * server contract `MachaPlaybackResolver` parses. Transformed modes get an
  * `.m3u8` stream URL so a queued session can also stand in for HLS manifest
  * admission.
+ *
+ * **The stream URL is the post-2026-09-21 route**, where a stream is a
+ * subresource of its session — `/sessions/{id}/stream/{token}/...` — rather
+ * than the removed top-level `/playback/stream/{id}/{token}/...`. It is written
+ * out here so the fake describes the wire a node actually serves; nothing in
+ * this client parses it, which is the property the route-shape tests assert
+ * rather than assume.
  */
 export function wireSession(id: string, overrides: WireSessionOverrides = {}): unknown {
   const mode = overrides.mode ?? 'direct';
@@ -37,7 +44,9 @@ export function wireSession(id: string, overrides: WireSessionOverrides = {}): u
     source: { path: '/movie', format: transformed ? 'matroska' : 'mp4', size: 1_000_000, bitrate: 1_000_000, streams: [] },
     output: {},
     stream: {
-      url: transformed ? `/api/v1/playback/stream/${id}/index.m3u8` : `/api/v1/playback/stream/${id}`,
+      url: transformed
+        ? `/api/v1/playback/sessions/${id}/stream/cap/1/index.m3u8`
+        : `/api/v1/playback/sessions/${id}/stream/cap/direct`,
       mime_type: transformed ? 'application/vnd.apple.mpegurl' : 'video/mp4',
       subtitle_url: null,
     },

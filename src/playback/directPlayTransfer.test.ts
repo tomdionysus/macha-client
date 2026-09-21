@@ -132,7 +132,7 @@ describe('direct play media throughput reporting', () => {
  */
 let sourceSequence = 0;
 function subscribedSource(): string {
-  const sourceUrl = `http://node-a.test:7438/api/v1/playback/stream/s${sourceSequence += 1}/direct`;
+  const sourceUrl = `http://node-a.test:7438/api/v1/playback/sessions/s${sourceSequence += 1}/stream/cap/direct`;
   releaseDirectPlayReadAhead(sourceUrl);
   directPlayReadAheadUrl({
     mediaId: 'm1', url: sourceUrl, isManifest: false, mimeType: 'video/mp4',

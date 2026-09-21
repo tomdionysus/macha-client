@@ -627,6 +627,29 @@ describe('Web HLS standby preflight', () => {
   });
 });
 
+describe('the stream route is the server\'s to choose', () => {
+  // The server moved streams under their session on 2026-09-21 and removed the
+  // old top-level route outright, with no dual-serve window. That is a no-op
+  // for this client only for as long as it composes no path of its own and
+  // resolves what the node hands it. Asserted rather than believed: a future
+  // hardcoded path fails here instead of on a node.
+  const playlist = ['#EXTM3U', '#EXT-X-MAP:URI="init.mp4"', '#EXTINF:4,', 'segment-0.m4s'].join('\n');
+
+  it('resolves a playlist against whatever route served it', () => {
+    const removed = 'https://node.test/api/v1/playback/stream/abc/cap/1/index.m3u8';
+    const current = 'https://node.test/api/v1/playback/sessions/abc/stream/cap/1/index.m3u8';
+
+    expect(webHlsPreflightTargets(playlist, removed).mediaUrls).toEqual([
+      'https://node.test/api/v1/playback/stream/abc/cap/1/init.mp4',
+      'https://node.test/api/v1/playback/stream/abc/cap/1/segment-0.m4s',
+    ]);
+    expect(webHlsPreflightTargets(playlist, current).mediaUrls).toEqual([
+      'https://node.test/api/v1/playback/sessions/abc/stream/cap/1/init.mp4',
+      'https://node.test/api/v1/playback/sessions/abc/stream/cap/1/segment-0.m4s',
+    ]);
+  });
+});
+
 describe('native HLS first-fragment readiness', () => {
   const manifest = '#EXTM3U\n#EXT-X-PLAYLIST-TYPE:EVENT\n#EXTINF:6,\nsegment-0.ts';
   const controllable = () => {
@@ -657,6 +680,32 @@ describe('native HLS first-fragment readiness', () => {
     // The node stated one second twice, and was believed both times.
     expect(host.slept).toEqual([1_000, 1_000]);
     expect(new Headers(fetchImpl.mock.calls[1][1]?.headers).get('range')).toBe('bytes=0-0');
+  });
+
+  it('reports a superseded generation as gone rather than as the node failing', async () => {
+    // The route move brings `410 generation_superseded`, and the native path
+    // reaches it through the preflight rather than through hls.js. Without a
+    // `gone` flag here the caller reports `stream`, which core reads as
+    // evidence against an endpoint that answered correctly — the same fault as
+    // the classifier's, on the one target that cannot be watched any other way.
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(new Response(manifest, { status: 200 }))
+      .mockResolvedValueOnce(new Response('{"code":"generation_superseded"}', { status: 410 }));
+    const host = controllable();
+
+    await expect(awaitNativeHlsFirstFragment('https://node-b.test/g/media.m3u8', { fetchImpl, ...host.options }))
+      .resolves.toMatchObject({ ready: false, gone: true, reason: 'fragment answered 410' });
+    expect(host.slept).toEqual([]);
+  });
+
+  it('does not call an ordinary refusal gone', async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(new Response(manifest, { status: 200 }))
+      .mockResolvedValueOnce(new Response('{"code":"stream_failed"}', { status: 503 }));
+    const host = controllable();
+
+    await expect(awaitNativeHlsFirstFragment('https://node-b.test/g/media.m3u8', { fetchImpl, ...host.options }))
+      .resolves.toMatchObject({ ready: false, gone: false });
   });
 
   it('never waits on a broken generation, which is the one thing that is node evidence', async () => {

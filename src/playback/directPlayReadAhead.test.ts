@@ -5,12 +5,30 @@ import type { PlaybackSource } from '@machafoundation/core';
 function source(): PlaybackSource {
   return {
     mediaId: 'file:test',
-    url: 'https://node.test/api/v1/playback/stream/session/cap/secret/file.mkv',
+    url: 'https://node.test/api/v1/playback/sessions/session/stream/cap/direct',
     isManifest: false, mimeType: 'video/x-matroska',
     mode: 'direct',
     sizeBytes: 1024 * 1024 * 1024,
   };
 }
+
+describe('the read-ahead carries the node\'s URL rather than rebuilding it', () => {
+  // The proxy URL is same-origin and the node's URL rides on it as a parameter,
+  // so a server that moves its stream routes moves nothing here. The worker
+  // only checks that what it was handed parses as http(s).
+  it('puts either route shape through verbatim', () => {
+    for (const url of [
+      'https://node.test/api/v1/playback/stream/abc/cap/direct',
+      'https://node.test/api/v1/playback/sessions/abc/stream/cap/direct',
+    ]) {
+      const proxy = new URL(buildDirectPlayReadAheadProxyUrl('key-1', 'https://client.test', {
+        mediaId: 'file:test', url, isManifest: false, mimeType: 'video/x-matroska', mode: 'direct', sizeBytes: 1_024,
+      }));
+      expect(proxy.origin).toBe('https://client.test');
+      expect(proxy.searchParams.get('source')).toBe(url);
+    }
+  });
+});
 
 describe('Direct Play read-ahead client', () => {
   afterEach(() => vi.unstubAllGlobals());

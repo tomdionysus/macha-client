@@ -61,7 +61,7 @@ function emit(video: { listeners: Map<string, Set<(event: Event) => void>> }, ty
 
 const directSource: PlaybackSource = {
   mediaId: 'm1',
-  url: 'https://node.test/api/v1/playback/stream/session/cap/file.mkv',
+  url: 'https://node.test/api/v1/playback/sessions/session/stream/cap/direct',
   isManifest: false,
   mimeType: 'video/x-matroska',
   mode: 'direct',

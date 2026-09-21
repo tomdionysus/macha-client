@@ -16,7 +16,7 @@ import { uiSettings } from '../settings';
 import { describePlaybackSession } from '@machafoundation/core';
 import { playbackFailureTrail, type PlaybackFailureTrailEntry } from './player/failureTrail';
 import { failureTrailEnabled } from '../diagnostics/failureTrailSetting';
-import { failureCauseMessages } from '../diagnostics/failureCauses';
+import { accountSessionLimitNotice, failureCauseMessages } from '../diagnostics/failureCauses';
 import { bufferedTimelineSegments } from '@machafoundation/core';
 import type { MediaSummary, PlaybackEvent, PlaybackProgress } from '@machafoundation/core';
 import { PlayerOptions } from './player/PlayerOptions';
@@ -793,6 +793,13 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
       {fatalError && (
         <div className="player-fatal-error" role="alert">
           <strong>Playback failed</strong>
+          {/* The account's own cap refusing is the one failure here that names
+              something a viewer can do, and it is not about this node. Led with
+              so it is not read as a breakage; core's message still follows,
+              because it is what they would quote in a report. */}
+          {accountSessionLimitNotice(fatalError) && (
+            <span className="player-failure-notice">{accountSessionLimitNotice(fatalError)}</span>
+          )}
           <span>{fatalError.message}</span>
           {/* What core chained beneath it. The head names the failure that
               started the recovery; these are the attempts that ended it, and

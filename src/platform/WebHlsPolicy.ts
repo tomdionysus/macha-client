@@ -13,6 +13,8 @@ import type { ManagedHlsMediaRecoveryBudget, ManagedHlsMediaRecoveryDecision } f
 import {
   SEGMENT_NOT_READY_STATUS as coreSegmentNotReadyStatus,
   SOURCE_NOT_FOUND_STATUS as coreSourceNotFoundStatus,
+  SOURCE_SUPERSEDED_STATUS as coreSourceSupersededStatus,
+  playbackFailureKindForStatus,
 } from '@machafoundation/core';
 
 export function webHlsBufferConfig(): Record<string, number | boolean> {
@@ -100,6 +102,37 @@ export const SEGMENT_NOT_READY_STATUS = coreSegmentNotReadyStatus;
  */
 export const SOURCE_NOT_FOUND_STATUS = coreSourceNotFoundStatus;
 
+/**
+ * `410 generation_superseded`: the generation has been replaced, and the node
+ * saying so is working perfectly.
+ *
+ * From core, like its sibling above, and for the same reason: two clients
+ * holding private copies of a server constant is how the stall budget went
+ * wrong. It was briefly local here — this client had to carry the tolerance
+ * before any node answers 410, which is the sequencing in the server's plan —
+ * and that lasted exactly as long as it took to link core's tree.
+ */
+export const SOURCE_SUPERSEDED_STATUS = coreSourceSupersededStatus;
+
+/**
+ * Whether a status says *this object is gone* rather than *this node is unwell*.
+ *
+ * **The mapping is core's and is asked for rather than repeated here.** Which
+ * statuses mean what is a property of the server contract that every client
+ * must agree on, so `playbackFailureKindForStatus` is the authority and this
+ * only narrows for the one thing that is web-specific: hls.js hands over
+ * `response.code` as `unknown`, and a payload carrying no status at all must
+ * not be read as a gone source.
+ *
+ * Written as a question about the *kind* rather than a list of statuses so the
+ * next one core adds arrives here for free — which is exactly what did not
+ * happen when `410` was added, and what left this classifier condemning healthy
+ * nodes until it was found by hand.
+ */
+export function isSourceGoneStatus(status: unknown): boolean {
+  return typeof status === 'number' && playbackFailureKindForStatus(status) === 'not-found';
+}
+
 type HlsErrorShape = { type?: unknown; response?: { code?: unknown } | null };
 
 /**
@@ -115,8 +148,9 @@ export function isHlsSegmentHold(data: HlsErrorShape): boolean {
 }
 
 /**
- * The node declined to serve this source. Not a fault in the node, and never
- * evidence against it.
+ * The node declined to serve this source — it has no record of it (404), or the
+ * generation it belonged to has been superseded (410). Not a fault in the node,
+ * and never evidence against it.
  *
  * Reached on the *nonfatal* events, which is the point: `response.code` is
  * populated on the very first one, so a source that has gone away is knowable
@@ -124,13 +158,13 @@ export function isHlsSegmentHold(data: HlsErrorShape): boolean {
  * 2026-09-17 the first of these arrived 3.7 s before the viewer pressed play.
  */
 export function isHlsSourceNotFound(data: HlsErrorShape): boolean {
-  return data.type === HLS_NETWORK_ERROR && data.response?.code === SOURCE_NOT_FOUND_STATUS;
+  return data.type === HLS_NETWORK_ERROR && isSourceGoneStatus(data.response?.code);
 }
 
 /**
  * Any HLS network error is early node-health evidence, even before it is
  * fatal — except the two that say nothing about the node at all: a held
- * segment, and a source the node has no record of.
+ * segment, and a source the node will not serve because it is gone.
  *
  * Note what the default costs if this is wrong in the permissive direction:
  * `@machafoundation/core` treats a `'stream'` failure as endpoint evidence, so an
