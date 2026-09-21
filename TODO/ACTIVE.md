@@ -1,6 +1,6 @@
 # Active tasks and concepts to explore
 
-Last updated: 2026-09-21 (a failover was driven live and the seamless half was tried and rolled back: the mode switch and the failover both hold the picture now, and a failed generation is no longer destroyed at diagnosis; the live run happened — see 2026-09-20-transcode-handover-live-run.md; the handover's own two changes are still unwatched — and 0.17.2 is now deployed to all three nodes)
+Last updated: 2026-09-21 (0.17.3 tagged and pushed, deployed nowhere; a failover driven live — the mode switch and the failover both keep the picture now, and the seamless half was tried and rolled back)
 
 This is the working backlog. Add new work here. When an item is implemented and
 its stated verification is complete, remove it from this file and add a dated
@@ -14,18 +14,22 @@ are related. Core is addressed as the `Macha NPM Core` session.
 
 ## Start here
 
-**0.17.2 is released, tagged, pushed and deployed.** On Tom's instruction,
-2026-09-20, it went to `fi-1`, `es-1` **and `gbni-1`** — the third of those had
-never served the client at all and needed a `web:` block and a process restart
-to do it. All three answer `/` with bundle `index-BGrNH6KR.js`, and so do
-`ramaroja` and `macnessa`. The procedure, and what the `gbni-1` restart cost,
-are below.
+**0.17.3 is released, tagged, merged and pushed — and NOT deployed.** Tagged
+`0.17.3` on 2026-09-21, `main` and `develop` both at `9409780`. Every node is
+still serving the **0.17.2** bundle `index-BGrNH6KR.js`, so nothing in this
+release is in front of a viewer until somebody rsyncs `dist/`. The procedure is
+below. The release built clean from `main` as `index-CnpOpAES.js`.
 
-It carries three playback fixes, all recorded with their evidence in
-`COMPLETED.md`: the generation clock no longer runs backwards on the teardown
-attach path, a seek holds the picture instead of blanking the element, and
-positions leave the client in whole milliseconds. `CHANGELOG.md` has the
-detail.
+It carries ten changes, and `CHANGELOG.md` says which of them have been watched
+against a node: **two have** — the picture now survives a mode switch (16.5 s
+of black, measured, now none) and a failover (9 s of black, measured, now
+none). The other eight landed with unit cover and a fault watched failing
+first, and no live run; each one's open half is a `[ ]` further down this file.
+
+**0.17.2 is deployed everywhere**, from 2026-09-20 on Tom's instruction: `fi-1`,
+`es-1` **and `gbni-1`** — the third had never served the client at all and
+needed a `web:` block and a process restart. `ramaroja` and `macnessa` answer
+with it too. What the `gbni-1` restart cost is recorded below.
 
 **Core is `^0.14.0` from npm as this is written, and a `file:../macha-ts` link
 is expected to come back.** It carries the seek contract,
