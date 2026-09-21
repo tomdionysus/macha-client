@@ -1,6 +1,6 @@
 # Active tasks and concepts to explore
 
-Last updated: 2026-09-21 (410 tolerance landed for the server's route change; 0.17.3 tagged and pushed, deployed nowhere; a failover driven live — the mode switch and the failover both keep the picture now, and the seamless half was tried and rolled back)
+Last updated: 2026-09-21 (0.18.0 committed and pushed, deployed nowhere; node selector, the AC-3 mode-press fix, keyboard seek commit, the role-less lockout sentence and local-versus-Zulu timestamps; the `readyState` 0 stall is still unexplained with four dead theories — see `2026-09-21-session-handover.md`)
 
 This is the working backlog. Add new work here. When an item is implemented and
 its stated verification is complete, remove it from this file and add a dated
@@ -13,6 +13,23 @@ concerns and are not duplicated here, even when a client bug and a server bug
 are related. Core is addressed as the `Macha NPM Core` session.
 
 ## Start here
+
+**Read `2026-09-21-session-handover.md` first if you are new to this
+context.** It carries the cluster facts, what is running on this machine, what
+core has landed and not yet been adopted, and the four explanations for the
+`readyState` 0 stall that measurement has already killed.
+
+**0.18.0 is committed and pushed, and deployed nowhere.** `5b8bff5` on
+`develop`. Every node still serves `index-NDVfpduh.js` from 14:37, built
+against core `648474d`, so nothing in 0.18.0 is in front of a viewer. The last
+local build is `index-CXIMJJGN.js` (`edf7e4ce4640`) against core `5077468` /
+dist `04554181bfba`.
+
+**Two jobs are queued on core work that has already landed**: wire
+`selectNode` to `moveTo`, which removes the measured 13.2 s gap when a viewer
+changes node, and delete `useNodeIdentity`, whose job core now does — verified
+live when the node pills went from five to three.
+
 
 **0.17.3 is released, tagged, merged and pushed — and NOT deployed.** Tagged
 `0.17.3` on 2026-09-21, `main` and `develop` both at `9409780`. The release
@@ -924,60 +941,42 @@ the presentation down.
       stall, every one killed by measurement. Theirs were about a server and
       mine were about a client, and the failure was identical.
 
-- [ ] **Unexplained: a player that sits at `readyState` 0 while the node
-      says it served.** Seen three times on 2026-09-21, on both playback
-      paths, and it is the one live symptom nothing has accounted for. The
-      two client-side explanations offered for it — the element not being on
-      the proxy URL, and the worker not answering an open-ended range — were
-      both measured and both wrong, so this entry deliberately states the
-      shape and no cause.
+- [ ] **Intermittent: a player sits at `readyState` 0 while the node says
+      it served — cause unknown, and four explanations have now died.** The
+      symptom is real and has been seen on both playback paths. Every
+      mechanism offered for it has been killed by measurement, including
+      three of mine in one evening and one tonight that survived long enough
+      to be written up before the control run refuted it.
 
-      **What is known, from both sides.** Transformed path: es-1 logged
-      `first fragment ready` at 247 ms and 208 ms for a session whose element
-      never left `readyState` 0, with a `blob:` source and nothing buffered
-      three minutes on. Direct path: the same title that had loaded metadata
-      in 801 ms an hour earlier sat at `readyState` 0 with `networkState` 2,
-      while the read-ahead worker answered `bytes=0-65535` from that
-      element's own `currentSrc` in **50 ms** with a `206` and 1,448 bytes of
-      body. So in both cases the bytes were available and something between
-      the source and the decoder did not consume them.
+      **What has been ruled out, each by a measurement rather than an
+      argument.** Not the proxy URL (the element is on it; the path segment
+      is `__macha_direct_cache__`). Not the read-ahead worker refusing an
+      open-ended range (`bytes=0-` answers `206` in 46 ms; the earlier probe
+      had awaited a 1.76 GB body). Not the node (es-1 logged `first fragment
+      ready` at 247 ms and 208 ms for a session whose element never moved,
+      and a separate AC-3 trace took 48 ms). **Not tab visibility, which is
+      the one that looked strongest**: a hidden tab starts transformed
+      playback in 1.0-2.4 s at 6 s hidden, at 104 s hidden, and three times
+      back to back; playback already running in a hidden, unfocused tab
+      advances at 24 fps with no drops. One window on 2026-09-21 had three
+      consecutive hidden starts fail at 25 s, 85 s and 56 s, and nothing
+      since has reproduced it.
 
-      **It is intermittent and correlates with a session-heavy run**, which
-      is the part that makes it hard: a cold page plays the same title in a
-      second. Next step is to watch it from the client with `hls.js` error
-      detail flattened to text and the element's own event sequence recorded
-      from before `src` is set — not to theorise from a black player, which
-      has now cost three wrong answers in one day.
+      **The one consequence chain that is understood**, from both sides:
+      when a start does stall, the node reclaims the unstreamed session at
+      120 s (`session reclaimed without ever being streamed idle_ms=120000`),
+      so when the client finally loads it gets a session that is gone, six
+      `hls-error-nonfatal` escalate to fatal, and the client fails over —
+      **blaming a node that did everything correctly**. That is worth fixing
+      independently of the trigger: a generation that has never produced a
+      byte should not be able to condemn its node.
 
-- [ ] **Diagnostic timestamps are Zulu, because the cluster spans
-      timezones.** Tom, 2026-09-21: *"Macha absolutely needs to handle
-      multiple timezones across sites. They WILL be in different timezones.
-      We should be using hard Zulu, UTC."* Tonight the three nodes ran EEST,
-      CEST and BST, and a session timeline handed to the server session was
-      an hour out because this machine matched one node's zone and was read
-      against another's. Nobody was confused for long, which is the danger:
-      the error is silent, plausible and survives review.
-
-      **The rule, in his refinement of it: present in local, deal in UTC
-      everywhere else — timezones are a presentation problem.** So
-      `src/diagnostics/timestamps.ts` has two forms and they are not
-      interchangeable. `presentedTime` is what a screen shows: the reader's
-      own zone, **labelled with it** (`21 Sep 2026, 18:51:52 GMT+3`), because
-      an unlabelled hour read beside a journal written in another zone is the
-      exact ambiguity that cost the hour. `zuluTimestamp` is the interchange
-      form, `2026-09-21 15:51:52Z`, for anything leaving this client for
-      another machine or another person's terminal. Zero and absent are `—`
-      rather than 1970 in both.
-
-      My first pass put Zulu on the screens as well and Tom corrected it: a
-      viewer should not have to convert their own clock to read when a node
-      was last seen. The zone label is what makes local safe; UTC is what
-      makes correlation safe.
-
-      **The rest is not this repo's to fix and is raised with the other
-      sessions.** Server logs print node-local time with no offset, which is
-      what actually cost the hour; the API's `*_unix_ms` fields are already
-      unambiguous and are the reason this fix was cheap here.
+      **Next step is instrumentation, not another theory.** The stall
+      produces no error until hls.js escalates, so nothing is captured at the
+      moment it matters. What is needed is a recorder armed before `src` is
+      set: element event sequence, `readyState`/`networkState` per second,
+      hls.js error payloads flattened, and whether any request left the page.
+      Then the next occurrence is diagnosable rather than re-argued.
 
 ## Priorities
 
