@@ -294,8 +294,16 @@ would disagree about the same generation.
 wrong about the resolution three times, which is the failure mode the rest of
 it is about. As this is written, `main` has `@machafoundation/core` as
 `^0.18.0` and installs a real directory from the registry; `develop` has
-`file:../macha-ts` and a symlink to core's working tree. The registry's
-`latest` is **0.18.0**.
+`file:../macha-ts` and a symlink to core's working tree, which is at
+`a3b40ca` (core's own `0.18.0` commit) and therefore the same code the
+registry holds, for now. The registry's `latest` is **0.18.0**.
+
+**The two branches differ in `package.json` and `package-lock.json` by
+design**, so a merge between them touches those files every time. Going to
+`main`: switch to the published version, drop the lockfile's `"link": true`
+entry *and* the `../macha-ts` entry, `npm install`, run the gate. Coming back
+to `develop`: switch to `file:../macha-ts` and `npm install`, which restores
+both lockfile entries on its own.
 
 **Tom's ruling, 2026-09-20 and again 2026-09-21.** A direct link to core's
 tree during development is **fine** — *"we're nowhere near ready to publish
