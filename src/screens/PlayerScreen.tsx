@@ -793,14 +793,16 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
       {fatalError && (
         <div className="player-fatal-error" role="alert">
           <strong>Playback failed</strong>
-          {/* The account's own cap refusing is the one failure here that names
-              something a viewer can do, and it is not about this node. Led with
-              so it is not read as a breakage; core's message still follows,
-              because it is what they would quote in a report. */}
+          <span>{fatalError.message}</span>
+          {/* **The cap explains why recovery could not finish. It is not what
+              went wrong**, and putting it first would tell a viewer their
+              account is busy when a node had just died under them. Core's head
+              is the failure that *started* the recovery, so that leads; this
+              follows it as the part they can act on, and it is the only line
+              here that names an action. */}
           {accountSessionLimitNotice(fatalError) && (
             <span className="player-failure-notice">{accountSessionLimitNotice(fatalError)}</span>
           )}
-          <span>{fatalError.message}</span>
           {/* What core chained beneath it. The head names the failure that
               started the recovery; these are the attempts that ended it, and
               a viewer reporting only one of the two reports half of it. */}

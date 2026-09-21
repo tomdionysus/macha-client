@@ -56,6 +56,12 @@ export function failureCauseMessages(error: unknown): string[] {
  *
  * Worth more here than on a television: this screen has an address bar behind
  * it, so a viewer told which screen to close has somewhere to go.
+ *
+ * **Something to branch on, never the headline.** A cap refusal reaches this
+ * screen as the reason a *recovery* could not finish, not as the thing that
+ * went wrong — core's head is the failure that started the recovery, which may
+ * well be a node dying under the viewer. Leading with this would tell somebody
+ * their account is busy while their node is on fire.
  */
 export function accountSessionLimitNotice(error: unknown): string | undefined {
   if (!isAccountSessionLimit(error)) return undefined;

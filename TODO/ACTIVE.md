@@ -515,7 +515,19 @@ the presentation down.
       The match is core's rather than a code string matched here, since four
       clients matching it separately is how they drift. Three tests, seen red.
       **Unverifiable live until the server ships the cap**, and this client
-      cannot produce a `429 account_session_limit` on demand.
+      cannot produce a `429 account_session_limit` on demand — nobody should
+      fake a 429 to watch it work.
+
+      **It follows core's message rather than leading.** A cap refusal is the
+      reason a *recovery* could not finish, not the thing that went wrong: core's
+      head is the failure that started the recovery, which may be a node dying
+      under the viewer, and leading with the cap would tell somebody their
+      account is busy while their node is on fire. Corrected after it shipped
+      the other way round — core's own reasoning said "the wrong thing to lead
+      with" in the same breath as endorsing the order it was in, and the
+      reasoning was right. The placement itself is not unit-covered: the notice
+      is, the JSX order is not, and asserting it would need a rendering test
+      this repo does not have.
 - [ ] **Superseded, kept for the shape of the argument.** Core 0.17.0 exports `playbackFailureCode(error)`
       and `isAccountSessionLimit(error)`, which walk the cause chain cycle-safe.
       The cap answers `429 account_session_limit`. Nothing here misclassifies it
