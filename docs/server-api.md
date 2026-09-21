@@ -84,8 +84,10 @@ only to configured or cluster-advertised Macha API endpoints.
 Artwork is fetched with `fetch()` and converted to an object URL rather than
 placed in `<img src>`, because an image element cannot attach the header.
 
-Returned `/api/v1/playback/stream/...` and subtitle URLs are capability URLs and
-are loaded *without* the Bearer token.
+Stream and subtitle URLs returned on the session are capability URLs, taken
+whole and loaded *without* the Bearer token. The client composes no stream or
+segment path of its own, so the server moving streams under
+`/api/v1/playback/sessions/{id}/stream/...` changes nothing here.
 
 ## Endpoints and discovery
 
@@ -158,7 +160,12 @@ Per-node entries of `GET /api/v1/status` carry a `playback` object beside
 `runtime`:
 
 ```json
-"playback": { "startup_timeout_ms": 15000, "segment_timeout_ms": 6000 }
+"playback": {
+  "startup_timeout_ms": 15000, "segment_timeout_ms": 6000,
+  "session_idle_ms": 1800000, "pipeline_idle_ms": 60000,
+  "transcode_entitlement_idle_ms": 300000,
+  "max_sessions": 64, "max_sessions_per_account": 32
+}
 ```
 
 `startup_timeout_ms` is how long that node may take to bring a transformed
@@ -166,18 +173,25 @@ generation's first fragment up; `segment_timeout_ms` is how long it holds a
 request for a fragment not yet ready. Each is that node's statement about
 itself. Absence means the node cannot say, never a default, and a client must
 not shorten a budget on a missing field or substitute another node's figure.
+The rest of the object (server 0.48.2) states the node's idle reaping and its
+caps; core reads the two timeouts and deliberately not `session_idle_ms`.
 
 Core derives per-endpoint budgets from these and passes them to the player on
 `PlaybackSource.budgets`.
 
 ### Sessions and generations
 
-Every session `POST` carries `Macha-Viewer-Session`, an opaque identity created
-once by the persistent `PlaybackRuntime` and retained across reloads, seeks,
-retries, representation changes, standby preparation and failover. It identifies
-one logical viewer and its single transcode entitlement; it is not an account,
-credential or progress identity. Each distinct admission creates a fresh
-`Idempotency-Key`, while retries of that admission across endpoints retain it.
+A session is bound to the node that created it: the session map is in-process
+and node-local, with no replication and no control-call forwarding, so a move
+to another node is create-there, promote, release-here. Admission is per bearer
+token against the creating node's `max_sessions_per_account` (server 0.48.0;
+`429 account_session_limit`, which core walks to the next node and charges to
+nobody), its node-wide `max_sessions` and its transcode limits (`429
+resource_limit`, which is the node being full). A session's transcode
+entitlement is released after `transcode_entitlement_idle_ms` without stream
+activity; the session record lives until `session_idle_ms` and answers `404`
+after that. Core no longer sends `Macha-Viewer-Session`, which the server has
+retired and does not read, nor `Idempotency-Key`.
 
 `PATCH` performs source-generation changes: mode, quality limits, audio stream,
 subtitle stream, media representation, and a transformed seek whose target lies

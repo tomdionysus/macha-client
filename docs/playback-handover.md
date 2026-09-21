@@ -79,6 +79,17 @@ to get there. Other targets are unaffected.
    keeps moving, and the replacement must also hold some road beyond the join,
    or it starves seconds after being promoted.
 
+   The join is not a fixed point: it recedes at the viewer's rate while the
+   replacement fills at its node's rate. `handoverJoinLost()` compares the
+   distance from the replacement's buffered edge to the join at the start of a
+   six-second observation and now, and abandons the handover as soon as the
+   race is decided — not closing at all, or closing too slowly to arrive
+   inside what is left of the budget — rather than waiting the 25 s budget
+   out. An abandoned handover reports `resumeAtMs`, the live position in the
+   replacement's clock, and the fallback attaches there instead of at the
+   position core computed before the attempt began, so the viewer is never
+   put back.
+
 5. **Seek the hidden element** to the join and wait for `seeked`. This costs the
    viewer nothing; nobody is looking at that element.
 
@@ -92,6 +103,13 @@ If the outgoing element **stalls** during this — the normal end of a reaped
 generation — the cut is forced immediately rather than waiting for a position
 that will never arrive.
 
+**A failed generation is stopped where it fails and destroyed where it is
+replaced.** `retireHls()` calls `stopLoad()`, so nothing more is fetched from a
+node that has gone, and the instance is destroyed only on the three paths that
+take the element: the teardown in `play()`, the cut in `promoteHandover()` and
+`stop()`. Destroying it at diagnosis detached the MediaSource and blanked the
+element seconds before anything could replace it.
+
 **Alignment is the part that must be exact.** The replacement is created for the
 position the viewer had reached when core asked, and they keep moving while it
 buffers. Promoting it at its own start replays the difference, which is plainly
@@ -102,7 +120,14 @@ creation *and* getting the join point resident, not just negotiation.
 
 ## Relocation
 
-`WebPlayer.holdThroughRelocation`, taken when the transition is not `continue`.
+`WebPlayer.holdThroughRelocation`, asked on every transition the handover did
+not take — a seek, a failover, and a representation change whose handover
+declined — except after a handover that spent the viewer's budget on the same
+blank. `canHoldThroughRelocation()` owns the guard and asks only what the
+replacement needs: hls.js must drive it, and the outgoing element must have a
+frame up to hold. It does not ask the outgoing source to be a manifest, which
+is a fact about media the hold never touches, so a switch out of Direct Play
+is held like any other.
 
 The teardown path blanks the element, because hls.js is handed a MediaSource
 object URL and attaching a new one resets whatever was showing. That leaves the
@@ -140,13 +165,13 @@ waiting on it.
 **`display: none` does not stop buffering.** An unrendered element still
 buffers; element visibility does not gate MSE.
 
-**Tab visibility gates everything.** A backgrounded tab stops decoding dead —
-`readyState` 0, `networkState` 2, no error — and it throttles *loading* as well,
-which is the half that looks like a server fault. Chrome throttles a background
-tab's timers to roughly one firing per minute and hls.js drives its fragment
-loop on a timer, so a backgrounded client can go minutes asking the node for
-nothing while the node reclaims the idle pipeline.
+**Tab visibility is a confound to record, not a settled mechanism.** It has
+been measured both ways. On 2026-09-17 and 2026-09-20 a backgrounded tab sat at
+`readyState` 0 with `networkState` 2 and no error while the node reclaimed an
+idle pipeline, which fits Chrome throttling a background tab's timers and
+hls.js driving its fragment loop on one. On 2026-09-21 hidden-tab starts
+succeeded in 1.0-2.4 s and hidden playback ran at 24 fps with no drops.
 
 `videoState()` therefore reports `document.hidden`, and any sample series taken
-while investigating playback should record it. Without that field a throttled
-harness is indistinguishable from a client that is genuinely slow to start.
+while investigating playback should record it. What the field must not do is
+stand in for a diagnosis: a stall in a visible tab is a stall.

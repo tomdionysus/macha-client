@@ -1,5 +1,10 @@
 # 2026-09-21 — handover
 
+> Superseded the same night by the rationalised `ACTIVE.md`, whose *Start
+> here* is current: core has moved past `5077468` (to `aab8028`, with one
+> behaviour change), the cluster is on server 0.48.2, and the `readyState` 0
+> stall is a P0 there. The rest of this file is the record of its day.
+
 Written at the end of a long session, in preparation for a context clear. It
 records what is true, what is merely believed, and what is running on this
 machine. Where something was measured, the measurement is here; where it was

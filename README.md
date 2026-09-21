@@ -36,15 +36,18 @@ it would, it belongs in core.
 - Node.js 20 or later.
 - A reachable Macha node with the catalogue and streaming HTTP APIs enabled.
 
-`@machafoundation/core` is published to npm, so a clone and an `npm install` are
-the whole setup. The development cycle resolves it exactly as a user's install
-does; there is no `npm link` step and no `file:` override. When core needs a
-change in front of this client before a release, it publishes a prerelease under
-a dist-tag and this client installs `@machafoundation/core@next`.
-
-`npm install` will silently keep an existing symlink rather than fetch a
-tarball, and the version string can agree while it does. `test -L
-node_modules/@machafoundation/core` is the check that cannot lie.
+`@machafoundation/core` is published to npm, and `main` always resolves it from
+there, so a clone of `main` and an `npm install` are the whole setup. During
+core development `develop` may instead link core's working tree
+(`"file:../macha-ts"` in `package.json`, with `macha-ts` cloned beside this
+repo); a linked `develop` needs that checkout, and `npm run dev -- --force`
+after core rebuilds, because Vite pre-bundles the linked copy and keeps
+serving it. Nothing merges to `main` while linked: the branch goes back to a
+published version, `test -L node_modules/@machafoundation/core` must fail, and
+the typecheck and suite run against the registry copy first. `npm install`
+silently keeps an existing symlink rather than fetching a tarball, and the
+version string can agree while it does, which is why that check is the one
+that cannot lie.
 
 ## Build and run
 

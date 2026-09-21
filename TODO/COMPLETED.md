@@ -1,27 +1,142 @@
 # Completed and tested
 
-Last updated: 2026-09-20
+Last updated: 2026-09-21
 
-## 2026-09-20 — eight changes landed on `develop`, none watched live
+## 2026-09-21 — on `develop` after 0.17.3: tagged nowhere, deployed nowhere
 
-**Read this first if you are picking the work up.** Everything below is
-committed, typecheck-clean and unit-covered, each fault was watched failing
-before it was fixed, and **not one of them has been run against a node.** They
-are recorded here because a new session needs to know they landed; their
-entries stay open in `ACTIVE.md` because what is open is the live
-verification, and each entry says what a run would have to show. Nothing here
-is released or deployed: `fi-1` and `es-1` are still on **0.17.1** from
-2026-09-17, which does not even carry 0.17.2.
+`5b8bff5` calls itself 0.18.0 and is not a release: not tagged, not on `main`,
+and it links core (`file:../macha-ts`), which the gate in `ACTIVE.md` forbids
+for anything that reaches `main`. Its five changes were **all watched live
+against the cluster on 2026-09-21** from `vite dev`; `CHANGELOG.md` is the
+authority for each. In one line each, with what each leaves open in
+`ACTIVE.md`:
 
-Two of the twelve commits are corrections to entries written earlier the same
-day, and one is a note from the core session; those are not changes to the
-client.
+| what | watched live | what is left open |
+| --- | --- | --- |
+| A viewer can choose which node streams to them: pills in the options panel, grouped by `nodeId`, sorted by name; a press states a preference through core's `prefer()` and starts a new generation there at the viewer's position | 2:11.795 on `fi-1` to 2:12.197 on `gbni-1`, **13.2 s of black** between them | wiring to core's `moveTo` removes the gap; `useNodeIdentity` must be deleted, because it calls the membership call and drops discovered endpoints it does not name |
+| A mode press never asks a node to copy audio this device cannot decode: a Remux press on an AC-3 title becomes `mode=transcode, video=copy, audio=transcode`, decided from `hlsAudioCodecs ?? audioCodecs` | the title that stalled at `readyState` 0 — six non-fatal hls.js errors, two fatal at 59 s, not one request reaching the node, MSE refusing the codec at the manifest — now plays `VIDEO COPY` + `AUDIO TRANSCODE` | core holds the rule for the automatic path only (`choosePlaybackInstruction.ts:399-401`); a viewer pressing a mode by name has no entry into it, and the phone client wrote the same table independently and hit the same fault the same afternoon. Why an AC-3 *copy* stalls on the node is the server's |
+| Keyboard seeking on the scrubber commits: `committingScrubberKey` names every key a range input moves itself on, committed on `keyup` | five `PageUp` presses from 22:07 landed at 1:39:27, playing; before, the same presses left the position at 59 s | the accelerating hold is still Samsung-only |
+| A session holding no roles gets a sentence that leads with the remedy — log in again, then ask an administrator — decided through core's `sessionLockedOut` so `undefined` stays unknown | yes | — |
+| Times are presented in the reader's zone with the zone named (`presentedTime`) and dealt in Zulu everywhere else (`zuluTimestamp`) | yes | — |
+
+**Also on `develop` since 0.17.3, from the session-and-stream route
+transition, and in the deployed bundle** (`2a0b95f`, `f4cb4e5`, `4016d2b`,
+`98fa410`):
+
+- The route move is a no-op here, asserted rather than believed: nothing
+  composes a stream or segment path, two tests hold that (one per side) and
+  both were watched red against a deliberately rebuilt path. Fakes and
+  fixtures moved to the post-change shape.
+- `410 generation_superseded` reaches core as `not-found` from three sites
+  behind one predicate, `isSourceGoneStatus`, which narrows hls.js's `unknown`
+  and delegates to core's `playbackFailureKindForStatus`; the native preflight
+  reports `gone`, so Samsung asks for a new generation instead of blaming the
+  node. Eight assertions go red when the predicate is pointed at `'not-ready'`.
+- `accountSessionLimitNotice` follows core's head on the failure screen. It
+  shipped leading the block and was corrected the same day: a cap refusal is
+  why a recovery could not *finish*, not what went wrong. Three tests seen
+  red; the JSX order is not covered. Unverifiable live until a node refuses,
+  and nobody should fake a 429 to watch it.
+- `prefer()` (core `8db9d26`) replaced `PinnedEndpointRegistry`, deleted the
+  same day rather than kept in parallel; `preferredEndpointForNode` stays
+  because a viewer picks a node and `prefer()` names an endpoint.
+- A linked core is identified as SHA plus `dist` hash, never a version. The
+  deployed artefact `index-NDVfpduh.js` (624,128 bytes, `shasum`
+  `be3dc9c3367a`) was built against core `5aa3f6f` and re-verified
+  byte-identical at `648474d`; four markers were read in the minified bytes —
+  `410` mapped to `"not-found"`, `standby-preparation-refused`, and the two
+  standby windows `8e3` and `1e4`, the second cut by core from 30 s because
+  30 s was a server default while 10 s is the floor a node refuses to start
+  below.
+
+**Smoke test of the deployed bundle, 2026-09-21 14:45-15:20.** Sixteen titles
+through the UI in Chrome against `vite dev` proxied to `gbni-1`, signed in as
+`webclient`. Every title played, seeked, rewound, paused, resumed and stopped;
+eleven with large scrubber drags (to ~75% and back to ~20%). Mode read off the
+plan overlay: six Direct (big seeks settle in 0.4-12 s), six Remux
+(`VIDEO COPY` + `AUDIO TRANSCODE`, 2-19 s), one Transcode forced from the mode
+selector (14.8 s forward, 18.8 s back). Nothing regressed. Two things worth
+chasing went to `ACTIVE.md`: a remux big seek sometimes failing its first
+generation, and a transcode-slot refusal on a mode switch being shown but the
+chosen mode not applied.
+
+**Withdrawn the same day, recorded so nobody re-derives them.** Six things
+relayed between sessions as established and disproved by opening the file or
+taking the measurement:
+
+1. *The element is not on the proxy URL.* It is; the path segment is
+   `__macha_direct_cache__`, and the grep had looked for
+   `macha-direct-read-ahead`.
+2. *The read-ahead worker never answers an open-ended range.* It answers
+   `bytes=0-` with `206` in 46 ms and a tail range in 53 ms; the probe had
+   awaited `arrayBuffer()` on a 1.76 GB body, so it was the probe that never
+   finished. A clean page load reaches `loadedmetadata` in 801 ms and playing
+   in 1.0 s. The stalls seen were produced by the state the investigation had
+   made: a force-stopped tab, a worker unregistered and re-registered three
+   times, and 1.7 GB probes competing with the element for the link.
+3. *A backgrounded tab cannot start playback*, which the `readyState` 0 entry
+   had rested on since 2026-09-05. Hidden-tab starts succeed at 6 s hidden,
+   at 104 s hidden and three times back to back, and hidden playback runs at
+   24 fps with no drops.
+4. *`delay_moov` is the cause of the AC-3 copy stall.* The comments cited say
+   it is the fix for that class of 503.
+5. *`max_sessions: 8` is live config.* It is the compiled default; every node
+   sets 64, read off each node's `macha.yaml` with its hash.
+6. *Core is 0.18.0.* Its tree is 0.17.0, unpublished, and the registry ends
+   at 0.14.0.
+
+Each was accepted because it fitted the symptom, and two reached other
+sessions before they were withdrawn. What worked every time was a measurement
+that could have come back the other way.
+
+## Client 0.17.3 — released 2026-09-21, two of its ten changes watched live
+
+Tagged `0.17.3` at `9409780`, `main` and `develop` merged. The release bundle
+built from `main`, `index-CnpOpAES.js`, was never deployed; every node instead
+serves the `develop` build of the same day, which carries all of this and more
+(see `ACTIVE.md`). Two changes were watched live, in
+[the run](2026-09-21-failover-and-mode-switch-live-run.md):
+
+**The picture stays up through a mode switch.** Selecting Transcode while
+Direct Play ran blanked the element for **16.5 s**: the hold built for seeks in
+0.17.2 was never asked, because a representation change arrives as
+`transition: 'continue'`, `play()` offers it to `handOverToSource()` first,
+that declines silently (Direct Play on the outgoing side), and the hold sat
+behind `transition !== 'continue'`. Measured before: `source-load-begin`,
+`media-element-reused`, `readyState` 0, no `relocation-hold-begin`. The hold
+is now asked on both transitions and `canHoldThroughRelocation()` owns the
+rule, asking only what the replacement needs — hls.js driving it and a frame
+up to hold — with the Direct Play case watched failing against the old clause
+first. Measured after, twice: `relocation-hold-complete` at 2,726 ms and
+4,977 ms, `readyState` never leaving 4. **16.5 s of black became none.**
+
+**The picture stays up through a failover.** `failSourceGeneration` called
+`hls.destroy()` the moment it diagnosed a terminal failure, and `destroy()`
+detaches the MediaSource: `media-abort` and `media-emptied` at `HAVE_NOTHING`,
+**nine seconds of black**, all of it after the failure was known, with the
+hold then declining correctly because there was nothing left to hold. A
+failed generation is now stopped where it fails — `retireHls()` calls
+`stopLoad()`, so it fetches nothing more from a dead node — and destroyed
+where it is replaced, `destroyRetiredHls()` on the three paths that take the
+element, which is the rule `promoteHandover` already stated. Measured after,
+node killed in-page: the hold engaged on the failover itself, `readyState`
+never below 2, `videoWidth` never left 1920,
+`relocation-hold-complete elapsedMs=2596`, and the viewer landed 330 ms into
+the new generation, within ~260 ms of where they were. Two corrections rode
+with it: the hold stands the stall budget down, which it had been getting for
+free from `holdPicture()` on the seek path (unverified live); and a promotion
+releases the outgoing side's Direct Play read-ahead, which only the teardown
+path did.
+
+**The other eight**, each committed 2026-09-20 with unit cover and its fault
+watched failing first, and **not one watched live**. Their open halves stay in
+`ACTIVE.md`.
 
 | what | commit | what is unproven |
 | --- | --- | --- |
-| Every playback deadline comes from the node serving the source — `awaitNativeHlsFirstFragment`, `preflightWebHlsSource`, `stallWatchdog.useSourceBudgets` | `38c42ec` | Both nodes on this cluster state the same figures the constants were derived from, so the adoption is currently indistinguishable from the old behaviour at runtime. A node configured differently is what would prove it. |
+| Every playback deadline comes from the node serving the source — `awaitNativeHlsFirstFragment`, `preflightWebHlsSource`, `stallWatchdog.useSourceBudgets` | `38c42ec` | Both nodes on this cluster state the same figures the constants were derived from (re-read on 0.48.2: `startup_timeout_ms` 15000, `segment_timeout_ms` 6000), so the adoption is currently indistinguishable from the old behaviour at runtime. A node configured differently is what would prove it. |
 | Direct Play's read-ahead cover reported to core as `readAheadBytes`, absent rather than zero where there is no cache | `2503ff5` | Core did its runway arithmetic from element buffer alone on 453 of 748 titles; that it now does not has not been watched. |
-| The transcode handover decides its race to the join instead of waiting the budget out, and its fallback attaches where the viewer actually is | `c16ce90` | The live measurement that produced it — 30 s of waiting then a 20 s rewind — has not been repeated. A run should show `join-receding-faster-than-it-fills` at about 6 s and a `resumeAtMs` within a second or two of the viewer. |
+| The transcode handover decides its race to the join instead of waiting the budget out, and its fallback attaches where the viewer actually is | `c16ce90` | See below: watched firing on 2026-09-21, under changes since reverted. |
 | The failure screen reads out the failures core chained beneath the head | `e61cd00` | Needs the failover it belongs to: two sentences at once, the node that was serving and the candidate that could not be reached. |
 | The handover's runway gate reads the element rather than the last event | `bafba54` | The case it fixes is an element that has stopped emitting, which is not reachable on demand. |
 | Everything leaving the player is whole milliseconds — duration, buffered ranges, forward buffer, and the committed seek | `90adb87` | The livelock the original rounding addressed has never been watched being cured on a node. The scrubber path that could reproduce it can no longer produce a fraction. |
@@ -42,6 +157,70 @@ whether transcode starts on the requested frame — only that a node's two
 fields add up. Separately: the `3,330.9 ms` offset measured on 2026-09-20 is
 not an integer, and the contract states those fields in whole milliseconds.
 
+### The handover's two exits, watched once and reachable by no current path
+
+`handoverJoinLost()` and `handoverFallbackPositionMs()` both fired live on
+2026-09-21 — `handover-abandoned reason=join-receding-faster-than-it-fills`
+at about six seconds, twice (deficit 2,151 → 4,256 ms over 6,049 ms; then
+921 → 3,027 over 6,053), with the fallback placing the viewer where they were
+rather than 20 s back. But reaching them needed three changes that were
+reverted the same evening as tuned to one node and one title: reporting the
+failure while runway remained, keeping the element playing through it, and
+routing a recovery relocation through the handover. On a node death as the
+client stands, the stall budget expires first and the relocation hold carries
+the picture instead. Proven, and unexercised again; the P0 in `ACTIVE.md`
+says so. The handover was abandoned both times for the same measured reason:
+the replacement fills at 1.49x while the join recedes at 1x, so it closes at
+0.49 s per second and needs about 53 s against a 25 s budget.
+
+### Fractional milliseconds, surveyed (in 0.17.3)
+
+The rule applied throughout: anything crossing the wire or reaching storage is
+whole milliseconds, and the element's own clock keeps its precision.
+`durationMs` was published raw and reaches `localStorage` through Continue
+Watching and the scrubber's `max` — and an `<input type="range">` hands back
+its maximum exactly as given rather than snapped to the step grid, so a drag
+to the far right committed a fractional duration as a seek at the end of the
+title, where a node is most likely to clamp and round, which is the livelock's
+own precondition. Floored, not rounded: a duration must not claim media the
+element does not have. `bufferedRangesMs` made whole *outward* (floor the
+start, ceil the end), because narrowing refuses a seek the element could have
+served and widening claims at most one millisecond it does not hold; on this
+adapter `localSeekCoverage()` is computed from them, so the widening reaches
+core's admission path. `forwardBufferMs` rounded. `seek()` rounds at the
+commit, the one place every committed seek passes through. Seen failing at
+the level that matters: the real player through `play()` and a `timeupdate`,
+watched failing with `expected 2706336.031 to be 2706336`. Not watched curing
+the livelock on a node.
+
+### The runway gate reads the element (in 0.17.3)
+
+`handOverToSource` took `outgoingEvent.forwardBufferMs`, the last event the
+stream carried, to decide whether there was enough buffer to protect — and
+the element that has stopped emitting is precisely the one that figure can
+only overestimate. Raised by the Android TV client on 2026-09-19, which reads
+its runway for a failure decision. `forwardBufferMsAt(outgoing.currentTime *
+1000, …)` answers for now, the same arithmetic `publish()` uses, so the two
+figures cannot drift. The clock offset still comes from the event, and must:
+core computed its request from that sample. `handOverToSource` has no test
+harness, so what is covered is `forwardBufferMsAt`, including the case that a
+sample taken 8 s ago claims 9 s of cover where 1 s is left.
+
+### A refused mint lands on the sign-in wall (in 0.17.3)
+
+The backlog had this as a change to make core stop raising the connection
+gate on a refusal; core 0.14.0 already does, with the argument in its source
+(`mintNow` calls `reportClusterUnreachable()` only when the reason is not
+`'refused'`). What was left was the opposite problem: roles stay `undefined`
+through a failed mint, `sessionPermits` answers "unknown is not none", and the
+whole navigation rendered over a session that did not exist. `useSession`
+publishes `mintFailure` from the subscription it already holds, and a refusal
+lands on the sign-in wall beside a role-less session —
+`sessionLockedOut(roles) || mintFailure?.reason === 'refused'` — because
+signing in is the one thing a viewer can do about either. The server's own
+sentence is not shown. Seen failing first against a stubbed 403
+`anonymous_disabled`; a second test pins that an adopted session reports no
+failure, so the field cannot become sticky.
 
 
 ## The generation clock stopped running backwards (client 0.17.2)

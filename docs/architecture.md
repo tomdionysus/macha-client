@@ -54,7 +54,9 @@ playback. The endpoint that most recently completed real work is authoritative
 and is tried first; on retryable failure the first working alternative becomes
 authoritative. Every known endpoint is checked immediately and at a bounded
 interval, but probe completion updates health only and never displaces
-authority.
+authority. A viewer can also choose a node from the player; that choice is an
+ordering preference stated through core's `prefer()` and never a health record,
+and playback moves there by creating a new generation on the chosen node.
 
 **Cancellation is never node-health evidence.** Health probes are not wired to
 playback, component lifecycle or client timeouts. An `AbortError` represents
@@ -96,11 +98,12 @@ transitions. React renders snapshots and provides presentation hosts. A
 full-screen or mini-player route change may rebind the player surface but
 cannot create, replace or destroy a playback session.
 
-The runtime creates one opaque logical-viewer identity for its player. Every
-session admission, including recovery and failover, carries the same
-`Macha-Viewer-Session` so the cluster retains one transcode entitlement across
-pipeline and node changes. Idempotency is operation-scoped: a distinct POST
-receives a new key, while endpoint retries of that POST retain it.
+A playback session is bound to the node that created it and is admitted
+against that node's own limits: a per-account session cap counted per node
+(server 0.48.0), a node-wide session limit, and one video transcode at a time
+on the nodes here. No viewer-identity header travels on the wire any more;
+core keys each session by endpoint and node session id, closes it by that id,
+and can ask a node whether a session it was handed is still alive.
 
 Generations are ordered: a replacement cannot acquire a new lease until the
 prior coordinator has finished teardown. Persisted queue and progress state is
