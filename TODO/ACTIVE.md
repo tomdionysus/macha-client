@@ -502,10 +502,16 @@ the presentation down.
       two runs from different directories disagree about identical bytes.
       Measured, not quoted: an hour earlier the same tree answered `0.17.0` on
       disk while its HEAD had committed something else, which is why the
-      version is not the thing to write down. Re-measured after core moved:
-      `a8e50d9`, clean, `dist` `8351d54d21b4`, and the suite and build were run
-      again against it rather than left green against the tree they were run
-      on. Core has taken the same rule the other way — do not leave the tree
+      version is not the thing to write down. Re-measured every time core's `src`
+      moved, because a linked client compiles at a moment of its own choosing:
+      the bundle that is ready to deploy was built against core **`5aa3f6f`**,
+      clean, `dist` `ffbe251b5294`, and verified in the *minified artefact*
+      rather than in the source — `jj=410 ... "not-found"` for the status
+      mapping, `standby-preparation-refused` for the cap, and `Fj=8e3` /
+      `Vj=1e4` for the two standby windows, the second of which core cut from
+      30 s to 10 s because 30 s was a server *default* while 10 s is the floor
+      a node refuses to start below. A version number would have reported none
+      of those three. Core has taken the same rule the other way — do not leave the tree
       dirty while anyone is linked, since a linked client compiles at a moment
       of its choosing rather than core's.
 - [x] **The failure screen names the account when the cap refuses.**
@@ -557,8 +563,16 @@ the presentation down.
       already stranded a session on without the client being able to know it.
       That bears directly on a per-node cap being exhausted by a cascade, and it
       is the client half of the question the server asked.
-- [ ] **Nothing is needed here for the per-account cap**, and that should be
-      re-checked when the server lands the code. This client never creates a
+- [ ] **The cap is `streaming.max_sessions_per_account`, 32 per node, zero
+      disables** (server, 2026-09-21), comfortably above the twelve-in-
+      disturbance case this repo's failover measurements produced. What to
+      check after the cutover is not a refusal a viewer sees but
+      `standby-preparation-refused` carrying `accountAtSessionLimit` **while
+      nobody sees anything wrong** — the cap working as designed while seamless
+      failover quietly gets worse, which is the only state here that produces
+      no symptom at all.
+- [ ] **Nothing else is needed here for the per-account cap**, and that should
+      be re-checked when the server lands the code. This client never creates a
       playback session — core does — and it classifies no create failure, so a
       `429 account_session_limit` arrives as core's message on the failure
       screen. The hazard this repo contributed evidence for is on the server's
