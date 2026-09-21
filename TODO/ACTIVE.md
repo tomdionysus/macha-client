@@ -26,15 +26,15 @@ together. **It is not tagged** — the `0.18.0` tag is Tom's to cut, and every
 release before it has one. The working tree is clean apart from
 `CLAUDE.local.md` and `basemind.toml`, which are untracked on purpose.
 
-**What the nodes serve, verified at the time of writing.** All five hosts —
-`fi-1`, `es-1`, `gbni-1`, `ramaroja` and `macnessa` — answer `/` with
-`index-NDVfpduh.js`: built 12:12 on 2026-09-21 from the tree at `4016d2b`
-against linked core `648474d`, deployed 14:37. It sits between 0.17.3 and 0.18.0: everything
-in 0.17.3, plus the 410 mapping and the cap notice from the route transition,
-and **nothing from 0.18.0** — no node selector, no AC-3 mode-press fix, no
-keyboard seek commit, no lockout sentence, no local timestamps. The 0.17.3
-release bundle (`index-CnpOpAES.js`) was never deployed. The deploy procedure
-and the backups are in the deploy section.
+**What the nodes serve.** All five hosts — `fi-1`, `es-1`, `gbni-1`,
+`ramaroja` and `macnessa` — serve **`index-CKNh5Q9D.js`**, the tagged 0.18.0
+build against the published core, deployed 2026-09-21 22:53 UTC. So the whole
+of 0.18.0 is in front of a viewer for the first time: the node selector, the
+AC-3 mode-press fix, the keyboard seek commit, the lockout sentence and the
+local timestamps. **It is the first deployed bundle ever built against a
+published core rather than a linked tree.** The procedure and this deploy's
+backups are in the deploy section. The 0.17.3 release bundle
+(`index-CnpOpAES.js`) was never deployed and now never will be.
 
 **The cluster, measured at the time of writing** (one `GET /api/v1/status` as
 `webclient`, session revoked, `204`): all three nodes on server **0.48.2**,
@@ -229,6 +229,38 @@ page. Prune deliberately, later, not as part of the deploy.
 Assets are gzipped by the server on demand (593 KB of JS goes out as 172 KB).
 There are no precompressed `.gz` siblings in `dist/`, which the server would
 prefer; generating them is a build change nobody has asked for yet.
+
+**0.18.0 is deployed to all three nodes, 2026-09-21 22:53 UTC, on Tom's
+instruction.** Bundle `index-CKNh5Q9D.js`, 633,692 bytes, `shasum`
+`eff197072a8e`, `dist` hash `091ae1eaef6d` — built from `main` at `ce74408`
+(tag `0.18.0`) against `@machafoundation/core` **0.18.0 from the registry**,
+which is what makes it the first deployed artefact not built against a linked
+tree. Backups first on all three at
+`/etc/macha/web.bak-20260921-225245.tar.gz`; rsync additive, no `--delete`,
+24 files and 1,800,061 bytes to each node, written `1000:50` (verified
+numerically with `stat`, not by name — the nodes happen to *name* uid 1000
+`tom` and gid 50 `staff`, which reads like a mistake and is not one).
+
+**Verified served rather than copied:** each node answers
+`index-CKNh5Q9D.js` on `http://127.0.0.1:7438/` with the bundle `200` at the
+full 633,692 bytes, and the CSS and Service Worker `200`; `ramaroja` and
+`macnessa` both serve it too, gzipped to 183,296 bytes. The previous bundle's
+assets are all still in place, and **both bundles reference the same lazy
+`hls-Bt6kO1A0.js` chunk**, so a viewer still running the old page is not
+broken by the swap — which is the thing the additive rule exists to protect,
+and it is worth checking rather than assuming on each deploy.
+
+**Booted once, and the browser check then hit its own confound.** The console
+shows `boot-start`, `platform-detected` and `react-mounted` at 29 ms with the
+read-ahead worker registered at 96 ms and no exception, so the artefact runs.
+After that the tab logged nothing for **101 seconds**, then `route-exhausted`
+and `same-origin-absent`, and the renderer stopped answering CDP entirely.
+That is a frozen background tab rather than a finding: measured independently
+with `curl`, all five hosts answer `/api/v1/health` with
+`{"service":"macha","status":"ok","version":"0.48.2"}` as `application/json`,
+which is exactly what `confirmMachaEndpoint` requires, and that probe aborts
+at 1.5 s against a tab whose timers had stopped. **A foregrounded check is
+still owed**, and it is the one thing this deploy has not had.
 
 **All three nodes now serve the develop build with the hot-linked core,
 deployed 2026-09-21 14:37 on Tom's instruction ("they are NOT production").**
