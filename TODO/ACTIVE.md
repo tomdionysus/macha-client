@@ -2976,6 +2976,67 @@ core wrote that, and every node in the field sends `resource_limit` bare.
       repo's failover measurements produced, and it is reachable on these
       nodes.
 
+## P1 — Choose the node a torrent downloads to
+
+**Tom asked for this through the `Macha Server` session, 2026-09-21. The API
+is built and unreleased**; that session will say when it deploys and in which
+version. Contract feedback was sent the same night and is summarised below
+with what was measured to produce it.
+
+**The contract.** `POST /api/v1/torrents/jobs` takes an optional `node_id`
+(32 hex characters) beside `magnet` or `acquisition_ref`. Omitted or null
+keeps today's behaviour — the job runs on whichever node served the request.
+The `202` now **always** carries `{id, node_id}`, including when no node was
+asked for. `400 bad_request` is a malformed id; `409 placement_failed` is a
+node that is not an active member or is unreachable, with the message saying
+which. It is never quietly downloaded somewhere else, so a 409 means nothing
+started.
+
+**Most of the display already exists.** `TorrentJobCard`'s detail pane has a
+`Node` row rendering `job.node_id` (`IngestScreen.tsx:236`), and
+`GET /api/v1/torrents/jobs` already returns the field per job, so showing
+placement needs no new call.
+
+- [ ] **A node control on the magnet form**, in this client's existing idiom:
+      the same grouping and labelling the player's node pills use, plus an
+      explicit "any node" that sends no `node_id`. Not a silent default —
+      the operator should be able to see which they chose. Every control
+      needs `data-tv-focusable="true"`.
+- [ ] **Show what the choice costs.** The nodes are deliberately unequal and
+      the server session put a number on it: a download on the four-core,
+      4 GB, spinning-disk box takes it to load 13 while the other two idle.
+      `/api/v1/status` already carries `runtime.load1`,
+      `process_cpu_percent` and `storage` per node, and this client already
+      fetches it. Showing load and free space beside each choice is the
+      difference between a control and a guess.
+- [ ] **Render `409 placement_failed` as its own sentence**, distinct from
+      `400`. One is this client's bug and one is a fact about the cluster,
+      and the viewer can act on only the second.
+- [x] **The `Node` row's fixture was lying.** It said `gbni-2`; no server has
+      ever sent that. A real id is 32 hex characters, so the row an operator
+      reads today says `855716bd8bb0ad12b0c4f876386699de`. Fixture and
+      assertion corrected to a real id, which is what makes the naming
+      problem below visible in the suite rather than only on a screen.
+- [ ] **Blocked on the server, and asked for:** a human `name` on each
+      `nodes[]` entry of `/api/v1/status`. There is none today, and the only
+      human-ish label, `host`, is inconsistent across this cluster — two
+      nodes report public DNS names and the third its machine name — as well
+      as being the RPC bind address rather than an identity (see the identity
+      P2 below). Until it lands, label a node by a short id prefix and say so;
+      do not invent a name from `host`.
+
+**Two questions are open with the server session.** Whether a node reporting
+`hosts_extents: false` can accept a torrent job at all — `corvus-fi-1` reports
+exactly that on the live cluster — because if it can and the data then lands
+elsewhere, the guarantee that makes this contract worth building is broken.
+And whether `node_id` is accepted exactly as status reports `id`, since this
+client will pass it straight through without normalising.
+
+**Not built ahead of the deployment, deliberately.** The contract may still
+move — this client has asked for one change to it — and building against a
+contract that then moves is how the fixtures in this repo came to describe a
+wire nobody serves.
+
 ## P1 — Android TV: what is still unverified on the set
 
 **The set itself is no longer unverified** — see `COMPLETED.md`. Launch,

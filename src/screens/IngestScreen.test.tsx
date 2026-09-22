@@ -21,7 +21,10 @@ function torrentJob(overrides: Partial<TorrentJob> = {}): TorrentJob {
     eta_seconds: 1_200,
     progress: 0.25,
     ingest_job_id: null,
-    node_id: 'gbni-2',
+    // A real node id, as `GET /api/v1/status` reports it. The fixture used to
+    // say `gbni-2`, which is not a thing the server has ever sent, and it made
+    // this assertion agree that the Node row is readable when it is not.
+    node_id: '855716bd8bb0ad12b0c4f876386699de',
     created_unix_ms: Date.now() - 3_600_000,
     updated_unix_ms: Date.now() - 2_000,
     error: null,
@@ -99,7 +102,7 @@ describe('torrent detail pane', () => {
       ?.querySelector('dd')?.textContent;
 
     expect(value('Info hash')).toBe('c2a1f0e9b8d7c6b5a4938271605f4e3d2c1b0a99');
-    expect(value('Node')).toBe('gbni-2');
+    expect(value('Node')).toBe('855716bd8bb0ad12b0c4f876386699de');
     // 250 MB served against the 1 GB this node actually holds.
     expect(value('Ratio')).toBe('0.25');
     expect(value('Age')).toBe('1h ago');
