@@ -16,6 +16,7 @@ import { uiSettings } from '../settings';
 import { describePlaybackSession } from '@machafoundation/core';
 import { playbackFailureTrail, type PlaybackFailureTrailEntry } from './player/failureTrail';
 import { playerNodeChoices } from './player/nodeChoices';
+import { moveStreamToNode } from './player/nodeMove';
 import { failureTrailEnabled } from '../diagnostics/failureTrailSetting';
 import { accountSessionLimitNotice, playbackFailureHeadline } from '../diagnostics/failureCauses';
 import { bufferedTimelineSegments } from '@machafoundation/core';
@@ -51,7 +52,7 @@ interface Props {
    * The registry belongs to the app, not to a player that comes and goes, so
    * the pin is set where the registry lives and this player only says which.
    */
-  onPinEndpoint?: (endpointIds: readonly string[]) => void;
+  onPinEndpoint?: (endpointIds: readonly string[]) => string | undefined;
 }
 
 
@@ -517,23 +518,19 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
   /**
    * Send this stream to the node the viewer picked, from where they are.
    *
-   * **A new generation, not a redirected one.** A playback session belongs to
-   * the node that created it, so "stream from that node instead" is a session
-   * on that node at this position — which is what `play()` does, closing the
-   * one on screen first so the node it leaves is not left holding a
-   * transcode slot.
+   * **A new session there, promoted under the picture.** A playback session
+   * belongs to the node that created it, so "stream from that node instead"
+   * is a session on that node at this position. Core's `moveTo` builds it
+   * while the old one keeps presenting, swaps, then releases the old one;
+   * `moveStreamToNode` says what happens when it cannot.
    *
    * **The pin is set before the request, and outlives it.** Ordering is what
    * makes the resolver choose, so the choice has to be in the registry before
    * anything resolves; leaving it there is what keeps the next seek, mode
    * change and recovery on the node the viewer asked for.
    *
-   * **Not seamless yet, and the gap is real.** Core already has the machinery
-   * that would make it so — `prepareAlternate` builds a standby on another
-   * node and promotion swaps to it under the picture, which is how failover
-   * moves a viewer without a black frame — but it is reached from inside the
-   * coordinator, on failure, and there is no public way to ask for it by
-   * name. Until there is, this costs what starting a stream costs.
+   * **Restarting was 13.2 s of black**, measured between fi-1 and gbni-1,
+   * because `play()` closes before it starts. That is what this replaced.
    */
   const nodeChoices = useMemo(
     () => playerNodeChoices(endpoints ?? [], playback.session?.endpoint?.id),
@@ -563,12 +560,20 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
       sessionId: playback.session?.sessionId,
     });
     setLocalNotice(undefined);
+    const endpointId = onPinEndpoint(choice.endpointIds);
+    if (endpointId === undefined) return;
     setMovingToNode(nodeId);
-    onPinEndpoint(choice.endpointIds);
-    // The viewer's own choices follow them across, or the move would quietly
-    // undo the mode and the audio track they had picked.
-    void runtime.play({ media, startPositionMs: positionMs, returnTo }, playback.session?.preferences);
-  }, [log, media, nodeChoices, onPinEndpoint, playback.intent.positionMs, playback.session?.endpoint?.id, playback.session?.preferences, playback.session?.sessionId, returnTo, runtime]);
+    // Cleared when the move settles rather than when a session appears: a
+    // move never takes the session away, so the note would clear at once.
+    void moveStreamToNode(runtime, endpointId, Boolean(fatalError))
+      .then((outcome) => {
+        log.info('node-move-settled', { to: endpointId, outcome });
+        if (outcome === 'refused') {
+          setLocalNotice(`${choice.label} could not take this stream, so it is still playing from here.`);
+        }
+      })
+      .finally(() => setMovingToNode(undefined));
+  }, [fatalError, log, nodeChoices, onPinEndpoint, playback.intent.positionMs, playback.session?.endpoint?.id, playback.session?.sessionId, runtime]);
 
   useEffect(() => {
     if (presentation === 'full') {
@@ -782,14 +787,6 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
 
   const session = playback.session;
   const event = playback.event;
-  // The move is over when a generation is playing, wherever it landed. It can
-  // land somewhere else — the node may refuse, and recovery is entitled to
-  // walk — so this clears on arrival rather than on arrival *there*, or the
-  // note would sit under the pills for the rest of the film.
-  useEffect(() => {
-    if (movingToNode === undefined) return;
-    if (session?.endpoint?.id !== undefined && !playback.starting) setMovingToNode(undefined);
-  }, [movingToNode, playback.starting, session?.endpoint?.id]);
   const duration = firstUsableDurationMs(session?.durationMs, event.durationMs, media.durationMs);
   const displayedProgress = scrubValue ?? Math.min(duration, playback.intent.positionMs);
   const playedPercent = Math.max(0, Math.min(100, displayedProgress / Math.max(1, duration) * 100));

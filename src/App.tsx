@@ -361,6 +361,7 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
     (endpointIds: readonly string[]) => {
       const endpointId = preferredEndpointForNode(endpointRegistry.candidates(), endpointIds);
       if (endpointId !== undefined) endpointRegistry.prefer(endpointId);
+      return endpointId;
     },
     [endpointRegistry],
   );
