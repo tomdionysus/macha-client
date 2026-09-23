@@ -386,7 +386,8 @@ amended back before it mattered. Concretely, before any merge to `main`:
    suite passed.
 3. `rm -rf node_modules/.vite`, then `npm run typecheck` and `npm test`
    green **against the registry copy**, not against the tree the link
-   pointed at.
+   pointed at. The README states the version under its title (`_vx.y.z_`);
+   a version bump that leaves it behind fails `src/readmeVersion.test.ts`.
 4. Then merge and push — Tom's action, on his request.
 
 **The gate was run for 0.18.0 and it caught something**, which is the
