@@ -628,6 +628,13 @@ fi-1 site, test account, dev client:
   rate above. Signatures are otherwise stable: 2,068 URLs identical across
   all three nodes and across reads. This is the half of the old caching fix
   that was never finished.
+- **And each cached poster expires 24 h after it was fetched, with nothing
+  to revalidate against.** Tom: "I see it randomly - I think it's local
+  cache expiry." The headers agree: `max-age=86400` and no `ETag` or
+  `Last-Modified`, so an expired entry cannot be answered with a 304 and is
+  downloaded whole again, at the cold rate. Each poster expires on its own
+  clock, which is why it looks random. Content-addressed artwork could be
+  cached for a year.
 - **Within a day the browser cache holds.** In-app revisit: 0-25 ms per
   poster; full reload: all 33 visible posters complete as their cards
   render. Host stays macnessa throughout (core's `ArtworkHostPreference`).
