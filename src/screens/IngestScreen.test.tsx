@@ -1,8 +1,10 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { describe, expect, it } from 'vitest';
 import type { AcquisitionApi, AcquisitionSnapshot, IngestJob, TorrentJob } from '@machafoundation/core';
 import { IngestScreen } from './IngestScreen';
+import { TorrentDetailScreen } from './TorrentDetailScreen';
 
 function torrentJob(overrides: Partial<TorrentJob> = {}): TorrentJob {
   return {
@@ -62,44 +64,115 @@ function fakeApi(value: AcquisitionSnapshot): AcquisitionApi {
   } as unknown as AcquisitionApi;
 }
 
-async function renderWithTorrent(job: TorrentJob, ingestJobs: IngestJob[] = []): Promise<HTMLElement> {
-  render(<IngestScreen api={fakeApi(snapshot([job], ingestJobs))} />);
-  return await screen.findByRole('button', { name: 'Some.Release.2024.1080p details' });
+
+const importing: IngestJob = {
+  id: 'ing-1',
+  source_type: 'torrent',
+  source_ref: 'tor-1',
+  display_name: 'Some.Release.2024.1080p',
+  source_path: '/srv/staging/tor-1',
+  remove_source_on_complete: true,
+  state: 'importing',
+  bytes_total: 4_000_000_000,
+  bytes_completed: 2_000_000_000,
+  files_total: 4,
+  files_completed: 2,
+  rate_bytes_per_second: 40_000_000,
+  eta_seconds: 50,
+  progress: 0.5,
+  current_file: 'episode-03.mkv',
+  current_destination: '/macha/shows/some-release/episode-03.mkv',
+  created_unix_ms: Date.now() - 60_000,
+  updated_unix_ms: Date.now(),
+  error: null,
+};
+
+function Where() {
+  const location = useLocation();
+  return <output data-testid="where">{location.pathname + location.search}</output>;
 }
 
-describe('torrent detail pane', () => {
-  it('stays closed until the torrent is clicked, and closes again on a second click', async () => {
-    const heading = await renderWithTorrent(torrentJob());
+function renderAt(path: string, value: AcquisitionSnapshot) {
+  const api = fakeApi(value);
+  render(
+    <MemoryRouter initialEntries={[path]}>
+      <Routes>
+        <Route path="/ingest" element={<IngestScreen api={api} />} />
+        <Route path="/ingest/torrents/:torrentId" element={<TorrentDetailScreen api={api} />} />
+      </Routes>
+      <Where />
+    </MemoryRouter>,
+  );
+}
 
+async function rowNames(): Promise<string[]> {
+  const table = await screen.findByRole('table', { name: /torrents/i });
+  return [...table.querySelectorAll('tbody tr .col-name')].map((cell) => cell.textContent ?? '');
+}
+
+const three = [
+  torrentJob({ id: 'a', name: 'Alpha', created_unix_ms: 1_000, download_rate: 10 }),
+  torrentJob({ id: 'b', name: 'Bravo', created_unix_ms: 3_000, download_rate: 30 }),
+  torrentJob({ id: 'c', name: 'Charlie', created_unix_ms: 2_000, download_rate: 20 }),
+];
+
+describe('the torrent list', () => {
+  it('is one slim row per torrent, newest first until asked otherwise', async () => {
+    renderAt('/ingest', snapshot(three));
+    await screen.findByText('Alpha');
+    expect(await rowNames()).toEqual(['Bravo', 'Charlie', 'Alpha']);
+    expect(document.querySelectorAll('.torrent-table tbody tr')).toHaveLength(3);
+  });
+
+  it('reorders when the viewer picks a sort, and says so in the address', async () => {
+    renderAt('/ingest', snapshot(three));
+    await screen.findByText('Alpha');
+    fireEvent.change(screen.getByLabelText('Sort by'), { target: { value: 'name' } });
+    expect(await rowNames()).toEqual(['Alpha', 'Bravo', 'Charlie']);
+    expect(screen.getByTestId('where').textContent).toBe('/ingest?sort=name&dir=asc');
+
+    fireEvent.click(screen.getByRole('button', { name: /Ascending; switch to descending/ }));
+    expect(await rowNames()).toEqual(['Charlie', 'Bravo', 'Alpha']);
+  });
+
+  it('sorts from a column header, and reverses on a second press', async () => {
+    renderAt('/ingest', snapshot(three));
+    await screen.findByText('Alpha');
+    const header = within(document.querySelector('.torrent-table thead') as HTMLElement).getByRole('button', { name: /Down/ });
+    fireEvent.click(header);
+    expect(await rowNames()).toEqual(['Bravo', 'Charlie', 'Alpha']);
+    fireEvent.click(header);
+    expect(await rowNames()).toEqual(['Alpha', 'Charlie', 'Bravo']);
+  });
+
+  it('opens a torrent on its own page, keeping the sort for the way back', async () => {
+    renderAt('/ingest?sort=name&dir=desc', snapshot(three));
+    fireEvent.click(await screen.findByRole('link', { name: 'Alpha' }));
+    expect(screen.getByTestId('where').textContent).toBe('/ingest/torrents/a?sort=name&dir=desc');
+    fireEvent.click(await screen.findByRole('link', { name: 'Import' }));
+    expect(screen.getByTestId('where').textContent).toBe('/ingest?sort=name&dir=desc');
+  });
+
+  it('keeps the detail off the list', async () => {
+    renderAt('/ingest', snapshot([torrentJob()]));
+    await screen.findByText('Some.Release.2024.1080p');
     expect(screen.queryByText('Info hash')).toBeNull();
-
-    fireEvent.click(heading);
-    expect(screen.getByText('Info hash')).not.toBeNull();
-    expect(heading.getAttribute('aria-expanded')).toBe('true');
-
-    fireEvent.click(heading);
-    await waitFor(() => expect(screen.queryByText('Info hash')).toBeNull());
   });
+});
 
-  it('shows only one torrent detail at a time', async () => {
-    const other = torrentJob({ id: 'tor-2', name: 'Another.Release', info_hash: 'ff00' });
-    render(<IngestScreen api={fakeApi(snapshot([torrentJob(), other]))} />);
-
-    fireEvent.click(await screen.findByRole('button', { name: 'Some.Release.2024.1080p details' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Another.Release details' }));
-
-    expect(screen.getAllByText('Info hash')).toHaveLength(1);
-    expect(screen.getByRole('button', { name: 'Some.Release.2024.1080p details' }).getAttribute('aria-expanded')).toBe('false');
-  });
-
-  it('reports the facts the card has no room for: hash, node, ratio and cataloguing outcome', async () => {
-    fireEvent.click(await renderWithTorrent(torrentJob()));
-
+describe("a torrent's own page", () => {
+  const detail = () => {
     const pane = document.querySelector('.ingest-job-detail');
     expect(pane).not.toBeNull();
-    const value = (label: string) => [...pane!.querySelectorAll('div')]
+    return (label: string) => [...pane!.querySelectorAll('div')]
       .find((row) => row.querySelector('dt')?.textContent === label)
       ?.querySelector('dd')?.textContent;
+  };
+
+  it('reports the facts the list has no room for: hash, node, ratio and cataloguing outcome', async () => {
+    renderAt('/ingest/torrents/tor-1', snapshot([torrentJob()]));
+    await screen.findByRole('heading', { name: 'Some.Release.2024.1080p' });
+    const value = detail();
 
     expect(value('Info hash')).toBe('c2a1f0e9b8d7c6b5a4938271605f4e3d2c1b0a99');
     expect(value('Node')).toBe('855716bd8bb0ad12b0c4f876386699de');
@@ -114,39 +187,21 @@ describe('torrent detail pane', () => {
   });
 
   it('omits the import group for a torrent that has not been handed to ingest', async () => {
-    fireEvent.click(await renderWithTorrent(torrentJob()));
-
+    renderAt('/ingest/torrents/tor-1', snapshot([torrentJob()]));
+    await screen.findByText('Transfer');
     expect(screen.queryByText('Import job')).toBeNull();
-    expect(screen.getByText('Transfer')).not.toBeNull();
   });
 
   it('reports the linked import job once the payload is being copied in', async () => {
-    const ingest: IngestJob = {
-      id: 'ing-1',
-      source_type: 'torrent',
-      source_ref: 'tor-1',
-      display_name: 'Some.Release.2024.1080p',
-      source_path: '/srv/staging/tor-1',
-      remove_source_on_complete: true,
-      state: 'importing',
-      bytes_total: 4_000_000_000,
-      bytes_completed: 2_000_000_000,
-      files_total: 4,
-      files_completed: 2,
-      rate_bytes_per_second: 40_000_000,
-      eta_seconds: 50,
-      progress: 0.5,
-      current_file: 'episode-03.mkv',
-      current_destination: '/macha/shows/some-release/episode-03.mkv',
-      created_unix_ms: Date.now() - 60_000,
-      updated_unix_ms: Date.now(),
-      error: null,
-    };
-    fireEvent.click(await renderWithTorrent(torrentJob({ ingest_job_id: 'ing-1' }), [ingest]));
-
-    expect(screen.getByText('Import job')).not.toBeNull();
+    renderAt('/ingest/torrents/tor-1', snapshot([torrentJob({ ingest_job_id: 'ing-1' })], [importing]));
+    expect(await screen.findByText('Import job')).not.toBeNull();
     expect(screen.getByText('/srv/staging/tor-1')).not.toBeNull();
     expect(screen.getByText('episode-03.mkv')).not.toBeNull();
     expect(screen.getByText('/macha/shows/some-release/episode-03.mkv')).not.toBeNull();
+  });
+
+  it('says a torrent that has gone is gone, rather than showing an empty page', async () => {
+    renderAt('/ingest/torrents/nope', snapshot([torrentJob()]));
+    await waitFor(() => expect(screen.getByText('This torrent is no longer on the server.')).not.toBeNull());
   });
 });

@@ -1,114 +1,134 @@
-/* Generic ingest / BitTorrent acquisition. */
+/* Generic ingest / BitTorrent acquisition: a compact job list in the shape of
+   a torrent client, one slim line per job, and a page per torrent. */
 .ingest-screen { width: 100%; }
-.ingest-header {
-  display: flex;
-  justify-content: space-between;
-  gap: 2rem;
-  align-items: end;
-  margin-bottom: 1.5rem;
-}
-.ingest-header > div:first-child { min-width: 0; }
-.ingest-header h1 { margin-bottom: .6rem; }
-.ingest-header > div:first-child > p:last-child { max-width: 70ch; margin: 0; color: var(--text-dim); line-height: 1.55; }
-.ingest-staging-summary {
-  flex: 0 1 360px;
-  min-width: 220px;
-  padding: 1rem 1.15rem;
-  border: 1px solid #ffffff12;
-  border-radius: .7rem;
-  background: #171719c7;
-}
-.ingest-staging-summary span { display: block; color: var(--text-faint); text-transform: uppercase; letter-spacing: .11em; font-size: .72rem; }
-.ingest-staging-summary strong { display: block; margin: .35rem 0 .25rem; font-size: 1.15rem; }
-.ingest-staging-summary small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-dim); }
-.ingest-submit-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; margin: 1.2rem 0 2rem; }
-.ingest-submit-card {
-  min-width: 0;
-  padding: 1.2rem;
-  border: 1px solid #ffffff12;
-  border-radius: .8rem;
-  background: #151517c9;
-  box-shadow: 0 14px 32px #0004;
-}
-.ingest-submit-card h2 { margin: .35rem 0 .55rem; }
-.ingest-submit-card > p { min-height: 3em; margin: 0 0 1rem; color: var(--text-dim); line-height: 1.5; }
-.ingest-submit-label { color: var(--text-faint); text-transform: uppercase; letter-spacing: .11em; font-size: .72rem; }
-.ingest-submit-line { display: flex; gap: .65rem; align-items: stretch; }
-.ingest-submit-line input {
+.ingest-header { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; margin-bottom: .75rem; }
+.ingest-header h1 { margin: 0; }
+.ingest-staging-summary { margin: 0; color: var(--text-faint); font-size: .82rem; white-space: nowrap; }
+.ingest-staging-summary strong { margin-left: .35rem; color: #d0d0d4; font-weight: 500; font-variant-numeric: tabular-nums; }
+
+.ingest-add-bar { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .6rem; margin-bottom: .5rem; }
+.ingest-add-form { display: flex; gap: .4rem; min-width: 0; }
+.ingest-add-form input {
   min-width: 0;
   flex: 1;
+  padding: .45rem .65rem;
+  border: 1px solid #3a3a40;
+  border-radius: .45rem;
   background: #19191c;
   color: white;
-  border: 1px solid #3a3a40;
-  border-radius: .65rem;
-  padding: .9rem 1rem;
+  font-size: .88rem;
 }
-.ingest-submit-line input:focus { outline: 1px solid var(--focus); border-color: var(--focus); }
-.ingest-submit-line button { flex: 0 0 auto; margin: 0; }
-.ingest-submit-line button:disabled, .ingest-job-actions button:disabled { opacity: .4; cursor: default; }
-.ingest-submit-card .ingest-disabled-note { min-height: 0; margin: .8rem 0 0; color: #d9a9ad; font-size: .88rem; }
-.ingest-page-error, .ingest-page-notice { padding: .8rem 1rem; border-radius: .6rem; margin: 0 0 1rem; }
+.ingest-add-form input:focus { outline: 1px solid var(--focus); border-color: var(--focus); }
+.ingest-add-form button { flex: 0 0 auto; margin: 0; padding: .45rem .8rem; font-size: .85rem; }
+.ingest-add-form button:disabled, .ingest-job-actions button:disabled { opacity: .4; cursor: default; }
+.ingest-disabled-note { margin: .2rem 0; color: #d9a9ad; font-size: .8rem; }
+
+.ingest-page-error, .ingest-page-notice { padding: .5rem .75rem; border-radius: .45rem; margin: .5rem 0; font-size: .88rem; }
 .ingest-page-error { color: #ffb4b4; background: #3b090c5c; border: 1px solid #8a293133; }
 .ingest-page-notice { color: #c9d5c9; background: #15301848; border: 1px solid #4d765433; }
-.ingest-loading, .ingest-empty { color: var(--text-dim); }
-.ingest-job-section { margin-top: 2rem; }
-.ingest-section-heading { display: flex; align-items: baseline; gap: .75rem; }
-.ingest-section-heading h2 { margin-bottom: .8rem; }
-.ingest-section-heading > span { color: var(--text-faint); font-variant-numeric: tabular-nums; }
-.ingest-job-list { display: grid; gap: .75rem; }
-.ingest-job-card {
-  position: relative;
-  padding: 1rem 1.1rem;
-  border: 1px solid #ffffff12;
-  border-radius: .75rem;
-  background: #151517d8;
+.ingest-loading, .ingest-empty { color: var(--text-dim); font-size: .9rem; }
+
+.ingest-job-section { margin-top: 1.25rem; }
+.ingest-section-heading { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: .4rem; }
+.ingest-section-heading h2 { margin: 0; font-size: 1.05rem; }
+.ingest-section-heading h2 > span { margin-left: .4rem; color: var(--text-faint); font-weight: 400; font-variant-numeric: tabular-nums; }
+.torrent-sort-control { display: flex; align-items: center; gap: .4rem; color: var(--text-faint); font-size: .8rem; }
+.torrent-sort-control label { display: flex; align-items: center; gap: .4rem; }
+.torrent-sort-control select {
+  padding: .3rem .45rem;
+  border: 1px solid #3a3a40;
+  border-radius: .4rem;
+  background: #19191c;
+  color: #d7d7da;
+  font-size: .82rem;
 }
-.ingest-job-card.state-blocked, .ingest-job-card.state-failed { border-color: #73232c73; }
-.ingest-job-card.state-paused { border-color: #6c623465; }
-.ingest-job-open {
-  display: block;
-  width: 100%;
+.torrent-sort-control select:focus { outline: 1px solid var(--focus); border-color: var(--focus); }
+.torrent-sort-direction.secondary-button { margin: 0; padding: .3rem .55rem; font-size: .78rem; }
+
+.ingest-table-scroll { overflow-x: auto; border: 1px solid #ffffff12; border-radius: .5rem; background: #151517d8; }
+.ingest-table { width: 100%; border-collapse: collapse; font-size: .84rem; font-variant-numeric: tabular-nums; }
+.ingest-table th {
+  padding: .35rem .55rem;
+  border-bottom: 1px solid #ffffff14;
+  color: var(--text-faint);
+  font-size: .7rem;
+  font-weight: 500;
+  letter-spacing: .06em;
+  text-align: left;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.torrent-sort-header {
   margin: 0;
   padding: 0;
   border: 0;
-  border-radius: .55rem;
   background: none;
   color: inherit;
-  text-align: left;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
   cursor: pointer;
 }
-.ingest-job-open:focus-visible { outline: 1px solid var(--focus); outline-offset: 3px; }
-.ingest-job-open:hover .ingest-disclosure { color: #d0d0d4; }
-.ingest-disclosure { flex: 0 0 auto; align-self: center; color: var(--text-faint); font-size: 1.1rem; line-height: 1; }
-.ingest-job-heading { display: flex; justify-content: space-between; gap: 1rem; align-items: start; padding-right: 2.5rem; }
-.ingest-job-heading > div { min-width: 0; }
-.ingest-job-heading > div:first-child { flex: 1; }
-.ingest-job-heading h3 { margin: .2rem 0 .18rem; font-size: 1.12rem; overflow-wrap: anywhere; }
-.ingest-state { color: var(--text-faint); text-transform: uppercase; letter-spacing: .1em; font-size: .68rem; }
-.ingest-percent { flex: 0 0 auto; color: #d8d8dc; font-size: 1.2rem; font-variant-numeric: tabular-nums; }
-.ingest-source { margin: 0; max-width: 90ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-faint); font-size: .82rem; }
-.ingest-progress-track { position: relative; height: 5px; margin: .85rem 0; border-radius: 99px; background: #ffffff0c; overflow: hidden; }
+.torrent-sort-header:hover, .torrent-sort-header.active { color: #d0d0d4; }
+.torrent-sort-header:focus-visible { outline: 1px solid var(--focus); outline-offset: 2px; }
+.ingest-table td { height: 2.1rem; padding: 0 .55rem; border-bottom: 1px solid #ffffff08; color: #c8c8cc; white-space: nowrap; }
+.ingest-table tbody tr:last-child td { border-bottom: 0; }
+.torrent-table tbody tr { cursor: pointer; }
+.ingest-table tbody tr:hover td { background: #ffffff06; }
+.ingest-table .col-name { width: 100%; max-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ingest-table .col-name a { color: #e2e2e6; text-decoration: none; }
+.ingest-table .col-name a:hover { text-decoration: underline; }
+.ingest-table .col-name a:focus-visible { outline: 1px solid var(--focus); outline-offset: 2px; }
+.ingest-table .col-progress { min-width: 8.5rem; }
+.ingest-table .col-progress > span { display: inline-block; width: 3.2rem; text-align: right; color: #d0d0d4; }
+.ingest-table .col-size, .ingest-table .col-rate, .ingest-table .col-eta, .ingest-table .col-peers, .ingest-table .col-ratio { text-align: right; }
+.ingest-table th.col-size, .ingest-table th.col-rate, .ingest-table th.col-eta, .ingest-table th.col-peers, .ingest-table th.col-ratio { text-align: right; }
+.ingest-table td.col-status { color: var(--text-dim); }
+.ingest-table td.col-status.has-error, .ingest-table tr.state-failed td.col-status, .ingest-table tr.state-blocked td.col-status { color: #e49a9f; }
+.ingest-table tr.state-paused td.col-status { color: #cbbf8a; }
+.ingest-table td.col-added { color: var(--text-faint); }
+.ingest-table .col-actions { width: 1%; padding-right: .35rem; }
+.ingest-error-row td { height: auto; padding: .25rem .55rem .45rem; color: #ffb4b4; white-space: normal; font-size: .8rem; }
+.ingest-table .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+.ingest-progress-track { position: relative; display: inline-block; width: 4.5rem; height: 5px; margin-right: .45rem; vertical-align: middle; border-radius: 99px; background: #ffffff10; overflow: hidden; }
 .ingest-progress-track > span { display: block; height: 100%; border-radius: inherit; background: var(--red-400); transition: width 180ms linear; }
 .ingest-progress-track > span.indeterminate { width: 28%; animation: ingest-indeterminate 1.4s ease-in-out infinite; }
 @keyframes ingest-indeterminate { 0% { transform: translateX(-110%); } 100% { transform: translateX(390%); } }
-.ingest-job-stats { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: .55rem 1rem; margin: 0; }
-.ingest-job-stats-import { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-.ingest-job-stats > div { min-width: 0; }
-.ingest-job-stats dt { color: var(--text-faint); font-size: .72rem; text-transform: uppercase; letter-spacing: .07em; }
-.ingest-job-stats dd { margin: .22rem 0 0; color: #d0d0d4; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
-.ingest-current { margin: .75rem 0 0; color: var(--text-faint); font-size: .82rem; }
-.ingest-current span { color: var(--text-dim); overflow-wrap: anywhere; }
-.ingest-job-error { margin: .75rem 0 0; color: #ffb4b4; line-height: 1.45; }
+
+.ingest-job-actions { display: flex; align-items: center; gap: .35rem; justify-content: flex-end; }
+.ingest-job-actions-row .secondary-button { margin: 0; padding: .18rem .5rem; border-radius: .35rem; font-size: .76rem; }
+.ingest-job-actions-row .ingest-remove-compact { padding: .1rem .45rem; font-size: .95rem; line-height: 1; }
+.ingest-job-actions-page { flex-wrap: wrap; }
+.ingest-job-actions-page .secondary-button { margin: 0; padding: .45rem .8rem; font-size: .85rem; }
+.ingest-confirm-label { color: #e2b0b4; font-size: .78rem; }
+.ingest-delete-button { border-color: #612028; color: #e2b0b4; }
+.ingest-delete-button.confirm { background: #30070bd4; border-color: #8a303b; }
+
+/* A torrent's own page. */
+.ingest-back { display: inline-block; margin-bottom: .6rem; color: var(--text-dim); font-size: .85rem; text-decoration: none; }
+.ingest-back::before { content: '‹ '; }
+.ingest-back:hover { color: #e2e2e6; }
+.torrent-detail-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; }
+.torrent-detail-header > div { min-width: 0; }
+.torrent-detail-header h1 { margin: .15rem 0 0; font-size: 1.35rem; overflow-wrap: anywhere; }
+.ingest-state { color: var(--text-faint); text-transform: uppercase; letter-spacing: .1em; font-size: .68rem; }
+.ingest-state.state-failed, .ingest-state.state-blocked { color: #e49a9f; }
+.torrent-detail-progress { display: flex; align-items: center; gap: .6rem; margin: .8rem 0; }
+.torrent-detail-progress .ingest-progress-track { flex: 1; width: auto; height: 6px; margin: 0; }
+.torrent-detail-progress strong { color: #d8d8dc; font-variant-numeric: tabular-nums; }
+.ingest-current { margin: .5rem 0 0; color: var(--text-faint); font-size: .85rem; }
+.ingest-job-error { margin: .5rem 0 0; color: #ffb4b4; line-height: 1.45; }
 .ingest-job-detail {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));
   gap: 1rem 1.5rem;
-  margin-top: .9rem;
-  padding-top: .9rem;
+  margin-top: 1rem;
+  padding-top: 1rem;
   border-top: 1px solid #ffffff12;
 }
 .ingest-detail-group { min-width: 0; }
-.ingest-detail-group h4 {
+.ingest-detail-group h2 {
   margin: 0 0 .5rem;
   color: var(--text-faint);
   text-transform: uppercase;
@@ -129,23 +149,16 @@
   font-variant-numeric: tabular-nums;
 }
 .ingest-detail-group code { color: #dedee2; }
-.ingest-job-actions { display: flex; flex-wrap: wrap; gap: .55rem; justify-content: flex-end; margin-top: .85rem; }
-.ingest-job-actions .secondary-button { margin: 0; padding: .58rem .85rem; }
-.ingest-job-remove { top: .7rem; right: .75rem; }
-.ingest-delete-button { border-color: #612028; color: #e2b0b4; }
-.ingest-delete-button.confirm { background: #30070bd4; border-color: #8a303b; }
 
 @media (max-width: 900px) {
-  .ingest-header { align-items: stretch; flex-direction: column; gap: 1rem; }
-  .ingest-staging-summary { flex-basis: auto; }
-  .ingest-submit-grid { grid-template-columns: 1fr; }
-  .ingest-job-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .ingest-add-bar { grid-template-columns: 1fr; }
+  .ingest-table .col-optional { display: none; }
 }
 
 @media (max-width: 600px) {
-  .ingest-submit-line { display: grid; }
-  .ingest-job-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .ingest-job-heading { align-items: baseline; }
+  .ingest-section-heading { flex-wrap: wrap; }
+  .ingest-table .col-progress .ingest-progress-track { display: none; }
+  .ingest-table .col-progress { min-width: 0; }
+  .ingest-table .col-size, .ingest-table .col-eta { display: none; }
+  .torrent-detail-header { flex-direction: column; }
 }
-
-

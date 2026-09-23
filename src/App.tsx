@@ -48,6 +48,7 @@ import { SettingsScreen } from './screens/SettingsScreen';
 import { SponsorScreen } from './screens/SponsorScreen';
 import { MetadataEditorScreen } from './screens/MetadataEditorScreen';
 import { IngestScreen } from './screens/IngestScreen';
+import { TorrentDetailScreen } from './screens/TorrentDetailScreen';
 import { ManageScreen, type ManageSection } from './screens/ManageScreen';
 import { NodeStatusScreen, StatusScreen } from './screens/StatusScreen';
 import { pathForMedia, routes } from '@machafoundation/core';
@@ -852,6 +853,7 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
           <Route path="/items/:itemId/edit" element={metadataEditingAvailable ? <MetadataEditorRoute api={catalogueApi} /> : <Navigate to={landing} replace />} />
           <Route path={routes.search} element={mediaPane(<SearchScreen api={api} onOpen={open} />)} />
           <Route path={routes.ingest} element={permits('importer') ? <IngestScreen api={acquisitionApi} /> : <Navigate to={landing} replace />} />
+          <Route path={`${routes.ingest}/torrents/:torrentId`} element={permits('importer') ? <TorrentDetailScreen api={acquisitionApi} /> : <Navigate to={landing} replace />} />
           <Route path={routes.status} element={permits('view_status') ? <StatusScreen api={clusterStatusApi} endpointRegistry={endpointRegistry} platform={platform} manageApi={managementAvailable ? manageApi : undefined} section="overview" auth={auth} /> : <Navigate to={landing} replace />} />
           <Route path={routes.statusClient} element={permits('view_status') ? <StatusScreen api={clusterStatusApi} endpointRegistry={endpointRegistry} platform={platform} manageApi={managementAvailable ? manageApi : undefined} section="client" auth={auth} /> : <Navigate to={landing} replace />} />
           <Route path={routes.statusConnectivity} element={permits('view_status') ? <StatusScreen api={clusterStatusApi} endpointRegistry={endpointRegistry} platform={platform} manageApi={managementAvailable ? manageApi : undefined} section="connectivity" auth={auth} /> : <Navigate to={landing} replace />} />
