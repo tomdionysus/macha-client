@@ -57,9 +57,9 @@ the top):
    still races a join it loses on a slow link and freezes ~15 s. Needs a
    lead for a node never measured; core has asked the server what it can
    state.
-2. **The seek P0** — the `relocate` path and the per-track reading still owed.
-   The freeze recorder is built (2026-09-23) and waits for a freeze; its
-   hls.js wiring wants one console check in a signed-in tab.
+2. **The seek P0** — the relocate path is verified live (2026-09-23) and the
+   freeze recorder is wired and seen live; what is left is the reading from a
+   real freeze, which the recorder now takes unaided.
 3. **The `readyState` 0 P0** — the recorder is in place; what is left is the
    consequence (a generation that never produced a byte condemning its node)
    and reading the next occurrence.
@@ -985,10 +985,13 @@ relied on it.
       The arithmetic closes end to end: generation origin 1,532,781 + element
       duration 1,173,555 = **2,706,336 ms**, exactly the scrubber's maximum.
 
-      **Not covered:** the `relocate` seek path. A synthetic scrubber commit did
-      not start a negotiation, and it was not worth fighting the UI for — a seek
-      reaches the same branch by the same call site, so this is confirmatory
-      rather than new. Worth doing by hand next time the player is open.
+      **The `relocate` seek path, verified live 2026-09-23**, remux from fi-1,
+      scrubber click: seek to 3,333,000 ms, the node started the generation on
+      the keyframe at 3,330,473, the client was handed local 2,527 ms,
+      `relocation-hold-begin` then `media-seeked currentTime=2.527` then
+      `relocation-hold-complete`. The pre-roll was not presented, and the
+      readout (55:45) equals generation start plus element time (3,330.473 +
+      14.72 s), so no constant offset.
 
       **Noticed, not diagnosed, and not this repo's:** the generation was
       `transcode` yet carried a 3,330.9 ms offset. Under the 0.46.0 contract
@@ -1059,12 +1062,20 @@ relied on it.
       record, so during a handover the two elements' counters were compared
       with each other and a freeze on the outgoing one could not be seen, and
       the audio-stopped check had the same fault. Every guard seen red.
-      **Unverified live:** no test drives hls.js events, so the
-      `BUFFER_CREATED` wiring has not run. The cheap check is to hold
-      `getVideoPlaybackQuality` constant on a playing element in the console
-      and read the report's `trackBuffered`; it needs a signed-in tab, which
-      this session did not make, because signing in means handing the browser
-      tool a token.
+      **Wired and seen live, 2026-09-23**, remux from es-1 in a foregrounded
+      tab: holding `getVideoPlaybackQuality` constant for 4 s on the playing
+      element gave `media-picture-stopped` at `frozenForMs` 1,594 (clock 1,860
+      ms on, frames held at 700), then `media-picture-resumed` at 3,719 ms,
+      each carrying real ranges. **The buffer is one `audiovideo`
+      SourceBuffer, not two**: the node muxes audio and video into one
+      rendition, so MSE holds no per-track ranges to read. The reading still
+      separates the candidates, because a muxed buffer's range is where
+      *both* tracks have data: a range covering the playhead through a freeze
+      means the video data is there (the decoder), a gap at the playhead
+      while sound plays means it is not (production). The decoded byte
+      counters in the same line say which decoder stopped. No false report
+      across a seek and a relocation hold. The reading itself still waits for
+      a real freeze.
 - [x] Adopt `PlaybackSource.budgets` — done 2026-09-20, shipped in 0.17.3,
       recorded in `COMPLETED.md`. **Unverified live:** both nodes state the
       figures the constants were derived from (`startup_timeout_ms` 15000,
@@ -1352,6 +1363,27 @@ which needs a node stopped at the right moment; the re-arm is unit-covered.
 
 The "Pause: confirmed not applicable" note under any-node failover below was
 right that pause makes no server call and wrong about the conclusion.
+
+## P1 — A reclaimed direct session is reported as an unsupported format
+
+Seen 2026-09-23, direct Matroska from fi-1, while the tab was hidden. The
+start record read `no-first-frame` after 121,087 ms, **zero requests**, every
+sample `hidden`; the node reclaimed the session at about 120 s (the client's
+DELETE got 404). When the tab came forward the element failed with
+`MEDIA_ELEMENT_ERROR: Format error` on `__macha_direct_cache__`, and the
+client made that `PlaybackSourceError: Web media source is unsupported`,
+terminal, with the failure screen. The format was fine: the same title played
+direct from macnessa on reload. So a session that is gone is named as a codec
+fault, and nothing tries to rebuild it. Two things to settle: what the
+direct read-ahead cache serves once its session is gone (the format error
+is presumably its response, not the media), and whether a hidden start
+should hold off rather than let the reclaim run out. Tom, 2026-09-23: "this
+is a problem in itself". Not diagnosed further.
+
+The same run also hit the mode-switch P1 below: a direct-to-remux press on
+macnessa (across the WAN from here) stalled at 9.81 s, was read terminal
+after 7 s of nothing, failed over, overran the 19 s attempt budget on fi-1,
+and landed on es-1.
 
 ## P1 — A mode switch negotiates from a stale position, and 7 s of nothing-arrived is read as terminal
 
