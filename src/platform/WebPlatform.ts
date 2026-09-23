@@ -24,6 +24,8 @@ import {
   subscribeDirectPlayReadAheadFailure,
 } from '../playback/directPlayReadAhead';
 import { hlsEventSummary, videoState, WebMediaDiagnostics } from './WebMediaDiagnostics';
+import { nodeStartCosts } from '../playback/nodeStartCosts';
+import { shouldReportStart, StartRecorder, type StartOutcome, type StartRole, type StartSample } from './startRecorder';
 import {
   isHlsNetworkDegradation,
   isHlsSegmentHold,
@@ -44,6 +46,13 @@ import {
 
 export { hlsEventSummary } from './WebMediaDiagnostics';
 export { webHlsBufferConfig } from './WebHlsPolicy';
+
+/**
+ * How long a start is recorded before it is reported as never having shown a
+ * frame: a node reclaims a session that was never streamed at 120 s, so past
+ * this the question is no longer the start but the reclaim.
+ */
+const START_RECORD_LIMIT_MS = 120_000;
 
 function clearTextTrackCues(track: TextTrack): void {
   // TextTrack.cues may be null while disabled. Hidden keeps the track
@@ -659,6 +668,12 @@ class WebPlayer implements Player {
   private readonly playerId = ++webPlayerSequence;
   private readonly log = createClientLogger('playback.web', { playerId: this.playerId });
   private readonly diagnostics = new WebMediaDiagnostics(this.log);
+  /** One per element that is starting a source; see `armStartRecorder`. */
+  private readonly startRecorders = new WeakMap<HTMLVideoElement, {
+    recorder: StartRecorder;
+    requests: () => PerformanceResourceTiming[] | undefined;
+    cleanup: () => void;
+  }>();
   private initialSeekCleanup?: () => void;
   private subtitleGeneration = 0;
   private subtitleCleanup?: () => void;
@@ -984,6 +999,7 @@ class WebPlayer implements Player {
     // both the fetching and its own (bounded) error channel. Only the former
     // can starve silently, so only the former is watched.
     let elementOwnsFetch = false;
+    this.armStartRecorder(video, source.url, 'primary');
 
     // Declared by the resolver, never sniffed: a native player handed an
     // undeclared .m3u8 parses the playlist as media and reports a source error.
@@ -1234,6 +1250,7 @@ class WebPlayer implements Player {
         elapsedMs: Math.round(performance.now() - startedAt),
         resumeAtMs,
       });
+      if (incoming) this.finishStartRecorder(incoming, 'abandoned');
       try { built?.hls.destroy(); } catch { /* the fallback path rebuilds regardless */ }
       try { incoming?.remove(); } catch { /* already detached */ }
       return { handedOver: false, resumeAtMs };
@@ -1246,6 +1263,7 @@ class WebPlayer implements Player {
       incoming.style.display = 'none';
       incoming.muted = true;
       host.appendChild(incoming);
+      this.armStartRecorder(incoming, source.url, 'handover');
       // Where the cut will land, near enough: the viewer is at `positionMs` on
       // the replacement's clock the moment core asks, and will have moved a
       // little further by the time this is ready. Only a starting hint — the
@@ -1491,6 +1509,7 @@ class WebPlayer implements Player {
     let built: { hls: InstanceType<typeof import('hls.js').default>; recovery: ManagedHlsMediaRecoveryBudget } | undefined;
     const abandon = (reason: string, detail?: unknown) => {
       this.log.warn('relocation-hold-abandoned', { reason, detail, elapsedMs: Math.round(performance.now() - startedAt) });
+      if (incoming) this.finishStartRecorder(incoming, 'abandoned');
       try { built?.hls.destroy(); } catch { /* the fallback path rebuilds regardless */ }
       try { incoming?.remove(); } catch { /* already detached */ }
       this.pictureHold = undefined;
@@ -1505,6 +1524,7 @@ class WebPlayer implements Player {
       incoming.style.display = 'none';
       incoming.muted = true;
       host.appendChild(incoming);
+      this.armStartRecorder(incoming, source.url, 'relocation');
       built = this.attachHls(hlsModule, incoming, source.url, sourceGeneration, false);
 
       if (!await waitForMediaEvent(incoming, 'canplay', HANDOVER_READY_TIMEOUT_MS)) return abandon('not-ready-in-time');
@@ -2062,6 +2082,7 @@ class WebPlayer implements Player {
     this.mediaTimeline = undefined;
     this.lastPublishedEvent = undefined;
     this.log.debug('stop', this.video ? videoState(this.video) : undefined);
+    if (this.video) this.finishStartRecorder(this.video, 'abandoned');
     this.startWatchdog.stop();
     this.stallWatchdog.stop();
     this.hls?.destroy();
@@ -2099,6 +2120,90 @@ class WebPlayer implements Player {
   subscribeDegradation(listener: PlaybackDegradationListener): () => void {
     this.degradationListeners.add(listener);
     return () => this.degradationListeners.delete(listener);
+  }
+
+  /**
+   * Record what this element does between being given a source and showing a
+   * frame, and say so in one line if that was slow or never happened.
+   *
+   * For the `readyState` 0 P0 (`TODO/ACTIVE.md`): the stall raises nothing
+   * until something else gives up, so the evidence has to be gathered from
+   * before `src` is set rather than reconstructed afterwards. Covers managed
+   * HLS as well as element-owned fetches, and the standby elements of a
+   * handover and a relocation hold as well as the one on screen: the start
+   * watchdog only watches the element-owned path, and a handover standby sat
+   * at `readyState` 0 for 16 s on the first live node move (2026-09-23) with
+   * nothing recording it.
+   *
+   * Observes only. It never fails, degrades or retries anything; the
+   * watchdogs own those decisions.
+   */
+  private armStartRecorder(video: HTMLVideoElement, url: string, role: StartRole): void {
+    this.finishStartRecorder(video, 'abandoned');
+    const recorder = new StartRecorder(role, url, () => performance.now());
+    const armedAt = performance.now();
+    const sample = (): StartSample => ({
+      readyState: video.readyState,
+      networkState: video.networkState,
+      bufferedEndS: video.buffered.length > 0 ? video.buffered.end(video.buffered.length - 1) : undefined,
+      hidden: typeof document !== 'undefined' && document.hidden,
+    });
+    const names = [
+      'loadstart', 'loadedmetadata', 'loadeddata', 'canplay', 'playing', 'waiting', 'stalled',
+      'suspend', 'emptied', 'abort', 'error', 'seeking', 'seeked',
+    ] as const;
+    const handlers = names.map((name) => [name, () => {
+      recorder.event(name, sample());
+      // HAVE_CURRENT_DATA is the first frame: something is paintable.
+      if (video.readyState >= 2 && (name === 'loadeddata' || name === 'canplay' || name === 'playing')) {
+        this.finishStartRecorder(video, 'first-frame');
+      }
+    }] as const);
+    for (const [name, handler] of handlers) video.addEventListener(name, handler);
+    const timer = setInterval(() => {
+      recorder.sample(sample());
+      if (performance.now() - armedAt >= START_RECORD_LIMIT_MS) this.finishStartRecorder(video, 'no-first-frame');
+    }, 1_000);
+    // An observer rather than `getEntriesByType`: the page's Resource Timing
+    // buffer holds 250 entries and was measured full eleven seconds after
+    // load, after which the buffer answers nothing new and a start that sent
+    // twenty requests reads as one that sent none. An observer is not bound
+    // by the buffer. Where there is none, the record says unknown.
+    const requests: PerformanceResourceTiming[] = [];
+    let observer: PerformanceObserver | undefined;
+    try {
+      observer = new PerformanceObserver((list) => {
+        requests.push(...list.getEntries() as PerformanceResourceTiming[]);
+      });
+      observer.observe({ type: 'resource' });
+    } catch {
+      observer = undefined;
+    }
+    this.startRecorders.set(video, {
+      recorder,
+      requests: () => {
+        if (!observer) return undefined;
+        requests.push(...observer.takeRecords() as PerformanceResourceTiming[]);
+        return requests;
+      },
+      cleanup: () => {
+        for (const [name, handler] of handlers) video.removeEventListener(name, handler);
+        clearInterval(timer);
+        observer?.disconnect();
+      },
+    });
+  }
+
+  private finishStartRecorder(video: HTMLVideoElement, outcome: StartOutcome): void {
+    const armed = this.startRecorders.get(video);
+    if (!armed) return;
+    this.startRecorders.delete(video);
+    const entries = armed.requests();
+    armed.cleanup();
+    const record = armed.recorder.finish(outcome, entries);
+    // Warn, so the Samsung build keeps it: that is the one target that cannot
+    // be watched any other way.
+    if (record && shouldReportStart(record)) this.log.warn('source-start-record', record);
   }
 
   /**
@@ -2276,6 +2381,7 @@ class WebPlayer implements Player {
     this.playRequestGeneration += 1;
     this.wantsPlayback = false;
     this.log.error('source-terminal-failure', { error, detail });
+    if (this.video) this.finishStartRecorder(this.video, 'failed');
     const hls = this.hls;
     this.hls = undefined;
     this.hlsMediaRecovery = undefined;
@@ -2361,8 +2467,18 @@ class WebPlayer implements Player {
     });
     hls.on(Hls.Events.LEVEL_SWITCHING, (_event, data) => this.log.debug('hls-level-switching', hlsEventSummary(data)));
     hls.on(Hls.Events.LEVEL_SWITCHED, (_event, data) => this.log.debug('hls-level-switched', hlsEventSummary(data)));
-    hls.on(Hls.Events.FRAG_LOADING, (_event, data) => this.log.debug('hls-fragment-loading', hlsEventSummary(data)));
-    hls.on(Hls.Events.FRAG_LOADED, (_event, data) => this.log.debug('hls-fragment-loaded', hlsEventSummary(data)));
+    hls.on(Hls.Events.FRAG_LOADING, (_event, data) => {
+      this.startRecorders.get(video)?.recorder.fragment('asked', data.frag?.sn);
+      this.log.debug('hls-fragment-loading', hlsEventSummary(data));
+    });
+    hls.on(Hls.Events.FRAG_LOADED, (_event, data) => {
+      this.startRecorders.get(video)?.recorder.fragment('got', data.frag?.sn);
+      if (data.frag?.sn !== 'initSegment') {
+        const costMs = nodeStartCosts.firstFragment(url);
+        if (costMs !== undefined) this.log.info('node-start-cost-measured', { url, costMs });
+      }
+      this.log.debug('hls-fragment-loaded', hlsEventSummary(data));
+    });
     hls.on(Hls.Events.FRAG_BUFFERED, (_event, data) => {
       this.log.debug('hls-fragment-buffered', { data: hlsEventSummary(data), state: videoState(video) });
       mediaRecovery.observeBufferedContent();
@@ -2370,6 +2486,9 @@ class WebPlayer implements Player {
     });
     hls.on(Hls.Events.BUFFER_FLUSHED, () => this.publish(video));
     hls.on(Hls.Events.ERROR, (_event, data) => {
+      // Before the guard: a standby's hls is not `this.hls` yet, and its
+      // errors are exactly what a start that never arrives needs on record.
+      this.startRecorders.get(video)?.recorder.hlsError(data as Parameters<StartRecorder['hlsError']>[0]);
       if (sourceGeneration !== this.sourceGeneration || this.hls !== hls) return;
       const payload = { data: hlsEventSummary(data), state: videoState(video) };
       // The earliest and cheapest recovery this client has. hls.js populates

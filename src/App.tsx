@@ -63,6 +63,7 @@ import { Loading } from './components/Status';
 import { useMediaRouteBack } from './app/useMediaRouteBack';
 import { useMusicController } from './app/useMusicController';
 import { usePlaybackRuntime } from './app/usePlaybackRuntime';
+import { measureStartCosts } from './playback/nodeStartCosts';
 import { usePlaybackController } from './app/usePlaybackController';
 import { technicalProfileFromCatalogue, type PlaybackPolicyOverrides } from '@machafoundation/core';
 import { ConnectionGateScreen } from './screens/ConnectionGateScreen';
@@ -492,7 +493,10 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
     facts: async (media: MediaSummary) => (await playbackFactsApi.facts({ itemId: media.id }))[0],
     policyOverrides: (platform as { playbackPolicy?: PlaybackPolicyOverrides }).playbackPolicy,
   }), [playbackFactsApi, platform]);
-  const { runtime: playbackRuntime, state: playbackRuntimeState } = usePlaybackRuntime(platform, playbackResolver, playbackRuntimeOptions);
+  // Every session core asks for is timed from the request, so the player's
+  // first fragment closes a measurement of what that node costs to start.
+  const measuredResolver = useMemo(() => measureStartCosts(playbackResolver), [playbackResolver]);
+  const { runtime: playbackRuntime, state: playbackRuntimeState } = usePlaybackRuntime(platform, measuredResolver, playbackRuntimeOptions);
   const preparePlaybackProfile = useCallback((profile: CatalogueMediaProfile) => {
     playbackRuntime.prepare(technicalProfileFromCatalogue(profile));
   }, [playbackRuntime]);
