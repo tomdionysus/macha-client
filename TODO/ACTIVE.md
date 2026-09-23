@@ -1765,8 +1765,23 @@ nor its `host:port` — has still not been watched, and now never will be here.
       the browser blocks the request (`TypeError: Failed to fetch`). On the
       live manifest URL: those headers fail, `Range` alone answers `206`,
       `cache: 'no-store'` with no headers answers `200`. This client's own
-      probes already use the latter and pass. Until core fixes it, only the
-      host lead (this viewer's measurement) ever leads a web move.
+      probes already use the latter and pass.
+- [x] **Fixed by core `07bd029` and wired here 2026-09-23.** Core keeps its
+      headers as the default (the fetch option rewrites signed URLs on React
+      Native and is dropped on Tizen 3) and lets a host pass `readinessFetch`.
+      `readinessFetchForHost()` in `platform/index.ts` passes core's
+      `noStoreFetch` for the plain browser only, beside `detectPlatform` so
+      the two cannot disagree; the television builds keep core's default
+      until their webviews are measured cross-origin. Live, host lead
+      suppressed: `generation-start-measured` after every create; the second
+      move into fi-1 read `leadSource: estimate`, `leadMs` 6,970 (1,970 + 5,000),
+      seamless.
+- [ ] **Core's estimate is too short for gbni-1 — core's, reported.** It
+      measured 4,196 and 4,504 ms (first byte ready); this client measures
+      14.4-20.3 s to the first fragment loaded for the same node and title.
+      Led by 9,196 ms the move lost its race and froze ~15 s; the 24.6 s host
+      lead on the same move was seamless. While both exist the host lead
+      wins, so on the web this viewer's measurement is what leads.
 - [ ] **Superseded — kept for the record: lead the move by it, waiting on core and on Tom.**
       Declining the handover up front would only reach the freeze and the
       black 16 s sooner, so the figure is only useful as a lead: ask the node
