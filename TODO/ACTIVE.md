@@ -1779,6 +1779,17 @@ nor its `host:port` — has still not been watched, and now never will be here.
       fragments opened at 0.28 and 0.57 MB/s, below the 0.63 MB/s stream, then
       ran at about 1.6 MB/s: the record, weighted to recent samples, shows the
       ramped rate while a join is lost in the slow opening. For core's decline.
+      **Core's answer, 2026-09-23:** the lead formula stays as it is, because
+      a steady-state rate would pass and the opening would still lose, so this
+      viewer's host lead remains the source for the opening. A "cannot
+      sustain this stream from here" decline is worth building once the rate
+      has more than a handful of media samples. Two core-side notes that touch
+      this client: `EndpointBandwidth.restore()` re-enters a persisted record
+      at one sample against a ranking threshold of two, so after a reload the
+      first fragment decides whether a node ranks on throughput (on core's
+      list); and from core `2bcce57` an unclassified terminal failure asks the
+      node whether the session is alive, bounded at 8 s, which web fatals
+      rarely reach because they are mostly classified.
 - [x] **(Superseded) Fixed by core `07bd029` and wired here 2026-09-23.** Core keeps its
       headers as the default (the fetch option rewrites signed URLs on React
       Native and is dropped on Tizen 3) and lets a host pass `readinessFetch`.
