@@ -1,7 +1,7 @@
 import { Fragment } from 'react';
 import { Link } from 'react-router-dom';
 import type { MediaApi } from '@machafoundation/core';
-import { albumLabel, episodeLabel, routes } from '@machafoundation/core';
+import { albumLabel, episodeLabel, routes, trackNumberLabel } from '@machafoundation/core';
 import type { MediaSummary } from '@machafoundation/core';
 import { CardCloseButton } from './CardCloseButton';
 import { LazyArtwork } from './LazyArtwork';
@@ -146,7 +146,7 @@ function InContextCard({ api, item, onOpen, elementRef, lines }: Props & { lines
         <span className="card-title">{item.title}</span>
       </button>
       <ContextLinks lines={lines} />
-      {item.kind === 'track' && item.subtitle && <span className="card-subtitle">{item.subtitle}</span>}
+      {item.kind === 'track' && trackNumberLabel(item) && <span className="card-subtitle">{trackNumberLabel(item)}</span>}
     </article>
   );
 }
