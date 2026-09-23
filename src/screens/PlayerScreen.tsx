@@ -17,6 +17,8 @@ import { describePlaybackSession } from '@machafoundation/core';
 import { playbackFailureTrail, type PlaybackFailureTrailEntry } from './player/failureTrail';
 import { playerNodeChoices } from './player/nodeChoices';
 import { moveStreamToNode } from './player/nodeMove';
+import { nodeStartCosts } from '../playback/nodeStartCosts';
+import { MOVE_LEAD_MARGIN_MS } from '@machafoundation/core';
 import { failureTrailEnabled } from '../diagnostics/failureTrailSetting';
 import { accountSessionLimitNotice, playbackFailureHeadline } from '../diagnostics/failureCauses';
 import { bufferedTimelineSegments } from '@machafoundation/core';
@@ -553,10 +555,17 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
     const choice = nodeChoices.find((node) => node.id === nodeId);
     if (!onPinEndpoint || !choice) return;
     const positionMs = Math.max(0, Math.round(scrubValueRef.current ?? playback.intent.positionMs));
+    // This viewer's latest start cost for that node, with core's margin. No
+    // fresh figure means no host lead: core then uses its own estimate.
+    const measured = nodeStartCosts.forNode(choice.endpointIds);
+    const leadMs = measured ? measured.costMs + MOVE_LEAD_MARGIN_MS : undefined;
     log.info('node-move-request', {
       from: playback.session?.endpoint?.id,
       to: choice.endpointIds,
       positionMs,
+      leadMs,
+      measuredStartCostMs: measured?.costMs,
+      measuredAgeMs: measured?.ageMs,
       sessionId: playback.session?.sessionId,
     });
     setLocalNotice(undefined);
@@ -565,7 +574,7 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
     setMovingToNode(nodeId);
     // Cleared when the move settles rather than when a session appears: a
     // move never takes the session away, so the note would clear at once.
-    void moveStreamToNode(runtime, endpointId, Boolean(fatalError))
+    void moveStreamToNode(runtime, endpointId, Boolean(fatalError), leadMs)
       .then((outcome) => {
         log.info('node-move-settled', { to: endpointId, outcome });
         if (outcome === 'refused') {

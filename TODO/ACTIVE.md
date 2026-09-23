@@ -1740,7 +1740,25 @@ nor its `host:port` — has still not been watched, and now never will be here.
       10 minutes, never a default. Nine tests, each rule seen red. **Live,
       foregrounded:** fi-1 1,830 ms and gbni-1 20,342 ms, each matching its
       own create and first-fragment log lines to the millisecond.
-- [ ] **Use it: lead the move by it — waiting on core and on Tom.**
+- [x] **Led moves work live, 2026-09-23, against core `d58375a`.** Tom
+      settled ownership first-hand: core measures, the host may override.
+      The web player declares `holdsThroughLead` (managed HLS only; native
+      HLS would skip the viewer forward), `selectNode` passes this viewer's
+      measured cost plus `MOVE_LEAD_MARGIN_MS`, and the handover waits for
+      the viewer while the join lies before the incoming generation
+      (`leadJoinStep`), allows a led generation its lead to become ready,
+      and never attaches before a generation's start. One page load,
+      foregrounded, 100 ms element samples:
+      | Move | Lead | Adapter got | Outcome |
+      |---|---|---|---|
+      | fi-1 to gbni-1 | none, no evidence yet | 0 | race lost, relocation hold froze 15.3 s |
+      | gbni-1 to fi-1 | 6,419 ms, host | -5,622 ms | handover complete at 5.9 s, joined 90 ms in, no stall |
+      | fi-1 to gbni-1 | 24,614 ms, host | -21,959 ms | handover complete at 22.2 s, joined 223 ms in, 27 s ahead of the join, no stall in 270 samples |
+      Old sessions stopped at each cut; all four sessions `404` after stop.
+      Both nodes' preflight allows `Range` from any origin, so core's
+      readiness probe is not blocked by CORS; core's own estimate was not
+      exercised (the host lead won, and the first move had no evidence).
+- [ ] **Superseded — kept for the record: lead the move by it, waiting on core and on Tom.**
       Declining the handover up front would only reach the freeze and the
       black 16 s sooner, so the figure is only useful as a lead: ask the node
       for intent + measured cost + margin, keep the outgoing element playing

@@ -19,6 +19,12 @@ export type NodeMoveOutcome = 'moved' | 'refused' | 'retried';
  * falling back to a restart would trade a working picture for a black one.
  * The preference stays set, so the next start or recovery still honours it.
  *
+ * **Led by this viewer's measurement when there is one.** The node produces
+ * from the position it is asked for, no faster than the viewer watches, so a
+ * move asked at the viewer's own position starts one start-cost behind and
+ * never catches up. `leadMs` asks for a position that far ahead; without it
+ * core uses its own estimate, or none (core `d58375a`).
+ *
  * **A failed generation is retried, not moved.** It is already released and
  * there is nothing to move; core spells that as the preference plus `retry()`.
  */
@@ -26,10 +32,12 @@ export async function moveStreamToNode(
   runtime: NodeMoveRuntime,
   endpointId: string,
   failed: boolean,
+  leadMs?: number,
 ): Promise<NodeMoveOutcome> {
   if (failed) {
     await runtime.retry();
     return 'retried';
   }
-  return await runtime.moveTo(endpointId) ? 'moved' : 'refused';
+  const moved = leadMs === undefined ? await runtime.moveTo(endpointId) : await runtime.moveTo(endpointId, { leadMs });
+  return moved ? 'moved' : 'refused';
 }

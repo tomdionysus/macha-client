@@ -489,7 +489,27 @@ export function handoverFallbackPositionMs(
   clockOffsetMs: number,
   livePositionMs: number,
 ): number {
-  return Math.max(requestedMs, livePositionMs + clockOffsetMs);
+  // Never before the generation's start: after a lead move core's request is
+  // negative, and the earliest place a replacement can attach is its first
+  // frame.
+  return Math.max(0, requestedMs, livePositionMs + clockOffsetMs);
+}
+
+/**
+ * What the handover does with a join that may lie before the incoming
+ * generation's start.
+ *
+ * After a lead move (core `d58375a`) the node produces from ahead of the
+ * viewer, so the join is negative in the new clock until the viewer, still
+ * watching the outgoing element, reaches the generation's start. That wait is
+ * the lead working, and must not be run through the convergence race, which
+ * would read a join behind the buffer as one receding faster than it fills. A
+ * stopped outgoing picture ends the wait: the cut goes to the start, because
+ * the position it was waiting for will never come.
+ */
+export function leadJoinStep(joinNewMs: number, outgoingStalled: boolean): 'wait' | 'join-at-start' | 'race' {
+  if (joinNewMs >= 0) return 'race';
+  return outgoingStalled ? 'join-at-start' : 'wait';
 }
 
 /** What the hold needs to know about the two sides of a relocation. */
@@ -647,6 +667,18 @@ export interface WebPlayerOptions {
 }
 
 class WebPlayer implements Player {
+  /**
+   * Whether a lead move may hand this player a negative position.
+   *
+   * Only the managed-HLS handover can keep the outgoing picture playing while
+   * the viewer travels to a generation that starts ahead of them. Native HLS,
+   * which the Samsung build forces, declines the handover and would attach at
+   * the generation's start, skipping the viewer forward by the whole lead.
+   */
+  get holdsThroughLead(): boolean {
+    return shouldUseManagedHls(this.options.forceNativeHls, managedHlsSupported());
+  }
+
   private host?: HTMLElement;
   private video?: HTMLVideoElement;
   private hls?: Hls;
@@ -876,6 +908,10 @@ class WebPlayer implements Player {
       // or the fallback for a slow handover is a rewind of however long it took.
       positionMs = handover.resumeAtMs ?? positionMs;
     }
+    // A lead move's position is negative until the viewer reaches the
+    // generation. Every path below attaches, and nothing can attach before
+    // the generation's first frame.
+    positionMs = Math.max(0, positionMs);
     // The teardown path below blanks the element, because hls.js is handed a
     // MediaSource object URL and attaching a new one resets whatever was
     // showing. Hold the picture instead: pause where they were, build the
@@ -1211,8 +1247,11 @@ class WebPlayer implements Player {
     // viewer is at `outgoingEvent.positionMs` on the old one and core is asking
     // for `positionMs` on the new one, so those denote the same content.
     const clockOffsetMs = positionMs - outgoingEvent.positionMs;
+    // How far ahead of the viewer this generation starts, when core led it.
+    const leadMs = positionMs < 0 ? -positionMs : 0;
     this.log.info('handover-begin', {
       url: source.url,
+      leadMs,
       requestedPositionMs: positionMs,
       outgoingPositionMs: outgoingEvent.positionMs,
       clockOffsetMs,
@@ -1271,7 +1310,11 @@ class WebPlayer implements Player {
       const expectedJoinMs = Math.max(0, positionMs + HANDOVER_JOIN_LEAD_MS);
       built = this.attachHls(hlsModule, incoming, source.url, sourceGeneration, false, expectedJoinMs);
 
-      const ready = await waitForMediaEvent(incoming, 'canplay', HANDOVER_READY_TIMEOUT_MS);
+      // A led generation may take as long as its lead to become ready: the
+      // viewer is still watching the outgoing picture for all of it. Measured
+      // 2026-09-23: gbni-1 took 20.3 s to a first fragment, past the 20 s
+      // this used to allow everything.
+      const ready = await waitForMediaEvent(incoming, 'canplay', Math.max(HANDOVER_READY_TIMEOUT_MS, leadMs));
       if (!ready) return abandon('not-ready-in-time');
       if (this.video !== outgoing) return abandon('superseded-while-preparing');
 
@@ -1305,7 +1348,7 @@ class WebPlayer implements Player {
       // moving; a point chosen once goes stale while the data is still arriving.
       let joinAtOldMs = 0;
       let targetMediaMs: number | undefined;
-      const bufferDeadline = performance.now() + HANDOVER_BUFFER_TIMEOUT_MS;
+      let bufferDeadline = performance.now() + HANDOVER_BUFFER_TIMEOUT_MS;
       let bufferLastSeenMs = livePositionMs();
       let bufferLastAdvancedAt = performance.now();
       // Where the race stood when it began, so that whether the replacement is
@@ -1317,6 +1360,27 @@ class WebPlayer implements Player {
         if (this.video !== outgoing) return abandon('superseded-while-buffering');
         if (outgoing.paused) return abandon('outgoing-paused-while-buffering');
         joinAtOldMs = livePositionMs() + HANDOVER_JOIN_LEAD_MS;
+        const leadStep = leadJoinStep(
+          joinAtOldMs + clockOffsetMs,
+          performance.now() - bufferLastAdvancedAt > HANDOVER_OUTGOING_STALL_MS,
+        );
+        if (leadStep === 'wait') {
+          // The viewer has not reached the generation yet. Nothing here is a
+          // race and no budget runs: both start when the join enters it.
+          const nowMs = livePositionMs();
+          if (nowMs > bufferLastSeenMs + 1) {
+            bufferLastSeenMs = nowMs;
+            bufferLastAdvancedAt = performance.now();
+          }
+          convergenceStartedAt = undefined;
+          bufferDeadline = performance.now() + HANDOVER_BUFFER_TIMEOUT_MS;
+          await new Promise((resolve) => setTimeout(resolve, HANDOVER_BUFFER_POLL_MS));
+          continue;
+        }
+        if (leadStep === 'join-at-start') {
+          this.log.warn('handover-lead-join-forced-by-stall', { joinAtOldMs, clockOffsetMs });
+          joinAtOldMs = -clockOffsetMs;
+        }
         targetMediaMs = timeline.toMediaTime(joinAtOldMs + clockOffsetMs);
         if (targetMediaMs === undefined) return abandon('incoming-join-unmappable');
         const targetSeconds = targetMediaMs / 1000;

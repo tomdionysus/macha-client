@@ -9,6 +9,7 @@ import {
   handoverJoinLost,
   forwardBufferMsAt,
   handoverFallbackPositionMs,
+  leadJoinStep,
   canHoldThroughRelocation,
   webMediaElementFailure,
   awaitNativeHlsFirstFragment,
@@ -867,6 +868,33 @@ describe('Handover fallback position', () => {
     // that is behind it is a stale sample, not a destination.
     expect(handoverFallbackPositionMs(3_718, -25_843, 29_561)).toBe(3_718);
     expect(handoverFallbackPositionMs(3_718, -25_843, 20_000)).toBe(3_718);
+  });
+
+  it('lands at the start of a generation built ahead of the viewer, never before it', () => {
+    // A lead move asks the node for a position ahead of the viewer, so core's
+    // request is negative: the viewer is that far before the generation's
+    // start. Abandoning before they arrive can only attach at the start.
+    expect(handoverFallbackPositionMs(-25_000, -60_000, 40_000)).toBe(0);
+    expect(handoverFallbackPositionMs(-25_000, -60_000, 70_000)).toBe(10_000);
+  });
+});
+
+describe('Joining a generation that starts ahead of the viewer', () => {
+  // Core's lead move (d58375a): the node produces from intent + lead, so the
+  // join lies before the incoming generation until the viewer, still watching
+  // the outgoing element, reaches its start. That wait is the point of the
+  // lead, not a race being lost.
+  it('waits for the viewer while the join is still before the generation', () => {
+    expect(leadJoinStep(-12_000, false)).toBe('wait');
+  });
+
+  it('joins at the start once the outgoing picture has stopped, rather than waiting for a position it cannot reach', () => {
+    expect(leadJoinStep(-12_000, true)).toBe('join-at-start');
+  });
+
+  it('races as before once the join is inside the generation', () => {
+    expect(leadJoinStep(0, false)).toBe('race');
+    expect(leadJoinStep(4_000, true)).toBe('race');
   });
 });
 

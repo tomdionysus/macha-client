@@ -5,7 +5,10 @@ function runtime(moved: boolean): NodeMoveRuntime & { calls: string[] } {
   const calls: string[] = [];
   return {
     calls,
-    moveTo: vi.fn(async (endpointId: string) => { calls.push(`moveTo ${endpointId}`); return moved; }),
+    moveTo: vi.fn(async (endpointId: string, options?: { leadMs?: number }) => {
+      calls.push(`moveTo ${endpointId}${options?.leadMs !== undefined ? ` lead ${options.leadMs}` : ''}`);
+      return moved;
+    }),
     retry: vi.fn(async () => { calls.push('retry'); }),
   };
 }
@@ -17,6 +20,21 @@ describe('moving a stream to the node a viewer picked', () => {
     const live = runtime(true);
     await expect(moveStreamToNode(live, 'https://macnessa.macha.network', false)).resolves.toBe('moved');
     expect(live.calls).toEqual(['moveTo https://macnessa.macha.network']);
+  });
+
+  it("leads the move by this viewer's measured start cost for that node", async () => {
+    // Measured 2026-09-23: gbni-1 took 20.3 s from create to first fragment.
+    // Asked for the viewer's own position, the node starts that far behind a
+    // join receding at 1x and never catches it.
+    const live = runtime(true);
+    await moveStreamToNode(live, 'http://10.44.1.50:7438', false, 25_342);
+    expect(live.calls).toEqual(['moveTo http://10.44.1.50:7438 lead 25342']);
+  });
+
+  it('leaves the lead to core when this viewer has no fresh figure for the node', async () => {
+    const live = runtime(true);
+    await moveStreamToNode(live, 'http://10.44.1.50:7438', false, undefined);
+    expect(live.calls).toEqual(['moveTo http://10.44.1.50:7438']);
   });
 
   it('says the node refused rather than restarting the stream behind the viewer', async () => {
