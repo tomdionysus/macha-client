@@ -69,8 +69,8 @@ including the native-HLS produced-source wait, unit-tested only); a look at
 the Import page under an account with `importer`; any push, merge to `main`,
 deploy or core publish; demoting or re-ranking a P0.
 
-**The first P0 below is a business P0 and outranks the rest** — scope-ratio
-titles play small in a black window. The bars are burnt into the source and
+**Two business P0s outrank the rest:** slow artwork (new, 2026-09-24), and
+scope-ratio titles playing small in a black window. The bars are burnt into the source and
 the fix is an ingest/server one. [Evidence](2026-09-16-video-fit-mode.md).
 
 **The P0s, as they stand.** The scope title (the server's). A player at
@@ -606,6 +606,45 @@ something outside this repo or needs groundwork before it can start safely.
   wrong mechanisms in one evening, two of which reached other sessions before
   they were withdrawn; `2026-09-21-session-handover.md` has the pattern. Write
   "not established" rather than saying it in passing.
+
+## P0 — Artwork loads slowly (business P0, Tom, 2026-09-24)
+
+Tom: "We STILL have slow artwork loading"; "a slow bitrate problem from the
+server, you can see them loading like its the 90s. It's also a caching
+problem I thought we'd solved 20 versions ago." Measured 2026-09-24 from the
+fi-1 site, test account, dev client:
+
+- **A node's first read of a poster is slow; repeats are not.** gbni-1, the
+  same 77 KB poster six times on one connection: first 1,112 ms (first byte
+  550 ms, body ~560 ms, about 1 Mbit/s), then 130-150 ms each. Warm across
+  different posters, gbni-1 answered in 115-310 ms against a 90 ms RTT;
+  fi-1 in 3 ms first byte, ~15 ms total. So "slow bitrate" is the node
+  serving artwork it does not hold hot. Server's to explain (DHT owner read
+  per request? a cold local read?).
+- **The URLs change every UTC day.** `exp` is the next UTC midnight
+  (1790294400000 = 2026-09-25T00:00Z) and every artwork URL carries it, so
+  the browser cache (`public, max-age=86400, immutable`) misses on every
+  poster after midnight UTC, and each first load of the day pays the cold
+  rate above. Signatures are otherwise stable: 2,068 URLs identical across
+  all three nodes and across reads. This is the half of the old caching fix
+  that was never finished.
+- **Within a day the browser cache holds.** In-app revisit: 0-25 ms per
+  poster; full reload: all 33 visible posters complete as their cards
+  render. Host stays macnessa throughout (core's `ArtworkHostPreference`).
+- **Oversized for the card.** Posters are 500x750 JPEG (68-102 KB) for cards
+  ~150 px wide; no smaller variant exists.
+- **Host choice ignores this viewer's link.** Every poster came from
+  macnessa (https, WAN from here; 636 ms median cold) while fi-1 (LAN, http)
+  serves the same URL in 65 ms. Core's to decide; the https layer on
+  macnessa also adds ~1.5 RTT per request against the node's plain http.
+- **The browser cannot measure it.** Artwork responses carry no
+  `Timing-Allow-Origin`, so Resource Timing hides first byte and size for
+  every cross-origin poster. A server header, one line.
+
+Asked of the server session 2026-09-24 with this evidence: cold-read cost,
+a stable (not daily) capability for immutable content-addressed artwork,
+sized variants, `Timing-Allow-Origin`. Not yet seen: Tom's own view (which
+page origin, which node, time of day).
 
 ## P0 — A scope title plays small in a black window
 
