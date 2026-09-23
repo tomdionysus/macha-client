@@ -3130,8 +3130,9 @@ the swap.
       `produced_ms > 0` says the first segment is published (segments are
       published whole); absent means cannot say, hand the source over as
       before. Waiting on core for the replacement; delete ours when it lands.
-      Open for Tom: whether the ruling reaches the standby preflight's
-      `bytes=0-65535` media read, which is not zero-byte.
+      **The standby preflight stays** (Tom, 2026-09-23): "it is reasonable to
+      request initial media from a node you're about to failover to." Its
+      `bytes=0-65535` read is real media from the node about to serve.
 - [ ] Swap both implementations, run the suite, and confirm the two changed
       behaviours **by test rather than by reading** before deleting anything.
       `Player.preflightSource` stays the seam the coordinator drives, and core
