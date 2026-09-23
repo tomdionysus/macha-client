@@ -1,5 +1,15 @@
 import { useEffect, useMemo, useState, type ChangeEvent } from 'react';
-import { DEFAULT_SEARCH_SORT, isMediaSortKey, isSearchable, orderMedia, SEARCH_SORTS, type MediaSortKey } from '@machafoundation/core';
+import {
+  DEFAULT_SEARCH_CATEGORIES,
+  DEFAULT_SEARCH_SORT,
+  isMediaSortKey,
+  isSearchable,
+  orderMedia,
+  SEARCH_CATEGORIES,
+  SEARCH_SORTS,
+  type MediaSortKey,
+  type SearchCategoryKey,
+} from '@machafoundation/core';
 import type { MediaApi } from '@machafoundation/core';
 import type { MediaSummary } from '@machafoundation/core';
 import { MediaCard } from '../components/MediaCard';
@@ -21,6 +31,11 @@ export function SearchScreen({ api, onOpen }: Props) {
   const [refreshToken, setRefreshToken] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const [sort, setSort] = useState<MediaSortKey>(DEFAULT_SEARCH_SORT);
+  const [categories, setCategories] = useState<readonly SearchCategoryKey[]>(DEFAULT_SEARCH_CATEGORIES);
+  // Any combination, including none; kept in core's order so the same set is the same array.
+  const toggleCategory = (key: SearchCategoryKey) => setCategories((current) => SEARCH_CATEGORIES
+    .map((category) => category.key)
+    .filter((candidate) => (candidate === key) !== current.includes(candidate)));
   const ordered = useMemo(() => orderMedia(results, sort), [results, sort]);
   const alphabet = useAlphabetIndex(ordered);
 
@@ -38,7 +53,7 @@ export function SearchScreen({ api, onOpen }: Props) {
     setRefreshing(true);
     setError(undefined);
     const timer = window.setTimeout(() => {
-      void api.search(normalized)
+      void api.search(normalized, undefined, { categories })
         .then((value) => { if (active) setResults(value); })
         .catch((reason: unknown) => { if (active) setError(String(reason)); })
         .finally(() => { if (active) setRefreshing(false); });
@@ -47,7 +62,7 @@ export function SearchScreen({ api, onOpen }: Props) {
       active = false;
       window.clearTimeout(timer);
     };
-  }, [api, query, refreshToken]);
+  }, [api, query, categories, refreshToken]);
 
   return (
     <section className="catalogue-indexed">
@@ -72,6 +87,20 @@ export function SearchScreen({ api, onOpen }: Props) {
             {SEARCH_SORTS.map((entry) => <option key={entry.key} value={entry.key}>{entry.choiceLabel}</option>)}
           </select>
         </div>
+        <div className="search-type-filter" role="group" aria-label="Title types">
+          {SEARCH_CATEGORIES.map((category) => (
+            <button
+              key={category.key}
+              type="button"
+              className="search-type-pill"
+              data-tv-focusable="true"
+              aria-pressed={categories.includes(category.key)}
+              onClick={() => toggleCategory(category.key)}
+            >
+              {category.label}
+            </button>
+          ))}
+        </div>
         <AsyncIconButton
           className="search-bar-refresh"
           label="Refresh Search"
@@ -80,6 +109,9 @@ export function SearchScreen({ api, onOpen }: Props) {
           icon={<RefreshIcon />}
         />
       </div>
+      {query.trim() !== '' && ordered.length === 0 && !refreshing && !error && (
+        <p className="search-empty" role="status">Nothing found. Try different search terms or filters.</p>
+      )}
       <div className="media-grid search-results">
         {ordered.map((item) => (
           <MediaCard

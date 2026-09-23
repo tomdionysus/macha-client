@@ -1,6 +1,7 @@
+import { Fragment } from 'react';
 import { Link } from 'react-router-dom';
 import type { MediaApi } from '@machafoundation/core';
-import { episodeLabel, routes } from '@machafoundation/core';
+import { albumLabel, episodeLabel, routes } from '@machafoundation/core';
 import type { MediaSummary } from '@machafoundation/core';
 import { CardCloseButton } from './CardCloseButton';
 import { LazyArtwork } from './LazyArtwork';
@@ -20,7 +21,7 @@ interface Props {
   onRemoveFromContinueWatching?: (item: MediaSummary) => void;
   actions?: readonly MediaCardAction[];
   progress?: number;
-  /** `in-context` names an episode's series and season, for a list that is not its season's. */
+  /** `in-context` names an episode's series and season, or a track's artist and album, for a list that is neither's. */
   variant?: 'default' | 'continue-watching' | 'in-context';
   elementRef?: (element: HTMLButtonElement | null) => void;
 }
@@ -54,22 +55,46 @@ function actionItems(item: MediaSummary, actions: readonly MediaCardAction[]): O
   }));
 }
 
+type ContextLink = { to: string; label: string };
+
 /**
- * The series, then where in it, each linking to its page. For an episode shown
- * away from its season (Continue Watching, search); a season page already
- * says both, so its rows never ask for this.
+ * Where an item sits, each step linking to its page, one line per entry: an
+ * episode's series, then "Season x Episode y"; a track's "Artist - Album
+ * (year)" on one line. For an item shown away from its parent (Continue
+ * Watching, search); a season or album page already says both, so its rows
+ * never ask for this.
  */
-function EpisodeContextLinks({ item }: { item: MediaSummary }) {
-  const context = item.playbackContext;
-  if (!context) return null;
+function contextLines(item: MediaSummary): ContextLink[][] | undefined {
+  if (item.kind === 'episode' && item.playbackContext) {
+    const { series, season } = item.playbackContext;
+    return [
+      [{ to: routes.show(series.id), label: series.title }],
+      [{ to: routes.season(series.id, season.id), label: episodeLabel(item) ?? season.title }],
+    ];
+  }
+  if (item.kind === 'track' && item.musicContext) {
+    const { artist, album } = item.musicContext;
+    return [[
+      ...(artist ? [{ to: routes.artist(artist.id), label: artist.title }] : []),
+      { to: routes.album(album.id), label: albumLabel(item.musicContext) },
+    ]];
+  }
+  return undefined;
+}
+
+function ContextLinks({ lines }: { lines: ReadonlyArray<ReadonlyArray<ContextLink>> }) {
   return (
     <div className="continue-card-context">
-      <Link to={routes.show(context.series.id)} data-tv-focusable="true" className="continue-card-context-link">
-        {context.series.title}
-      </Link>
-      <Link to={routes.season(context.series.id, context.season.id)} data-tv-focusable="true" className="continue-card-context-link">
-        {episodeLabel(item) ?? context.season.title}
-      </Link>
+      {lines.map((line) => (
+        <span key={line.map((link) => link.to).join(' ')} className="continue-card-context-line">
+          {line.map((link, index) => (
+            <Fragment key={link.to}>
+              {index > 0 && ' - '}
+              <Link to={link.to} data-tv-focusable="true" className="continue-card-context-link">{link.label}</Link>
+            </Fragment>
+          ))}
+        </span>
+      ))}
     </div>
   );
 }
@@ -89,7 +114,7 @@ function ContinueWatchingEpisodeCard({ api, item, onOpen, onRemoveFromContinueWa
         <Poster api={api} item={item} progress={progress} />
         <span className="card-title continue-card-title">{item.title}</span>
       </button>
-      <EpisodeContextLinks item={item} />
+      <ContextLinks lines={contextLines(item) ?? []} />
       {onRemoveFromContinueWatching && (
         <CardCloseButton
           className="continue-card-remove"
@@ -101,10 +126,14 @@ function ContinueWatchingEpisodeCard({ api, item, onOpen, onRemoveFromContinueWa
   );
 }
 
-/** A search hit for an episode: the card opens it, the links go to its series and season. */
-function EpisodeInContextCard({ api, item, onOpen, elementRef }: Props) {
+/**
+ * A search hit that belongs to something: the card opens it, the links go to
+ * its parents. A track keeps its own "Track 9" under them; an episode's label
+ * is already its season link.
+ */
+function InContextCard({ api, item, onOpen, elementRef, lines }: Props & { lines: ContextLink[][] }) {
   return (
-    <article className="media-card media-card-episode continue-card">
+    <article className={`media-card media-card-${item.kind} continue-card`}>
       <button
         type="button"
         ref={elementRef}
@@ -116,7 +145,8 @@ function EpisodeInContextCard({ api, item, onOpen, elementRef }: Props) {
         <Poster api={api} item={item} />
         <span className="card-title">{item.title}</span>
       </button>
-      <EpisodeContextLinks item={item} />
+      <ContextLinks lines={lines} />
+      {item.kind === 'track' && item.subtitle && <span className="card-subtitle">{item.subtitle}</span>}
     </article>
   );
 }
@@ -200,9 +230,8 @@ export function MediaCard({ api, item, onOpen, onRemoveFromContinueWatching, act
     );
   }
 
-  if (variant === 'in-context' && item.kind === 'episode' && item.playbackContext) {
-    return <EpisodeInContextCard api={api} item={item} onOpen={onOpen} elementRef={elementRef} />;
-  }
+  const lines = variant === 'in-context' ? contextLines(item) : undefined;
+  if (lines) return <InContextCard api={api} item={item} onOpen={onOpen} elementRef={elementRef} lines={lines} />;
 
   if (actions?.length) {
     return (

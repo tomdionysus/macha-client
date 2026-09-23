@@ -308,7 +308,8 @@ h2 { font-size: clamp(1.2rem, 2vw, 1.75rem); letter-spacing: -.01em; margin: 1.1
 .continue-card-open:focus-visible .poster { outline: 1px solid var(--focus); outline-offset: 1px; }
 .continue-card-title { margin-top: .7rem; font-size: 1.1rem; line-height: 1.25; white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .continue-card-context { display: grid; gap: .08rem; margin-top: .28rem; }
-.continue-card-context-link { display: block; width: fit-content; max-width: 100%; overflow: hidden; color: var(--text-dim); font-size: .82rem; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
+.continue-card-context-line { display: block; overflow: hidden; color: var(--text-dim); font-size: .82rem; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
+.continue-card-context-link { color: var(--text-dim); }
 .continue-card-context-link:hover, .continue-card-context-link:focus-visible { color: #dedee2; text-decoration: underline; text-decoration-color: var(--focus); text-underline-offset: 2px; }
 .card-close-button {
   position: absolute;
@@ -616,6 +617,23 @@ h2 { font-size: clamp(1.2rem, 2vw, 1.75rem); letter-spacing: -.01em; margin: 1.1
 .search-bar > * { height: var(--search-control-height); }
 .secondary-button.async-icon-button.search-bar-refresh { flex: 0 0 auto; width: var(--search-control-height); height: var(--search-control-height); border-radius: .65rem; }
 .search-input { flex: 1; min-width: 0; padding-block: 0; }
+/* The type filter: toggles in the fields' own height and shape, lit like the player's options when on. */
+.search-type-filter { display: flex; gap: .5rem; flex: 0 0 auto; }
+.search-type-pill {
+  height: 100%;
+  margin: 0;
+  padding: 0 1.1rem;
+  border: 1px solid #3a3a40;
+  border-radius: .65rem;
+  background: #19191c;
+  color: #9a9aa2;
+  font-size: 1.05rem;
+  cursor: pointer;
+}
+.search-type-pill:hover, .search-type-pill:focus-visible { border-color: var(--focus); color: #dedee2; outline: none; }
+.search-type-pill[aria-pressed='true'] { border-color: var(--focus); background: var(--accent-surface-strong); color: #dedee2; }
+/* Centred in what is left of the page below the search row. */
+.search-empty { display: grid; place-items: center; min-height: 50vh; margin: 0; color: var(--text-dim); font-size: 1.1rem; text-align: center; }
 .search-results { margin-top: 2rem; }
 /*
  * Search mixes square music art with 2:3 posters. A percentage margin is taken
@@ -640,7 +658,7 @@ h2 { font-size: clamp(1.2rem, 2vw, 1.75rem); letter-spacing: -.01em; margin: 1.1
 }
 .sort-control select:focus { outline: 1px solid var(--focus); border-color: var(--focus); }
 .search-bar .sort-control { font-size: .95rem; }
-.search-bar .sort-control select { align-self: stretch; padding: 1rem 2.8rem 1rem 1.2rem; border-radius: .65rem; font-size: 1.05rem; background-position: right 1.1rem center; }
+.search-bar .sort-control select { align-self: stretch; padding: 0 2.8rem 0 1.2rem; border-radius: .65rem; font-size: 1.05rem; background-position: right 1.1rem center; }
 
 .settings { width: 100%; }
 .settings label { display: block; color: var(--text-dim); margin: 1rem 0 .45rem; }

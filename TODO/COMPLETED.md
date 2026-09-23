@@ -22,6 +22,18 @@ Last updated: 2026-09-24, after the search sort
   One `EpisodeContextLinks` serves both; search opts in with
   `variant="in-context"`, because season-page episodes carry the same
   context.
+- **Tracks in search** read "Artist - Album (year)" under the title, artist
+  and album each linking to its page, then their own "Track 9"; no year, no
+  brackets (core's `albumLabel`, seen live: "U2 - Achtung Baby (1991)",
+  "U2 - How to Dismantle an Atomic Bomb").
+- **Type pills** Movies, TV Shows and Music between the sort and refresh,
+  the fields' height and shape; any combination, none included. Core's
+  `SEARCH_CATEGORIES` and `api.search(query, signal, { categories })` own the
+  filter (core asks the catalogue for 200 and keeps 50 when a filter will
+  discard hits, and has asked the server for a kind parameter). A centred
+  notice asks for different terms or filters when the bar has text and
+  nothing came back. Seen live: each combination returned only its kinds,
+  none gave the notice, a nonsense query gave the notice, an empty bar none.
 - **Search ignores "the", "a" and "an"** (Tom): core's `isSearchable` decides
   whether to search and `api.search` sends only the remaining words. Seen
   live: "the" and "the a an" sent no request; "the girls" sent "girls".
