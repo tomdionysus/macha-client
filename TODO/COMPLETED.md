@@ -5,7 +5,9 @@ Last updated: 2026-09-24, after the search sort
 ## Search: a full-width bar with a sort control, on core's sort vocabulary — 2026-09-24, unreleased
 
 - **The search bar fills the width**, with "Sort by" on the right of the
-  same row, sized to match the input. Tom's request. The Import page's sort
+  same row, sized to match the input. Tom's request. No separate label:
+  each option reads "Sort By <label>" (Tom's ruling), the select named by
+  `aria-label` instead. The Import page's sort
   styling is shared as `.sort-control`.
 - **The options and orderings are core's** (`2816e5e`, unpublished):
   `SEARCH_SORTS`, `DEFAULT_SEARCH_SORT`, `orderMedia`, `isMediaSortKey`.

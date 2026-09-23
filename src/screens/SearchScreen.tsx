@@ -56,16 +56,14 @@ export function SearchScreen({ api, onOpen }: Props) {
           autoFocus
         />
         <div className="sort-control">
-          <label>
-            Sort by
-            <select
-              data-tv-focusable="true"
-              value={sort}
-              onChange={(event: ChangeEvent<HTMLSelectElement>) => { if (isMediaSortKey(event.target.value)) setSort(event.target.value); }}
-            >
-              {SEARCH_SORTS.map((entry) => <option key={entry.key} value={entry.key}>{entry.label}</option>)}
-            </select>
-          </label>
+          <select
+            data-tv-focusable="true"
+            aria-label="Sort results"
+            value={sort}
+            onChange={(event: ChangeEvent<HTMLSelectElement>) => { if (isMediaSortKey(event.target.value)) setSort(event.target.value); }}
+          >
+            {SEARCH_SORTS.map((entry) => <option key={entry.key} value={entry.key}>Sort By {entry.label}</option>)}
+          </select>
         </div>
       </div>
       <div className="media-grid search-results">
