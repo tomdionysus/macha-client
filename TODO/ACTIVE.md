@@ -640,10 +640,17 @@ fi-1 site, test account, dev client:
   render. Host stays macnessa throughout (core's `ArtworkHostPreference`).
 - **Oversized for the card.** Posters are 500x750 JPEG (68-102 KB) for cards
   ~150 px wide; no smaller variant exists.
-- **Host choice ignores this viewer's link.** Every poster came from
-  macnessa (https, WAN from here; 636 ms median cold) while fi-1 (LAN, http)
-  serves the same URL in 65 ms. Core's to decide; the https layer on
-  macnessa also adds ~1.5 RTT per request against the node's plain http.
+- **Host choice ignored this viewer's link; fixed in core, verified.**
+  Every poster came from macnessa (https, WAN from here; 636 ms median cold)
+  while fi-1 (LAN, http) serves the same URL in 65 ms. Core now picks the
+  artwork host once per run by health-probe round trip (switching only on a
+  gain of at least 50 ms and 40%), and keeps it sticky. Seen live
+  2026-09-24: the first load moved all 33 visible posters to fi-1 (all done
+  644 ms after the cards rendered, against up to 3.4 s before); a reload kept
+  fi-1 and every poster was ready as its card rendered. On an https page the
+  http nodes are not candidates, so a deployed https client gains only where
+  a nearer https node exists. The https layer on macnessa also adds ~1.5 RTT
+  per request against the node's plain http.
 - **The browser cannot measure it.** Artwork responses carry no
   `Timing-Allow-Origin`, so Resource Timing hides first byte and size for
   every cross-origin poster. A server header, one line.
