@@ -3109,6 +3109,22 @@ nothing; a derived one states its relationship. Core's replacement asserts the
 number, so it cannot drift back. Do the same here for anything that survives
 the swap.
 
+- [ ] **Blocked on the web, found 2026-09-23.** Core's walk marks every
+      request uncacheable with `Cache-Control` and `Pragma`, and the nodes
+      allow only `Authorization, Content-Type, If-Match, Range` cross-origin,
+      so a browser blocks those requests outright (`TypeError: Failed to
+      fetch`, proven on a live manifest URL). This client's probes pass
+      because they use `cache: 'no-store'` and only `Range`. Core keeps the
+      headers because the fetch option rewrites signed URLs on React Native
+      and is dropped on Tizen 3, and the host fetch override it briefly had
+      was removed the same day with the one-byte start-cost probe. Swapping
+      today would break the standby preflight and readiness probe on the web.
+      Needs either the nodes to allow those two headers, or core to take a
+      host fetch for the walk again.
+      **Also for Tom:** this client's native-HLS readiness probe
+      (`probeFirstFragment`) is itself a `bytes=0-0` request. Tom ruled out
+      core's one-byte start-cost probe on 2026-09-23; whether that ruling
+      reaches this probe, which gates attaching a native-HLS source, is his.
 - [ ] Swap both implementations, run the suite, and confirm the two changed
       behaviours **by test rather than by reading** before deleting anything.
       `Player.preflightSource` stays the seam the coordinator drives, and core
