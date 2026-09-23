@@ -1,26 +1,56 @@
 # Completed and tested
 
-Last updated: 2026-09-21
+Last updated: 2026-09-23
 
-## 2026-09-21 — on `develop` after 0.17.3: tagged nowhere, deployed nowhere
+## Client 0.18.0 — released 2026-09-21, deployed the same night, all five changes watched live
 
-`5b8bff5` calls itself 0.18.0 and is not a release: not tagged, not on `main`,
-and it links core (`file:../macha-ts`), which the gate in `ACTIVE.md` forbids
-for anything that reaches `main`. Its five changes were **all watched live
-against the cluster on 2026-09-21** from `vite dev`; `CHANGELOG.md` is the
-authority for each. In one line each, with what each leaves open in
-`ACTIVE.md`:
+**Released.** Tagged `0.18.0` at `ce74408` on `main`, annotated like every
+release before it; `main`, `develop` and the tag are on the remote. It is the
+first release to resolve `@machafoundation/core` from the registry (0.18.0,
+published that evening) after being developed against a `file:` link, and
+the first deployed bundle ever built against a published core rather than a
+linked tree. Gate run against the registry copy: `test -L` failing, typecheck
+clean, 461 tests across 56 files, `vite build` producing `index-CKNh5Q9D.js`
+(633,692 bytes, `shasum` `eff197072a8e`); `prefer`, `moveTo`, `claimNodeId`,
+`SOURCE_SUPERSEDED_STATUS` and `playbackFailureDetail` confirmed present in
+the published tarball rather than in the tree beside it.
+
+**The gate caught something, and it is the reason the gate is written down.**
+Deleting `node_modules/@machafoundation/core` and running `npm install` did
+not remove the link: `package-lock.json` still held `"link": true` resolved at
+`../macha-ts`, so npm recreated the symlink, and `require(...).version`
+answered `0.18.0` because core's linked tree had reached that number too.
+Only `test -L` failed. Removing the lockfile's `../macha-ts` and
+`node_modules/@machafoundation/core` entries and reinstalling produced a
+registry resolution with an integrity hash. A version check agreed with a
+stale link, live — the failure this file had described twice in the
+abstract. Coming back to `develop`, `npm install` against `file:../macha-ts`
+restores both lockfile entries on its own.
+
+**Deployed 2026-09-21 22:53 UTC** to all three nodes on Tom's instruction:
+backups at `/etc/macha/web.bak-20260921-225245.tar.gz`, rsync additive, 24
+files and 1,800,061 bytes per node, ownership `1000:50` checked numerically.
+Verified served on each node's own `127.0.0.1:7438` and on both public names
+(gzipped to 183,296 bytes). The old and new bundles reference the same lazy
+`hls-Bt6kO1A0.js` chunk, so a viewer still on the previous page is not broken
+by the swap. Booted once in a browser — `react-mounted` at 29 ms, read-ahead
+worker registered, no exception — after which the tab froze and its later
+log lines are not evidence; the foregrounded check is recorded as owed in
+`ACTIVE.md`.
+
+**The five changes**, each watched live against the cluster on 2026-09-21
+from `vite dev` before the release; `CHANGELOG.md` is the authority for each,
+and the open halves are in `ACTIVE.md`:
 
 | what | watched live | what is left open |
 | --- | --- | --- |
-| A viewer can choose which node streams to them: pills in the options panel, grouped by `nodeId`, sorted by name; a press states a preference through core's `prefer()` and starts a new generation there at the viewer's position | 2:11.795 on `fi-1` to 2:12.197 on `gbni-1`, **13.2 s of black** between them | wiring to core's `moveTo` removes the gap; `useNodeIdentity` must be deleted, because it calls the membership call and drops discovered endpoints it does not name |
+| A viewer can choose which node streams to them: pills in the options panel, grouped by `nodeId`, sorted by name; a press states a preference through core's `prefer()` and starts a new generation there at the viewer's position | 2:11.795 on `fi-1` to 2:12.197 on `gbni-1`, **13.2 s of black** between them | wiring to core's `moveTo` removes the gap; `useNodeIdentity` must be deleted, because it calls the membership call and drops discovered endpoints it does not name — and it is now in front of viewers |
 | A mode press never asks a node to copy audio this device cannot decode: a Remux press on an AC-3 title becomes `mode=transcode, video=copy, audio=transcode`, decided from `hlsAudioCodecs ?? audioCodecs` | the title that stalled at `readyState` 0 — six non-fatal hls.js errors, two fatal at 59 s, not one request reaching the node, MSE refusing the codec at the manifest — now plays `VIDEO COPY` + `AUDIO TRANSCODE` | core holds the rule for the automatic path only (`choosePlaybackInstruction.ts:399-401`); a viewer pressing a mode by name has no entry into it, and the phone client wrote the same table independently and hit the same fault the same afternoon. Why an AC-3 *copy* stalls on the node is the server's |
 | Keyboard seeking on the scrubber commits: `committingScrubberKey` names every key a range input moves itself on, committed on `keyup` | five `PageUp` presses from 22:07 landed at 1:39:27, playing; before, the same presses left the position at 59 s | the accelerating hold is still Samsung-only |
 | A session holding no roles gets a sentence that leads with the remedy — log in again, then ask an administrator — decided through core's `sessionLockedOut` so `undefined` stays unknown | yes | — |
 | Times are presented in the reader's zone with the zone named (`presentedTime`) and dealt in Zulu everywhere else (`zuluTimestamp`) | yes | — |
 
-**Also on `develop` since 0.17.3, from the session-and-stream route
-transition, and in the deployed bundle** (`2a0b95f`, `f4cb4e5`, `4016d2b`,
+**Also in 0.18.0, from the session-and-stream route transition** (`2a0b95f`, `f4cb4e5`, `4016d2b`,
 `98fa410`):
 
 - The route move is a no-op here, asserted rather than believed: nothing

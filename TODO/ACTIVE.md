@@ -1,9 +1,10 @@
 # Active tasks and concepts to explore
 
-Last updated: 2026-09-21, late. Rationalised against the code, the commits and
-the live cluster after the previous session's context collapsed; where this
-file and a dated document in this directory disagree, this file is current and
-the dated document is the record of its day.
+Last updated: 2026-09-23, written up for a context clear. Read
+[2026-09-23-session-handover.md](2026-09-23-session-handover.md) for what
+the last session did and what it left unsettled; where this file and a dated
+document in this directory disagree, this file is current and the dated
+document is the record of its day.
 
 This is the working backlog. Add new work here. When an item is implemented and
 its stated verification is complete, remove it from this file and add a dated
@@ -22,9 +23,10 @@ are related. Core is addressed as the `Macha NPM Core` session.
 passed against that copy: no symlink, typecheck clean, 461 tests green, and
 `vite build` producing `index-CKNh5Q9D.js`. `develop` carries the same tree
 with the core link restored, which is how core and this client are developed
-together. **It is not tagged** — the `0.18.0` tag is Tom's to cut, and every
-release before it has one. The working tree is clean apart from
-`CLAUDE.local.md` and `basemind.toml`, which are untracked on purpose.
+together. **Tagged `0.18.0`** at `ce74408`, annotated like every release
+before it, and pushed; `main`, `develop` and the tag are all on the remote.
+The working tree is clean apart from `CLAUDE.local.md` and `basemind.toml`,
+which are untracked on purpose.
 
 **What the nodes serve.** All five hosts — `fi-1`, `es-1`, `gbni-1`,
 `ramaroja` and `macnessa` — serve **`index-CKNh5Q9D.js`**, the tagged 0.18.0
@@ -87,6 +89,9 @@ show. `COMPLETED.md` carries the table.
    bundle. It is the only thing keeping the pause P0 a P0, and where core's
    requested `source-reaped` triple (`runwayMs`, `leadTimeMs`, `lookAheadMs`)
    gets captured.
+
+**And one that waits on a server deploy:** the node control on the torrent
+form — its own P1 below, with the contract feedback already sent.
 
 **What needs Tom, and nothing else does.** A television needs him in front of
 it. So does a deployment, so does merging anything to `main`, and so does the
@@ -1614,8 +1619,16 @@ nodeId)`, which attaches an id and changes nothing else. Core's monitor also
 asks every unclaimed endpoint for its `node_id` directly, so the LAN address a
 viewer typed is identified without this client's help. The 0.18.0 changelog
 says the hook "invents nothing", which is true and is the wrong axis: it did
-not consider what the membership call removes. Nothing in front of a viewer
-carries it — 0.18.0 is deployed nowhere.
+not consider what the membership call removes. **It is in front of viewers
+since the 0.18.0 deploy.** No dropped endpoint has been observed, and the
+condition that would drop one — a discovered endpoint whose node is absent
+from the status snapshot, or whose address matches neither the node's
+`api_endpoint` origin nor its `host:port` — has not been watched either way.
+The browser check after the deploy logged `route-exhausted` in a tab that
+was demonstrably frozen, which is not evidence of this; but this hook is the
+one deployed mechanism that could produce that symptom in a healthy tab, so
+the foregrounded check owed under the deploy section should look at the
+endpoint list before and after the first identity cycle rather than assume.
 
 - [ ] Delete `useNodeIdentity`, `nodeAdvertisements.ts` and their tests. Keep
       `preferredEndpointForNode`, which exists because a viewer picks a *node*
@@ -2359,8 +2372,8 @@ how it was measured; this is only what is left to confirm.
       against an account holding `manage_users`.
 - [ ] **The node pills on a remote.** New focusable controls in the player's
       options panel (0.18.0), grouped and sorted; the D-pad must reach them
-      and a press must state the preference. Never opened on a set, and
-      0.18.0 is deployed nowhere.
+      and a press must state the preference. Never opened on a set; deployed
+      since 2026-09-21.
 
 ## P1 — The MPEG-TS preference is asserted, not gated
 
@@ -3286,10 +3299,10 @@ the server's replacement of those two is safe here; discovery is core's alone.
 ## P2 — Repo conventions
 
 Tom set these 2026-09-13 and asked every session be told. The dated branch
-bookkeeping that used to sit here is gone: `0.17.3` is the last tag, `develop`
-is the working branch, and as of 2026-09-21 `main` is at `2b1bbaa` (0.17.3
-plus one records commit) with `develop` six commits ahead of it and linked to
-core.
+bookkeeping that used to sit here is gone: `0.18.0` is the last tag, on
+`main` at `ce74408`; `develop` is the working branch, a few commits ahead
+with the core link in it, and the two differ in `package.json` and the
+lockfile by design (see the core section).
 
 - Work happens on a long-lived **`develop`**; releases are tags on `main`,
   with a merge commit on `main` named for the version.
