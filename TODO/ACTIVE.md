@@ -3129,7 +3129,15 @@ the swap.
       session route instead, where from server 0.47.0 `stream.production`
       `produced_ms > 0` says the first segment is published (segments are
       published whole); absent means cannot say, hand the source over as
-      before. Waiting on core for the replacement; delete ours when it lands.
+      before. **Done 2026-09-23 against core `3e611b8`:** the web player
+      declares `needsProducedSource` on the native-HLS path only, core holds
+      such a source back until the session route reports `produced_ms > 0`
+      (published whole, so never early; the create response carries the
+      first reading), and `probeFirstFragment`, `awaitNativeHlsFirstFragment`
+      and their constants and tests are deleted. Unit-tested; **not yet seen
+      on the Samsung set**, where the evidence is a `source-produced-wait`
+      line reading `produced`, the create-to-hand-over time, and the element
+      starting clean on its first segment. Needs Tom at the television.
       **The standby preflight stays** (Tom, 2026-09-23): "it is reasonable to
       request initial media from a node you're about to failover to." Its
       `bytes=0-65535` read is real media from the node about to serve.
