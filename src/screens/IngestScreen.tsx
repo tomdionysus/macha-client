@@ -162,7 +162,7 @@ export function IngestScreen({ api }: Props) {
       <section className="ingest-job-section" aria-labelledby="ingest-torrents-heading">
         <div className="ingest-section-heading">
           <h2 id="ingest-torrents-heading">Torrents <span>{torrentJobs.length}</span></h2>
-          <div className="torrent-sort-control">
+          <div className="sort-control">
             <label>
               Sort by
               <select

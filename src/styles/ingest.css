@@ -32,17 +32,6 @@
 .ingest-section-heading { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: .4rem; }
 .ingest-section-heading h2 { margin: 0; font-size: 1.05rem; }
 .ingest-section-heading h2 > span { margin-left: .4rem; color: var(--text-faint); font-weight: 400; font-variant-numeric: tabular-nums; }
-.torrent-sort-control { display: flex; align-items: center; gap: .4rem; color: var(--text-faint); font-size: .8rem; }
-.torrent-sort-control label { display: flex; align-items: center; gap: .4rem; }
-.torrent-sort-control select {
-  padding: .3rem .45rem;
-  border: 1px solid #3a3a40;
-  border-radius: .4rem;
-  background: #19191c;
-  color: #d7d7da;
-  font-size: .82rem;
-}
-.torrent-sort-control select:focus { outline: 1px solid var(--focus); border-color: var(--focus); }
 .torrent-sort-direction.secondary-button { margin: 0; padding: .3rem .55rem; font-size: .78rem; }
 
 .ingest-table-scroll { overflow-x: auto; border: 1px solid #ffffff12; border-radius: .5rem; background: #151517d8; }
