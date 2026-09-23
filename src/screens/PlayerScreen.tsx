@@ -259,7 +259,7 @@ export function webArrowTargetOwnsKey(target: EventTarget | null): boolean {
 
 export const isSubtitleOnlyUpdate = isSubtitleOnlyPlaybackUpdate;
 
-function PlayerSession({ api, media, platform, runtime, startPositionMs, presentation, onProgress, onPosition, onMinimize, onExpand, onStop, onPrevious, onNext, onEnded, canPrevious, canNext, queuePosition, volume, onVolumeChange, endpoints, onPinEndpoint, returnTo }: Omit<Props, 'request'> & { media: MediaSummary; startPositionMs: number; returnTo: string }) {
+function PlayerSession({ api, media, platform, runtime, startPositionMs, presentation, onProgress, onPosition, onMinimize, onExpand, onStop, onPrevious, onNext, onEnded, canPrevious, canNext, queuePosition, volume, onVolumeChange, endpoints, onPinEndpoint }: Omit<Props, 'request'> & { media: MediaSummary; startPositionMs: number }) {
   const pageRef = useRef<HTMLElement | null>(null);
   const hostRef = useRef<HTMLDivElement | null>(null);
   const chromeRef = useRef<HTMLDivElement | null>(null);
@@ -1103,7 +1103,6 @@ export function PlayerHost(props: Props) {
       {...sessionProps}
       media={request.media}
       startPositionMs={request.startPositionMs}
-      returnTo={request.returnTo}
     />
   );
 }

@@ -1,6 +1,6 @@
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import readme from '../README.md?raw';
+import { version } from '../package.json';
 
 /**
  * The README states the client's version under its title, and it must be the
@@ -9,9 +9,7 @@ import { describe, expect, it } from 'vitest';
  */
 describe('the version the README states', () => {
   it('is the package version, in italics, directly under the title', () => {
-    const root = resolve(__dirname, '..');
-    const { version } = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8')) as { version: string };
-    const lines = readFileSync(resolve(root, 'README.md'), 'utf8').split('\n');
+    const lines = readme.split('\n');
     expect(lines[0]).toBe('# Macha Client');
     expect(lines[1]).toBe('');
     expect(lines[2]).toBe(`_v${version}_`);
