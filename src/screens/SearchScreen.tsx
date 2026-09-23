@@ -124,7 +124,8 @@ export function SearchScreen({ api, onOpen }: Props) {
           />
         ))}
       </div>
-      {ordered.length > 0 && <AlphabetIndex availableKeys={alphabet.availableKeys} onSelect={alphabet.jumpTo} />}
+      {/* A letter marks a place only in title order; under any other it points nowhere useful. */}
+      {ordered.length > 0 && sort === 'title' && <AlphabetIndex availableKeys={alphabet.availableKeys} onSelect={alphabet.jumpTo} />}
     </section>
   );
 }

@@ -43,7 +43,9 @@ Last updated: 2026-09-24, after the search sort
   in a poster's height; grid cards start at the top, which fixed a 10 px
   drop of every button card in a row holding a taller episode card (a
   `<button>` centres its content in its stretched height). The Movies/TV
-  alphabet jump bar (`AlphabetIndex`, already a component) is on search.
+  alphabet jump bar (`AlphabetIndex`, already a component) is on search,
+  shown only under Sort By Title (Tom, matching the TV client: a letter
+  marks nothing in any other order). Result rows are 1rem apart.
 - **Seen live** against the cluster: all four options present; Year put
   2009, 2007, 2003 first and the yearless episodes and tracks last.
   The server answers a search with at most 50 results, so a sort reorders
