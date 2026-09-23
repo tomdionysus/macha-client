@@ -2,7 +2,7 @@
 
 Last updated: 2026-09-24, after the search sort
 
-## Search: a full-width bar with a sort control, on core's sort vocabulary — 2026-09-24, unreleased
+## Search: full-width bar, core's sort and episode labels, articles ignored, jump bar — 2026-09-24, unreleased
 
 - **The search bar fills the width**, with "Sort by" on the right of the
   same row, sized to match the input. Tom's request. No separate label:
@@ -16,6 +16,22 @@ Last updated: 2026-09-24, after the search sort
   orderings, each tie-break seen red in core's suite. The client holds no
   table and no ordering tests of its own. Core reports the phone client
   still orders its library with raw `localeCompare`, and has told it.
+- **Episodes in search and Continue Watching** show the series (linking to
+  it), then core's `episodeLabel` ("Season 3 Episode 2", linking to the
+  season), in place of `S03E02`; season pages keep theirs (Tom's scope).
+  One `EpisodeContextLinks` serves both; search opts in with
+  `variant="in-context"`, because season-page episodes carry the same
+  context.
+- **Search ignores "the", "a" and "an"** (Tom): core's `isSearchable` decides
+  whether to search and `api.search` sends only the remaining words. Seen
+  live: "the" and "the a an" sent no request; "the girls" sent "girls".
+- **Layout, seen live:** refresh sits at the right of the search row,
+  square to the fields (one height variable, 49 px here); the sort caret
+  is a drawn chevron set in from the edge; music art in search is centred
+  in a poster's height; grid cards start at the top, which fixed a 10 px
+  drop of every button card in a row holding a taller episode card (a
+  `<button>` centres its content in its stretched height). The Movies/TV
+  alphabet jump bar (`AlphabetIndex`, already a component) is on search.
 - **Seen live** against the cluster: all four options present; Year put
   2009, 2007, 2003 first and the yearless episodes and tracks last.
   The server answers a search with at most 50 results, so a sort reorders

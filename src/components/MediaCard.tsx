@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom';
 import type { MediaApi } from '@machafoundation/core';
-import { routes } from '@machafoundation/core';
+import { episodeLabel, routes } from '@machafoundation/core';
 import type { MediaSummary } from '@machafoundation/core';
 import { CardCloseButton } from './CardCloseButton';
 import { LazyArtwork } from './LazyArtwork';
@@ -20,7 +20,8 @@ interface Props {
   onRemoveFromContinueWatching?: (item: MediaSummary) => void;
   actions?: readonly MediaCardAction[];
   progress?: number;
-  variant?: 'default' | 'continue-watching';
+  /** `in-context` names an episode's series and season, for a list that is not its season's. */
+  variant?: 'default' | 'continue-watching' | 'in-context';
   elementRef?: (element: HTMLButtonElement | null) => void;
 }
 
@@ -53,13 +54,28 @@ function actionItems(item: MediaSummary, actions: readonly MediaCardAction[]): O
   }));
 }
 
-function ContinueWatchingEpisodeCard({ api, item, onOpen, onRemoveFromContinueWatching, progress, elementRef }: Props) {
+/**
+ * The series, then where in it, each linking to its page. For an episode shown
+ * away from its season (Continue Watching, search); a season page already
+ * says both, so its rows never ask for this.
+ */
+function EpisodeContextLinks({ item }: { item: MediaSummary }) {
   const context = item.playbackContext;
-  if (!context) throw new Error(`Continue Watching episode ${item.id} is missing playback hierarchy context.`);
+  if (!context) return null;
+  return (
+    <div className="continue-card-context">
+      <Link to={routes.show(context.series.id)} data-tv-focusable="true" className="continue-card-context-link">
+        {context.series.title}
+      </Link>
+      <Link to={routes.season(context.series.id, context.season.id)} data-tv-focusable="true" className="continue-card-context-link">
+        {episodeLabel(item) ?? context.season.title}
+      </Link>
+    </div>
+  );
+}
 
-  const seasonLabel = item.subtitle
-    ? `${context.season.title} · ${item.subtitle}`
-    : context.season.title;
+function ContinueWatchingEpisodeCard({ api, item, onOpen, onRemoveFromContinueWatching, progress, elementRef }: Props) {
+  if (!item.playbackContext) throw new Error(`Continue Watching episode ${item.id} is missing playback hierarchy context.`);
   return (
     <article className="media-card media-card-episode continue-card">
       <button
@@ -73,22 +89,7 @@ function ContinueWatchingEpisodeCard({ api, item, onOpen, onRemoveFromContinueWa
         <Poster api={api} item={item} progress={progress} />
         <span className="card-title continue-card-title">{item.title}</span>
       </button>
-      <div className="continue-card-context">
-        <Link
-          to={routes.show(context.series.id)}
-          data-tv-focusable="true"
-          className="continue-card-context-link"
-        >
-          {context.series.title}
-        </Link>
-        <Link
-          to={routes.season(context.series.id, context.season.id)}
-          data-tv-focusable="true"
-          className="continue-card-context-link"
-        >
-          {seasonLabel}
-        </Link>
-      </div>
+      <EpisodeContextLinks item={item} />
       {onRemoveFromContinueWatching && (
         <CardCloseButton
           className="continue-card-remove"
@@ -96,6 +97,26 @@ function ContinueWatchingEpisodeCard({ api, item, onOpen, onRemoveFromContinueWa
           onClick={() => onRemoveFromContinueWatching(item)}
         />
       )}
+    </article>
+  );
+}
+
+/** A search hit for an episode: the card opens it, the links go to its series and season. */
+function EpisodeInContextCard({ api, item, onOpen, elementRef }: Props) {
+  return (
+    <article className="media-card media-card-episode continue-card">
+      <button
+        type="button"
+        ref={elementRef}
+        className="continue-card-open"
+        data-tv-focusable="true"
+        onClick={() => onOpen(item)}
+        aria-label={`Play ${item.title}`}
+      >
+        <Poster api={api} item={item} />
+        <span className="card-title">{item.title}</span>
+      </button>
+      <EpisodeContextLinks item={item} />
     </article>
   );
 }
@@ -177,6 +198,10 @@ export function MediaCard({ api, item, onOpen, onRemoveFromContinueWatching, act
         elementRef={elementRef}
       />
     );
+  }
+
+  if (variant === 'in-context' && item.kind === 'episode' && item.playbackContext) {
+    return <EpisodeInContextCard api={api} item={item} onOpen={onOpen} elementRef={elementRef} />;
   }
 
   if (actions?.length) {

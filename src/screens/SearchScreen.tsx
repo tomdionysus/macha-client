@@ -1,9 +1,13 @@
 import { useEffect, useMemo, useState, type ChangeEvent } from 'react';
-import { DEFAULT_SEARCH_SORT, isMediaSortKey, orderMedia, SEARCH_SORTS, type MediaSortKey } from '@machafoundation/core';
+import { DEFAULT_SEARCH_SORT, isMediaSortKey, isSearchable, orderMedia, SEARCH_SORTS, type MediaSortKey } from '@machafoundation/core';
 import type { MediaApi } from '@machafoundation/core';
 import type { MediaSummary } from '@machafoundation/core';
 import { MediaCard } from '../components/MediaCard';
+import { AlphabetIndex } from '../components/AlphabetIndex';
+import { AsyncIconButton } from '../components/AsyncIconButton';
+import { RefreshIcon } from '../components/ManageIcons';
 import { MediaPageTitle } from '../components/MediaPageTitle';
+import { useAlphabetIndex } from '../hooks/useAlphabetIndex';
 
 interface Props {
   api: MediaApi;
@@ -18,10 +22,13 @@ export function SearchScreen({ api, onOpen }: Props) {
   const [refreshing, setRefreshing] = useState(false);
   const [sort, setSort] = useState<MediaSortKey>(DEFAULT_SEARCH_SORT);
   const ordered = useMemo(() => orderMedia(results, sort), [results, sort]);
+  const alphabet = useAlphabetIndex(ordered);
 
   useEffect(() => {
+    // Core decides what is worth a search: the words titles ignore for
+    // ordering never trigger one, and never reach the catalogue.
     const normalized = query.trim();
-    if (normalized.length < 2) {
+    if (!isSearchable(normalized)) {
       setResults([]);
       setError(undefined);
       setRefreshing(false);
@@ -43,8 +50,8 @@ export function SearchScreen({ api, onOpen }: Props) {
   }, [api, query, refreshToken]);
 
   return (
-    <section>
-      <MediaPageTitle refreshing={refreshing} onRefresh={() => setRefreshToken((value) => value + 1)}>Search</MediaPageTitle>
+    <section className="catalogue-indexed">
+      <MediaPageTitle>Search</MediaPageTitle>
       {error && <p className="manage-error media-refresh-error">Refresh failed: {error}</p>}
       <div className="search-bar">
         <input
@@ -62,13 +69,30 @@ export function SearchScreen({ api, onOpen }: Props) {
             value={sort}
             onChange={(event: ChangeEvent<HTMLSelectElement>) => { if (isMediaSortKey(event.target.value)) setSort(event.target.value); }}
           >
-            {SEARCH_SORTS.map((entry) => <option key={entry.key} value={entry.key}>Sort By {entry.label}</option>)}
+            {SEARCH_SORTS.map((entry) => <option key={entry.key} value={entry.key}>{entry.choiceLabel}</option>)}
           </select>
         </div>
+        <AsyncIconButton
+          className="search-bar-refresh"
+          label="Refresh Search"
+          busy={refreshing}
+          onClick={() => setRefreshToken((value) => value + 1)}
+          icon={<RefreshIcon />}
+        />
       </div>
       <div className="media-grid search-results">
-        {ordered.map((item) => <MediaCard key={item.id} api={api} item={item} onOpen={onOpen} />)}
+        {ordered.map((item) => (
+          <MediaCard
+            key={item.id}
+            api={api}
+            item={item}
+            onOpen={onOpen}
+            variant="in-context"
+            elementRef={(element) => alphabet.registerItem(item.id, element)}
+          />
+        ))}
       </div>
+      {ordered.length > 0 && <AlphabetIndex availableKeys={alphabet.availableKeys} onSelect={alphabet.jumpTo} />}
     </section>
   );
 }

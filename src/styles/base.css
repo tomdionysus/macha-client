@@ -237,6 +237,13 @@ h2 { font-size: clamp(1.2rem, 2vw, 1.75rem); letter-spacing: -.01em; margin: 1.1
 }
 .media-row::-webkit-scrollbar { display: none; }
 .media-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(145px, 1fr)); gap: 1.4rem 1rem; }
+/*
+ * Cards start at the top rather than stretch to their row: a <button> centres
+ * its content in whatever height it is given, so one taller card (a search
+ * episode with its series and season links) pushed every button card in its
+ * row down by half the difference, and their titles off the line.
+ */
+.media-grid > * { align-self: start; }
 .catalogue-indexed { padding-right: 2.35rem; }
 .alphabet-index {
   position: fixed;
@@ -604,22 +611,36 @@ h2 { font-size: clamp(1.2rem, 2vw, 1.75rem); letter-spacing: -.01em; margin: 1.1
   font-size: 1.15rem;
 }
 .settings input { width: min(900px, 100%); }
-.search-bar { display: flex; align-items: center; gap: 1rem; width: 100%; }
-.search-input { flex: 1; min-width: 0; }
+/* One height for the row's three controls, so the refresh button can be square to it. */
+.search-bar { --search-control-height: 3.5rem; display: flex; align-items: stretch; gap: 1rem; width: 100%; }
+.search-bar > * { height: var(--search-control-height); }
+.secondary-button.async-icon-button.search-bar-refresh { flex: 0 0 auto; width: var(--search-control-height); height: var(--search-control-height); border-radius: .65rem; }
+.search-input { flex: 1; min-width: 0; padding-block: 0; }
 .search-results { margin-top: 2rem; }
+/*
+ * Search mixes square music art with 2:3 posters. A percentage margin is taken
+ * from the card's width, so 25% above and below centres a square in a poster's
+ * height and every title in a row still starts on the same line. The title's
+ * own top margin collapses into the one below, so that one carries it too.
+ */
+.search-results .music-artwork { margin-top: 25%; margin-bottom: calc(25% + .65rem); }
 .sort-control { display: flex; align-items: center; gap: .4rem; color: var(--text-faint); font-size: .8rem; }
 .sort-control label { display: flex; align-items: center; gap: .4rem; }
 .sort-control select {
-  padding: .3rem .45rem;
+  appearance: none;
+  padding: .3rem 1.7rem .3rem .45rem;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23b8b8be' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right .55rem center;
   border: 1px solid #3a3a40;
   border-radius: .4rem;
-  background: #19191c;
+  background-color: #19191c;
   color: #d7d7da;
   font-size: .82rem;
 }
 .sort-control select:focus { outline: 1px solid var(--focus); border-color: var(--focus); }
 .search-bar .sort-control { font-size: .95rem; }
-.search-bar .sort-control select { align-self: stretch; padding: 1rem 1.2rem; border-radius: .65rem; font-size: 1.05rem; }
+.search-bar .sort-control select { align-self: stretch; padding: 1rem 2.8rem 1rem 1.2rem; border-radius: .65rem; font-size: 1.05rem; background-position: right 1.1rem center; }
 
 .settings { width: 100%; }
 .settings label { display: block; color: var(--text-dim); margin: 1rem 0 .45rem; }
