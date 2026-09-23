@@ -3121,10 +3121,17 @@ the swap.
       today would break the standby preflight and readiness probe on the web.
       Needs either the nodes to allow those two headers, or core to take a
       host fetch for the walk again.
-      **Also for Tom:** this client's native-HLS readiness probe
-      (`probeFirstFragment`) is itself a `bytes=0-0` request. Tom ruled out
-      core's one-byte start-cost probe on 2026-09-23; whether that ruling
-      reaches this probe, which gates attaching a native-HLS source, is his.
+- [ ] **Zero-byte checks go, this client's included — Tom, 2026-09-23:**
+      "Zero byte check is a hack and we're not doing it. If you've a better
+      idea, talk to core." `probeFirstFragment` / `awaitNativeHlsFirstFragment`
+      (the native-HLS path, the Samsung build) are a `bytes=0-0` probe and are
+      to be deleted. Proposed to core the same day: read readiness from the
+      session route instead, where from server 0.47.0 `stream.production`
+      `produced_ms > 0` says the first segment is published (segments are
+      published whole); absent means cannot say, hand the source over as
+      before. Waiting on core for the replacement; delete ours when it lands.
+      Open for Tom: whether the ruling reaches the standby preflight's
+      `bytes=0-65535` media read, which is not zero-byte.
 - [ ] Swap both implementations, run the suite, and confirm the two changed
       behaviours **by test rather than by reading** before deleting anything.
       `Player.preflightSource` stays the seam the coordinator drives, and core
