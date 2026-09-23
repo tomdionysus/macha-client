@@ -1755,9 +1755,18 @@ nor its `host:port` — has still not been watched, and now never will be here.
       | gbni-1 to fi-1 | 6,419 ms, host | -5,622 ms | handover complete at 5.9 s, joined 90 ms in, no stall |
       | fi-1 to gbni-1 | 24,614 ms, host | -21,959 ms | handover complete at 22.2 s, joined 223 ms in, 27 s ahead of the join, no stall in 270 samples |
       Old sessions stopped at each cut; all four sessions `404` after stop.
-      Both nodes' preflight allows `Range` from any origin, so core's
-      readiness probe is not blocked by CORS; core's own estimate was not
-      exercised (the host lead won, and the first move had no evidence).
+      Both nodes' preflight allows `Range` from any origin, but that did not
+      settle core's own estimate, which the host lead had overridden.
+- [ ] **Core's own estimate never records on the web — core's, reported
+      2026-09-23.** Run with the host lead suppressed: three creates, zero
+      `generation-start-measured`, every move `leadSource: none`. Core's HLS
+      walk adds `Cache-Control` and `Pragma` to every probe; the nodes allow
+      only `Authorization, Content-Type, If-Match, Range` cross-origin, so
+      the browser blocks the request (`TypeError: Failed to fetch`). On the
+      live manifest URL: those headers fail, `Range` alone answers `206`,
+      `cache: 'no-store'` with no headers answers `200`. This client's own
+      probes already use the latter and pass. Until core fixes it, only the
+      host lead (this viewer's measurement) ever leads a web move.
 - [ ] **Superseded — kept for the record: lead the move by it, waiting on core and on Tom.**
       Declining the handover up front would only reach the freeze and the
       black 16 s sooner, so the figure is only useful as a lead: ask the node
