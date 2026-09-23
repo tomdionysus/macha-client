@@ -1,22 +1,9 @@
 import { useEffect, useMemo, useState, type ChangeEvent } from 'react';
-import { newestCatalogueFirst, sortMediaByIndexedTitle } from '@machafoundation/core';
+import { DEFAULT_SEARCH_SORT, isMediaSortKey, orderMedia, SEARCH_SORTS, type MediaSortKey } from '@machafoundation/core';
 import type { MediaApi } from '@machafoundation/core';
 import type { MediaSummary } from '@machafoundation/core';
 import { MediaCard } from '../components/MediaCard';
 import { MediaPageTitle } from '../components/MediaPageTitle';
-
-/** Each order is core's; relevance is the order the server answered in. */
-export const SEARCH_SORTS = [
-  { key: 'relevance', label: 'Relevance', order: (items: MediaSummary[]) => items },
-  { key: 'title', label: 'Title', order: sortMediaByIndexedTitle },
-  { key: 'recent', label: 'Recently added', order: newestCatalogueFirst },
-] as const;
-
-export type SearchSortKey = (typeof SEARCH_SORTS)[number]['key'];
-
-export function orderSearchResults(items: MediaSummary[], key: SearchSortKey): MediaSummary[] {
-  return SEARCH_SORTS.find((entry) => entry.key === key)!.order(items);
-}
 
 interface Props {
   api: MediaApi;
@@ -29,8 +16,8 @@ export function SearchScreen({ api, onOpen }: Props) {
   const [error, setError] = useState<string>();
   const [refreshToken, setRefreshToken] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
-  const [sort, setSort] = useState<SearchSortKey>('relevance');
-  const ordered = useMemo(() => orderSearchResults(results, sort), [results, sort]);
+  const [sort, setSort] = useState<MediaSortKey>(DEFAULT_SEARCH_SORT);
+  const ordered = useMemo(() => orderMedia(results, sort), [results, sort]);
 
   useEffect(() => {
     const normalized = query.trim();
@@ -74,7 +61,7 @@ export function SearchScreen({ api, onOpen }: Props) {
             <select
               data-tv-focusable="true"
               value={sort}
-              onChange={(event: ChangeEvent<HTMLSelectElement>) => setSort(event.target.value as SearchSortKey)}
+              onChange={(event: ChangeEvent<HTMLSelectElement>) => { if (isMediaSortKey(event.target.value)) setSort(event.target.value); }}
             >
               {SEARCH_SORTS.map((entry) => <option key={entry.key} value={entry.key}>{entry.label}</option>)}
             </select>

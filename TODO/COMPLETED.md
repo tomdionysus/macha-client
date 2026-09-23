@@ -1,6 +1,23 @@
 # Completed and tested
 
-Last updated: 2026-09-23, after the reap run
+Last updated: 2026-09-24, after the search sort
+
+## Search: a full-width bar with a sort control, on core's sort vocabulary — 2026-09-24, unreleased
+
+- **The search bar fills the width**, with "Sort by" on the right of the
+  same row, sized to match the input. Tom's request. The Import page's sort
+  styling is shared as `.sort-control`.
+- **The options and orderings are core's** (`2816e5e`, unpublished):
+  `SEARCH_SORTS`, `DEFAULT_SEARCH_SORT`, `orderMedia`, `isMediaSortKey`.
+  Asked of core on Tom's instruction so every client shares one vocabulary.
+  Relevance is the server's order; Title, Year and Recently added are core's
+  orderings, each tie-break seen red in core's suite. The client holds no
+  table and no ordering tests of its own. Core reports the phone client
+  still orders its library with raw `localeCompare`, and has told it.
+- **Seen live** against the cluster: all four options present; Year put
+  2009, 2007, 2003 first and the yearless episodes and tracks last.
+  The server answers a search with at most 50 results, so a sort reorders
+  those 50, not the library. Needs core published before a release.
 
 ## The Import page, the README version, and native HLS without a probe — 2026-09-23, unreleased
 

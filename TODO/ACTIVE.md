@@ -2946,19 +2946,6 @@ both measured, neither this client's to build.
       state about a node's start cost without a stream request; the
       one-byte probe is ruled out (Tom, 2026-09-23).
 
-## P1 — Search sorts by core's orderings; Year and the option table are asked of core
-
-Done 2026-09-23 on Tom's request: the search bar is full width with a "Sort
-by" control on the right of the same row (Relevance, Title, Recently added),
-the Import page's sort styling shared as `.sort-control`. Relevance is the
-server's order; the other two are core's `sortMediaByIndexedTitle` and
-`newestCatalogueFirst`. Seen in the browser. The option table
-(`SEARCH_SORTS`) is local for now: on Tom's instruction core was asked for
-it, and for a year ordering, so every client shares one vocabulary. When it
-lands, replace the local table and add Year. **Note:** the server answers a
-search with at most 50 results, so a sort reorders those 50, not the
-library.
-
 ## P2 — Pause follow-ups that survived the reap run
 
 The pause P0 is closed (`COMPLETED.md`, 2026-09-23). Two small things and two
