@@ -22,7 +22,6 @@ interface Props {
   catalogueApi: CatalogueApi;
   section: ManageSection;
   users: ReactNode;
-  onUnmatchedCountChange?: (count: number) => void;
 }
 
 function formatBytes(value: number): string {
@@ -389,10 +388,9 @@ function UnmatchedReview({ item, api, catalogueApi, onResolved, onDeleteRequest 
   );
 }
 
-function UnmatchedManager({ api, catalogueApi, onCountChange }: {
+function UnmatchedManager({ api, catalogueApi }: {
   api: ManageApi;
   catalogueApi: CatalogueApi;
-  onCountChange?: (count: number) => void;
 }) {
   const [items, setItems] = useState<UnmatchedFile[]>([]);
   const [reviewing, setReviewing] = useState<string>();
@@ -409,7 +407,6 @@ function UnmatchedManager({ api, catalogueApi, onCountChange }: {
     try {
       const next = await api.unmatched();
       setItems(next);
-      onCountChange?.(next.length);
       setReviewing((current) => current && next.some((item) => item.id === current) ? current : undefined);
       setChecked((current) => new Set([...current].filter((id) => next.some((item) => item.id === id))));
       setPage((current) => pageSlice(next, current).page);
@@ -418,7 +415,7 @@ function UnmatchedManager({ api, catalogueApi, onCountChange }: {
     } finally {
       setLoading(false);
     }
-  }, [api, onCountChange]);
+  }, [api]);
 
   useEffect(() => { void reload(); }, [reload]);
 
@@ -678,7 +675,7 @@ function FileManager({ api }: { api: ManageApi }) {
   );
 }
 
-export function ManageScreen({ api, catalogueApi, section, users, onUnmatchedCountChange }: Props) {
+export function ManageScreen({ api, catalogueApi, section, users }: Props) {
   return (
     <div className="manage-screen">
       <h1>Manage</h1>
@@ -686,7 +683,7 @@ export function ManageScreen({ api, catalogueApi, section, users, onUnmatchedCou
         ? users
         : section === 'files'
           ? <FileManager api={api} />
-          : <UnmatchedManager api={api} catalogueApi={catalogueApi} onCountChange={onUnmatchedCountChange} />}
+          : <UnmatchedManager api={api} catalogueApi={catalogueApi} />}
     </div>
   );
 }

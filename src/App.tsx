@@ -478,7 +478,6 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
    */
   const landing = mediaAvailable ? routes.home : manageLanding ?? routes.settings;
   const metadataEditingAvailable = libraryManagementAvailable;
-  const [unmatchedCount, setUnmatchedCount] = useState(0);
 
   // What the instruction chooser reasons from: the server's reported facts for
   // the item about to play, and the platform truths no probe can discover.
@@ -525,18 +524,6 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
     ready: playbackReady,
   });
   const activePlayback = playback.activePlayback;
-
-  useEffect(() => {
-    if (!managementAvailable || effectiveConnectionGate) {
-      setUnmatchedCount(0);
-      return undefined;
-    }
-    let cancelled = false;
-    void manageApi.unmatched()
-      .then((items) => { if (!cancelled) setUnmatchedCount(items.length); })
-      .catch(() => { /* Manage itself will surface API errors when opened. */ });
-    return () => { cancelled = true; };
-  }, [effectiveConnectionGate, manageApi, managementAvailable]);
 
   const samsungBack = useCallback(() => {
     if (!buildPlatformTraits.receivesBackKeyEvents) return false;
@@ -675,7 +662,6 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
       catalogueApi={catalogueApi}
       section={section}
       users={usersPane}
-      onUnmatchedCountChange={setUnmatchedCount}
     />
   );
 
@@ -800,7 +786,6 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
                 className={({ isActive }: { isActive: boolean }) => isActive ? 'active' : undefined}
               >
                 {item.label}
-                {item.to === routes.manage && unmatchedCount > 0 && <span className="manage-badge">{unmatchedCount}</span>}
               </NavLink>
             );
           })}
