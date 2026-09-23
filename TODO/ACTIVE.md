@@ -853,8 +853,25 @@ exit, and that exit starts by condemning the node.
       false)` with the source still playing, "deliberately not gated on paused
       state". `isEndpointRetryablePlaybackFailure` excludes `not-found`. This
       client's Direct Play worker and HLS policy both already emit into it.
-      **Not yet watched live:** a pause past thirty minutes recovering without a
-      failure screen, against 0.14.0. That is the only thing keeping this a P0.
+      **Watched live 2026-09-23, and it recovers.** fi-1, server 0.53,
+      `session_idle` 30 min, core `0ac8f21`, transcode HLS. Paused 19:27:35
+      UTC with 127 s buffered, nothing touched the session, resumed 20:02:17
+      after 34.7 min. Resume was instant from the buffer. 20:02:27 first
+      fragment `404` → `sessionAlive` → `session-gone` → `source-reaped` →
+      `replacement-pending` (runway 119.9 s, lead 26 s); 20:02:58 hls.js fatal
+      reported `source-gone` and taken as
+      `source-failure-superseded-by-replacement`, no failure screen;
+      20:04:00.959 `session-reaped-regenerating` at `lead-time-reached`
+      (runway 25.9 s) on **the same node**, new session 1.6 s later,
+      `handover-complete` 1.28 s after that with 23 s of runway left.
+      1,257 samples at 100 ms from 20:02:31: no stall, no pause, no failure
+      screen; the cut went 157.5 s on the old generation to 2.8 s on the new,
+      100 ms apart. All sessions `404` after stop. **Confound, stated:** the tab
+      was hidden from the resume click until 20:02:31, so the resume and the
+      first `404` were not foregrounded; the recovery from the rebuild onward
+      was. One `route-endpoint-failed` for fi-1 (`unreachable`) was logged at
+      19:40:31, mid-pause, unexplained and without consequence.
+      **This clears the item's live check.** Demoting the P0 is Tom's call.
 - [x] **This repo, policy layer.** `SOURCE_NOT_FOUND_STATUS` and
       `isHlsSourceNotFound` beside `isHlsSegmentHold` in `WebHlsPolicy.ts`, the
       404 excluded from `isHlsNetworkDegradation`, and a `fail-not-found` action
