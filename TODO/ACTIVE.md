@@ -1776,12 +1776,22 @@ nor its `host:port` — has still not been watched, and now never will be here.
       suppressed: `generation-start-measured` after every create; the second
       move into fi-1 read `leadSource: estimate`, `leadMs` 6,970 (1,970 + 5,000),
       seamless.
-- [ ] **Core's estimate is too short for gbni-1 — core's, reported.** It
-      measured 4,196 and 4,504 ms (first byte ready); this client measures
-      14.4-20.3 s to the first fragment loaded for the same node and title.
-      Led by 9,196 ms the move lost its race and froze ~15 s; the 24.6 s host
-      lead on the same move was seamless. While both exist the host lead
-      wins, so on the web this viewer's measurement is what leads.
+- [ ] **The gbni-1 moves are transfer-bound, not node-bound — measured
+      2026-09-23 16:21 UTC, corrects this file's earlier reading.** Core's
+      4.2-5.3 s is a complete first segment (the server publishes segments
+      whole), and time to first byte on every gbni-1 fragment was 0.1-0.35 s.
+      The link from this client to gbni-1 carried the first three incoming
+      fragments at 0.26, 0.90 and 1.32 MB/s, 0.50 MB/s together, against a
+      0.63 MB/s stream; fi-1 delivered up to 5.8 MB/s in the same window.
+      This machine is at the fi-1 site, so gbni-1 is across the WAN from
+      here. Withdrawn from this item only: "gbni-1 took 9-20 s to a first
+      fragment" as a statement about the node — those figures stand as
+      create-to-first-fragment-loaded for this viewer, which is mostly
+      transfer. Still true: led by 9.2 s the move froze ~15 s and led by
+      24.6 s it held. With core: a lead that covers the transfer (bytes the
+      join needs over the measured throughput), and declining a move to a
+      node that cannot deliver the stream's bitrate from here, where no lead
+      is enough. After the 24.6 s cut, later stalls were not watched.
 - [ ] **Superseded — kept for the record: lead the move by it, waiting on core and on Tom.**
       Declining the handover up front would only reach the freeze and the
       black 16 s sooner, so the figure is only useful as a lead: ask the node
