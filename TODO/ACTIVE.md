@@ -1,8 +1,9 @@
 # Active tasks and concepts to explore
 
-Last updated: 2026-09-23, written up for a context clear. Read
+Last updated: 2026-09-23, after the foregrounded deploy check and the
+`useNodeIdentity` deletion. Read
 [2026-09-23-session-handover.md](2026-09-23-session-handover.md) for what
-the last session did and what it left unsettled; where this file and a dated
+the session before did and what it left unsettled; where this file and a dated
 document in this directory disagree, this file is current and the dated
 document is the record of its day.
 
@@ -75,11 +76,15 @@ show. `COMPLETED.md` carries the table.
 
 **Three jobs are ready to start, in this order:**
 
-1. **Delete `useNodeIdentity` and wire `selectNode` to core's `moveTo`** — its
-   own P1 below. The deletion is not tidying: the hook calls
-   `applyAdvertisement`, the membership call core just stopped using for this
-   because it drops every discovered endpoint it is not told about. The wiring
-   removes the measured 13.2 s of black on a node change.
+1. **Make the web handover arrive.** A node move now reaches the player
+   correctly (core `5de9250`, verified live 2026-09-23: no leak, no
+   yank-back, old session released at the cut), and then this client's own
+   handover fails the same way twice running: the join recedes faster than
+   the new node fills, the relocation hold freezes the picture ~16-19 s and
+   times out on its seek, and the fresh start is black for up to 15 s. That
+   is the transcode handover P0 below, now reproducible on demand by a node
+   move. The client changes for the move, the identity deletion, the failure
+   screen and the start recorder are all uncommitted on `develop`.
 2. **Instrument the `readyState` 0 stall** — the P0 below. Nine explanations
    have died to measurement, tab occlusion among them, which the old P2 had as
    the answer. What is wanted is a recorder armed before `src` is set, and a
@@ -264,8 +269,23 @@ That is a frozen background tab rather than a finding: measured independently
 with `curl`, all five hosts answer `/api/v1/health` with
 `{"service":"macha","status":"ok","version":"0.48.2"}` as `application/json`,
 which is exactly what `confirmMachaEndpoint` requires, and that probe aborts
-at 1.5 s against a tab whose timers had stopped. **A foregrounded check is
-still owed**, and it is the one thing this deploy has not had.
+at 1.5 s against a tab whose timers had stopped.
+
+**Foregrounded check done 2026-09-23 14:30-14:33 UTC, and it closes the
+deploy.** `macnessa` in a Chrome tab with `document.visibilityState` read as
+`visible` and `hasFocus()` true (the first read after navigation said
+`hidden`; the window had to be activated with AppleScript before any of it
+counted). The already-signed-in client mounted at 21 ms, routed three
+attempts to `route-success` inside 700 ms, and every `probe-cycle` from
+14:30:56 to 14:33:28 reported `reachable 3, known 3, decidedBy sticky`,
+captured by wrapping `console.debug` in the page since the extension shows
+the payloads as `Object`. `useNodeIdentity` ran at mount and at 60 s
+intervals, so the cycles at 14:31:55 and 14:32:55 fell between probes that
+counted three on both sides: **no endpoint dropped**. The persisted discovered
+list (`ramaroja`, `10.35.1.50:7438`) was unchanged too. It is the
+configuration where the drop could not happen — same-origin plus two
+discovered, all three nodes in the status snapshot — so it clears the deploy
+rather than exonerating the hook, which is deleted regardless (P1 below).
 
 **All three nodes now serve the develop build with the hot-linked core,
 deployed 2026-09-21 14:37 on Tom's instruction ("they are NOT production").**
@@ -735,13 +755,30 @@ that did everything correctly.**
 *node* never answered; `videoState()` reports `document.hidden` on every
 diagnostic line since 0.17.2.
 
-- [ ] **Instrumentation, not a tenth theory.** The stall produces no error
-      until hls.js escalates, so nothing is captured at the moment it matters.
-      A recorder armed before `src` is set: the element's event sequence,
-      `readyState`/`networkState` sampled per second, hls.js error payloads
-      flattened to text, and whether any request left the page — Resource
-      Timing for same-origin, the worker's own log for proxied. Then the next
-      occurrence is diagnosable rather than re-argued.
+- [x] **Instrumentation, not a tenth theory — built 2026-09-23.**
+      `StartRecorder` (`platform/startRecorder.ts`), armed by the web player
+      before any source is set, on the primary element and on the standby of
+      a handover and of a relocation hold. One `source-start-record` at
+      `warn` when a start is slow (3 s or more to a first frame), failed,
+      abandoned after 2 s, or produced nothing in 120 s. It carries the
+      element events, per-second `readyState`/`networkState`/buffer/`hidden`
+      kept only on change, each hls.js fragment asked and got, hls.js errors
+      as one line each, and the requests under the session's path that left
+      the page. Eleven unit tests, each rule seen red.
+      **Two things the live runs taught it.** The page's Resource Timing
+      buffer is full at 250 entries within 11-18 s of load, so a query of it
+      reported "0 requests" for starts that were plainly fetching; the
+      recorder now uses a `PerformanceObserver` per start and reports
+      requests as absent, not zero, where none is available. And Resource
+      Timing lists a request only once its response ends, so fragment starts
+      are recorded from hls.js to show one still in flight (unit-tested; not
+      yet seen in a live record).
+      **First live readings** (fi-1 to gbni-1 moves, foregrounded): a handover
+      standby at `readyState` 0 for 12.3 s whose four requests left at +1 ms
+      and completed by +12.3 s, so the browser asked at once and the node was
+      slow to produce. A primary start that failed at 16 s: seeking, 3.1 s
+      buffered, last completed request at +9.0 s; whether a fragment was in
+      flight after that is what the fragment lines now answer.
 - [ ] **A generation that has never produced a byte must not be able to
       charge its node.** The failure that follows the 120 s reclaim is
       reported as evidence against the endpoint today. Decide with core where
@@ -1579,12 +1616,12 @@ Both items are core's, and neither has a client workaround worth building:
       **Checked 2026-09-20, and the client half was not done:** the failure
       screen rendered `fatalError.message` and nothing else, so everything core
       chained beneath it was thrown away on the floor. `failureCauseMessages`
-      now walks the chain and the screen reads it out under the head, quieter.
-      Only `Error` causes are followed — a `PlaybackSourceError` carries an
-      hls.js payload in `cause` and that is evidence for a log, not a sentence
-      for a viewer — and the walk is cycle-safe, because a viewer waiting on a
-      hung failure screen is worse off than one told less. Seen failing first
-      against a stub that says nothing, which is what the screen did.
+      then walked the chain and read it out under the head, quieter — and
+      **was itself replaced on 2026-09-23** by core's `playbackFailureDetail`,
+      which carries the server's sentence from whichever layer knew it rather
+      than reading `.message` off each layer (core's README: never render
+      `.message`, never reconstruct it). The chain is still in the opt-in
+      failure trail.
 
       **Not verified live**, and the thing it is for cannot be produced without
       the failover it belongs to: what a run should show is both sentences at
@@ -1620,24 +1657,115 @@ asks every unclaimed endpoint for its `node_id` directly, so the LAN address a
 viewer typed is identified without this client's help. The 0.18.0 changelog
 says the hook "invents nothing", which is true and is the wrong axis: it did
 not consider what the membership call removes. **It is in front of viewers
-since the 0.18.0 deploy.** No dropped endpoint has been observed, and the
-condition that would drop one — a discovered endpoint whose node is absent
-from the status snapshot, or whose address matches neither the node's
-`api_endpoint` origin nor its `host:port` — has not been watched either way.
-The browser check after the deploy logged `route-exhausted` in a tab that
-was demonstrably frozen, which is not evidence of this; but this hook is the
-one deployed mechanism that could produce that symptom in a healthy tab, so
-the foregrounded check owed under the deploy section should look at the
-endpoint list before and after the first identity cycle rather than assume.
+since the 0.18.0 deploy, and stays there until the next one.** The
+foregrounded check on 2026-09-23 (deploy section) watched three identity
+cycles against the deployed bundle and saw no endpoint dropped, in the one
+configuration where none could be — same-origin plus two discovered
+endpoints, all three nodes present in the snapshot. The condition that would
+drop one — a discovered endpoint whose node is absent from the status
+snapshot, or whose address matches neither the node's `api_endpoint` origin
+nor its `host:port` — has still not been watched, and now never will be here.
 
-- [ ] Delete `useNodeIdentity`, `nodeAdvertisements.ts` and their tests. Keep
-      `preferredEndpointForNode`, which exists because a viewer picks a *node*
-      and `prefer()` names an *endpoint*.
+- [x] **Deleted 2026-09-23.** `useNodeIdentity`, `nodeAdvertisements.ts` and
+      their tests are gone, with the one call in `App.tsx`; typecheck clean,
+      452 tests across 55 files. `preferredEndpointForNode` stays, because a
+      viewer picks a *node* and `prefer()` names an *endpoint*.
 - [ ] Verify the grouping still holds against core at or past `76d94ba`: the
       player's node pills show three nodes for five endpoints (three configured
       addresses, two discovered names). The "five to three" seen on 2026-09-21
       was with both mechanisms running and does not separate them.
-- [ ] **Wire `selectNode` to `moveTo`.** `PlayerScreen.selectNode` pins the
+- [x] **Wired 2026-09-23, against core `2f196a1`** (`PlaybackRuntime.moveTo`,
+      added on request, unreleased, so `main` cannot take it until core
+      publishes). `moveStreamToNode` in `screens/player/nodeMove.ts`: a live
+      generation is moved, a `false` leaves the viewer where they are with a
+      sentence rather than restarting behind them, a failed generation calls
+      `retry()`. The app's pin now returns the endpoint it preferred. The
+      "moving" note clears when the move settles, not when a session appears,
+      because a move never takes the session away. Three tests, both
+      non-trivial branches seen red.
+- [ ] **Live run 2026-09-23, fi-1 to gbni-1, transcode fMP4, foregrounded —
+      the move worked and core then undid it.** Move start 14:45:57.2,
+      gbni-1 session created and `source-move-ready` 14:46:04.07, old fi-1
+      session stopped 30 ms later. The web handover kept presenting fi-1's
+      buffer on the old element and cut to the standby at ~14:46:40.7: a
+      frozen frame of at most 2.5 s, **no black, position continuous**
+      (212.6 s both sides). The standby sat at `readyState` 0 for 16 s first.
+      Then: the old element kept fetching from the released session (404s from
+      14:46:04.4), `sessionAlive` said gone, and at 14:46:40.6 core's reap
+      path regenerated *that* session on fi-1, replaced the current gbni-1
+      session with it without closing it, and handed over back to fi-1 — which
+      loaded black, stalled 7 s, went terminal and failed over to gbni-1 at
+      14:47:24. **The gbni-1 session leaked**: still `200` after the viewer
+      stopped, holding the node's only video transcode slot; closed by hand
+      (`204`, then `404`). Core's, and reported with the capture: release after
+      the cut, not at activation; ignore reap evidence for a session that is
+      not current; close a session being replaced. Re-run the same move when
+      core has a fix.
+- [x] **Core's fix verified live 2026-09-23 against `5de9250`**, twice. Two
+      sessions per move and no more, both `404` after stop; the fi-1 session
+      stopped at the cut (15:03:53.9, not at move-ready 15:03:17.6); fi-1
+      kept serving the outgoing element (segments 27 and 28 loaded after the
+      move was ready), no 404s, no reap, no regeneration. Core recorded the
+      general "close whatever `serverSession` replaces" as still open.
+- [ ] **What the viewer got is still worse than the 13.2 s restart it
+      replaced**, and it is this client's handover, not core. Both runs:
+      `handover-abandoned` with `join-receding-faster-than-it-fills` (gbni-1
+      took 8.8 s and 12.3 s to its first fragment), then
+      `relocation-hold-begin`, a frozen frame for 19.4 s and 15.8 s, then
+      `relocation-hold-abandoned` on `incoming-seek-timeout`, then a fresh
+      start: black 14.7 s in the first run; in the second it failed at 16 s
+      and failed over to fi-1, charging gbni-1. The timeline stayed
+      continuous. The transcode handover P0 is where this belongs.
+      **No node states what a start will cost** (core, 2026-09-23):
+      `startup_timeout_ms` is the ceiling at which a node gives up, not an
+      expectation, and declining joins under it would refuse ones that work;
+      `production` exists only once the generation does; core's endpoint
+      samples are transport, not pipeline start. Two honest routes: a server
+      ask for a node-measured figure (recent transcode first-fragment latency
+      on the status telemetry) — **Tom's decision whether it goes on the
+      server's list** — or this client's own create-to-first-fragment
+      measurement per node, recorded and re-read, never a constant (the
+      `look_ahead_ms` fault). Core's 11,672 ms node-side first fragment for a
+      4K HEVC software encode (2026-09-18) is the same order as gbni-1's
+      8.5-12.3 s here, so this may be the cold-start cost of that box rather
+      than a fault in it.
+- [x] **Measured, as Tom directed on 2026-09-23** ("the client would
+      measure each node's time from session create to first fragment and
+      use that for this viewer" — "do this"). `playback/nodeStartCosts.ts`:
+      `measureStartCosts` wraps the resolver handed to the runtime and stamps
+      every call that resolves to a session with when it was asked; the web
+      player's first non-init fragment for that source URL closes the
+      measurement and logs `node-start-cost-measured`. Latest figure per node
+      origin, looked up across all of a node's addresses, unknown after
+      10 minutes, never a default. Nine tests, each rule seen red. **Live,
+      foregrounded:** fi-1 1,830 ms and gbni-1 20,342 ms, each matching its
+      own create and first-fragment log lines to the millisecond.
+- [ ] **Use it: lead the move by it — waiting on core and on Tom.**
+      Declining the handover up front would only reach the freeze and the
+      black 16 s sooner, so the figure is only useful as a lead: ask the node
+      for intent + measured cost + margin, keep the outgoing element playing
+      until the viewer reaches the new generation's start, and cut there.
+      Core agrees with the design and has held it for two reasons.
+      **Ownership:** the server session relayed Tom's decline of a
+      server-stated figure as "the client is responsible", which core read as
+      core measuring; core has asked Tom directly. **Contract:** core's
+      `activationPosition` turns a generation that starts after the viewer
+      into a seek back to the viewer on current nodes (a second full start),
+      so a lead needs `play()` to define a negative position and hosts to opt
+      in (the web handover can hold through it, the RN hosts cannot).
+      This client's side, once both are settled: `selectNode` passes the
+      measured lead; the handover declines when outgoing runway is under the
+      lead plus margin, and while the join lies before the incoming buffered
+      start it waits for the viewer instead of running the convergence race
+      and buffer deadline, which would read that wait as lost.
+      What the earlier text said the wiring would do:
+      `PlaybackCoordinator.moveTo` exists (`:1522`) but `PlaybackRuntime`,
+      which is all the player holds, holds the coordinator as a private field
+      and forwards `seek`, `seekBy`, `update`, `setPaused` and `retry` and not
+      `moveTo`; core's own backlog (`ACTIVE.md:32`) expects this client to be
+      the caller. The ask is `PlaybackRuntime.moveTo(endpointId):
+      Promise<boolean>`, `false` with no coordinator. When it lands:
+      `PlayerScreen.selectNode` pins the
       choice through `prefer()` and calls `runtime.play({media,
       startPositionMs})`, which closes the old generation before starting the
       new one: **13.2 s of black**, measured (2:11.795 on `fi-1` to 2:12.197 on
@@ -1649,10 +1777,15 @@ endpoint list before and after the first identity cycle rather than assume.
       costs nothing against it. Keep `prefer()` for the ordering, call
       `moveTo` for the move, and measure the same switch: the target is no
       black and no lost position.
-- [ ] Core's `playbackFailureDetail(error)` replaces the failure screen's own
-      `failureCauseMessages` walk. Core's README states the rule every host
-      needs: never render `.message`, never reconstruct the sentence by
-      stripping prefixes, and `undefined` means write your own. Same sitting.
+- [x] **Done 2026-09-23.** `playbackFailureHeadline` in
+      `diagnostics/failureCauses.ts` is `playbackFailureDetail(error)` with
+      one sentence of the client's own for `undefined`; the screen renders
+      that in place of `fatalError.message` and the `failureCauseMessages`
+      walk is deleted along with its CSS. Seen red first: the test asserts the
+      headline never contains `Macha endpoint` or a node address. Not
+      verified live, for the same reason the walk never was — a terminal
+      failure has to be produced to see it — and the opt-in failure trail
+      still carries the raw chain when it is.
 
 ## P1 — A mode switch negotiates from a stale position, and 7 s of nothing-arrived is read as terminal
 
