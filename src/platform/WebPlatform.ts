@@ -552,6 +552,8 @@ class WebPlayer implements Player {
   private readonly playerId = ++webPlayerSequence;
   private readonly log = createClientLogger('playback.web', { playerId: this.playerId });
   private readonly diagnostics = new WebMediaDiagnostics(this.log);
+  /** Each element's source buffers by track, while hls.js has them; for `WebMediaDiagnostics`. */
+  private readonly trackBuffers = new WeakMap<HTMLVideoElement, Partial<Record<string, SourceBuffer>>>();
   /** One per element that is starting a source; see `armStartRecorder`. */
   private readonly startRecorders = new WeakMap<HTMLVideoElement, {
     recorder: StartRecorder;
@@ -673,7 +675,7 @@ class WebPlayer implements Player {
       video.setAttribute('autoplay', 'autoplay');
       video.setAttribute('preload', 'auto');
     }
-    this.diagnostics.attach(video, () => this.directReadAheadSourceUrl);
+    this.diagnostics.attach(video, () => this.directReadAheadSourceUrl, () => this.trackBuffers.get(video));
 
     const publish = () => this.publish(video);
     video.addEventListener('timeupdate', publish);
@@ -2342,6 +2344,18 @@ class WebPlayer implements Player {
     }
     const attachedAt = performance.now();
 
+    this.trackBuffers.delete(video);
+    // Only ever this instance's own entry: a retired hls.js detaches after
+    // its replacement has already created buffers on the same element.
+    let createdBuffers: Partial<Record<string, SourceBuffer>> | undefined;
+    hls.on(Hls.Events.BUFFER_CREATED, (_event, data) => {
+      createdBuffers = {};
+      for (const [name, track] of Object.entries(data.tracks)) if (track) createdBuffers[name] = track.buffer;
+      this.trackBuffers.set(video, createdBuffers);
+    });
+    hls.on(Hls.Events.MEDIA_DETACHED, () => {
+      if (createdBuffers && this.trackBuffers.get(video) === createdBuffers) this.trackBuffers.delete(video);
+    });
     hls.on(Hls.Events.MEDIA_ATTACHED, () => {
       this.log.debug('hls-media-attached');
       this.requestPlay(video, 'hls-media-attached');

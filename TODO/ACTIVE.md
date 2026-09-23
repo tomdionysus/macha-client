@@ -22,8 +22,8 @@ are related. Core is addressed as the `Macha NPM Core` session.
 **Where the repo is, 2026-09-23.** `main` is **0.18.0** (`ce74408`, tagged,
 pushed), resolving `@machafoundation/core` `^0.18.0` from the registry.
 `develop` is **22 commits ahead of `origin/develop`**, unpushed, linked to
-core's tree (`file:../macha-ts`, core at `23583aa`). Suite **488 tests**,
-typecheck clean. Everything since 0.18.0 is on `develop` only, and most of it
+core's tree (`file:../macha-ts`, core at `23583aa`). Suite **492 tests**,
+typecheck clean (it had gone red on 2026-09-23 without the suite noticing; fixed in `2dea242`). Everything since 0.18.0 is on `develop` only, and most of it
 needs **core past its published 0.18.0**: `moveTo` with a lead, the move
 fixes, the produced-source wait. A release needs core published first, and
 both are Tom's.
@@ -58,6 +58,8 @@ the top):
    lead for a node never measured; core has asked the server what it can
    state.
 2. **The seek P0** — the `relocate` path and the per-track reading still owed.
+   The freeze recorder is built (2026-09-23) and waits for a freeze; its
+   hls.js wiring wants one console check in a signed-in tab.
 3. **The `readyState` 0 P0** — the recorder is in place; what is left is the
    consequence (a generation that never produced a byte condemning its node)
    and reading the next occurrence.
@@ -1044,6 +1046,25 @@ relied on it.
       repo resolves.
 - [ ] Take the per-track buffer and `getVideoPlaybackQuality()` reading for the
       audio-without-video freeze. The server session is holding for it.
+      **The recorder is built, 2026-09-23; the reading itself is still owed.**
+      `WebMediaDiagnostics` now reports `media-picture-stopped` (warn) when
+      `totalVideoFrames` holds for 1.5 s while `currentTime` advances, and
+      `media-picture-resumed` when frames move again. Both carry each track's
+      `SourceBuffer` ranges (`trackBuffered`, from hls.js's `BUFFER_CREATED`)
+      and the frame counters. So the next freeze reads itself: a video track
+      with nothing at the playhead is a node still producing, a video track
+      holding the playhead with frames frozen is the decoder. Never judged on
+      a paused, seeking or hidden page, or on a clock that stopped (that is
+      the watchdog's). Decoder state is now per element: it was one shared
+      record, so during a handover the two elements' counters were compared
+      with each other and a freeze on the outgoing one could not be seen, and
+      the audio-stopped check had the same fault. Every guard seen red.
+      **Unverified live:** no test drives hls.js events, so the
+      `BUFFER_CREATED` wiring has not run. The cheap check is to hold
+      `getVideoPlaybackQuality` constant on a playing element in the console
+      and read the report's `trackBuffered`; it needs a signed-in tab, which
+      this session did not make, because signing in means handing the browser
+      tool a token.
 - [x] Adopt `PlaybackSource.budgets` — done 2026-09-20, shipped in 0.17.3,
       recorded in `COMPLETED.md`. **Unverified live:** both nodes state the
       figures the constants were derived from (`startup_timeout_ms` 15000,

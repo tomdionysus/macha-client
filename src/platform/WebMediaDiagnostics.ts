@@ -31,6 +31,30 @@ function stateName(value: number, names: readonly string[]): string {
  */
 /** Long enough that a codec's own quiet passage is never mistaken for a fault. */
 const AUDIO_SILENCE_EVIDENCE_MS = 5_000;
+/**
+ * A picture has no quiet passage: a still scene is still frames. So this only
+ * has to be longer than the gap between two `timeupdate` samples.
+ */
+const PICTURE_FREEZE_EVIDENCE_MS = 1_500;
+
+/** The source buffers behind an element, by track, as the player created them. */
+export type TrackBuffers = () => Partial<Record<string, { buffered: TimeRanges }>> | undefined;
+
+/** One element's decoder counters. Two elements are live across a handover. */
+interface DecoderProgress {
+  decoded: { audio?: number; video?: number };
+  audioStoppedAtMs?: number;
+  audioLossReported: boolean;
+  frames?: number;
+  clockS?: number;
+  pictureStoppedAtMs?: number;
+  pictureStoppedClockS?: number;
+  pictureFreezeReported: boolean;
+}
+
+function freshProgress(): DecoderProgress {
+  return { decoded: {}, audioLossReported: false, pictureFreezeReported: false };
+}
 
 function decodedBytes(video: HTMLVideoElement): { audio?: number; video?: number } {
   const counters = video as HTMLVideoElement & {
@@ -43,6 +67,34 @@ function decodedBytes(video: HTMLVideoElement): { audio?: number; video?: number
     audio: typeof audio === 'number' && Number.isFinite(audio) ? audio : undefined,
     video: typeof picture === 'number' && Number.isFinite(picture) ? picture : undefined,
   };
+}
+
+/** Standard, unlike the byte counters, and counts a frame whether it was shown or dropped. */
+function frameCounts(video: HTMLVideoElement): { total: number; dropped: number } | undefined {
+  if (typeof video.getVideoPlaybackQuality !== 'function') return undefined;
+  const quality = video.getVideoPlaybackQuality();
+  return { total: quality.totalVideoFrames, dropped: quality.droppedVideoFrames };
+}
+
+/**
+ * What each track holds, separately. The element's own `buffered` is the
+ * intersection, so a video track with nothing at the playhead and an audio
+ * track with a minute ahead of it read identically to both being short.
+ */
+function trackRanges(tracks: TrackBuffers): Record<string, Array<{ start: number; end: number }> | 'removed'> | undefined {
+  const sources = tracks();
+  if (!sources) return undefined;
+  const out: Record<string, Array<{ start: number; end: number }> | 'removed'> = {};
+  for (const [name, track] of Object.entries(sources)) {
+    if (!track) continue;
+    // A source buffer removed from its MediaSource throws on `buffered`.
+    try {
+      out[name] = ranges(track.buffered);
+    } catch {
+      out[name] = 'removed';
+    }
+  }
+  return out;
 }
 
 export function videoState(video: HTMLVideoElement): Record<string, unknown> {
@@ -121,16 +173,17 @@ export function hlsEventSummary(value: unknown): Record<string, unknown> {
 export class WebMediaDiagnostics {
   private lastTimeLogMs = 0;
   private lastProgressLogMs = 0;
-  private lastDecoded: { audio?: number; video?: number } = {};
-  private audioStoppedAtMs?: number;
-  private audioLossReported = false;
+  private readonly progress = new WeakMap<HTMLVideoElement, DecoderProgress>();
 
   constructor(private readonly log: ClientLogger) {}
 
-  private resetDecoderProgress(): void {
-    this.lastDecoded = {};
-    this.audioStoppedAtMs = undefined;
-    this.audioLossReported = false;
+  private progressOf(video: HTMLVideoElement): DecoderProgress {
+    let state = this.progress.get(video);
+    if (!state) {
+      state = freshProgress();
+      this.progress.set(video, state);
+    }
+    return state;
   }
 
   /**
@@ -152,36 +205,94 @@ export class WebMediaDiagnostics {
    * Both climbing with no sound is the output path — a track, a route, a duck
    * — and nothing in the page is at fault at all.
    */
-  private noteDecoderProgress(video: HTMLVideoElement): void {
+  private noteDecoderProgress(video: HTMLVideoElement, state: DecoderProgress): void {
     const decoded = decodedBytes(video);
     if (decoded.audio === undefined || decoded.video === undefined) return;
-    const previous = this.lastDecoded;
-    this.lastDecoded = decoded;
+    const previous = state.decoded;
+    state.decoded = decoded;
     if (previous.audio === undefined || previous.video === undefined) return;
     if (video.paused || video.seeking) {
-      this.audioStoppedAtMs = undefined;
+      state.audioStoppedAtMs = undefined;
       return;
     }
     if (decoded.audio > previous.audio) {
-      this.audioStoppedAtMs = undefined;
-      this.audioLossReported = false;
+      state.audioStoppedAtMs = undefined;
+      state.audioLossReported = false;
       return;
     }
     if (decoded.video <= previous.video) return;
     const now = performance.now();
-    if (this.audioStoppedAtMs === undefined) {
-      this.audioStoppedAtMs = now;
+    if (state.audioStoppedAtMs === undefined) {
+      state.audioStoppedAtMs = now;
       return;
     }
-    if (this.audioLossReported || now - this.audioStoppedAtMs < AUDIO_SILENCE_EVIDENCE_MS) return;
-    this.audioLossReported = true;
+    if (state.audioLossReported || now - state.audioStoppedAtMs < AUDIO_SILENCE_EVIDENCE_MS) return;
+    state.audioLossReported = true;
     this.log.warn('media-audio-decode-stopped', {
       ...videoState(video),
-      silentForMs: Math.round(now - this.audioStoppedAtMs),
+      silentForMs: Math.round(now - state.audioStoppedAtMs),
     });
   }
 
-  attach(video: HTMLVideoElement, readAheadSourceUrl: () => string | undefined): void {
+  /**
+   * The same fault the other way round: the picture holds while the clock,
+   * and so the sound, runs on. Measured 5.40 s after a seek on 2026-09-18 and
+   * never explained, because the reading that separates the two candidates was
+   * never taken at the moment. A video track with nothing buffered at the
+   * playhead is a node still producing; one that holds the playhead while no
+   * frame advances is the decoder. So the report carries each track's ranges
+   * and the frame counters, taken when the freeze is established and again
+   * when it ends.
+   *
+   * A hidden page is never judged: a browser may stop decoding the picture of
+   * a page nobody can see, which is exactly this signature and not a fault.
+   */
+  private notePictureProgress(video: HTMLVideoElement, state: DecoderProgress, tracks: TrackBuffers): void {
+    const frames = frameCounts(video);
+    if (!frames) return;
+    const previousFrames = state.frames;
+    const previousClockS = state.clockS;
+    state.frames = frames.total;
+    state.clockS = video.currentTime;
+    if (previousFrames === undefined || previousClockS === undefined) return;
+    const now = performance.now();
+    if (frames.total > previousFrames) {
+      if (state.pictureFreezeReported && state.pictureStoppedAtMs !== undefined) {
+        this.log.warn('media-picture-resumed', {
+          ...videoState(video),
+          frozenForMs: Math.round(now - state.pictureStoppedAtMs),
+          frames,
+          trackBuffered: trackRanges(tracks),
+        });
+      }
+      state.pictureStoppedAtMs = undefined;
+      state.pictureFreezeReported = false;
+      return;
+    }
+    const hidden = typeof document !== 'undefined' && document.hidden;
+    // Only a clock that moved: one that did not is a stall, which is the
+    // watchdog's and is reported there.
+    if (video.paused || video.seeking || hidden || video.currentTime <= previousClockS) {
+      if (!state.pictureFreezeReported) state.pictureStoppedAtMs = undefined;
+      return;
+    }
+    if (state.pictureStoppedAtMs === undefined) {
+      state.pictureStoppedAtMs = now;
+      state.pictureStoppedClockS = previousClockS;
+      return;
+    }
+    if (state.pictureFreezeReported || now - state.pictureStoppedAtMs < PICTURE_FREEZE_EVIDENCE_MS) return;
+    state.pictureFreezeReported = true;
+    this.log.warn('media-picture-stopped', {
+      ...videoState(video),
+      frozenForMs: Math.round(now - state.pictureStoppedAtMs),
+      clockAdvancedMs: Math.round((video.currentTime - (state.pictureStoppedClockS ?? previousClockS)) * 1000),
+      frames,
+      trackBuffered: trackRanges(tracks),
+    });
+  }
+
+  attach(video: HTMLVideoElement, readAheadSourceUrl: () => string | undefined, tracks: TrackBuffers = () => undefined): void {
     const stateEvents = [
       'loadstart', 'loadedmetadata', 'loadeddata', 'canplay', 'canplaythrough', 'playing', 'play', 'pause',
       'waiting', 'stalled', 'suspend', 'seeking', 'seeked', 'ended', 'durationchange', 'ratechange', 'emptied',
@@ -197,7 +308,7 @@ export class WebMediaDiagnostics {
         const state = videoState(video);
         const readAhead = directPlayReadAheadMetrics(sourceUrl);
         const detail = readAhead ? { ...state, directReadAhead: readAhead } : state;
-        if (name === 'emptied' || name === 'loadstart') this.resetDecoderProgress();
+        if (name === 'emptied' || name === 'loadstart') this.progress.set(video, freshProgress());
         if (name === 'waiting' || name === 'stalled' || name === 'error' || name === 'abort') this.log.warn(`media-${name}`, detail);
         else this.log.debug(`media-${name}`, detail);
       });
@@ -209,7 +320,9 @@ export class WebMediaDiagnostics {
       this.log.debug('media-progress', videoState(video));
     });
     video.addEventListener('timeupdate', () => {
-      this.noteDecoderProgress(video);
+      const state = this.progressOf(video);
+      this.noteDecoderProgress(video, state);
+      this.notePictureProgress(video, state, tracks);
       const now = performance.now();
       if (now - this.lastTimeLogMs < 2_000) return;
       this.lastTimeLogMs = now;
