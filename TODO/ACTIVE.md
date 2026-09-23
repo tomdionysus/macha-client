@@ -1,8 +1,9 @@
 # Active tasks and concepts to explore
 
 Last updated: 2026-09-23, rationalised after the reap run closed the pause P0. Read
-[2026-09-23-session-handover.md](2026-09-23-session-handover.md) for what
-the session before did and what it left unsettled; where this file and a dated
+[2026-09-23-evening-handover.md](2026-09-23-evening-handover.md) first, for
+what is running, what is in flight with core, today's rulings and the method
+that cost time; where this file and a dated
 document in this directory disagree, this file is current and the dated
 document is the record of its day.
 
@@ -20,8 +21,8 @@ are related. Core is addressed as the `Macha NPM Core` session.
 
 **Where the repo is, 2026-09-23.** `main` is **0.18.0** (`ce74408`, tagged,
 pushed), resolving `@machafoundation/core` `^0.18.0` from the registry.
-`develop` is **20 commits ahead of `origin/develop`**, unpushed, linked to
-core's tree (`file:../macha-ts`, core at `909cf4d`). Suite **488 tests**,
+`develop` is **22 commits ahead of `origin/develop`**, unpushed, linked to
+core's tree (`file:../macha-ts`, core at `23583aa`). Suite **488 tests**,
 typecheck clean. Everything since 0.18.0 is on `develop` only, and most of it
 needs **core past its published 0.18.0**: `moveTo` with a lead, the move
 fixes, the produced-source wait. A release needs core published first, and
