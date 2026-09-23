@@ -58,7 +58,6 @@ import { EndpointRegistry, bootstrapEndpoints as bootstrapClusterEndpoints } fro
 import { preferredEndpointForNode } from './cluster/preferredEndpoint';
 import { lockoutNotice, lockoutReason } from './app/lockoutNotice';
 import { useEndpointCandidates } from './cluster/useEndpointCandidates';
-import { useNodeIdentity } from './cluster/useNodeIdentity';
 import { setDirectPlayTransferListener } from './playback/directPlayReadAhead';
 import { Loading } from './components/Status';
 import { useMediaRouteBack } from './app/useMediaRouteBack';
@@ -407,9 +406,6 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
     managementAvailable,
   } = useMachaServices({ endpointRegistry, auth, apiOverride, playbackOverride });
   useEndpointHealthMonitor(endpointRegistry, clusterStatusApi, auth, connectionRequired && effectiveEndpoints.length > 0 && !effectiveConnectionGate);
-  // Same condition, different question: the health loop asks how the nodes
-  // are, this asks which endpoints are the same node.
-  useNodeIdentity(endpointRegistry, clusterStatusApi, auth, connectionRequired && effectiveEndpoints.length > 0 && !effectiveConnectionGate);
   // Not before the session has settled. `SessionManager.fetch` retries a 401
   // only when it actually sent a token, so a whoami that goes out during the
   // cold-start mint is answered 401, returned as-is, and the roles are never

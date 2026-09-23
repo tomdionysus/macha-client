@@ -17,7 +17,7 @@ import { describePlaybackSession } from '@machafoundation/core';
 import { playbackFailureTrail, type PlaybackFailureTrailEntry } from './player/failureTrail';
 import { playerNodeChoices } from './player/nodeChoices';
 import { failureTrailEnabled } from '../diagnostics/failureTrailSetting';
-import { accountSessionLimitNotice, failureCauseMessages } from '../diagnostics/failureCauses';
+import { accountSessionLimitNotice, playbackFailureHeadline } from '../diagnostics/failureCauses';
 import { bufferedTimelineSegments } from '@machafoundation/core';
 import type { MediaSummary, PlaybackEvent, PlaybackProgress } from '@machafoundation/core';
 import { PlayerOptions } from './player/PlayerOptions';
@@ -867,7 +867,11 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
       {fatalError && (
         <div className="player-fatal-error" role="alert">
           <strong>Playback failed</strong>
-          <span>{fatalError.message}</span>
+          {/* Core's sentence, never `.message`: by the time a failure reaches
+              here its message is two of core's envelopes and a node address.
+              The trail below still carries the whole chain for anyone who
+              switched it on. */}
+          <span>{playbackFailureHeadline(fatalError)}</span>
           {/* **The cap explains why recovery could not finish. It is not what
               went wrong**, and putting it first would tell a viewer their
               account is busy when a node had just died under them. Core's head
@@ -877,12 +881,6 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
           {accountSessionLimitNotice(fatalError) && (
             <span className="player-failure-notice">{accountSessionLimitNotice(fatalError)}</span>
           )}
-          {/* What core chained beneath it. The head names the failure that
-              started the recovery; these are the attempts that ended it, and
-              a viewer reporting only one of the two reports half of it. */}
-          {failureCauseMessages(fatalError).map((message) => (
-            <span className="player-failure-cause" key={message}>{message}</span>
-          ))}
           {failureTrail.length > 0 && (
             <ol className="player-failure-trail">
               {failureTrail.map((entry) => (
