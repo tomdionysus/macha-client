@@ -1766,7 +1766,20 @@ nor its `host:port` — has still not been watched, and now never will be here.
       live manifest URL: those headers fail, `Range` alone answers `206`,
       `cache: 'no-store'` with no headers answers `200`. This client's own
       probes already use the latter and pass.
-- [x] **Fixed by core `07bd029` and wired here 2026-09-23.** Core keeps its
+- [x] **Withdrawn the same day: Tom ruled out the one-byte probe** ("one-byte
+      request - we're not doing this"). Core removed it (`38d0524`) and the
+      readiness option (`5ca3661`); this client's wiring is reverted. The host
+      lead is the only lead source, and it measures create plus transfer.
+- [x] **hls.js fragments now feed core's throughput record, 2026-09-23.**
+      Only the Direct Play worker did before, so for a transcode or remux node
+      core's figure was its JSON reads. `reportFragmentTransfer` sends each
+      fragment's bytes over first-byte-to-last through the same listener,
+      renamed `setMediaTransferListener`. Live: gbni-1 went from one JSON
+      sample at 221 KB/s to 16 samples at 1.60 MB/s after one session. Its
+      fragments opened at 0.28 and 0.57 MB/s, below the 0.63 MB/s stream, then
+      ran at about 1.6 MB/s: the record, weighted to recent samples, shows the
+      ramped rate while a join is lost in the slow opening. For core's decline.
+- [x] **(Superseded) Fixed by core `07bd029` and wired here 2026-09-23.** Core keeps its
       headers as the default (the fetch option rewrites signed URLs on React
       Native and is dropped on Tizen 3) and lets a host pass `readinessFetch`.
       `readinessFetchForHost()` in `platform/index.ts` passes core's

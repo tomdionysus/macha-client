@@ -20,6 +20,7 @@ import {
   directPlayReadAheadMetrics,
   directPlayReadAheadUrl,
   releaseDirectPlayReadAhead,
+  reportFragmentTransfer,
   setDirectPlayReadAheadMode,
   subscribeDirectPlayReadAheadFailure,
 } from '../playback/directPlayReadAhead';
@@ -2537,6 +2538,8 @@ class WebPlayer implements Player {
     });
     hls.on(Hls.Events.FRAG_LOADED, (_event, data) => {
       this.startRecorders.get(video)?.recorder.fragment('got', data.frag?.sn);
+      const stats = data.frag?.stats;
+      if (stats && data.frag?.url) reportFragmentTransfer(data.frag.url, stats.loaded, stats.loading.first, stats.loading.end);
       if (data.frag?.sn !== 'initSegment') {
         const costMs = nodeStartCosts.firstFragment(url);
         if (costMs !== undefined) this.log.info('node-start-cost-measured', { url, costMs });

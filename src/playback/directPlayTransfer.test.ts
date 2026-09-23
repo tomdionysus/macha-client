@@ -2,7 +2,8 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import {
   directPlayReadAheadUrl,
   releaseDirectPlayReadAhead,
-  setDirectPlayTransferListener,
+  reportFragmentTransfer,
+  setMediaTransferListener,
   type DirectPlayReadAheadMetrics,
 } from './directPlayReadAhead';
 
@@ -55,12 +56,12 @@ function workerHost() {
 
 let host: ReturnType<typeof workerHost>;
 beforeAll(() => { host = workerHost(); });
-afterEach(() => setDirectPlayTransferListener(undefined));
+afterEach(() => setMediaTransferListener(undefined));
 
 describe('direct play media throughput reporting', () => {
   it('reports only the bytes and transfer time added since the last message', () => {
     const seen: Array<[string, number, number]> = [];
-    setDirectPlayTransferListener((origin, bytes, durationMs) => seen.push([origin, bytes, durationMs]));
+    setMediaTransferListener((origin, bytes, durationMs) => seen.push([origin, bytes, durationMs]));
     const source = subscribedSource();
 
     host.post(source, metrics({ fetchedBytes: 4_000_000, fetchActiveMs: 1_000 }));
@@ -73,7 +74,7 @@ describe('direct play media throughput reporting', () => {
 
   it('divides by transfer time, not wall time', () => {
     const seen: Array<[string, number, number]> = [];
-    setDirectPlayTransferListener((origin, bytes, durationMs) => seen.push([origin, bytes, durationMs]));
+    setMediaTransferListener((origin, bytes, durationMs) => seen.push([origin, bytes, durationMs]));
     const source = subscribedSource();
 
     host.post(source, metrics({ fetchedBytes: 1_000_000, fetchActiveMs: 500 }));
@@ -87,7 +88,7 @@ describe('direct play media throughput reporting', () => {
 
   it('ignores an idle window that moved no bytes', () => {
     const seen: unknown[] = [];
-    setDirectPlayTransferListener((...args) => seen.push(args));
+    setMediaTransferListener((...args) => seen.push(args));
     const source = subscribedSource();
 
     host.post(source, metrics({ fetchedBytes: 5_000_000, fetchActiveMs: 1_000 }));
@@ -98,7 +99,7 @@ describe('direct play media throughput reporting', () => {
 
   it('does not report negative traffic when the worker resets its counters', () => {
     const seen: unknown[] = [];
-    setDirectPlayTransferListener((...args) => seen.push(args));
+    setMediaTransferListener((...args) => seen.push(args));
     const source = subscribedSource();
 
     host.post(source, metrics({ fetchedBytes: 9_000_000, fetchActiveMs: 3_000 }));
@@ -113,7 +114,7 @@ describe('direct play media throughput reporting', () => {
 
   it('says nothing when the worker cannot name the node it fetched from', () => {
     const seen: unknown[] = [];
-    setDirectPlayTransferListener((...args) => seen.push(args));
+    setMediaTransferListener((...args) => seen.push(args));
     const source = subscribedSource();
 
     host.post(source, metrics({ sourceOrigin: '', fetchedBytes: 1_000_000, fetchActiveMs: 100 }));
@@ -144,3 +145,24 @@ function subscribedSource(): string {
   const calls = controller.postMessage.mock.calls;
   return calls[calls.length - 1][0].sourceKey;
 }
+
+describe('an hls.js fragment, reported the same way', () => {
+  it('reaches the listener as its bytes over the time from first byte to last', () => {
+    // The wait before the first byte is the node; the rest is the link. On
+    // 2026-09-23 gbni-1 answered in 0.1-0.35 s and then delivered at 0.26-1.32
+    // MB/s, and only the second half says whether it can carry a stream.
+    const seen: unknown[][] = [];
+    setMediaTransferListener((...args) => seen.push(args));
+    reportFragmentTransfer('http://10.44.1.50:7438/api/v1/playback/sessions/s/stream/g/1/segment-000001.m4s', 2_031_747, 43_293, 51_100.8);
+    expect(seen).toEqual([['http://10.44.1.50:7438', 2_031_747, 7_807.8]]);
+  });
+
+  it('reports nothing that did not move bytes over measurable time', () => {
+    const seen: unknown[][] = [];
+    setMediaTransferListener((...args) => seen.push(args));
+    reportFragmentTransfer('http://10.44.1.50:7438/x.m4s', 0, 1, 2);
+    reportFragmentTransfer('http://10.44.1.50:7438/x.m4s', 1_000, 5, 5);
+    reportFragmentTransfer('not a url', 1_000, 1, 2);
+    expect(seen).toEqual([]);
+  });
+});

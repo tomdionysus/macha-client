@@ -59,7 +59,7 @@ import { EndpointRegistry, bootstrapEndpoints as bootstrapClusterEndpoints } fro
 import { preferredEndpointForNode } from './cluster/preferredEndpoint';
 import { lockoutNotice, lockoutReason } from './app/lockoutNotice';
 import { useEndpointCandidates } from './cluster/useEndpointCandidates';
-import { setDirectPlayTransferListener } from './playback/directPlayReadAhead';
+import { setMediaTransferListener } from './playback/directPlayReadAhead';
 import { Loading } from './components/Status';
 import { useMediaRouteBack } from './app/useMediaRouteBack';
 import { useMusicController } from './app/useMusicController';
@@ -386,10 +386,10 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
    * throughput evidence such a session will ever produce.
    */
   useEffect(() => {
-    setDirectPlayTransferListener(
+    setMediaTransferListener(
       (url, bytes, durationMs) => endpointRegistry.recordTransferByUrl(url, bytes, durationMs),
     );
-    return () => setDirectPlayTransferListener(undefined);
+    return () => setMediaTransferListener(undefined);
   }, [endpointRegistry]);
   const { auth, ready: sessionReady, roles, mintFailure } = useSession({
     connectionRequired,

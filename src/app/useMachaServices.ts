@@ -1,6 +1,5 @@
 import { useMemo } from 'react';
 import { createMachaServices, type MachaServices, type MachaServicesOptions } from '@machafoundation/core';
-import { readinessFetchForHost } from '../platform';
 
 /**
  * Memoizes the core's service factory for React.
@@ -13,7 +12,7 @@ import { readinessFetchForHost } from '../platform';
 export function useMachaServices(options: MachaServicesOptions): MachaServices {
   const { endpointRegistry, auth, apiOverride, playbackOverride } = options;
   return useMemo(
-    () => createMachaServices({ endpointRegistry, auth, apiOverride, playbackOverride, readinessFetch: readinessFetchForHost() }),
+    () => createMachaServices({ endpointRegistry, auth, apiOverride, playbackOverride }),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- see the docblock:
     // overrides are test seams and must not retrigger construction.
     [endpointRegistry, auth],
