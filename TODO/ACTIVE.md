@@ -1,7 +1,7 @@
 # Active tasks and concepts to explore
 
-Last updated: 2026-09-23, rationalised after the reap run closed the pause P0. Read
-[2026-09-23-evening-handover.md](2026-09-23-evening-handover.md) first, for
+Last updated: 2026-09-24, rationalised for a clear. Read
+[2026-09-24-handover.md](2026-09-24-handover.md) first, for
 what is running, what is in flight with core, today's rulings and the method
 that cost time; where this file and a dated
 document in this directory disagree, this file is current and the dated
@@ -19,58 +19,69 @@ are related. Core is addressed as the `Macha NPM Core` session.
 
 ## Start here
 
-**Where the repo is, 2026-09-23.** `main` is **0.18.0** (`ce74408`, tagged,
-pushed), resolving `@machafoundation/core` `^0.18.0` from the registry.
-`develop` is **22 commits ahead of `origin/develop`**, unpushed, linked to
-core's tree (`file:../macha-ts`, core at `23583aa`). Suite **492 tests**,
-typecheck clean (it had gone red on 2026-09-23 without the suite noticing; fixed in `2dea242`). Everything since 0.18.0 is on `develop` only, and most of it
-needs **core past its published 0.18.0**: `moveTo` with a lead, the move
-fixes, the produced-source wait. A release needs core published first, and
-both are Tom's.
+**Where the repo is, 2026-09-24.** `main` is **0.18.0** (`ce74408`).
+`develop` is **34 commits ahead of `origin/develop`** (`6e264bb` was the
+last push), linked to core's tree (`file:../macha-ts`, core clean at
+`b5c0128`). Typecheck clean. Suite **530 tests, and not reliably green**:
+see the first item below. Everything since 0.18.0 needs core past its
+published 0.18.0, and a great deal of it now needs core's unpublished
+viewer-text cut; a release needs a core publish first, and both are Tom's.
 
-**What the nodes serve:** the 0.18.0 bundle `index-CKNh5Q9D.js`, deployed
-2026-09-21, confirmed working in a foregrounded tab on 2026-09-23 (deploy
-section). **The cluster:** three nodes on server **0.53**, `session_idle`
-30 min, `transcode_entitlement_idle` 5 min, per-account cap 32. **This
-machine sits at the fi-1 site**: fi-1 is its LAN, gbni-1 and es-1 are across
-the WAN from here, whatever their own wiring. Read every cross-node number
-by destination.
+**The cluster:** es-1 and gbni-1 on server **0.55.1**; **fi-1 refused
+connections** at the time of writing (connection refused in 2 ms, not a
+timeout), probably mid-upgrade, not diagnosed. Artwork now caches for 30
+days with an ETag (server 0.54.1). This machine sits at the fi-1 site.
 
-**What 2026-09-23 did** (records in `COMPLETED.md`, three dated entries at
-the top):
-
-- Closed the **pause P0**: a 34.7 min pause recovered in place on the same
-  node, no failure screen, no stall.
-- Finished the **node-move P1**: identity hook deleted, `moveTo` wired, moves
-  led by this viewer's measured start cost (seamless where the unled move
-  froze 15 s), fragment bytes feeding core's throughput record, failure
-  screen on `playbackFailureDetail`.
-- Built the **start recorder** for the `readyState` 0 P0.
-- Redesigned the **Import page** (compact sortable list, a page per torrent).
-- Removed the **zero-byte probe** from native HLS; core waits on the
-  session's own production instead.
-- Put the version under the README's title, checked by a test.
+**What 2026-09-24 did** (`COMPLETED.md`, dated entries at the top): the
+search page (full width, sort, type pills, articles ignored, episode and
+track lines, A-Z bar, empty notice); every viewer word moved from core into
+`src/text/viewerText.ts` on Tom's ruling; Import split into Torrents and
+Files, the torrent page redesigned, columns that hold still; Manage
+Unmatched in the torrent list's style with each file on its own page;
+shared list parts (`ListParts`, `ListSortControls`, `lists/`, `lists.css`)
+and paging on both lists; the artwork P0's host choice and caching
+(core and server) verified; the direct-play reclaim race fixed and run
+live; TV focus corrections ported; login, Music and Status touches.
 
 **Next, in order:**
 
-1. **The handover P0 for unled switches** — a mode switch or a first move
-   still races a join it loses on a slow link and freezes ~15 s. Needs a
-   lead for a node never measured; core has asked the server what it can
-   state.
-2. **The seek P0** — the relocate path is verified live (2026-09-23) and the
-   freeze recorder is wired and seen live; what is left is the reading from a
-   real freeze, which the recorder now takes unaided.
-3. **The `readyState` 0 P0** — the recorder is in place; what is left is the
-   consequence (a generation that never produced a byte condemning its node)
-   and reading the next occurrence.
+1. **The torrent paging test times out: find why a 50-row re-render costs
+   ~2 s in jsdom.** `IngestScreen.test.tsx`, "a long torrent list shows
+   fifty rows a page", failed in 8 of 12 back-to-back full-suite runs
+   (timeout, 6.3 s against 5 s), and it is in commit `f951e58`. Timed alone:
+   render 0.56 s, data arriving 1.7 s, the Next click (one re-render of 50
+   rows and an address write) 2.0 s, about 40 ms a row. Narrowing the role
+   query saved 0.7 s and is not the cause. Tom: failing tests are problems
+   to investigate, never "flaky". Likely suspects, unchecked: something per
+   row that is expensive under jsdom (JobControls, Progress, the row
+   `Link`), or the whole screen re-rendering on each address write. The
+   3-row sort tests at 1.5 s say the cost is not only row count.
+2. **Bulk actions on torrents** (Tom, asked before the Unmatched work and
+   deferred behind it): selection and bulk pause, resume and remove, in the
+   shared list parts the Unmatched list already uses.
+3. **Seen by hand, not yet:** the unmatched table without a horizontal
+   scrollbar (headers now clip to their column; the likely cause was the
+   last header running past the table edge), uptime on the Status node
+   cards, the player's text after the viewer-text move (stream-status
+   lines, clock, notices), the fullscreen cursor.
+4. The playback P0s as before: the handover with no lead (waiting on a
+   server-stated start cost), the seek freeze reading (the recorder waits
+   for one), the `readyState` 0 consequence.
 
 **What needs Tom, and nothing else does:** a television (the Samsung items,
-including the native-HLS produced-source wait, unit-tested only); a look at
-the Import page under an account with `importer`; any push, merge to `main`,
-deploy or core publish; demoting or re-ranking a P0.
+including the native-HLS produced-source wait, unit-tested only); any push,
+merge to `main`, deploy or core publish; demoting or re-ranking a P0; and
+these open decisions from 2026-09-24: whether the ~15 s artwork hang on a
+silently dead node (8-18 s window) matters; whether the player options
+panel should keep a sideways move between its columns (the TV focus
+correction stops it; Up/Down still reach everything); sized artwork
+variants' priority (the server's); and core's two questions, "Plan A"
+searched as "Plan" and "Season 0 Episode 1".
 
-**Two business P0s outrank the rest:** slow artwork (new, 2026-09-24), and
-scope-ratio titles playing small in a black window. The bars are burnt into the source and
+**Two business P0s outrank the rest:** slow artwork (host choice and
+caching fixed and verified 2026-09-24; what remains is the server's slow
+first read and poster size), and scope-ratio titles playing small in a
+black window. The bars are burnt into the source and
 the fix is an ingest/server one. [Evidence](2026-09-16-video-fit-mode.md).
 
 **The P0s, as they stand.** The scope title (the server's). A player at
