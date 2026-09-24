@@ -121,8 +121,8 @@ function scoreTvCandidate(current: DOMRect, candidate: DOMRect, direction: Samsu
 
 /**
  * The best candidate, one row at a time. Left and right keep to the current
- * row: anything overlapping the current element vertically competes alone,
- * and the next row is reached only once this one runs out, since the lane
+ * row: only what overlaps the current element vertically competes, and at the
+ * end of the row the move stops rather than falling to another row. The lane
  * penalty alone let a near card below beat a far refresh on the same row.
  * Up and down go to the nearest row: the candidate whose facing edge is
  * closest, and everything overlapping it vertically. "Same column first" was
@@ -143,8 +143,9 @@ function bestTvCandidate(current: HTMLElement, elements: HTMLElement[], directio
 
   let row = scored;
   if (direction === 'left' || direction === 'right') {
-    const inLane = scored.filter((entry) => entry.result.inLane);
-    if (inLane.length > 0) row = inLane;
+    // The end of a row is the end of the move: falling back to other rows
+    // dropped Left from the top bar's first item into a card below it.
+    row = scored.filter((entry) => entry.result.inLane);
   } else {
     const facingGap = (rect: DOMRect) => rectGap(currentRect.top, currentRect.height, rect.top, rect.height);
     const nearest = scored.reduce((best, entry) => (facingGap(entry.rect) < facingGap(best.rect) ? entry : best));

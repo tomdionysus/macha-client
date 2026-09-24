@@ -288,3 +288,49 @@ describe('up and down go to the nearest row', () => {
     expect(selected()).toMatch(/^nav-/);
   });
 });
+
+describe('left and right stop at the end of a row', () => {
+  let detach: (() => void) | undefined;
+
+  function place(id: string, left: number, top: number, width: number, height: number) {
+    const node = document.getElementById(id) as HTMLElement;
+    node.getBoundingClientRect = () => ({
+      top, bottom: top + height, left, right: left + width, width, height, x: left, y: top, toJSON: () => ({}),
+    });
+  }
+
+  function press(key: string, keyCode: number) {
+    document.dispatchEvent(new KeyboardEvent('keydown', { key, keyCode, bubbles: true, cancelable: true } as KeyboardEventInit));
+  }
+
+  function selected(): string | undefined {
+    return document.querySelector('[data-tv-selected="true"]')?.id;
+  }
+
+  beforeEach(() => {
+    document.body.innerHTML = ['nav-home', 'nav-movies', 'card'].map((id) => `<button data-tv-focusable="true" id="${id}">${id}</button>`).join('');
+    place('nav-home', 740, 20, 60, 40);
+    place('nav-movies', 820, 20, 80, 40);
+    place('card', 60, 140, 200, 330);
+  });
+
+  afterEach(() => {
+    detach?.();
+    detach = undefined;
+    document.body.innerHTML = '';
+  });
+
+  it('stays on the first item of the top bar rather than dropping to a card below', () => {
+    detach = attachSpatialTvNavigation();
+    expect(selected()).toBe('nav-home');
+    press('ArrowLeft', 37);
+    expect(selected()).toBe('nav-home');
+  });
+
+  it('still moves along the row', () => {
+    detach = attachSpatialTvNavigation();
+    (document.getElementById('nav-movies') as HTMLElement).focus();
+    press('ArrowLeft', 37);
+    expect(selected()).toBe('nav-home');
+  });
+});
