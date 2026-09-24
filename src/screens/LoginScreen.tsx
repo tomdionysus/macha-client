@@ -149,9 +149,13 @@ export function LoginScreen({ onSignIn, onSignedIn, guestAllowed = true, connect
     // it, below a header, so it centres in the space it was actually given.
     <div className="login-screen">
       <section className="connection-gate-panel">
-        <img className="connection-gate-logo" src={logoUrl} alt="" />
-        <p className="eyebrow">Macha media client</p>
-        <h1>Log in</h1>
+        <div className="connection-gate-brand">
+          <img className="connection-gate-logo" src={logoUrl} alt="" />
+          <div>
+            <p className="eyebrow">Macha media client</p>
+            <h1>Log in</h1>
+          </div>
+        </div>
         {/* The notice replaces the standing invitation rather than joining
             it: a viewer whose account holds no roles is not here to be told
             what signing in would buy them, because they have signed in and

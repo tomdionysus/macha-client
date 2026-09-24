@@ -24,18 +24,8 @@ describe('lockoutReason', () => {
 });
 
 describe('lockoutNotice', () => {
-  it('sends a role-less viewer to the remedy that answers two of the three causes', () => {
-    const notice = lockoutNotice('no-roles')!;
-    // Log in first: a cluster carrying no anonymous viewer and a session
-    // degraded by a credential-less re-mint are both fixed by signing in.
-    expect(notice).toMatch(/log in/i);
-    expect(notice).toMatch(/administrator/i);
-    expect(notice.search(/log in/i)).toBeLessThan(notice.search(/administrator/i));
-    expect(notice).toContain('media_viewer');
-  });
-
-  it('says what the state is as well as what to do about it', () => {
-    expect(lockoutNotice('no-roles')).toMatch(/no permissions/i);
+  it('leaves a role-less session to the login screen\'s own line', () => {
+    expect(lockoutNotice('no-roles')).toBeUndefined();
   });
 
   it('tells a refused viewer to sign in, which is the thing that would work', () => {

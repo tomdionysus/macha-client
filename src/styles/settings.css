@@ -125,6 +125,12 @@
 .connection-gate-logo { display: block; width: 5rem; height: 5rem; margin-bottom: 1rem; object-fit: contain; }
 .connection-gate-panel > .eyebrow { margin: 0 0 .35rem; }
 .connection-gate-panel > h1 { margin: 0 0 .7rem; }
+/* The logo with the panel's eyebrow and title beside it, the Settings brand's arrangement at panel size. */
+.connection-gate-brand { display: flex; align-items: center; gap: 1.15rem; margin-bottom: 1rem; }
+.connection-gate-brand .connection-gate-logo { flex: 0 0 auto; width: 6.5rem; height: 6.5rem; margin: 0; }
+.connection-gate-brand > div { min-width: 0; }
+.connection-gate-brand .eyebrow { margin: 0 0 .35rem; }
+.connection-gate-brand h1 { margin: 0; }
 .connection-gate-panel > p { color: var(--text-dim); line-height: 1.55; }
 .connection-gate-panel .connection-form { margin-top: 1.4rem; }
 
