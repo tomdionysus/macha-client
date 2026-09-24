@@ -235,3 +235,56 @@ describe('a wide element beside smaller ones', () => {
     expect(selected()).toMatch(/^card-/);
   });
 });
+
+describe('up and down go to the nearest row', () => {
+  // Home: the top bar, a short Continue Watching row, and a longer Movies row
+  // below. The Movies cards at the right have nothing directly above them in
+  // Continue Watching; the only thing in their column is a nav item.
+  let detach: (() => void) | undefined;
+
+  function place(id: string, left: number, top: number, width: number, height: number) {
+    const node = document.getElementById(id) as HTMLElement;
+    node.getBoundingClientRect = () => ({
+      top, bottom: top + height, left, right: left + width, width, height, x: left, y: top, toJSON: () => ({}),
+    });
+  }
+
+  function press(key: string, keyCode: number) {
+    document.dispatchEvent(new KeyboardEvent('keydown', { key, keyCode, bubbles: true, cancelable: true } as KeyboardEventInit));
+  }
+
+  function selected(): string | undefined {
+    return document.querySelector('[data-tv-selected="true"]')?.id;
+  }
+
+  function home() {
+    const ids = ['nav-home', 'nav-search', 'cw-0', 'cw-1', 'cw-2', 'movie-0', 'movie-1', 'movie-2', 'movie-3', 'movie-4'];
+    document.body.innerHTML = ids.map((id) => `<button data-tv-focusable="true" id="${id}">${id}</button>`).join('');
+    place('nav-home', 740, 20, 60, 40);
+    place('nav-search', 1040, 20, 70, 40);
+    [60, 290, 520].forEach((left, index) => place(`cw-${index}`, left, 140, 200, 330));
+    [60, 290, 520, 745, 975].forEach((left, index) => place(`movie-${index}`, left, 640, 200, 320));
+  }
+
+  afterEach(() => {
+    detach?.();
+    detach = undefined;
+    document.body.innerHTML = '';
+  });
+
+  it('goes up from a card with nothing above it to the nearest card in the row above, not the top bar', () => {
+    home();
+    detach = attachSpatialTvNavigation();
+    (document.getElementById('movie-4') as HTMLElement).focus();
+    press('ArrowUp', 38);
+    expect(selected()).toBe('cw-2');
+  });
+
+  it('still goes up from the top row of cards into the top bar', () => {
+    home();
+    detach = attachSpatialTvNavigation();
+    (document.getElementById('cw-0') as HTMLElement).focus();
+    press('ArrowUp', 38);
+    expect(selected()).toMatch(/^nav-/);
+  });
+});

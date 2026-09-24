@@ -120,20 +120,37 @@ function scoreTvCandidate(current: DOMRect, candidate: DOMRect, direction: Samsu
 }
 
 /**
- * The best candidate, the current row (or column) first: anything that
- * overlaps the current element across the direction of travel competes alone,
- * and the next row is reached only once this one runs out. The lane penalty
- * alone lost this: a far refresh on the same row scored worse than a near
- * card below it.
+ * The best candidate, one row at a time. Left and right keep to the current
+ * row: anything overlapping the current element vertically competes alone,
+ * and the next row is reached only once this one runs out, since the lane
+ * penalty alone let a near card below beat a far refresh on the same row.
+ * Up and down go to the nearest row: the candidate whose facing edge is
+ * closest, and everything overlapping it vertically. "Same column first" was
+ * wrong there: under a short row the only thing in a card's column can be the
+ * top bar, and Up skipped the whole row. Both corrections are the Android TV
+ * client's, found on its set and ported in step.
  */
 function bestTvCandidate(current: HTMLElement, elements: HTMLElement[], direction: SamsungDpadDirection): HTMLElement | undefined {
   const currentRect = current.getBoundingClientRect();
   const scored = elements
     .filter((element) => element !== current)
-    .map((element) => ({ element, result: scoreTvCandidate(currentRect, element.getBoundingClientRect(), direction) }))
-    .filter((entry): entry is { element: HTMLElement; result: { score: number; inLane: boolean } } => entry.result !== null);
-  const inLane = scored.filter((entry) => entry.result.inLane);
-  return (inLane.length > 0 ? inLane : scored).sort((a, b) => a.result.score - b.result.score)[0]?.element;
+    .map((element) => {
+      const rect = element.getBoundingClientRect();
+      return { element, rect, result: scoreTvCandidate(currentRect, rect, direction) };
+    })
+    .filter((entry): entry is { element: HTMLElement; rect: DOMRect; result: { score: number; inLane: boolean } } => entry.result !== null);
+  if (scored.length === 0) return undefined;
+
+  let row = scored;
+  if (direction === 'left' || direction === 'right') {
+    const inLane = scored.filter((entry) => entry.result.inLane);
+    if (inLane.length > 0) row = inLane;
+  } else {
+    const facingGap = (rect: DOMRect) => rectGap(currentRect.top, currentRect.height, rect.top, rect.height);
+    const nearest = scored.reduce((best, entry) => (facingGap(entry.rect) < facingGap(best.rect) ? entry : best));
+    row = scored.filter((entry) => rectGap(nearest.rect.top, nearest.rect.height, entry.rect.top, entry.rect.height) === 0);
+  }
+  return [...row].sort((a, b) => a.result.score - b.result.score)[0]?.element;
 }
 
 function sequentialCandidate(elements: HTMLElement[], current: HTMLElement, direction: SamsungDpadDirection): HTMLElement | undefined {
