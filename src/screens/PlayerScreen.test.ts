@@ -129,8 +129,8 @@ describe('what to tell a viewer whose title has not started yet', () => {
   });
 
   it('names what is being waited for, and how long it has been', () => {
-    // Law 2: a failure or a degraded state must be visible and actionable
-    // rather than becoming indefinite waiting. The budgets bound three
+    // Work is bounded and event-driven: a failure or a degraded state must be
+    // visible and actionable rather than becoming indefinite waiting. The budgets bound three
     // sequential phases and nothing bounds their sum, so a cold node can
     // legitimately spend the better part of a minute before anything is
     // declared wrong. A viewer told what is happening and for how long is in

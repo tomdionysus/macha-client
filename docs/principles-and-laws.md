@@ -94,6 +94,24 @@ preloaded or embedded.
    downstream throughput limits, but not by an artificial quiet period or the
    mere existence of another open writer.
 
+4. **Thou Shalt Not Shoot Thyself In The Foot.** No operation, code path or
+   subsystem may leave the node — or the client — in a state it cannot recover
+   from on its own. *Added by the server on 2026-09-20 and adopted here
+   unchanged.* It is different in kind from the three above: laws 1-3 decide who
+   goes first, this one decides what may not be done **at any priority**. It is
+   a veto over all three and where it conflicts it wins, because a component
+   that has destroyed itself serves no viewer. Its test, in the server's words:
+   *if this goes wrong on the node furthest away, does it come back without me?*
+   The client's version of the same question is a television in another room
+   that nobody will relaunch.
+
+   Five self-healing disciplines come with it, and four of them bite here:
+   **re-derive, do not assert**; **every retried work item gets backoff, a
+   failure budget, a parked state and an operator action**; **recover by
+   resolving rather than refusing**; and **a bound smaller than one unit of its
+   own work is not a bound**. (The fifth, keeping snapshot size a function of
+   the live namespace, is the server's.)
+
 These laws define priority, not polling. Viewer demand, resource availability,
 durability completion, queue transitions and pressure thresholds must wake or
 pace work through events.

@@ -23,12 +23,13 @@ Developed with substantial use of AI-assisted implementation.
 | React Native clients | Phone and TV apps sharing `@machafoundation/core` but not this UI. |
 
 **`@machafoundation/core` owns everything that is not presentation:** the HTTP
-API layer, the cluster endpoint registry and health monitoring,
-playback-session negotiation, the `PlaybackCoordinator` state machine, failover,
+API layer, the cluster endpoint registry and health monitoring, the sign-in
+session, playback-session negotiation, the `PlaybackCoordinator` state machine, failover,
 and the media start and stall watchdogs.
 
-**This repo owns** the React UI, the `Platform`/`Player` adapters, TV focus
-navigation, the Direct Play read-ahead worker, and the three build targets.
+**This repo owns** the React UI and every word a viewer sees, the
+`Platform`/`Player` adapters, TV focus navigation, the Direct Play read-ahead
+worker, and the three build targets.
 
 The dividing question is whether a non-DOM client would need the same thing. If
 it would, it belongs in core.
@@ -116,9 +117,12 @@ src/screens/        one module per route
 src/components/     shared presentation
 src/app/            router, services, playback and session hooks
 src/platform/       Platform/Player adapters: Web, Samsung, Android
-src/playback/       Direct Play read-ahead Service Worker
-src/cluster/        React binding for core's endpoint health monitor
+src/playback/       Direct Play read-ahead Service Worker, per-node start costs
+src/cluster/        React bindings for core's endpoint registry and health monitor
 src/hooks/          including useTvNavigation, the D-pad spatial model
+src/text/           viewerText.ts: every word a viewer sees
+src/lists/          list sorting and paging, beside components/ListParts.tsx
+src/state/          the build's client configuration, and volume
 src/styles/         plain CSS, within Chromium 47's vocabulary
 src/diagnostics/    console bridge and failure-trail setting
 platforms/android/  WebView shell (Java)

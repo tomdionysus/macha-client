@@ -48,13 +48,15 @@ The chooser lives in `@machafoundation/core`, so every Macha client decides
 identically from the same facts. The server performs the result and does not
 substitute for it.
 
-**Any node will do.** Configured API URLs seed a client-owned endpoint registry
-and one shared router used by catalogue, status, management, import and
-playback. The endpoint that most recently completed real work is authoritative
-and is tried first; on retryable failure the first working alternative becomes
-authoritative. Every known endpoint is checked immediately and at a bounded
-interval, but probe completion updates health only and never displaces
-authority. A viewer can also choose a node from the player; that choice is an
+**Any node will do.** One endpoint registry, created in `src/App.tsx`, routes
+catalogue, status, management, import and playback. Core's `seedEndpoints`
+fills it in order of standing: configured API URLs, then a Macha node confirmed
+on the page's own origin while nothing is configured, then endpoints remembered
+from earlier runs. The endpoint that most recently completed real work is
+authoritative and is tried first; on retryable failure the first working
+alternative becomes authoritative. Every known endpoint is checked immediately
+and at a bounded interval, but probe completion updates health only and never
+displaces authority. A viewer can also choose a node from the player; that choice is an
 ordering preference stated through core's `prefer()` and never a health record,
 and playback moves there by creating a new generation on the chosen node.
 
@@ -62,7 +64,9 @@ and playback moves there by creating a new generation on the chosen node.
 playback, component lifecycle or client timeouts. An `AbortError` represents
 local intent and cannot demote an endpoint or trigger cluster-unreachable
 state. Node identity and API endpoint identity stay separate, because one node
-may advertise several reachable API bases.
+may advertise several reachable API bases; core's health monitor attaches a
+node id to an endpoint with `claimNodeId`, which changes nothing about
+membership.
 
 **Cluster transport exhaustion is an application-level state**, not a
 screen-level error. Only the background health scan may publish that
@@ -72,8 +76,17 @@ management operation cannot infer a cluster-wide outage. While a player owns
 playback, recovery UI is deferred so neither playing nor paused presentation is
 unmounted, and recovery is cancelled if any endpoint responds before playback
 ends. Afterwards the application mounts only the Connection gate at
-`/manage/settings/connection` until an endpoint passes a bounded check. With no
+`/settings/connection` until an endpoint passes a bounded check. With no
 stored endpoints the same gate is presented as first-run setup.
+
+**One session for the application.** Core's `SessionManager` holds the bearer
+session, and `useSession` configures it and subscribes. Log out is composed in
+`src/App.tsx`: playback stops first, because a playback session opened under a
+token cannot be closed once the token is gone; then `SessionManager.signOut`
+revokes the session and a fresh one is started.
+
+**Every word a viewer sees is this client's.** Core hands over facts and codes
+and composes no viewer text; `src/text/viewerText.ts` words them.
 
 ## Playback
 
@@ -183,10 +196,11 @@ takes the native URL immediately.
 ### Samsung
 
 The Samsung target keeps the native HLS path with MPEG-TS segments. It has no
-degradation channel and prepares no standby; a stall watchdog stands in for one,
-and the client holds a native source until the node will actually serve its
-first fragment, because a native player handed a not-yet-ready playlist reports
-a permanent network failure the coordinator can only read as node failure.
+degradation channel and prepares no standby; a stall watchdog stands in for one.
+A native player handed a not-yet-ready playlist reports a permanent network
+failure the coordinator can only read as node failure, so the player declares
+`needsProducedSource` and core holds the source back until the session reports
+media produced. Nothing probes a fragment before attaching.
 
 ## Catalogue
 
@@ -214,26 +228,33 @@ The React application owns URL routes. Browser Back and Forward work on Web
 without special state handling; packaged Android and Samsung builds use hash
 routing so navigation stays inside the application asset.
 
-Music, Status and Manage expose secondary routes through one shared shell
-navigation row, styled and focused like the primary navigation. Status is
-partitioned into Overview, Client, Connectivity and Nodes; the Client route is
-strictly local and neither waits for nor polls cluster status. Node detail
-routes stay within the Nodes context.
+Music, Import, Status and Manage expose secondary routes through one shared
+shell navigation row, styled and focused like the primary navigation. Import is
+partitioned into Torrents and Files, and each torrent has its own page at
+`/ingest/torrents/:id`. Manage is partitioned into Unmatched, Files and Users,
+and each unmatched file has its own page. Status is partitioned into Overview,
+Client and Connectivity; the Client route is strictly local and neither waits
+for nor polls cluster status. Node detail pages at `/status/nodes/:nodeId` open
+from the node cards. Settings is a top-level section, with Connection beneath
+it, and no role gates it.
 
 Production hosting must fall back to `index.html` for unknown application paths.
 
 ## TV focus navigation
 
 Samsung and Android D-pad focus use a shared geometry-based spatial model.
-Candidates must lie in the requested direction and are scored by primary-axis
-distance, secondary-axis distance and a penalty for leaving the current visual
-lane. Where a constrained browser has not produced usable geometry, DOM order is
-the fallback.
+Direction is judged from the focused element's edges, not its centre. Left and
+Right keep to the current row and stop at its end; Up and Down go to the
+nearest row. Within the row, candidates are scored by primary-axis distance,
+secondary-axis distance and a penalty for leaving the current visual lane.
+Where a constrained browser has not produced usable geometry, DOM order is the
+fallback.
 
 Visible full-player chrome is scoped independently of the current page. Active,
 selected and explicit default focus are preferred before the first control. Text
 editors, selects and focused playback ranges retain native key ownership rather
-than participating in spatial movement.
+than participating in spatial movement, except that no editor keeps Up or Down:
+on a D-pad they are the only way out of a form.
 
 ## Managing records
 
@@ -241,9 +262,20 @@ One idiom for everything the viewer manages — accounts, files, playlists,
 unmatched media.
 
 A **list** presents records compactly and read-only: identity, a one-line
-summary, and an actions menu. **A row contains no inputs.** An editable field in
-a list can be changed by accident, makes every row as tall as its longest form,
-and forces each row to carry its own busy, dirty and error state.
+summary, and an actions menu. **A row contains no editable fields**; the one
+input a row may carry is its selection box for bulk actions. An editable field
+in a list can be changed by accident, makes every row as tall as its longest
+form, and forces each row to carry its own busy, dirty and error state. Lists
+share their parts: headings, pager and selection (`useListSelection`,
+`SelectPageBox`, `SelectRowBox`, `BulkActions`, `runBulkOperation`) in
+`src/components/ListParts.tsx`, sort controls in
+`src/components/ListSortControls.tsx`, sorting and paging in `src/lists/`, and
+styles in `src/styles/lists.css`.
+
+A record with more to show than a row holds, such as a torrent or an unmatched
+file, has its own page instead, reached from its row and built from the same
+parts. The page carries the record's facts and actions; destruction is still
+confirmed in a `ConfirmModal`.
 
 Every mutation opens a **dialogue**: `FormModal` to edit, `ConfirmModal` to
 destroy. The dialogue owns the form, the busy state and the failure, and stays
@@ -289,5 +321,5 @@ a second UI.
   chrome. It does not own playback resources.
 - Continue Watching is installation-local, bounded to three unfinished items,
   and never uploaded.
-- There is no cloud service, account system, advertising, recommendation engine,
-  social activity or global watchlist.
+- There is no cloud service, advertising, recommendation engine, social
+  activity or global watchlist.
