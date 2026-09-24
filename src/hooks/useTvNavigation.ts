@@ -91,6 +91,10 @@ function rectGap(start: number, size: number, otherStart: number, otherSize: num
  * right edge, and by centres every result card right of that middle counted
  * as "right" of the field and beat the sort control beside it. Found by the
  * Android TV client, which ported this scorer and changed it in step.
+ *
+ * The one deliberate difference from that port: the TV client also makes the
+ * opposite press undo the move just made. Tom declined it for the web
+ * (2026-09-24), so this scorer alone decides every move here.
  */
 function scoreTvCandidate(current: DOMRect, candidate: DOMRect, direction: SamsungDpadDirection): { score: number; inLane: boolean } | null {
   const tx = candidate.left + candidate.width / 2;
