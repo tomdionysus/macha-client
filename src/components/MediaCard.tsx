@@ -190,7 +190,14 @@ function ActionableMediaCard({ api, item, onOpen, actions = [], progress, elemen
       >
         <Poster api={api} item={item} progress={progress} />
         <span className="card-title">{item.title}</span>
-        {(item.subtitle || item.year) && <span className="card-subtitle">{item.subtitle ?? item.year}</span>}
+        {item.kind === 'track' && item.musicContext ? (
+          // Tom, 2026-09-24: on Music the artist sits below the album name, for
+          // tracks as for albums (whose subtitle core now makes the artist).
+          <>
+            <span className="card-subtitle">{item.musicContext.album.title}</span>
+            {item.musicContext.artist && <span className="card-subtitle">{item.musicContext.artist.title}</span>}
+          </>
+        ) : (item.subtitle || item.year) && <span className="card-subtitle">{item.subtitle ?? item.year}</span>}
       </button>
       <OverflowMenu
         className="card-overflow-menu"
