@@ -16,6 +16,7 @@ import {
   type MediaSummary,
   type MusicHierarchyContext,
   type PlaybackNotice,
+  type PlaybackRefusal,
   type PlaybackStatusDescription,
   type SearchCategoryKey,
   type StartupSubsystem,
@@ -290,11 +291,13 @@ const CHOICE_NAMES: Record<string, string> = {
  * rather than inventing a reason (Tom, 2026-09-25: "That change could not be
  * made" was "worse than 'something has gone wrong'").
  */
-export function playbackRefusalText(error: unknown): string {
-  if (error instanceof MachaPlaybackError && error.choice) {
-    const what = CHOICE_NAMES[error.choice] ?? error.choice.replace(/_/g, ' ');
-    if (error.code === CHOICE_NOT_AVAILABLE_CODE) return `The chosen ${what} is not in this file.`;
-    if (error.code === CHOICE_REQUIRED_CODE) return `This file has more than one ${what} and none was chosen.`;
+export function playbackRefusalText(error: unknown, refusal?: PlaybackRefusal): string {
+  const code = refusal?.code ?? (error instanceof MachaPlaybackError ? error.code : undefined);
+  const choice = refusal?.choice ?? (error instanceof MachaPlaybackError ? error.choice : undefined);
+  if (choice) {
+    const what = CHOICE_NAMES[choice] ?? choice.replace(/_/g, ' ');
+    if (code === CHOICE_NOT_AVAILABLE_CODE) return `The chosen ${what} is not in this file.`;
+    if (code === CHOICE_REQUIRED_CODE) return `This file has more than one ${what} and none was chosen.`;
   }
   return viewerErrorText(error, 'The node refused it without saying why.');
 }
@@ -306,9 +309,9 @@ export function playbackNoticeText(notice: PlaybackNotice): string {
     case 'decode-fallback': return 'This device could not play the original streams, so they are being converted.';
     case 'cannot-seek': return 'This stream cannot seek.';
     case 'not-ready': return 'Playback is still loading.';
-    case 'instruction-failed': return `Could not start this way: ${playbackRefusalText(notice.error)}`;
+    case 'instruction-failed': return `Could not start this way: ${playbackRefusalText(notice.error, notice.refusal)}`;
     case 'subtitles-loading': return 'Loading subtitles…';
-    case 'update-failed': return `Playback settings were not changed: ${playbackRefusalText(notice.error)}`;
+    case 'update-failed': return `Playback settings were not changed: ${playbackRefusalText(notice.error, notice.refusal)}`;
   }
 }
 

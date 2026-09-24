@@ -172,6 +172,11 @@ describe('a refused playback change says why (Tom: no more "That change could no
     expect(playbackRefusalText(undefined)).toBe('The node refused it without saying why.');
   });
 
+  it('reads the refusal core puts on the notice, even with no error beside it', () => {
+    expect(playbackNoticeText({ code: 'update-failed', refusal: { status: 400, code: 'choice_required', choice: 'audio_stream', choices: [1, 2] } }))
+      .toBe('Playback settings were not changed: This file has more than one audio track and none was chosen.');
+  });
+
   it('never shows the old sentence', () => {
     expect(playbackNoticeText({ code: 'update-failed', error: refusal('choice_required', 'container') })).toBe('Playback settings were not changed: This file has more than one streaming format and none was chosen.');
     expect(playbackNoticeText({ code: 'update-failed' })).not.toMatch(/could not be made/);
