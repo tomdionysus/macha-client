@@ -95,6 +95,7 @@
 .unmatched-table .col-provider { width: 6.5rem; color: var(--text-dim); }
 .unmatched-table .col-attempts { width: 5.6rem; text-align: right; }
 .unmatched-table .col-status { width: 21rem; max-width: 21rem; }
+.unmatched-table .col-added { width: 8.4rem; }
 /* A file's page: what it could be, beside what it could be matched to. */
 .unmatched-choices { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .8rem; }
 .unmatched-choices .detail-card { margin-top: .8rem; }

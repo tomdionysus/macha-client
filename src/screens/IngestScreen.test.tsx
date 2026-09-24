@@ -240,7 +240,10 @@ describe('a long torrent list', () => {
     expect(document.querySelectorAll('.torrent-table tbody tr')).toHaveLength(50);
     expect(screen.getByText('1–50 of 60 · page 1 of 2')).toBeTruthy();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    // Looked up inside the pager: a role query over the whole page computes
+    // an accessible name for every control in fifty rows, which is what took
+    // this test past five seconds on a loaded machine.
+    fireEvent.click(within(document.querySelector('.pager') as HTMLElement).getByRole('button', { name: 'Next' }));
     await screen.findByText('Torrent 09');
     expect(document.querySelectorAll('.torrent-table tbody tr')).toHaveLength(10);
     expect(screen.getByTestId('where').textContent).toBe('/ingest/torrents?sort=added&dir=desc&page=2');

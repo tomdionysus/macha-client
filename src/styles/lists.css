@@ -21,6 +21,10 @@
   text-align: left;
   text-transform: uppercase;
   white-space: nowrap;
+  /* A header wider than its column is clipped, never left to run past the
+     table's edge, where the scroll box would count it as width to scroll to. */
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .sort-header {
   margin: 0;

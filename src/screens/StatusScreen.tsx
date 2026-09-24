@@ -382,6 +382,7 @@ function NodeCard({ node, canManage, resetting, onReset }: { node: ClusterNodeSt
           <span className={telemetryAgeClassName(node)}>{freshnessLabel(node)}</span>
         </div>
         <dl className="cluster-node-stats">
+          <div><dt>Uptime</dt><dd>{node.runtime.uptime_ms != null ? formatDuration(node.runtime.uptime_ms) : '—'}</dd></div>
           <div><dt>Storage</dt><dd>{formatBytes(node.storage.used_bytes)} / {formatBytes(node.storage.capacity_bytes)}</dd></div>
           <div><dt>Cache</dt><dd>{node.cache.capacity_bytes ? `${formatBytes(node.cache.used_bytes)} / ${formatBytes(node.cache.capacity_bytes)}` : '—'}</dd></div>
           <div><dt>Load</dt><dd>{node.runtime.load1 != null ? node.runtime.load1.toFixed(2) : '—'}</dd></div>
