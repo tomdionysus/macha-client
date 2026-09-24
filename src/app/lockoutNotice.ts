@@ -45,10 +45,14 @@ export function lockoutReason(
   return mintRefused ? 'refused' : undefined;
 }
 
+/**
+ * A role-less session gets no notice of its own (Tom, 2026-09-24): the
+ * login screen's standing line, that the server requires an account, says
+ * what to do. It is also what an ordinary sign-out produces on a cluster
+ * whose anonymous account holds nothing, where "this session has no
+ * permissions" greeted every login as though something were wrong.
+ */
 export function lockoutNotice(reason: LockoutReason | undefined): string | undefined {
-  if (reason === 'no-roles') {
-    return 'This session has no permissions on this server, so there is nothing it can open. Log in again to see the library — and if you are already signed in as yourself, ask an administrator for the media_viewer role.';
-  }
   if (reason === 'refused') {
     return 'This server does not allow browsing without an account. Sign in to continue.';
   }

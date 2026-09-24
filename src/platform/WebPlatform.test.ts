@@ -9,9 +9,9 @@ import {
   handoverJoinLost,
   forwardBufferMsAt,
   handoverFallbackPositionMs,
+  leadJoinStep,
   canHoldThroughRelocation,
   webMediaElementFailure,
-  awaitNativeHlsFirstFragment,
   preflightWebHlsSource,
   webHlsPreflightTargets,
   HLS_PREFLIGHT_TIMEOUT_MS,
@@ -140,7 +140,7 @@ describe('Web player source reassignment', () => {
    * failed — and three of those exhaust a healthy cluster. The element is
    * therefore not given the URL until the node will serve it.
    */
-  describe('a native HLS source whose first fragment is still being produced', () => {
+  describe('a native HLS source', () => {
     const hlsSource = {
       mediaId: 'm1',
       url: 'https://node.test/g/media.m3u8',
@@ -156,67 +156,25 @@ describe('Web player source reassignment', () => {
       return player;
     }
 
-    it('holds the URL back until the node serves it, then attaches', async () => {
-      const video = fakeVideo();
-      const playlist = '#EXTM3U\n#EXTINF:6,\nsegment-0.ts';
-      vi.stubGlobal('fetch', vi.fn()
-        .mockResolvedValueOnce(new Response(playlist, { status: 200 }))
-        .mockResolvedValueOnce(new Response('', { status: 500, headers: { 'Retry-After': '0' } }))
-        .mockResolvedValueOnce(new Response(playlist, { status: 200 }))
-        .mockResolvedValueOnce(new Response(new Uint8Array([1]), { status: 206 })));
-
-      await nativePlayer(video).play(hlsSource, 0, true);
-
-      expect(video.src).toBe(hlsSource.url);
+    it('asks core to hold the source until the node has produced media, and only on this path', () => {
+      // A native player cannot ride a 500 hold; hls.js can.
+      expect(nativePlayer(fakeVideo()).needsProducedSource).toBe(true);
+      expect(new WebPlatform({ forceNativeHls: true }).createPlayer().holdsThroughLead).toBe(false);
     });
 
-    it('never charges the waiting node for a failure from the generation it is replacing', async () => {
+    it('attaches the URL at once, and asks the node for nothing', async () => {
+      // The zero-byte probe that used to gate this is gone: core now waits on
+      // the session route before handing the source over.
       const video = fakeVideo();
       const player = nativePlayer(video);
-      const failures: Error[] = [];
-      player.subscribeFailure?.((error) => failures.push(error));
-      let serveFragment = (_: Response) => {};
-      vi.stubGlobal('fetch', vi.fn()
-        .mockResolvedValueOnce(new Response('#EXTM3U\n#EXTINF:6,\nsegment-0.ts', { status: 200 }))
-        .mockReturnValueOnce(new Promise<Response>((resolve) => { serveFragment = resolve; })));
-
-      const playing = player.play(hlsSource, 0, true);
-      await Promise.resolve();
-      // The element is still holding the source of the node that just died,
-      // and it says so while the replacement is being waited on.
-      (video as { error: MediaError | null }).error = { code: 2, message: 'connection lost' } as MediaError;
-      emit(video, 'error');
-      expect(failures).toEqual([]);
-
-      serveFragment(new Response(new Uint8Array([1]), { status: 206 }));
-      await playing;
+      const fetch = vi.fn();
+      vi.stubGlobal('fetch', fetch);
+      await player.play(hlsSource, 0, true);
       expect(video.src).toBe(hlsSource.url);
-    });
-
-    it('reports a node that will not serve it as stream evidence, without ever attaching', async () => {
-      const video = fakeVideo();
-      const player = nativePlayer(video);
-      const failures: Error[] = [];
-      player.subscribeFailure?.((error) => failures.push(error));
-      vi.stubGlobal('fetch', vi.fn()
-        .mockResolvedValueOnce(new Response('#EXTM3U\n#EXTINF:6,\nsegment-0.ts', { status: 200 }))
-        .mockResolvedValueOnce(new Response('', { status: 503 })));
-
-      await expect(player.play(hlsSource, 0, true)).resolves.toBe(false);
-
-      expect(video.src).toBe('');
-      expect(failures).toHaveLength(1);
-      expect(failures[0]).toMatchObject({ kind: 'stream' });
+      expect(fetch).not.toHaveBeenCalled();
     });
   });
 
-  /**
-   * The gap these close: every failure channel on this player is driven by
-   * something the element emits, so an element that accepted a source and then
-   * received nothing emitted nothing, and playback waited on it forever with
-   * no error and no failover. Reported live as an unchanging spinner watched
-   * for four minutes.
-   */
   describe('a source that never delivers a byte', () => {
     const directSource = {
       mediaId: 'm1',
@@ -650,113 +608,6 @@ describe('the stream route is the server\'s to choose', () => {
   });
 });
 
-describe('native HLS first-fragment readiness', () => {
-  const manifest = '#EXTM3U\n#EXT-X-PLAYLIST-TYPE:EVENT\n#EXTINF:6,\nsegment-0.ts';
-  const controllable = () => {
-    const slept: number[] = [];
-    let clock = 0;
-    return {
-      slept,
-      options: {
-        now: () => clock,
-        sleep: async (ms: number) => { slept.push(ms); clock += ms; },
-      },
-    };
-  };
-
-  it('waits out a held fragment for as long as the node keeps saying it is producing one', async () => {
-    const held = () => new Response('{"code":"segment_not_ready"}', { status: 500, headers: { 'Retry-After': '1' } });
-    const fetchImpl = vi.fn()
-      .mockResolvedValueOnce(new Response(manifest, { status: 200 }))
-      .mockResolvedValueOnce(held())
-      .mockResolvedValueOnce(new Response(manifest, { status: 200 }))
-      .mockResolvedValueOnce(held())
-      .mockResolvedValueOnce(new Response(manifest, { status: 200 }))
-      .mockResolvedValueOnce(new Response(new Uint8Array([7]), { status: 206 }));
-    const host = controllable();
-
-    await expect(awaitNativeHlsFirstFragment('https://node-b.test/g/media.m3u8', { fetchImpl, ...host.options }))
-      .resolves.toMatchObject({ ready: true, attempts: 3 });
-    // The node stated one second twice, and was believed both times.
-    expect(host.slept).toEqual([1_000, 1_000]);
-    expect(new Headers(fetchImpl.mock.calls[1][1]?.headers).get('range')).toBe('bytes=0-0');
-  });
-
-  it('reports a superseded generation as gone rather than as the node failing', async () => {
-    // The route move brings `410 generation_superseded`, and the native path
-    // reaches it through the preflight rather than through hls.js. Without a
-    // `gone` flag here the caller reports `stream`, which core reads as
-    // evidence against an endpoint that answered correctly — the same fault as
-    // the classifier's, on the one target that cannot be watched any other way.
-    const fetchImpl = vi.fn()
-      .mockResolvedValueOnce(new Response(manifest, { status: 200 }))
-      .mockResolvedValueOnce(new Response('{"code":"generation_superseded"}', { status: 410 }));
-    const host = controllable();
-
-    await expect(awaitNativeHlsFirstFragment('https://node-b.test/g/media.m3u8', { fetchImpl, ...host.options }))
-      .resolves.toMatchObject({ ready: false, gone: true, reason: 'fragment answered 410' });
-    expect(host.slept).toEqual([]);
-  });
-
-  it('does not call an ordinary refusal gone', async () => {
-    const fetchImpl = vi.fn()
-      .mockResolvedValueOnce(new Response(manifest, { status: 200 }))
-      .mockResolvedValueOnce(new Response('{"code":"stream_failed"}', { status: 503 }));
-    const host = controllable();
-
-    await expect(awaitNativeHlsFirstFragment('https://node-b.test/g/media.m3u8', { fetchImpl, ...host.options }))
-      .resolves.toMatchObject({ ready: false, gone: false });
-  });
-
-  it('never waits on a broken generation, which is the one thing that is node evidence', async () => {
-    const fetchImpl = vi.fn()
-      .mockResolvedValueOnce(new Response(manifest, { status: 200 }))
-      .mockResolvedValueOnce(new Response('{"code":"stream_failed"}', { status: 503 }));
-    const host = controllable();
-
-    await expect(awaitNativeHlsFirstFragment('https://node-b.test/g/media.m3u8', { fetchImpl, ...host.options }))
-      .resolves.toMatchObject({ ready: false, reason: 'fragment answered 503', attempts: 1 });
-    expect(host.slept).toEqual([]);
-  });
-
-  it('gives up on a node that holds the fragment past the budget, rather than holding the viewer forever', async () => {
-    const fetchImpl = vi.fn().mockImplementation((url: string) => Promise.resolve(
-      String(url).endsWith('.m3u8')
-        ? new Response(manifest, { status: 200 })
-        : new Response('', { status: 500, headers: { 'Retry-After': '1' } }),
-    ));
-    const host = controllable();
-
-    const readiness = await awaitNativeHlsFirstFragment('https://node-b.test/g/media.m3u8', {
-      fetchImpl,
-      timeoutMs: 4_000,
-      ...host.options,
-    });
-    expect(readiness.ready).toBe(false);
-    expect(readiness.reason).toContain('for 3s');
-    expect(host.slept).toEqual([1_000, 1_000, 1_000]);
-  });
-
-  it('treats a transfer that never became a response as the node, not the fragment', async () => {
-    const fetchImpl = vi.fn().mockRejectedValue(new TypeError('Failed to fetch'));
-    const host = controllable();
-
-    await expect(awaitNativeHlsFirstFragment('https://node-b.test/g/media.m3u8', { fetchImpl, ...host.options }))
-      .resolves.toMatchObject({ ready: false, reason: 'Failed to fetch', attempts: 1 });
-    expect(host.slept).toEqual([]);
-  });
-
-  it('abandons the wait the moment a later generation takes over', async () => {
-    const fetchImpl = vi.fn();
-    const readiness = await awaitNativeHlsFirstFragment('https://node-b.test/g/media.m3u8', {
-      fetchImpl,
-      superseded: () => true,
-    });
-    expect(readiness).toMatchObject({ ready: false, attempts: 0 });
-    expect(fetchImpl).not.toHaveBeenCalled();
-  });
-});
-
 describe('Web media failure evidence', () => {
   it('distinguishes endpoint-retryable network failure from decoder and compatibility failure', () => {
     expect(webMediaElementFailure({ code: 2, message: 'connection lost' }).kind).toBe('stream');
@@ -867,6 +718,33 @@ describe('Handover fallback position', () => {
     // that is behind it is a stale sample, not a destination.
     expect(handoverFallbackPositionMs(3_718, -25_843, 29_561)).toBe(3_718);
     expect(handoverFallbackPositionMs(3_718, -25_843, 20_000)).toBe(3_718);
+  });
+
+  it('lands at the start of a generation built ahead of the viewer, never before it', () => {
+    // A lead move asks the node for a position ahead of the viewer, so core's
+    // request is negative: the viewer is that far before the generation's
+    // start. Abandoning before they arrive can only attach at the start.
+    expect(handoverFallbackPositionMs(-25_000, -60_000, 40_000)).toBe(0);
+    expect(handoverFallbackPositionMs(-25_000, -60_000, 70_000)).toBe(10_000);
+  });
+});
+
+describe('Joining a generation that starts ahead of the viewer', () => {
+  // Core's lead move (d58375a): the node produces from intent + lead, so the
+  // join lies before the incoming generation until the viewer, still watching
+  // the outgoing element, reaches its start. That wait is the point of the
+  // lead, not a race being lost.
+  it('waits for the viewer while the join is still before the generation', () => {
+    expect(leadJoinStep(-12_000, false)).toBe('wait');
+  });
+
+  it('joins at the start once the outgoing picture has stopped, rather than waiting for a position it cannot reach', () => {
+    expect(leadJoinStep(-12_000, true)).toBe('join-at-start');
+  });
+
+  it('races as before once the join is inside the generation', () => {
+    expect(leadJoinStep(0, false)).toBe('race');
+    expect(leadJoinStep(4_000, true)).toBe('race');
   });
 });
 

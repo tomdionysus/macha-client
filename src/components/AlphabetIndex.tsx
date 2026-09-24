@@ -1,4 +1,5 @@
 import { ALPHABET_INDEX, type AlphabetIndexKey } from '@machafoundation/core';
+import { alphabetIndexKeyDescription, alphabetIndexKeyText } from '../text/viewerText';
 
 interface Props {
   availableKeys: Set<AlphabetIndexKey>;
@@ -17,10 +18,10 @@ export function AlphabetIndex({ availableKeys, onSelect }: Props) {
             className="alphabet-index-button"
             disabled={!available}
             data-tv-focusable={available ? 'true' : undefined}
-            aria-label={key === '#' ? 'Titles beginning with a number or symbol' : `Titles beginning with ${key}`}
+            aria-label={alphabetIndexKeyDescription(key)}
             onClick={() => onSelect(key)}
           >
-            {key}
+            {alphabetIndexKeyText(key)}
           </button>
         );
       })}

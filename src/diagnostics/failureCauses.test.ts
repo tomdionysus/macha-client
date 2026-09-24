@@ -1,46 +1,32 @@
 import { describe, expect, it } from 'vitest';
-import { accountSessionLimitNotice, failureCauseMessages } from './failureCauses';
+import { accountSessionLimitNotice, playbackFailureHeadline } from './failureCauses';
 
-describe('the failures beneath the one being named', () => {
-  it('reads out the chain core attached, in the order it happened', () => {
-    // The shape core's `terminalRecoveryError` produces: the failure that
-    // started the recovery, carrying the attempt that ended it. Measured live
-    // as the pair a viewer sees one half of — a node that was serving them,
-    // and a candidate an https page could never have fetched.
-    const ending = new Error('Macha endpoint http://10.35.1.50:7438 failed: Failed to fetch');
-    const originating = new Error('Web HLS source not found (fragLoadError).', { cause: ending });
+describe('the sentence a viewer is shown for a terminal failure', () => {
+  it('is what the node said, from the layer that knew, not what wrapped it', () => {
+    // The shape a failure has after crossing core's envelopes: the outer
+    // layers classify, the innermost carries the server's own sentence.
+    const refused = new Error('Macha playback request failed');
+    (refused as { detail?: string }).detail = 'timed out waiting for the first fragmented-MP4 segment';
+    const endpoint = new Error('Macha endpoint http://10.35.1.50:7438 failed: Macha playback request failed', { cause: refused });
+    const head = new Error('Web HLS source not found (fragLoadError).', { cause: endpoint });
 
-    expect(failureCauseMessages(originating)).toEqual([
-      'Macha endpoint http://10.35.1.50:7438 failed: Failed to fetch',
-    ]);
+    expect(playbackFailureHeadline(head)).toBe('timed out waiting for the first fragmented-MP4 segment');
   });
 
-  it('does not say the same thing twice', () => {
-    // A layer that wraps a failure without adding to it is common, and the
-    // screen repeating one sentence reads as a rendering fault.
-    const inner = new Error('Failed to fetch');
-    const outer = new Error('Failed to fetch', { cause: inner });
-    expect(failureCauseMessages(outer)).toEqual([]);
+  it('never falls back to the log line', () => {
+    // Core's rule: `.message` is two envelopes and a node address in front of
+    // somebody trying to watch a film. When no layer stated a sentence, this
+    // client says something of its own.
+    const error = new Error('Macha endpoint http://10.35.1.50:7438 failed: Failed to fetch');
+    const said = playbackFailureHeadline(error);
+    expect(said).not.toContain('Macha endpoint');
+    expect(said).not.toContain('10.35.1.50');
+    expect(said).toMatch(/could not/);
   });
 
-  it('stops at a cause that is evidence rather than a sentence', () => {
-    // `PlaybackSourceError` puts an hls.js payload in `cause`. It belongs in a
-    // log, not in front of a viewer, and it is where the readable chain ends.
-    const payload = { type: 'networkError', details: 'fragLoadError' };
-    const error = new Error('Web HLS network degradation.', { cause: payload });
-    expect(failureCauseMessages(error)).toEqual([]);
-  });
-
-  it('survives a chain that points back at itself', () => {
-    const first = new Error('first');
-    const second = new Error('second', { cause: first });
-    first.cause = second;
-    expect(failureCauseMessages(first)).toEqual(['second']);
-  });
-
-  it('has nothing to say about something that is not an error', () => {
-    expect(failureCauseMessages(undefined)).toEqual([]);
-    expect(failureCauseMessages('a string that got thrown')).toEqual([]);
+  it('has the same sentence of its own for something that is not an error', () => {
+    expect(playbackFailureHeadline(undefined)).toBe(playbackFailureHeadline(new Error('anything')));
+    expect(playbackFailureHeadline('a string that got thrown')).toBe(playbackFailureHeadline(undefined));
   });
 });
 

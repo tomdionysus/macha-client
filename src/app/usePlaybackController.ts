@@ -312,7 +312,8 @@ export function usePlaybackController(options: {
       state: { media: activePlayback.media, queue: queueState?.items, queueIndex: queueState?.currentIndex, returnTo } satisfies PlaybackRouteState,
     });
   }, [activePlayback, location.pathname, location.search, navigate, playerRouteActive, queueState, runtime]);
-  const stop = useCallback(() => {
+  /** Ends playback. Resolves once the node's playback session is closed, which sign-out must wait for. */
+  const stop = useCallback((): Promise<void> => {
     const returnTo = activePlayback?.returnTo ?? routes.home;
     if (playerRouteActive) {
       suppressReconstructRef.current = true;
@@ -320,7 +321,7 @@ export function usePlaybackController(options: {
     }
     setQueueState(undefined);
     queueStore.clear();
-    void runtime.stop();
+    return runtime.stop();
   }, [activePlayback?.returnTo, navigate, playerRouteActive, queueStore, runtime]);
 
   return {

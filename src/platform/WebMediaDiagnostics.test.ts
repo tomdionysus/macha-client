@@ -109,3 +109,109 @@ describe('sound stopping while the picture carries on', () => {
     expect(warnings.filter((entry) => entry.event === 'media-audio-decode-stopped')).toHaveLength(0);
   });
 });
+
+describe('the picture holding while the clock runs on', () => {
+  /** The seek P0's freeze: sound continuing, picture still, nothing emitted. */
+  function withFrames(video: ReturnType<typeof fakeVideo>) {
+    const quality = { totalVideoFrames: 0, droppedVideoFrames: 0 };
+    Object.assign(video, { getVideoPlaybackQuality: () => ({ ...quality }) });
+    return quality;
+  }
+
+  function tick(video: ReturnType<typeof fakeVideo>, quality: { totalVideoFrames: number }, frames: number, clockS: number, atMs: number) {
+    vi.spyOn(performance, 'now').mockReturnValue(atMs);
+    quality.totalVideoFrames = frames;
+    video.currentTime = clockS;
+    video.emit('timeupdate');
+  }
+
+  function rangesOf(pairs: Array<[number, number]>): TimeRanges {
+    return { length: pairs.length, start: (index: number) => pairs[index][0], end: (index: number) => pairs[index][1] } as unknown as TimeRanges;
+  }
+
+  it('reports frames frozen while the clock advances, with each track, and again when it ends', () => {
+    const { warnings, log } = recorder();
+    const video = fakeVideo();
+    const quality = withFrames(video);
+    const tracks = { audio: { buffered: rangesOf([[10, 70]]) }, video: { buffered: rangesOf([[10, 12.5]]) } };
+    new WebMediaDiagnostics(log).attach(video, () => undefined, () => tracks);
+
+    tick(video, quality, 100, 10, 0);
+    tick(video, quality, 106, 10.25, 250);
+    // The picture stops at 106 frames; the clock does not.
+    tick(video, quality, 106, 10.5, 500);
+    tick(video, quality, 106, 11.5, 1_500);
+    expect(warnings.filter((entry) => entry.event === 'media-picture-stopped')).toHaveLength(0);
+
+    tick(video, quality, 106, 12.25, 2_250);
+    tick(video, quality, 106, 13, 3_000);
+    const stopped = warnings.filter((entry) => entry.event === 'media-picture-stopped');
+    expect(stopped).toHaveLength(1);
+    expect(stopped[0].data).toMatchObject({
+      frozenForMs: 1_750,
+      clockAdvancedMs: 2_000,
+      frames: { total: 106, dropped: 0 },
+      trackBuffered: { audio: [{ start: 10, end: 70 }], video: [{ start: 10, end: 12.5 }] },
+    });
+
+    tick(video, quality, 112, 13.25, 3_250);
+    const resumed = warnings.filter((entry) => entry.event === 'media-picture-resumed');
+    expect(resumed).toHaveLength(1);
+    expect(resumed[0].data).toMatchObject({ frozenForMs: 2_750, frames: { total: 112 } });
+  });
+
+  it('leaves a clock that stopped to the stall watchdog, and never judges a paused or hidden page', () => {
+    const { warnings, log } = recorder();
+    const video = fakeVideo();
+    const quality = withFrames(video);
+    new WebMediaDiagnostics(log).attach(video, () => undefined);
+
+    tick(video, quality, 100, 10, 0);
+    for (let step = 1; step < 10; step += 1) tick(video, quality, 100, 10, step * 1_000);
+    video.paused = true;
+    for (let step = 10; step < 20; step += 1) tick(video, quality, 100, step, step * 1_000);
+    video.paused = false;
+    vi.stubGlobal('document', { hidden: true });
+    for (let step = 20; step < 30; step += 1) tick(video, quality, 100, step, step * 1_000);
+    vi.unstubAllGlobals();
+
+    expect(warnings.filter((entry) => entry.event.startsWith('media-picture-'))).toHaveLength(0);
+  });
+
+  it('sees a freeze on one element while another, which a handover has live at once, plays', () => {
+    const { warnings, log } = recorder();
+    const outgoing = fakeVideo();
+    const incoming = fakeVideo();
+    const outgoingFrames = withFrames(outgoing);
+    const incomingFrames = withFrames(incoming);
+    const diagnostics = new WebMediaDiagnostics(log);
+    diagnostics.attach(outgoing, () => undefined);
+    diagnostics.attach(incoming, () => undefined);
+
+    // The outgoing picture holds at 106 frames while its clock runs; the
+    // incoming element decodes normally. Sampled interleaved, a shared
+    // previous sample makes every outgoing sample look like progress.
+    for (let step = 0; step < 12; step += 1) {
+      tick(outgoing, outgoingFrames, 106, 100 + step * 0.25, step * 250);
+      tick(incoming, incomingFrames, step * 6, step * 0.25, step * 250 + 1);
+    }
+
+    expect(warnings.filter((entry) => entry.event === 'media-picture-stopped')).toHaveLength(1);
+    expect(warnings.filter((entry) => entry.event.startsWith('media-picture-'))).toHaveLength(1);
+  });
+
+  it('says a track whose buffer has gone is gone, rather than throwing', () => {
+    const { warnings, log } = recorder();
+    const video = fakeVideo();
+    const quality = withFrames(video);
+    const removed = { get buffered(): TimeRanges { throw new DOMException('removed', 'InvalidStateError'); } };
+    new WebMediaDiagnostics(log).attach(video, () => undefined, () => ({ video: removed }));
+
+    tick(video, quality, 100, 10, 0);
+    tick(video, quality, 100, 10.5, 500);
+    tick(video, quality, 100, 11, 1_000);
+    tick(video, quality, 100, 12, 2_000);
+
+    expect(warnings.find((entry) => entry.event === 'media-picture-stopped')?.data).toMatchObject({ trackBuffered: { video: 'removed' } });
+  });
+});

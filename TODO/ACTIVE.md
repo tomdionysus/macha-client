@@ -1,9 +1,11 @@
 # Active tasks and concepts to explore
 
-Last updated: 2026-09-21, late. Rationalised against the code, the commits and
-the live cluster after the previous session's context collapsed; where this
-file and a dated document in this directory disagree, this file is current and
-the dated document is the record of its day.
+Last updated: 2026-09-24, rationalised for a clear. Read
+[2026-09-24-handover.md](2026-09-24-handover.md) first, for
+what is running, what is in flight with core, today's rulings and the method
+that cost time; where this file and a dated
+document in this directory disagree, this file is current and the dated
+document is the record of its day.
 
 This is the working backlog. Add new work here. When an item is implemented and
 its stated verification is complete, remove it from this file and add a dated
@@ -17,102 +19,160 @@ are related. Core is addressed as the `Macha NPM Core` session.
 
 ## Start here
 
-**Where the repo is.** **0.18.0 is released on `main`**, which resolves
-`@machafoundation/core` as `^0.18.0` from the registry, with the gate below
-passed against that copy: no symlink, typecheck clean, 461 tests green, and
-`vite build` producing `index-CKNh5Q9D.js`. `develop` carries the same tree
-with the core link restored, which is how core and this client are developed
-together. **It is not tagged** — the `0.18.0` tag is Tom's to cut, and every
-release before it has one. The working tree is clean apart from
-`CLAUDE.local.md` and `basemind.toml`, which are untracked on purpose.
+**Release in preparation, 2026-09-24 evening (Tom: "clear up what is in
+flight and stabilise").** Everything in flight is finished and in the working
+tree, uncommitted: bulk torrent actions, server 0.56.0 wording, log out onto
+core's session model, `seedEndpoints`, the Status reset gate, the decode
+fallback wording. `CHANGELOG.md`'s Unreleased section now covers everything
+since 0.18.0. What the release needs, all Tom's: a core publish carrying
+`e840d72` or later (this client depends on a great deal of unpublished core);
+`package.json` onto that version, then suite, typecheck and build against it;
+the version bump (README version test); the merge to `main`. Two things to
+decide before it: the Unreleased entry "Choosing a node moves the stream"
+says **"Not releasable until the handover arrives"**, and that handover is
+still an open P0 below; and the paging-test remedy (item 1). Live checks owed
+need a sign-in as Tom: bulk bar, Reset association by role, log out,
+remembered nodes across a reload.
 
-**What the nodes serve, verified at the time of writing.** All five hosts —
-`fi-1`, `es-1`, `gbni-1`, `ramaroja` and `macnessa` — answer `/` with
-`index-NDVfpduh.js`: built 12:12 on 2026-09-21 from the tree at `4016d2b`
-against linked core `648474d`, deployed 14:37. It sits between 0.17.3 and 0.18.0: everything
-in 0.17.3, plus the 410 mapping and the cap notice from the route transition,
-and **nothing from 0.18.0** — no node selector, no AC-3 mode-press fix, no
-keyboard seek commit, no lockout sentence, no local timestamps. The 0.17.3
-release bundle (`index-CnpOpAES.js`) was never deployed. The deploy procedure
-and the backups are in the deploy section.
+**Where the repo is, 2026-09-24.** `main` is **0.18.0** (`ce74408`).
+`develop` is **34 commits ahead of `origin/develop`** (`6e264bb` was the
+last push), linked to core's tree (`file:../macha-ts`, core clean at
+`b5c0128`). Typecheck clean. Suite **530 tests, and not reliably green**:
+see the first item below. Everything since 0.18.0 needs core past its
+published 0.18.0, and a great deal of it now needs core's unpublished
+viewer-text cut; a release needs a core publish first, and both are Tom's.
 
-**The cluster, measured at the time of writing** (one `GET /api/v1/status` as
-`webclient`, session revoked, `204`): all three nodes on server **0.48.2**,
-`ready` and `online`. Every node states the same `playback` object:
-`startup_timeout_ms` 15000, `segment_timeout_ms` 6000, `session_idle_ms`
-1800000, `pipeline_idle_ms` 60000, `transcode_entitlement_idle_ms` 300000,
-`max_sessions` 64, `max_sessions_per_account` 32. Three of those fields are
-newer than the last description of the wire in this file, and two of them
-change entries below: the transcode entitlement is released after **five
-minutes** idle rather than held for the session's thirty, and the per-account
-cap has replaced one-session-per-bearer (server 0.48.0).
+**The cluster:** es-1 and gbni-1 on server **0.55.1**; **fi-1 refused
+connections** at the time of writing (connection refused in 2 ms, not a
+timeout), probably mid-upgrade, not diagnosed. Artwork now caches for 30
+days with an ETag (server 0.54.1). This machine sits at the fi-1 site.
 
-**Core is published at 0.18.0**, which is `latest` on the registry and what
-`main` resolves. It carries everything this client compiles against —
-`prefer()`, `moveTo()`, `claimNodeId()`, `SOURCE_SUPERSEDED_STATUS`,
-`playbackFailureDetail()` — each confirmed present in the *published tarball*
-rather than in the tree beside it. It includes `76d94ba`, where node identity
-is claimed through `claimNodeId` rather than announced through
-`applyAdvertisement`, because the latter states membership and deleted the
-cluster; that is what makes the first job below a deletion.
+**What 2026-09-24 did** (`COMPLETED.md`, dated entries at the top): the
+search page (full width, sort, type pills, articles ignored, episode and
+track lines, A-Z bar, empty notice); every viewer word moved from core into
+`src/text/viewerText.ts` on Tom's ruling; Import split into Torrents and
+Files, the torrent page redesigned, columns that hold still; Manage
+Unmatched in the torrent list's style with each file on its own page;
+shared list parts (`ListParts`, `ListSortControls`, `lists/`, `lists.css`)
+and paging on both lists; the artwork P0's host choice and caching
+(core and server) verified; the direct-play reclaim race fixed and run
+live; TV focus corrections ported; login, Music and Status touches.
 
-**The published copy and the linked tree both answered `0.18.0` at the moment
-of the cutover, and that is the trap, not a reassurance.** The first
-`npm install` on `main` left the symlink in place — `package-lock.json` still
-held `"link": true` against `../macha-ts`, so npm reused it, and
-`require(...).version` cheerfully agreed because core's local tree had also
-reached 0.18.0. Only `test -L` caught it. The lockfile entry had to go before
-npm would fetch the tarball. **A version check agreed with a stale link,
-live**, which is the failure this file has described twice in the abstract.
+**Next, in order:**
 
-**Verified live on 2026-09-21, and nothing since:** the picture surviving a
-mode switch and a failover (0.17.3), and all five 0.18.0 changes, each against
-the cluster from `vite dev`. Everything else in 0.17.3 is unit-covered with its
-fault watched failing first, and has a `[ ]` below naming what a live run must
-show. `COMPLETED.md` carries the table.
+1. **The torrent paging test's timeout: cause found, remedy is Tom's.**
+   `IngestScreen.test.tsx`, "a long torrent list shows fifty rows a page",
+   failed in 8 of 12 full-suite runs on 2026-09-24 (timeout, 6.3 s against
+   5 s; commit `f951e58`). It does not cost ~2 s a re-render. Measured
+   2026-09-24 17:00, quiet machine: 0.45 s alone, CPU profile ~0.3 s of
+   work (React render ~230 ms, whole-page text queries ~180 ms), nothing
+   per row standing out. The run time follows machine load, not the code:
+   0.74 s at load 26, 1.29 s at 36, 1.84 s at 55 and 1.61 s at 135, all
+   green, 530/530 in 5 of 5 runs and in one run at 40 workers. The load was
+   the Server session's `cmake --build build -j8` (six to eleven `clang++`
+   processes) plus the other sessions on this 12-core machine. The load
+   average peaked above 100 during the failing runs and was ~95 over 15
+   minutes when this was measured. Yesterday's "timed alone" figures
+   (4.3 s total) are the same test at ten times today's cost, so they were
+   taken under that load too. The 6.3 s timeout itself was not reproduced
+   (it needs more load than was present). The 3-row sort tests scale the
+   same way, so this is every jsdom test's headroom, and the paging test is
+   simply the heaviest. Open for Tom: accept it as is, raise the jsdom
+   suites' `testTimeout`, or cut the test's cost (table-scoped queries save
+   ~0.18 s).
+2. **Bulk actions on torrents: built and unit-tested, not yet seen live.**
+   Selection (row boxes, a page box, pruning of ids that leave the list)
+   and the bulk bar are now shared parts in `ListParts` (`useListSelection`,
+   `SelectPageBox`, `SelectRowBox`, `BulkActions`, `runBulkOperation`), and
+   Unmatched moved onto them. The torrent bar offers Pause and Resume (each
+   enabled only when a ticked torrent can take it, and applied only to
+   those) and Remove, which always asks and cancels any still running
+   first. `useAcquisition.actMany` shares the single-job dispatch with `act`
+   and says how many the server refused. Three tests, each seen red under a
+   mutation. Owed: a look on the live page, and whether the bar's sticky
+   `top: 132px` (Unmatched's) sits right under Import's header.
+3. **Server 0.56.0: codes on everything** (committed at macha `60ce47a`,
+   not deployed as of 2026-09-24 17:10; the server will send a message as each
+   node goes live). Checked here: nothing breaks when it lands. The one JSON
+   body this client parses itself, the subtitle manifest, ignores unknown
+   keys. **Worded, against core `a5b08f0`:** `viewerText.ts` now words job
+   error codes (`jobErrorText`: Import list, torrent page, file-import
+   rows), catalogue results (`hintResultLabel`: Unmatched list and page),
+   Status diagnostics (`diagnosticErrorText`: UPnP, external IP, startup,
+   node connectivity), `placement_failed` by reason (in `viewerErrorText`),
+   and the Settings server card (`serverStatusText`, from core's new
+   `code`/`detail`, which replaced `ServerStatus.message`). The rule: a
+   known code gets this client's sentence; a generic one (`torrent_error`,
+   `filesystem_error`, `import_failed`, `torrent_failed`, `ingest_failed`)
+   also gets the server's sentence after it; an unknown code, or none from
+   a pre-0.56.0 node, shows the server's sentence. One `codeWords` now
+   backs `stateLabel`. Six tests, seen red under two mutations. Owed: a
+   look at Import, Unmatched and Status against a node once it has 0.56.0
+   (the server will say when), and Tom's eye on the wording.
+4. **Fixed 2026-09-24 evening, from the live page:**
+   - **Remembered endpoints were wiped on every load.** This was found by the
+     Android TV session and seen live here: the list held two URLs 20 s into a
+     load and was null by 114 s. `App.tsx` seeded it as `'environment'`, and
+     core's health cycle keeps only `'discovered'`. It now seeds through
+     core's `seedEndpoints` (core `b47773d`, committed, not pushed). Core also
+     now keeps remembered nodes that have not answered yet. Not yet seen
+     surviving a reload live (the tab is signed out; see below).
+   - **Status offered Reset association to any account that can view
+     status.** It was seen as `webclient` (media_viewer + view_status). It was
+     gated on the `managementAvailable` configuration flag, not a role. The
+     server asks `manager` of every change under `/api/v1/manage`
+     (`service.cpp`), so Status now gets the manage API only with `manager`.
+     Not yet seen live with and without the role.
+   - **Fixed in core `9654e1e` (pushed):** a cold start with fi-1 and es-1
+     down took 17.2 s before anything showed, because the session check
+     walked the nodes one at a time. Validation is now hedged at 1 s. Seen
+     live against `9654e1e`: first screen at 2.8 s, same two nodes down.
+   - **Likely core's, fixed in `9654e1e`:** the dev tab's `webclient` session
+     ended mid-load and a reload landed on `/login`. Core's reading: with no
+     node answering, validation returned the same as a refusal, the manager
+     minted anonymously, the cluster refused, and a good token went unused.
+     Now "nobody answered" keeps the cached session. Not proven to be what
+     happened here. Owed: sign in once, then check the remembered list
+     survives a reload and the Reset association gate by role.
+   - **Core `e840d72`, decode fallback (Tom's ruling):** a copied stream
+     the player cannot decode now gets a transcode on the same node instead
+     of a failure screen, once per playback and never against a mode the
+     viewer chose. Worded here: the `decode-fallback` notice ("This device
+     could not play the original streams, so they are being converted.") and
+     the `player-could-not-decode` reason in the player options. Not seen
+     live; it needs a title the browser cannot decode.
+   - ramaroja is offline for the foreseeable future (Tom, via core). Nothing
+     in this repo points at it; the TVs' saved endpoints need checking.
+5. **Seen by hand, not yet:** the unmatched table without a horizontal
+   scrollbar (headers now clip to their column; the likely cause was the
+   last header running past the table edge), the player's text after the
+   viewer-text move (stream-status lines, clock, notices), the fullscreen
+   cursor. Uptime on the Status node cards: seen live 2026-09-24.
+6. The playback P0s as before: the handover with no lead (waiting on a
+   server-stated start cost), the seek freeze reading (the recorder waits
+   for one), the `readyState` 0 consequence.
 
-**Three jobs are ready to start, in this order:**
+**What needs Tom, and nothing else does:** a television (the Samsung items,
+including the native-HLS produced-source wait, unit-tested only); any push,
+merge to `main`, deploy or core publish; demoting or re-ranking a P0; and
+these open decisions from 2026-09-24: whether the ~15 s artwork hang on a
+silently dead node (8-18 s window) matters; whether the player options
+panel should keep a sideways move between its columns (the TV focus
+correction stops it; Up/Down still reach everything); sized artwork
+variants' priority (the server's); and core's two questions, "Plan A"
+searched as "Plan" and "Season 0 Episode 1".
 
-1. **Delete `useNodeIdentity` and wire `selectNode` to core's `moveTo`** — its
-   own P1 below. The deletion is not tidying: the hook calls
-   `applyAdvertisement`, the membership call core just stopped using for this
-   because it drops every discovered endpoint it is not told about. The wiring
-   removes the measured 13.2 s of black on a node change.
-2. **Instrument the `readyState` 0 stall** — the P0 below. Nine explanations
-   have died to measurement, tab occlusion among them, which the old P2 had as
-   the answer. What is wanted is a recorder armed before `src` is set, and a
-   fix for the consequence: a generation that never produced a byte condemning
-   its node.
-3. **The reap run** — a thirty-minute pause against 0.48.2 with the deployed
-   bundle. It is the only thing keeping the pause P0 a P0, and where core's
-   requested `source-reaped` triple (`runwayMs`, `leadTimeMs`, `lookAheadMs`)
-   gets captured.
+**Two business P0s outrank the rest:** slow artwork (host choice and
+caching fixed and verified 2026-09-24; what remains is the server's slow
+first read and poster size), and scope-ratio titles playing small in a
+black window. The bars are burnt into the source and
+the fix is an ingest/server one. [Evidence](2026-09-16-video-fit-mode.md).
 
-**What needs Tom, and nothing else does.** A television needs him in front of
-it. So does a deployment, so does merging anything to `main`, and so does the
-decision on persisting the same-origin endpoint (P1 below). The cluster itself
-does not — the test account signs in from any browser.
-
-**The first P0 below is a business P0 and outranks the rest** — scope-ratio
-titles play small in a black window, which is the quality of the product on the
-titles people choose it for. 2026-09-16 settled where the black comes from: the
-bars are burnt into the source, the client's fit is correct, and the fix is an
-ingest/server one. [Evidence](2026-09-16-video-fit-mode.md).
-
-**The P0s, as they stand.** The scope title (the server's; the client task
-waits). A player at `readyState` 0 while the node says it served (no
-mechanism; promoted from P2 because it recurred on 2026-09-21 and its
-explanation did not survive). A pause past the idle budget (both halves built
-and in the deployed bundle, never watched on a thirty-minute pause). Seek
-misbehaviour (the origin fix verified on a resume; the `relocate` path and the
-per-track reading still owed). The transcode handover (both exits watched
-firing on 2026-09-21 under changes reverted the same evening, so proven and
-not reachable). Failover from an https page onto an http node (core's, live in
-the deployed configuration). Each demotion below carries its reason; demoting
-is not dismissing.
-
-**Anything on a television needs Tom present.** The Samsung items below are
-gated on the set being on.
+**The P0s, as they stand.** The scope title (the server's). A player at
+`readyState` 0 (instrumented, no mechanism yet). Seek misbehaviour. A
+handover with no lead. Failover from an https page onto an http node
+(core's). Each demotion below carries its reason; demoting is not
+dismissing.
 
 ## How the test cluster behaves, and how to read it
 
@@ -230,6 +290,66 @@ Assets are gzipped by the server on demand (593 KB of JS goes out as 172 KB).
 There are no precompressed `.gz` siblings in `dist/`, which the server would
 prefer; generating them is a build change nobody has asked for yet.
 
+**develop deployed to fi-1 and gbni-1, 2026-09-24 18:03 (local), on Tom's
+instruction; es-1 is offline for the foreseeable future and was not
+touched.** Bundle `index-8e3uI4_9.js`, 674,669 bytes, `shasum`
+`1acc554bcd78`, built from the uncommitted `develop` working tree (bulk
+torrent actions, 0.56.0 code wording, `seedEndpoints`, the Status reset gate)
+against linked core `47812f7` (with `6fd7747` notes; tree clean). Backups
+first at `/etc/macha/web.bak-20260924-180351.tar.gz` on both; rsync additive,
+no `--delete`, 24 files and 1,847,166 bytes each. Verified served on both via
+`http://127.0.0.1:7438/`: index names the bundle, the bundle is `200` at full
+size with a matching `shasum`, owned `1000:50`, and `hls-Bt6kO1A0.js` (shared
+with the previous build) still `200`. `macnessa.macha.network` serves it too.
+Not yet opened in a browser on either node.
+
+**0.18.0 is deployed to all three nodes, 2026-09-21 22:53 UTC, on Tom's
+instruction.** Bundle `index-CKNh5Q9D.js`, 633,692 bytes, `shasum`
+`eff197072a8e`, `dist` hash `091ae1eaef6d` — built from `main` at `ce74408`
+(tag `0.18.0`) against `@machafoundation/core` **0.18.0 from the registry**,
+which is what makes it the first deployed artefact not built against a linked
+tree. Backups first on all three at
+`/etc/macha/web.bak-20260921-225245.tar.gz`; rsync additive, no `--delete`,
+24 files and 1,800,061 bytes to each node, written `1000:50` (verified
+numerically with `stat`, not by name — the nodes happen to *name* uid 1000
+`tom` and gid 50 `staff`, which reads like a mistake and is not one).
+
+**Verified served rather than copied:** each node answers
+`index-CKNh5Q9D.js` on `http://127.0.0.1:7438/` with the bundle `200` at the
+full 633,692 bytes, and the CSS and Service Worker `200`; `ramaroja` and
+`macnessa` both serve it too, gzipped to 183,296 bytes. The previous bundle's
+assets are all still in place, and **both bundles reference the same lazy
+`hls-Bt6kO1A0.js` chunk**, so a viewer still running the old page is not
+broken by the swap — which is the thing the additive rule exists to protect,
+and it is worth checking rather than assuming on each deploy.
+
+**Booted once, and the browser check then hit its own confound.** The console
+shows `boot-start`, `platform-detected` and `react-mounted` at 29 ms with the
+read-ahead worker registered at 96 ms and no exception, so the artefact runs.
+After that the tab logged nothing for **101 seconds**, then `route-exhausted`
+and `same-origin-absent`, and the renderer stopped answering CDP entirely.
+That is a frozen background tab rather than a finding: measured independently
+with `curl`, all five hosts answer `/api/v1/health` with
+`{"service":"macha","status":"ok","version":"0.48.2"}` as `application/json`,
+which is exactly what `confirmMachaEndpoint` requires, and that probe aborts
+at 1.5 s against a tab whose timers had stopped.
+
+**Foregrounded check done 2026-09-23 14:30-14:33 UTC, and it closes the
+deploy.** `macnessa` in a Chrome tab with `document.visibilityState` read as
+`visible` and `hasFocus()` true (the first read after navigation said
+`hidden`; the window had to be activated with AppleScript before any of it
+counted). The already-signed-in client mounted at 21 ms, routed three
+attempts to `route-success` inside 700 ms, and every `probe-cycle` from
+14:30:56 to 14:33:28 reported `reachable 3, known 3, decidedBy sticky`,
+captured by wrapping `console.debug` in the page since the extension shows
+the payloads as `Object`. `useNodeIdentity` ran at mount and at 60 s
+intervals, so the cycles at 14:31:55 and 14:32:55 fell between probes that
+counted three on both sides: **no endpoint dropped**. The persisted discovered
+list (`ramaroja`, `10.35.1.50:7438`) was unchanged too. It is the
+configuration where the drop could not happen — same-origin plus two
+discovered, all three nodes in the status snapshot — so it clears the deploy
+rather than exonerating the hook, which is deleted regardless (P1 below).
+
 **All three nodes now serve the develop build with the hot-linked core,
 deployed 2026-09-21 14:37 on Tom's instruction ("they are NOT production").**
 Bundle `index-NDVfpduh.js`, 624,128 bytes, `shasum` `be3dc9c3367a` — identical
@@ -294,8 +414,16 @@ would disagree about the same generation.
 wrong about the resolution three times, which is the failure mode the rest of
 it is about. As this is written, `main` has `@machafoundation/core` as
 `^0.18.0` and installs a real directory from the registry; `develop` has
-`file:../macha-ts` and a symlink to core's working tree. The registry's
-`latest` is **0.18.0**.
+`file:../macha-ts` and a symlink to core's working tree, which is at
+`a3b40ca` (core's own `0.18.0` commit) and therefore the same code the
+registry holds, for now. The registry's `latest` is **0.18.0**.
+
+**The two branches differ in `package.json` and `package-lock.json` by
+design**, so a merge between them touches those files every time. Going to
+`main`: switch to the published version, drop the lockfile's `"link": true`
+entry *and* the `../macha-ts` entry, `npm install`, run the gate. Coming back
+to `develop`: switch to `file:../macha-ts` and `npm install`, which restores
+both lockfile entries on its own.
 
 **Tom's ruling, 2026-09-20 and again 2026-09-21.** A direct link to core's
 tree during development is **fine** — *"we're nowhere near ready to publish
@@ -321,7 +449,8 @@ amended back before it mattered. Concretely, before any merge to `main`:
    suite passed.
 3. `rm -rf node_modules/.vite`, then `npm run typecheck` and `npm test`
    green **against the registry copy**, not against the tree the link
-   pointed at.
+   pointed at. The README states the version under its title (`_vx.y.z_`);
+   a version bump that leaves it behind fails `src/readmeVersion.test.ts`.
 4. Then merge and push — Tom's action, on his request.
 
 **The gate was run for 0.18.0 and it caught something**, which is the
@@ -586,6 +715,94 @@ something outside this repo or needs groundwork before it can start safely.
   they were withdrawn; `2026-09-21-session-handover.md` has the pattern. Write
   "not established" rather than saying it in passing.
 
+## P0 — Artwork loads slowly (business P0, Tom, 2026-09-24)
+
+Tom: "We STILL have slow artwork loading"; "a slow bitrate problem from the
+server, you can see them loading like its the 90s. It's also a caching
+problem I thought we'd solved 20 versions ago." Measured 2026-09-24 from the
+fi-1 site, test account, dev client:
+
+- **A node's first read of a poster is slow; repeats are not.** gbni-1, the
+  same 77 KB poster six times on one connection: first 1,112 ms (first byte
+  550 ms, body ~560 ms, about 1 Mbit/s), then 130-150 ms each. Warm across
+  different posters, gbni-1 answered in 115-310 ms against a 90 ms RTT;
+  fi-1 in 3 ms first byte, ~15 ms total. So "slow bitrate" is the node
+  serving artwork it does not hold hot. Server's to explain (DHT owner read
+  per request? a cold local read?).
+- **The URLs change every UTC day.** `exp` is the next UTC midnight
+  (1790294400000 = 2026-09-25T00:00Z) and every artwork URL carries it, so
+  the browser cache (`public, max-age=86400, immutable`) misses on every
+  poster after midnight UTC, and each first load of the day pays the cold
+  rate above. Signatures are otherwise stable: 2,068 URLs identical across
+  all three nodes and across reads. This is the half of the old caching fix
+  that was never finished.
+- **And each cached poster expires 24 h after it was fetched, with nothing
+  to revalidate against.** Tom: "I see it randomly - I think it's local
+  cache expiry." The headers agree: `max-age=86400` and no `ETag` or
+  `Last-Modified`, so an expired entry cannot be answered with a 304 and is
+  downloaded whole again, at the cold rate. Each poster expires on its own
+  clock, which is why it looks random. Content-addressed artwork could be
+  cached for a year.
+- **Within a day the browser cache holds.** In-app revisit: 0-25 ms per
+  poster; full reload: all 33 visible posters complete as their cards
+  render. Host stays macnessa throughout (core's `ArtworkHostPreference`).
+- **Oversized for the card.** Posters are 500x750 JPEG (68-102 KB) for cards
+  ~150 px wide; no smaller variant exists.
+- **Host choice ignored this viewer's link; fixed in core, verified.**
+  Every poster came from macnessa (https, WAN from here; 636 ms median cold)
+  while fi-1 (LAN, http) serves the same URL in 65 ms. Core now picks the
+  artwork host once per run by health-probe round trip (switching only on a
+  gain of at least 50 ms and 40%), and keeps it sticky. Seen live
+  2026-09-24: the first load moved all 33 visible posters to fi-1 (all done
+  644 ms after the cards rendered, against up to 3.4 s before); a reload kept
+  fi-1 and every poster was ready as its card rendered. On an https page the
+  http nodes are not candidates, so a deployed https client gains only where
+  a nearer https node exists. The https layer on macnessa also adds ~1.5 RTT
+  per request against the node's plain http.
+- **A host that dies silently holds each poster ~15 s.** Core never leads
+  with a host in failure cooldown (`4f50200`), but between a silent death
+  and the health cycle charging it, the loader moves on only at the img's
+  error event. Measured in Chrome 2026-09-24: connection refused errors in
+  19 ms (falls through at once); a silently dropping host errors at 14.7 s.
+  Core charges a silently dead node 8-18 s after it dies (an 8 s probe
+  timeout on a 10 s cycle), and since `75c2d27` `ready` stays false from the
+  first failure until the node answers again, so no new poster leads with it
+  after that. The window is therefore up to ~18 s in which posters on that
+  node hang 14.7 s each. Watching `ready` would gain little and a client
+  time limit would abandon slow but working loads on a weak link, so neither
+  is built; core agrees. Tom's call if the window matters.
+- **The browser cannot measure it.** Artwork responses carry no
+  `Timing-Allow-Origin`, so Resource Timing hides first byte and size for
+  every cross-origin poster. A server header, one line.
+
+**Server 0.54.1 (all nodes 07:36Z 2026-09-24) fixed the caching half, verified
+from here the same morning** on all three nodes over http and on macnessa and
+ramaroja over https: `Cache-Control: public, max-age=2592000, immutable`
+(30 days, tied to the capability), `ETag` = the artwork id, `If-None-Match`
+answered 304 with no body (4 ms on fi-1, one RTT elsewhere),
+`Timing-Allow-Origin: *`. Every URL now carries one `exp`, 2026-11-03T00:00Z,
+39.7 days out, identical across nodes (es-1 lists one extra artwork, no URL
+differs). So a poster is one download per browser per ~30 days. **Seen in
+the browser the same day:** `Timing-Allow-Origin` makes artwork timing
+readable; Movies with everything cached came from fi-1 with no network
+request, 56 ms median per poster, all 30 visible posters complete 56 ms after
+the cards render. On the first visit after the URL change, 18 of 67 posters
+downloaded (84 KB median, 178 ms first byte from fi-1) and the 49 cache hits
+alongside them took ~580 ms, apparently queued behind those downloads rather
+than slow in themselves.
+
+**Still open:** the slow first read (the server's inference: gbni-1 and es-1
+data disks 89-99% busy with torrent and import writes, a poster read queues
+behind that I/O; Tom has put the torrent work ahead of it), and sized
+variants (not started; a feature, Tom's priority call). The https overhead
+through macnessa is a TLS front, not macha's server; what terminates it is
+unknown.
+
+Asked of the server session 2026-09-24 with this evidence: cold-read cost,
+a stable (not daily) capability for immutable content-addressed artwork,
+sized variants, `Timing-Allow-Origin`. Not yet seen: Tom's own view (which
+page origin, which node, time of day).
+
 ## P0 — A scope title plays small in a black window
 
 Evidence, the one-line test that produced it, and where the fix belongs:
@@ -690,13 +907,14 @@ that did everything correctly.**
 *node* never answered; `videoState()` reports `document.hidden` on every
 diagnostic line since 0.17.2.
 
-- [ ] **Instrumentation, not a tenth theory.** The stall produces no error
-      until hls.js escalates, so nothing is captured at the moment it matters.
-      A recorder armed before `src` is set: the element's event sequence,
-      `readyState`/`networkState` sampled per second, hls.js error payloads
-      flattened to text, and whether any request left the page — Resource
-      Timing for same-origin, the worker's own log for proxied. Then the next
-      occurrence is diagnosable rather than re-argued.
+- [x] **Instrumentation, not a tenth theory — built 2026-09-23.** One
+      `source-start-record` at `warn` per start that is slow, failed,
+      abandoned or never shows a frame, armed before `src`, on the element on
+      screen and on every standby: element events, per-second state,
+      fragments asked and got, hls.js errors, and the requests that left the
+      page (observed, because the Resource Timing buffer is full within
+      seconds). Details in `COMPLETED.md`, 2026-09-23. The next occurrence
+      arrives diagnosable.
 - [ ] **A generation that has never produced a byte must not be able to
       charge its node.** The failure that follows the 120 s reclaim is
       reported as evidence against the endpoint today. Decide with core where
@@ -705,261 +923,6 @@ diagnostic line since 0.17.2.
       the sample, the Network panel open, and no automation-driven screenshot
       trusted as evidence of visibility — this project's browser tooling
       forces a render through CDP regardless of page visibility.
-
-## P0 — A pause past the node's idle budget kills the session, and the resume never checks
-
-Reproduced live and verbatim 2026-09-17:
-[a paused session is reaped](2026-09-17-paused-session-reaped.md).
-
-**A measurement is coming from the Android TV RN client, 2026-09-19.** That
-session has implemented the same park-and-reclassify policy against
-`expo-video`, and a long pause is ordinary on a television rather than an edge
-case, so it will provoke this before a desktop can. Two things it has
-undertaken to report: whether its re-attach blank is visible at ten feet, and
-what `session_idle` does to a set actually left paused, and after how long.
-Record whatever arrives as measured **on that platform**, not restated as ours
-— its player cannot keep the buffer and frame through a park, because a player
-in its error state will not resume, so the two clients differ at exactly the
-moment the viewer is looking at the screen.
-
-Two things went the other way in the same exchange and are worth keeping. The
-404 policy — `isHlsSourceNotFound`, `fail-not-found` and the Direct Play
-`notFoundSourceGeneration` latch — is in the deployed bundle
-(`index-NDVfpduh.js`, `develop` after 0.17.3), so a live web client now
-carries it. And "no spinner on parked resume" is
-asserted from this repo's code and has never been watched on a screen.
-
-Pause for thirty minutes or more and press play: the buffer plays out, then
-`Macha endpoint http://10.35.1.50:7438 failed: Failed to fetch`.
-
-`streaming.session_idle_ms` is **1800000 — thirty minutes exactly**, and `fi-1`
-runs the default. On 0.48.2 every node also states
-`transcode_entitlement_idle_ms` 300000, so the transcode slot is released five
-minutes into a pause while the session itself lives thirty; it is the session
-the resume must check, not the slot. The reaper's clock runs from `touched`, which only a request
-refreshes; a paused client fills its bounded forward buffer, stops asking, and
-from then on the clock runs unopposed. **A pause longer than the budget is a
-certainty, not a risk.** A reaped session answers `404 not_found` on both the
-session and the stream routes.
-
-Nothing between the pause and the resume asks the node whether the session is
-still there. `resume()` restarts the parked load and asks the element to play;
-the 404s are retried blind for 62 s, the one permitted hls.js network recovery
-is spent on them, and the node is then failed over for having answered
-honestly — onto the unreachable http LAN address, which is the name the viewer
-is shown. Measured: the session was on `es-1`; the screen blamed `fi-1`.
-
-**There is more cover than the symptom suggests.** Instrumented, the first 404
-reaches the degradation channel **3.7 s before the viewer presses play** — hls.js
-meets the reaped session while topping up its buffer — on top of 62.8 s of
-buffer. Core is already told, on the right channel, at the right moment; it
-answers `alternate-preparation-start`, a standby on another node, purely because
-the kind says `'stream'`. Recovering inside that window is invisible to the
-viewer.
-
-Split with the `Macha Client Core` session 2026-09-17; it owns the core half and
-has confirmed the chain in its own source. Core's sharper statement of it:
-**core has no "regenerate here" verb** — every terminal source error has one
-exit, and that exit starts by condemning the node.
-
-- [x] **Core: a failure kind for "this source is gone"**, not endpoint-retryable,
-      with a regenerate-in-place path. **Shipped in core 0.14.0 and verified in
-      the installed package 2026-09-19:** `degrade()` tests
-      `isMissingSourceFailure` (`kind === 'not-found'`) *before* the
-      endpoint-evidence guard and calls `beginMissingSessionRecovery(error,
-      false)` with the source still playing, "deliberately not gated on paused
-      state". `isEndpointRetryablePlaybackFailure` excludes `not-found`. This
-      client's Direct Play worker and HLS policy both already emit into it.
-      **Not yet watched live:** a pause past thirty minutes recovering without a
-      failure screen, against 0.14.0. That is the only thing keeping this a P0.
-- [x] **This repo, policy layer.** `SOURCE_NOT_FOUND_STATUS` and
-      `isHlsSourceNotFound` beside `isHlsSegmentHold` in `WebHlsPolicy.ts`, the
-      404 excluded from `isHlsNetworkDegradation`, and a `fail-not-found` action
-      that spends no network restart. Tests seen red first — including the
-      inversion of an existing assertion that a 404 *is* degradation evidence.
-      Named for what the node said, not what it means: the adapter cannot tell a
-      reaped session from a fragment past the end of the plan, and must not
-      pretend to.
-- [x] **This repo, the wiring — written and proven live.** `WebPlatform` reports
-      a 404 as `'not-found'` on both channels, on its own degradation latch so an
-      earlier transient error cannot swallow it. Verified against a linked core
-      at `ce8b596`: regenerates on the same node, keeps the position, charges
-      nothing against the endpoint, never goes near a failover. Evidence in the
-      document above.
-- [x] **Gate cleared: `@machafoundation/core@0.13.0` is published and installed.**
-      The tree builds again for the first time since `cc85216` — typecheck clean,
-      **360/360 green**, from a real `node_modules` directory and not a link.
-      Verified through the module system before trusting it:
-      `playbackFailureKindForStatus(404) === 'not-found'` (500 `not-ready`, 503
-      `stream`), `SOURCE_NOT_FOUND_STATUS` 404, `SEGMENT_NOT_READY_STATUS` 500,
-      `BROKEN_GENERATION_STATUS` 503, `SERVER_STARTUP_TIMEOUT_MS` 15000, and
-      `isEndpointRetryablePlaybackFailure` false for the new kind. The local
-      `SERVER_STARTUP_TIMEOUT_MS` copy is deleted and imported from core.
-      **Install trap:** npm's local metadata cache can answer `ETARGET — no
-      matching version found` for a version that is demonstrably on the registry
-      over HTTP. `--prefer-online`, or `npm cache clean --force`. Same shape as
-      the Vite `node_modules/.vite` trap, one layer down.
-- [x] **`fail-not-found` reports without tearing down.** `reportSourceGone`, own
-      latch, wired to three sites: the hls fatal, the Direct Play element error
-      when the worker already reported the source gone for that generation, and
-      the stall once the buffer runs out. Seen red against real core by removing
-      the element-error branch, not merely red against an absent constant —
-      which is what the first red actually was, and would have passed for
-      evidence.
-      **This removes the only thing in this client that ends a dead playback.**
-      Core has taken that obligation and proved it is code: `failTerminal` sets
-      the snapshot's fatal error and the runtime stops the player. The stall
-      report is the *trigger* for core to build, not a backstop; core carries its
-      own deadline bounded by the viewer's remaining media.
-- [x] **This repo, the Direct Play half — the same fault, a different exit.**
-      The worker's `retryableSourceStatus` is `408 || 425 || 429 || >= 500`, so a
-      404 fell through to the success path and the media element was handed the
-      error envelope as though it were media. It raised a generic `MediaError`,
-      which maps to `unsupported`/`media` and never `not-found`, so Direct Play
-      would still have failed terminally after core ships. The worker now
-      reports the failure with its status; the response travels exactly as
-      before, because not splicing an alternate over a 404 is a deliberate older
-      invariant and its test caught an early version of this that broke it.
-      **This is the path the original report's episode actually takes** in
-      Chrome on macOS, so a quiet release would have looked fine.
-- [ ] **The deferral works and makes the stall worse. Tested 2026-09-17 against
-      core `73abbdc`.** A swap finally happened — `replacement-held` ->
-      `source-failure-superseded-by-replacement` -> `replacement-swapped-in`, no
-      failover, no release-unused — and the viewer's picture froze for
-      **12,749 ms**, measured by sampling the element every 250 ms, against the
-      **5.16 s** baseline it was meant to remove.
-      **A held generation produces nothing while it is held.** Inside the stall:
-      manifest 0.55 s, then 2.7 s to the first fragment request, then **9.0 s
-      waiting on that one fragment**. The node starts producing on the first
-      stream request, and holding the replacement is exactly the decision not to
-      make one — so the session sat 28 s having produced nothing and the swap
-      paid the full cold start anyway. The floor cannot fix it: `media-emptied`
-      fires at the swap whatever the runway is, so the remaining 61.5 s was
-      discarded and then the viewer waited for a pipeline nobody had started.
-      Either core warms the replacement (spend the runway making the request
-      that starts production) or it goes back to activating at once and accepts
-      5.16 s. Raised with core; two data points, one per arm, so worth repeating
-      the baseline arm on the same build before anyone commits to a shape.
-      This also answers the look-ahead question: a generation created and left
-      alone has not produced ahead, it has not produced at all.
-- [x] **Preflight budget raised from 5 s to 25 s, derived.** A standby is a
-      freshly created transcode generation and the server's pipeline is lazy —
-      the preflight's own request is what starts production, then waits for it.
-      Measured 9.0 s for that first fragment; the node's own
-      `startup_timeout_ms` is **15 s**, read off `es-1`. So a 5 s gate had been
-      recording healthy-but-starting nodes as unable to serve, and core's
-      `prepareAlternate` discarded and closed the session on that `false` —
-      silently, and worst on the cold, busy or distant nodes a standby exists
-      for. Now `SERVER_STARTUP_TIMEOUT_MS + SERVER_SEGMENT_HOLD_MS + 4_000`,
-      written as the sum it has to exceed rather than a number picked alone.
-      Both tests seen red at 5 s first. Core still has to widen
-      `ALTERNATE_TRANSCODE_RECOVERY_WINDOW_MS` (8 s) or a standby that now
-      passes is still discarded before a cold pipeline could be useful.
-- [x] **The pipeline is NOT lazy. Measured 2026-09-17, premise withdrawn.**
-      `POST /playback/sessions` calls `start_pipeline` and blocks on the first
-      fragment before answering 201 — the node's own journal for trace
-      `c04cacfb`: `first fragment ready elapsed_ms=1924 segments=1`, then
-      `session create complete elapsed_ms=1924`. Client side: create then
-      segment 0 immediately is **0.30 s** with no seek, **0.64 s** with
-      `seek_ms=434000`; and after holding a generation **28 s untouched**,
-      segments 0/5/8/9 all come back in ~0.6 s. A held generation is warm and
-      stays warm. "Holding bought no warmth" was wrong and core had already
-      built on it — corrected there.
-- [ ] **What actually costs the 9.0 s: the look-ahead does not follow the
-      viewer.** Production parks at `highest_requested + max_ahead_segments`, so
-      warming segment 0 buys 0..8 and no more. Same held generation:
-      `segment-000012` -> **500 after 6.27 s**, `segment-000014` -> **500 after
-      7.59 s**, with the node logging `stream refused ... reason=hold_timed_out`
-      for both. A replacement held 28 s has the viewer arriving past the
-      frontier, and the node produces forward to reach them at roughly realtime.
-      **`REPLACEMENT_LEAD_TIME_MS` (30 s) must be compared against the
-      look-ahead**, which on `es-1` is `max_ahead_segments: 8` ×
-      `segment_duration_ms: 4000` = 32 s. Two seconds of margin, and on a node
-      with `max_ahead_segments: 4` the reshape reproduces the bug it fixes.
-      Neither field is on the play session payload; asked the server session
-      for a `look_ahead_ms` rather than hardcoding 8 and 4000.
-- [x] **`stream.look_ahead_ms` shipped in server 0.45.0 and is verified live.**
-      Confirmed end to end by this session on both nodes, because the server
-      session had no credentials to check its own release: `es-1` and `fi-1`
-      both report 0.45.0; a transcode session returns **32000** on each; it
-      survives a `PATCH {"seek_ms":...}` (generation 2, still 32000); and a
-      direct session returns **`null` with the key present**, so
-      `'look_ahead_ms' in stream` is true.
-      **Three states, and they are not interchangeable:** absent means a node
-      too old to say, `null` means direct play with no pipeline and nothing to
-      bound, a number is the answer. Zero would have read as "no look-ahead",
-      which is why the server chose null.
-      **It is a distance from `highest_requested`, not from the start of the
-      generation.** For a freshly created generation `highest_requested` is 0,
-      so the two readings agree perfectly — right up until anything requests a
-      later index, which is when the conflation would bite. The coincidence is
-      strongest exactly where a client is most likely to make the mistake.
-      **Read it per session, never cached against an endpoint.** It is
-      serialised from the live config, so an operator reload can change it
-      mid-session with no `PATCH` to announce it.
-      The 32000 matches what was measured before the field existed — segments
-      0/5/8/9 in ~0.6 s, segment 12 refused after 6.27 s — so eight four-second
-      fragments, arrived at from both directions.
-      **The field would not have prevented our 12.7 s freeze**, and the server's
-      changelog has been corrected to say so. `es-1` sets 8 and 4000 explicitly,
-      so the constant we would have hardcoded was right and the frontier really
-      was 32 s wide; the freeze was holding a generation 28 s and the viewer
-      then arriving past a correctly-read frontier. The field fixes the general
-      case — a differently configured node — which is a different bug from the
-      one we had.
-- [ ] **Do not "walk the frontier" — production is sequential.**
-      `note_requested` raises `highest_requested` with `std::max`, but that moves
-      only the *permission* boundary; the producer still appends strictly in
-      order. Asking for index 20 authorises production to 28 and then makes you
-      wait while 10..19 encode at roughly realtime. Walking one index at a time
-      costs the same wall clock as jumping. The 6.27 s and 7.59 s above were
-      that encoding, not a lookup. **The rule instead:** a fresh generation
-      seeked to the arrival point beats making an existing one encode its way
-      there — **1.92 s** cold start against **~9 s** of catch-up over a 28 s gap.
-      (Corrected 2026-09-17 after telling core the opposite; second wrong
-      instruction sent on this, both withdrawn before anything was built.)
-- [x] **Bound the lead by the look-ahead and warming becomes unnecessary.
-      Done in core 0.14.0.** `replacementLeadTimeMs(lookAheadMs,
-      attemptBudgetMs)` clamps the lead to `min(REPLACEMENT_LEAD_TIME_MS,
-      lookAheadMs - LOOK_AHEAD_MARGIN_MS)` and floors it at the attempt budget,
-      so a replacement is neither created past the frontier nor started with
-      less time than one attempt needs. The reasoning that got there: the viewer
-      arrives at generation-local `L`; if `L <= lookAheadMs - margin` they land
-      inside permission and there is nothing to warm, and if `L` exceeds it
-      warming cannot fix it either because permission caps production. Not yet
-      watched live on a reap.
-- [ ] **Segment duration is already on the wire; only the count is not.**
-      `#EXT-X-TARGETDURATION` and per-fragment `#EXTINF`, plan complete from the
-      first fetch (`#EXT-X-ENDLIST`). Do not multiply a count by a duration, and
-      note the **first fragment of a transcode generation is 2 s by design**,
-      not the configured duration — read the real values.
-- [ ] **Write `hold_timed_out` down as a contract, not an observation.** 500
-      `segment_not_ready`, `Retry-After: 1`, `Cache-Control: no-store`, and
-      never a 404 — the playlist has already promised the object exists and a
-      404 would invite an intermediary to cache the absence. "Held then refused"
-      means the encoder did not reach that index inside the hold window, not
-      that the fragment is missing; retrying is correct and succeeds as
-      production advances. It is the one 5xx that must not read as node
-      ill-health, and it belongs beside `SEGMENT_NOT_READY_STATUS`.
-- [x] **`warmSource` — superseded, not built.** Once the lead is bounded by
-      the look-ahead (above), a replacement created at lead `L` lands inside
-      permission and there is nothing to warm; and if `L` exceeds the frontier,
-      warming cannot help because permission caps production regardless. Core
-      did not add it. If a longer lead is ever wanted deliberately, raising
-      permission early is the one job it would have, and it should be argued
-      for then rather than kept warm here.
-- [ ] **Preflight's failure vocabulary is still thin.** Timeout, 404, empty body
-      and not-applicable all return the same bare `false`. Core does not need
-      causes today; the standby path is the one place "not ready yet" and
-      "refused" genuinely differ, and that is the argument for it whenever it is
-      worth making. Note `!source.isManifest` returns a bare `false` too, so
-      Direct Play reads as *refused* before any request is made — harmless while
-      nothing gates on it, wrong the moment something does.
-- [ ] **`runway-spent` is still unexercised, and may be unreachable here.**
-      hls.js gives up ~28 s after the hold; `maxBufferLength` is 60. Any pause
-      long enough to fill the buffer leaves more runway than hls.js has
-      patience, so the fatal always wins while this adapter escalates it. That
-      raises the stakes on the teardown change below rather than lowering them.
 
 ## P0 — Seek misbehaviour: the node now does what it is told, and this client's clock does not follow
 
@@ -1218,10 +1181,13 @@ relied on it.
       The arithmetic closes end to end: generation origin 1,532,781 + element
       duration 1,173,555 = **2,706,336 ms**, exactly the scrubber's maximum.
 
-      **Not covered:** the `relocate` seek path. A synthetic scrubber commit did
-      not start a negotiation, and it was not worth fighting the UI for — a seek
-      reaches the same branch by the same call site, so this is confirmatory
-      rather than new. Worth doing by hand next time the player is open.
+      **The `relocate` seek path, verified live 2026-09-23**, remux from fi-1,
+      scrubber click: seek to 3,333,000 ms, the node started the generation on
+      the keyframe at 3,330,473, the client was handed local 2,527 ms,
+      `relocation-hold-begin` then `media-seeked currentTime=2.527` then
+      `relocation-hold-complete`. The pre-roll was not presented, and the
+      readout (55:45) equals generation start plus element time (3,330.473 +
+      14.72 s), so no constant offset.
 
       **Noticed, not diagnosed, and not this repo's:** the generation was
       `transcode` yet carried a 3,330.9 ms offset. Under the 0.46.0 contract
@@ -1279,6 +1245,33 @@ relied on it.
       repo resolves.
 - [ ] Take the per-track buffer and `getVideoPlaybackQuality()` reading for the
       audio-without-video freeze. The server session is holding for it.
+      **The recorder is built, 2026-09-23; the reading itself is still owed.**
+      `WebMediaDiagnostics` now reports `media-picture-stopped` (warn) when
+      `totalVideoFrames` holds for 1.5 s while `currentTime` advances, and
+      `media-picture-resumed` when frames move again. Both carry each track's
+      `SourceBuffer` ranges (`trackBuffered`, from hls.js's `BUFFER_CREATED`)
+      and the frame counters. So the next freeze reads itself: a video track
+      with nothing at the playhead is a node still producing, a video track
+      holding the playhead with frames frozen is the decoder. Never judged on
+      a paused, seeking or hidden page, or on a clock that stopped (that is
+      the watchdog's). Decoder state is now per element: it was one shared
+      record, so during a handover the two elements' counters were compared
+      with each other and a freeze on the outgoing one could not be seen, and
+      the audio-stopped check had the same fault. Every guard seen red.
+      **Wired and seen live, 2026-09-23**, remux from es-1 in a foregrounded
+      tab: holding `getVideoPlaybackQuality` constant for 4 s on the playing
+      element gave `media-picture-stopped` at `frozenForMs` 1,594 (clock 1,860
+      ms on, frames held at 700), then `media-picture-resumed` at 3,719 ms,
+      each carrying real ranges. **The buffer is one `audiovideo`
+      SourceBuffer, not two**: the node muxes audio and video into one
+      rendition, so MSE holds no per-track ranges to read. The reading still
+      separates the candidates, because a muxed buffer's range is where
+      *both* tracks have data: a range covering the playhead through a freeze
+      means the video data is there (the decoder), a gap at the playhead
+      while sound plays means it is not (production). The decoded byte
+      counters in the same line say which decoder stopped. No false report
+      across a seek and a relocation hold. The reading itself still waits for
+      a real freeze.
 - [x] Adopt `PlaybackSource.budgets` — done 2026-09-20, shipped in 0.17.3,
       recorded in `COMPLETED.md`. **Unverified live:** both nodes state the
       figures the constants were derived from (`startup_timeout_ms` 15000,
@@ -1286,7 +1279,21 @@ relied on it.
       indistinguishable from the old behaviour at runtime. A node configured
       differently is what proves it.
 
-## P0 — A transcode handover can never reach its join, waits 25 s, then rewinds the viewer
+## P0 — A handover with no lead cannot win its join, and the picture freezes
+
+**Where it stands, 2026-09-23.** A join is won whenever the new generation
+starts ahead of the viewer: both led node moves (6.4 s and 24.6 s leads) and
+the reap rebuild at its lead time completed seamlessly, with no stall in
+hundreds of 100 ms samples. What still loses is a switch with no lead: the
+first move of a page to a node, and a mode switch or relocation that asks for
+the viewer's own position. On a slow link that is `join-receding-faster-than-
+it-fills`, a relocation hold that freezes 15-19 s, then a fresh start. It no
+longer rewinds the viewer (fixed 2026-09-21). The remaining work is leading
+those other callers too, which needs the lead to come from somewhere for a
+node never measured (see the P1 on moves to a node this link cannot carry).
+
+The original report, 2026-09-20:
+
 
 **Measured 2026-09-20, foregrounded, on the live cluster.** Reported by Tom as
 "problems starting media from a position that isn't zero — sometimes it works,
@@ -1329,7 +1336,7 @@ on the title and the node, which is exactly why it reads as intermittent.
 This is the same fact as *"do not walk the frontier — production is
 sequential"* and *"a fresh generation seeked to the arrival point beats making
 an existing one encode its way there — 1.92 s cold start against ~9 s of
-catch-up"*, recorded under the pause P0. Nobody had connected it to the
+catch-up"*, recorded under the pause P0 (now in `COMPLETED.md`, 2026-09-23). Nobody had connected it to the
 handover path.
 
 **The fallback is worse than the delay.** After abandoning, `play()` falls
@@ -1534,12 +1541,12 @@ Both items are core's, and neither has a client workaround worth building:
       **Checked 2026-09-20, and the client half was not done:** the failure
       screen rendered `fatalError.message` and nothing else, so everything core
       chained beneath it was thrown away on the floor. `failureCauseMessages`
-      now walks the chain and the screen reads it out under the head, quieter.
-      Only `Error` causes are followed — a `PlaybackSourceError` carries an
-      hls.js payload in `cause` and that is evidence for a log, not a sentence
-      for a viewer — and the walk is cycle-safe, because a viewer waiting on a
-      hung failure screen is worse off than one told less. Seen failing first
-      against a stub that says nothing, which is what the screen did.
+      then walked the chain and read it out under the head, quieter — and
+      **was itself replaced on 2026-09-23** by core's `playbackFailureDetail`,
+      which carries the server's sentence from whichever layer knew it rather
+      than reading `.message` off each layer (core's README: never render
+      `.message`, never reconstruct it). The chain is still in the opt-in
+      failure trail.
 
       **Not verified live**, and the thing it is for cannot be produced without
       the failover it belongs to: what a run should show is both sentences at
@@ -1553,53 +1560,48 @@ which needs a node stopped at the right moment; the re-arm is unit-covered.
 The "Pause: confirmed not applicable" note under any-node failover below was
 right that pause makes no server call and wrong about the conclusion.
 
-## P1 — Delete `useNodeIdentity`, and wire `selectNode` to core's `moveTo`
+## P1 — A reclaimed direct session is reported as an unsupported format
 
-Two follow-ons to the node selector shipped in 0.18.0, both unblocked by core
-work that has already landed, neither started.
+Seen 2026-09-23, direct Matroska from fi-1, while the tab was hidden. The
+start record read `no-first-frame` after 121,087 ms, **zero requests**, every
+sample `hidden`; the node reclaimed the session at about 120 s (the client's
+DELETE got 404). When the tab came forward the element failed with
+`MEDIA_ELEMENT_ERROR: Format error` on `__macha_direct_cache__`, and the
+client made that `PlaybackSourceError: Web media source is unsupported`,
+terminal, with the failure screen. The format was fine: the same title played
+direct from macnessa on reload. So a session that is gone is named as a codec
+fault, and nothing tries to rebuild it. Two things to settle: what the
+direct read-ahead cache serves once its session is gone (the format error
+is presumably its response, not the media), and whether a hidden start
+should hold off rather than let the reclaim run out. Tom, 2026-09-23: "this
+is a problem in itself".
 
-**`useNodeIdentity` must go, and not only because core does its job now.** It
-teaches the registry which endpoints are one node by calling
-`registry.applyAdvertisement()` with the URLs that match each node in
-`/api/v1/status`. Read core's method rather than its name (`EndpointRegistry.ts:454`):
-`applyAdvertisement` keeps configured endpoints and **rebuilds the discovered
-list from the advertisement alone** — any discovered endpoint the call does not
-name is dropped. So on any cycle where the status snapshot lacks a node, or a
-discovered endpoint matches neither a node's `api_endpoint` origin nor its
-`host:port`, this hook deletes it. Core hit exactly this in its own health
-monitor — `76d94ba`, *"identity is not membership"*: a three-node cluster
-collapsing to one on the cycle after discovery, found from a television
-signing itself out — and now claims identity with `claimNodeId(baseUrl,
-nodeId)`, which attaches an id and changes nothing else. Core's monitor also
-asks every unclaimed endpoint for its `node_id` directly, so the LAN address a
-viewer typed is identified without this client's help. The 0.18.0 changelog
-says the hook "invents nothing", which is true and is the wrong axis: it did
-not consider what the membership call removes. Nothing in front of a viewer
-carries it — 0.18.0 is deployed nowhere.
+**Mechanism found and fixed 2026-09-24; unit-tested, not yet seen live.**
+Not the worker losing its configuration on a restart: the proxy URL carries
+source, size and mime, and a restarted worker rebuilds from it. It is a
+race. The worker hands the element the node's 404 and posts its
+"source gone" report separately, after an await; the element's `error`
+handler judged terminal unless that report had already landed
+(`notFoundSourceGeneration`), and nothing ordered the two. The trail fits:
+`media-error`, terminal, DELETE, and no `source-degraded`. Now the worker
+records the status before returning the response and answers a
+`macha-direct-read-ahead-status` query, and the element error handler for a
+read-ahead source asks it (1 s budget) before judging, so a 404 becomes
+`not-found` (re-create) whichever arrives first. Seen red first in both
+halves: the player test read `unsupported`, the worker test had no answer.
+**Live run 2026-09-24:** direct play from the worker, the session deleted on
+the node from the page (204), then a seek from 56 min to 100 min. The worker
+reported the 404 (`source-degraded`, status 404), the element's error became
+`source-gone` rather than `unsupported`, the client re-created the session in
+direct mode and was playing at 100:21 with no failure screen. In that run the
+worker's report beat the element's error, so it exercised the existing path;
+the reverse order, which is the one this fix is for, is unit-tested only. **Still open:** whether a start in a hidden
+tab should hold off rather than let the node's 120 s reclaim run out.
 
-- [ ] Delete `useNodeIdentity`, `nodeAdvertisements.ts` and their tests. Keep
-      `preferredEndpointForNode`, which exists because a viewer picks a *node*
-      and `prefer()` names an *endpoint*.
-- [ ] Verify the grouping still holds against core at or past `76d94ba`: the
-      player's node pills show three nodes for five endpoints (three configured
-      addresses, two discovered names). The "five to three" seen on 2026-09-21
-      was with both mechanisms running and does not separate them.
-- [ ] **Wire `selectNode` to `moveTo`.** `PlayerScreen.selectNode` pins the
-      choice through `prefer()` and calls `runtime.play({media,
-      startPositionMs})`, which closes the old generation before starting the
-      new one: **13.2 s of black**, measured (2:11.795 on `fi-1` to 2:12.197 on
-      `gbni-1`). Core's `PlaybackCoordinator.moveTo(endpointId)`
-      (`:1522`) builds on the new node, promotes, then releases. A session is
-      permanently bound to the node that created it — the session map is
-      in-process and node-local — so that is the only shape a move can take,
-      and because the account cap is counted per node, holding both briefly
-      costs nothing against it. Keep `prefer()` for the ordering, call
-      `moveTo` for the move, and measure the same switch: the target is no
-      black and no lost position.
-- [ ] Core's `playbackFailureDetail(error)` replaces the failure screen's own
-      `failureCauseMessages` walk. Core's README states the rule every host
-      needs: never render `.message`, never reconstruct the sentence by
-      stripping prefixes, and `undefined` means write your own. Same sitting.
+The same run also hit the mode-switch P1 below: a direct-to-remux press on
+macnessa (across the WAN from here) stalled at 9.81 s, was read terminal
+after 7 s of nothing, failed over, overran the 19 s attempt budget on fi-1,
+and landed on es-1.
 
 ## P1 — A mode switch negotiates from a stale position, and 7 s of nothing-arrived is read as terminal
 
@@ -1834,7 +1836,7 @@ than a boolean saying bytes arrived.
       away stays as the recovery budget. Core took the obligation to end a dead
       playback (`failTerminal` sets the fatal error and the runtime stops the
       player), which answers the question of what the viewer is told when no
-      replacement comes. Recorded in the pause P0's task list with its evidence.
+      replacement comes. Recorded in the pause P0's task list with its evidence (now in `COMPLETED.md`, 2026-09-23).
 - [x] **Core is blind to Direct Play cover — fixed 2026-09-20.** `publish()`
       now emits `readAheadBytes` from the worker's `aheadBytes`, which is
       measured beyond `lastServedOffset` and so matches core's contract of
@@ -2148,11 +2150,17 @@ renamed or removed symbols. That is *compiles and passes*, which is not the
 same as ported, and the distinction is deliberate: two things are still
 untouched.
 
-- [ ] `AccountMenu.tsx:55` still calls `await api.logout()`. It should call
-      `sessionManager.signOut()`, which revokes server-side and does not mint a
-      replacement, then `sessionManager.start(registry)` **only if** that screen
-      actually wants a session afterwards. This is the change held back until
-      core stated the composition; core has now stated it.
+- [x] **Done 2026-09-24 evening, unit-tested, not yet run live.** Log out
+      now stops playback and waits for it (`playback.stop` returns the
+      runtime's promise), then calls `useSession().signOut`, which is core's
+      `signOut()` (clears local state first, then revokes) followed by
+      `start(registry)`. It always starts again, so the app learns what an
+      anonymous viewer may do: browse, or the login wall. A revoke that fails
+      still leaves this device signed out, and an app-wide notice says the
+      session stays valid at the server. `AccountMenu` no longer takes the
+      users API. Tests: the revoke carries the old token, and nothing after
+      it does; a failed revoke still restarts and rejects; the menu calls the
+      app's sign-out only once confirmed. All seen red under mutation.
 - [ ] `lastIdentityChange` (`{ from?, to?, at }`) is subscribed nowhere.
 
 **Why this is not a mechanical swap, measured on this cluster 2026-09-13.**
@@ -2187,11 +2195,12 @@ this; this client does not.
 `sessionStorage` and is carried on every subsequent request until a later 401
 forces a re-mint.
 
-- [ ] Change to the ruled composition. Core will state it on the API surface
-      first — on the `UsersApi.logout` and `SessionManager.signOut` doc
-      comments, which is where all four clients read it. The conditional half
-      — mint anonymous only when one is needed, not always — is the part that
-      is easy to get wrong.
+- [x] Changed to the ruled composition 2026-09-24; see the item above. The
+      "only when needed" half: this client always needs a session afterwards
+      (every screen reads through one, and the anonymous account's roles
+      decide between browsing and the login wall), so it always starts again.
+      Owed: one live sign-out, confirming a DELETE with the old token and no
+      request carrying it afterwards.
 
 **A related core defect, open, and explicitly not to be worked around here.**
 Raised by the `@machafoundation/core` session 2026-09-13: `SessionManager`
@@ -2319,8 +2328,8 @@ how it was measured; this is only what is left to confirm.
       against an account holding `manage_users`.
 - [ ] **The node pills on a remote.** New focusable controls in the player's
       options panel (0.18.0), grouped and sorted; the D-pad must reach them
-      and a press must state the preference. Never opened on a set, and
-      0.18.0 is deployed nowhere.
+      and a press must state the preference. Never opened on a set; deployed
+      since 2026-09-21.
 
 ## P1 — The MPEG-TS preference is asserted, not gated
 
@@ -2846,6 +2855,38 @@ nothing; a derived one states its relationship. Core's replacement asserts the
 number, so it cannot drift back. Do the same here for anything that survives
 the swap.
 
+- [ ] **Blocked on the web, found 2026-09-23.** Core's walk marks every
+      request uncacheable with `Cache-Control` and `Pragma`, and the nodes
+      allow only `Authorization, Content-Type, If-Match, Range` cross-origin,
+      so a browser blocks those requests outright (`TypeError: Failed to
+      fetch`, proven on a live manifest URL). This client's probes pass
+      because they use `cache: 'no-store'` and only `Range`. Core keeps the
+      headers because the fetch option rewrites signed URLs on React Native
+      and is dropped on Tizen 3, and the host fetch override it briefly had
+      was removed the same day with the one-byte start-cost probe. Swapping
+      today would break the standby preflight and readiness probe on the web.
+      Needs either the nodes to allow those two headers, or core to take a
+      host fetch for the walk again.
+- [x] **Zero-byte checks go, this client's included — Tom, 2026-09-23:**
+      "Zero byte check is a hack and we're not doing it. If you've a better
+      idea, talk to core." `probeFirstFragment` / `awaitNativeHlsFirstFragment`
+      (the native-HLS path, the Samsung build) are a `bytes=0-0` probe and are
+      to be deleted. Proposed to core the same day: read readiness from the
+      session route instead, where from server 0.47.0 `stream.production`
+      `produced_ms > 0` says the first segment is published (segments are
+      published whole); absent means cannot say, hand the source over as
+      before. **Done 2026-09-23 against core `3e611b8`:** the web player
+      declares `needsProducedSource` on the native-HLS path only, core holds
+      such a source back until the session route reports `produced_ms > 0`
+      (published whole, so never early; the create response carries the
+      first reading), and `probeFirstFragment`, `awaitNativeHlsFirstFragment`
+      and their constants and tests are deleted. Unit-tested; **not yet seen
+      on the Samsung set**, where the evidence is a `source-produced-wait`
+      line reading `produced`, the create-to-hand-over time, and the element
+      starting clean on its first segment. Needs Tom at the television.
+      **The standby preflight stays** (Tom, 2026-09-23): "it is reasonable to
+      request initial media from a node you're about to failover to." Its
+      `bytes=0-65535` read is real media from the node about to serve.
 - [ ] Swap both implementations, run the suite, and confirm the two changed
       behaviours **by test rather than by reading** before deleting anything.
       `Player.preflightSource` stays the seam the coordinator drives, and core
@@ -2935,6 +2976,67 @@ core wrote that, and every node in the field sends `resource_limit` bare.
       no symptom. The 32-per-node cap is comfortably above the twelve this
       repo's failover measurements produced, and it is reachable on these
       nodes.
+
+## P1 — Choose the node a torrent downloads to
+
+**Tom asked for this through the `Macha Server` session, 2026-09-21. The API
+is built and unreleased**; that session will say when it deploys and in which
+version. Contract feedback was sent the same night and is summarised below
+with what was measured to produce it.
+
+**The contract.** `POST /api/v1/torrents/jobs` takes an optional `node_id`
+(32 hex characters) beside `magnet` or `acquisition_ref`. Omitted or null
+keeps today's behaviour — the job runs on whichever node served the request.
+The `202` now **always** carries `{id, node_id}`, including when no node was
+asked for. `400 bad_request` is a malformed id; `409 placement_failed` is a
+node that is not an active member or is unreachable, with the message saying
+which. It is never quietly downloaded somewhere else, so a 409 means nothing
+started.
+
+**Most of the display already exists.** `TorrentJobCard`'s detail pane has a
+`Node` row rendering `job.node_id` (`IngestScreen.tsx:236`), and
+`GET /api/v1/torrents/jobs` already returns the field per job, so showing
+placement needs no new call.
+
+- [ ] **A node control on the magnet form**, in this client's existing idiom:
+      the same grouping and labelling the player's node pills use, plus an
+      explicit "any node" that sends no `node_id`. Not a silent default —
+      the operator should be able to see which they chose. Every control
+      needs `data-tv-focusable="true"`.
+- [ ] **Show what the choice costs.** The nodes are deliberately unequal and
+      the server session put a number on it: a download on the four-core,
+      4 GB, spinning-disk box takes it to load 13 while the other two idle.
+      `/api/v1/status` already carries `runtime.load1`,
+      `process_cpu_percent` and `storage` per node, and this client already
+      fetches it. Showing load and free space beside each choice is the
+      difference between a control and a guess.
+- [ ] **Render `409 placement_failed` as its own sentence**, distinct from
+      `400`. One is this client's bug and one is a fact about the cluster,
+      and the viewer can act on only the second.
+- [x] **The `Node` row's fixture was lying.** It said `gbni-2`; no server has
+      ever sent that. A real id is 32 hex characters, so the row an operator
+      reads today says `855716bd8bb0ad12b0c4f876386699de`. Fixture and
+      assertion corrected to a real id, which is what makes the naming
+      problem below visible in the suite rather than only on a screen.
+- [ ] **Blocked on the server, and asked for:** a human `name` on each
+      `nodes[]` entry of `/api/v1/status`. There is none today, and the only
+      human-ish label, `host`, is inconsistent across this cluster — two
+      nodes report public DNS names and the third its machine name — as well
+      as being the RPC bind address rather than an identity (see the identity
+      P2 below). Until it lands, label a node by a short id prefix and say so;
+      do not invent a name from `host`.
+
+**Two questions are open with the server session.** Whether a node reporting
+`hosts_extents: false` can accept a torrent job at all — `corvus-fi-1` reports
+exactly that on the live cluster — because if it can and the data then lands
+elsewhere, the guarantee that makes this contract worth building is broken.
+And whether `node_id` is accepted exactly as status reports `id`, since this
+client will pass it straight through without normalising.
+
+**Not built ahead of the deployment, deliberately.** The contract may still
+move — this client has asked for one change to it — and building against a
+contract that then moves is how the fixtures in this repo came to describe a
+wire nobody serves.
 
 ## P1 — Android TV: what is still unverified on the set
 
@@ -3046,9 +3148,59 @@ input they are most likely to reach for first.
 
 Revealing the chrome on movement is probably right rather than only restoring
 the cursor, since that is what the hidden state is paired with — but a pointer
-that moves must at minimum become visible again. Worth checking the mini player
+that moves must at minimum become visible again.
+
+**Fixed 2026-09-24, unit-tested, not yet seen by hand.** A pointer handler had
+since been added, but it reveals the chrome only when the pointer is over the
+control bar, and the cursor still shared the chrome's flag, so movement
+anywhere else left it hidden. The cursor now answers to the pointer alone
+(`usePointerIdle`): any movement shows it, and it hides again after the
+chrome's own 3 s delay without movement. The chrome keeps its rules. Owed: a
+look in fullscreen on a desktop. Worth checking the mini player
 and the non-fullscreen page at the same time, since the class is gated on
 `fullscreen` and the behaviour should not differ in a way nobody chose.
+
+## P1 — A move to a node this viewer's link cannot carry
+
+The node move works (see `COMPLETED.md`, 2026-09-23). Two things are left,
+both measured, neither this client's to build.
+
+- [ ] **Decline, with a reason, a move to a node that cannot sustain the
+      stream from here.** gbni-1 from this client's fi-1 site opened at
+      0.26-0.57 MB/s against a 0.63 MB/s stream, then ran at about 1.6 MB/s.
+      Core now has fragment-level throughput per node (this client feeds it)
+      and the session bitrate, and has agreed to build the decline once the
+      rate has more than a handful of media samples. The lead stays this
+      viewer's measurement, because a steady-state rate passes where the cold
+      opening loses.
+- [ ] **The first move of a page to a node is unled.** Neither side has a
+      measurement yet, so it behaves as before: a race the handover loses on
+      a slow link, and a ~15 s freeze. Core has asked the server what it can
+      state about a node's start cost without a stream request; the
+      one-byte probe is ruled out (Tom, 2026-09-23).
+
+## P2 — Pause follow-ups that survived the reap run
+
+The pause P0 is closed (`COMPLETED.md`, 2026-09-23). Two small things and two
+rules came out of it.
+
+- [ ] **Write `hold_timed_out` down as a contract, beside
+      `SEGMENT_NOT_READY_STATUS`.** `500 segment_not_ready`, `Retry-After: 1`,
+      `Cache-Control: no-store`, never a `404`: the encoder did not reach
+      that index inside the hold window, and retrying is correct. It is the
+      one 5xx that must not read as node ill-health.
+- [ ] **The standby preflight's failure vocabulary is thin.** Timeout, `404`,
+      empty body and not-applicable all return a bare `false`, and
+      `!source.isManifest` reads as *refused* before any request is made.
+      Harmless while nothing gates on the cause; wrong the moment something
+      does.
+
+Rules, not tasks: **production is sequential**, so asking a node for a
+distant fragment authorises production and then waits while everything
+before it is encoded; a fresh generation at the arrival point beats making
+an existing one encode its way there. And **segment durations are on the
+wire** (`#EXT-X-TARGETDURATION`, per-fragment `#EXTINF`; a transcode's first
+fragment is 2 s by design): read them, never multiply a count by a guess.
 
 ## P2 — 40% of artwork is unreachable when one of three nodes is down (server's; watch only)
 
@@ -3185,10 +3337,10 @@ the server's replacement of those two is safe here; discovery is core's alone.
 ## P2 — Repo conventions
 
 Tom set these 2026-09-13 and asked every session be told. The dated branch
-bookkeeping that used to sit here is gone: `0.17.3` is the last tag, `develop`
-is the working branch, and as of 2026-09-21 `main` is at `2b1bbaa` (0.17.3
-plus one records commit) with `develop` six commits ahead of it and linked to
-core.
+bookkeeping that used to sit here is gone: `0.18.0` is the last tag, on
+`main` at `ce74408`; `develop` is the working branch, a few commits ahead
+with the core link in it, and the two differ in `package.json` and the
+lockfile by design (see the core section).
 
 - Work happens on a long-lived **`develop`**; releases are tags on `main`,
   with a merge commit on `main` named for the version.

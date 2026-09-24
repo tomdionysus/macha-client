@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  errorMessage,
   routes,
   USER_ROLES,
   type CurrentSession,
@@ -12,6 +11,7 @@ import {
 import { useAsync } from '../hooks/useAsync';
 import { ErrorMessage, Loading } from '../components/Status';
 import { presentedTime } from '../diagnostics/timestamps';
+import { viewerErrorText } from '../text/viewerText';
 
 const ROLE_LABELS: Record<UserRole, string> = {
   media_viewer: 'View media',
@@ -124,7 +124,7 @@ export function ChangePasswordScreen({ api, policy, onChanged }: {
       setDone(true);
       onChanged();
     } catch (cause) {
-      setError(errorMessage(cause));
+      setError(viewerErrorText(cause));
     } finally {
       setBusy(false);
     }

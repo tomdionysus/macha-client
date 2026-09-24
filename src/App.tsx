@@ -6,6 +6,7 @@ import { AppLogo } from './components/AppLogo';
 import { MusicNav } from './components/MusicNav';
 import { StatusNav } from './components/StatusNav';
 import { ManageNav } from './components/ManageNav';
+import { ImportNav } from './components/ImportNav';
 import { machaLogoUrl as logoUrl } from './uiAssets';
 import { useTvNavigation } from './hooks/useTvNavigation';
 import { useEndpointHealthMonitor } from './cluster/useEndpointHealthMonitor';
@@ -14,7 +15,8 @@ import { samsungBackTarget } from './platform/samsungBackNavigation';
 import type { Platform } from '@machafoundation/core';
 import { buildPlatformTraits, isTvBuild } from './platform/traits';
 import type { PlaybackResolver } from '@machafoundation/core';
-import { reportClusterReachable, SERVER_REACHABLE_EVENT, SERVER_UNREACHABLE_EVENT, SERVER_UNREACHABLE_MESSAGE } from '@machafoundation/core';
+import { reportClusterReachable, SERVER_REACHABLE_EVENT, SERVER_UNREACHABLE_EVENT } from '@machafoundation/core';
+import { SERVER_UNREACHABLE_TEXT, SIGN_OUT_UNCONFIRMED_TEXT } from './text/viewerText';
 import type { Episode, MediaSummary, PlaybackProgress, SeasonSummary } from '@machafoundation/core';
 import { ContinueWatchingStore } from '@machafoundation/core';
 import { hasRole, sessionManager, sessionPermits, type UserRole } from '@machafoundation/core';
@@ -48,22 +50,23 @@ import { SettingsScreen } from './screens/SettingsScreen';
 import { SponsorScreen } from './screens/SponsorScreen';
 import { MetadataEditorScreen } from './screens/MetadataEditorScreen';
 import { IngestScreen } from './screens/IngestScreen';
-import { ManageScreen, type ManageSection } from './screens/ManageScreen';
+import { TorrentDetailScreen } from './screens/TorrentDetailScreen';
+import { ManageScreen, UnmatchedFilePage, type ManageSection } from './screens/ManageScreen';
 import { NodeStatusScreen, StatusScreen } from './screens/StatusScreen';
 import { pathForMedia, routes } from '@machafoundation/core';
 import { playerRouteItemId } from '@machafoundation/core';
 import { useMachaServices } from './app/useMachaServices';
 import { useSession } from './app/useSession';
-import { EndpointRegistry, bootstrapEndpoints as bootstrapClusterEndpoints } from '@machafoundation/core';
+import { EndpointRegistry, seedEndpoints } from '@machafoundation/core';
 import { preferredEndpointForNode } from './cluster/preferredEndpoint';
 import { lockoutNotice, lockoutReason } from './app/lockoutNotice';
 import { useEndpointCandidates } from './cluster/useEndpointCandidates';
-import { useNodeIdentity } from './cluster/useNodeIdentity';
-import { setDirectPlayTransferListener } from './playback/directPlayReadAhead';
+import { setMediaTransferListener } from './playback/directPlayReadAhead';
 import { Loading } from './components/Status';
 import { useMediaRouteBack } from './app/useMediaRouteBack';
 import { useMusicController } from './app/useMusicController';
 import { usePlaybackRuntime } from './app/usePlaybackRuntime';
+import { measureStartCosts } from './playback/nodeStartCosts';
 import { usePlaybackController } from './app/usePlaybackController';
 import { technicalProfileFromCatalogue, type PlaybackPolicyOverrides } from '@machafoundation/core';
 import { ConnectionGateScreen } from './screens/ConnectionGateScreen';
@@ -324,27 +327,27 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
   const volumeStore = useMemo(() => new VolumeStore(clientId), [clientId]);
   const endpointKey = effectiveEndpoints.join('\n');
   const endpointRegistry = useMemo(
-    () => new EndpointRegistry([
-      ...bootstrapClusterEndpoints(bootstrapEndpoints),
-      // A Macha node confirmed on this page's own origin. Seeded the way
-      // discovered membership is, because that is what it is — derived rather
-      // than configured, and never written where configuration is read from.
-      // It exists only while nothing is configured, so it can never outrank an
+    () => new EndpointRegistry(seedEndpoints({
+      configured: bootstrapEndpoints,
+      // A Macha node confirmed on this page's own origin: derived rather than
+      // configured, and never written where configuration is read from. It
+      // exists only while nothing is configured, so it can never outrank an
       // endpoint a viewer typed.
-      ...bootstrapClusterEndpoints(sameOrigin.endpoint ? [sameOrigin.endpoint] : [], 'environment'),
-      // Runtime-discovered membership confirmed reachable in a previous
-      // session — never user configuration (`docs/server-api.md`), so it's
-      // seeded after the real bootstrap seeds and dropped on any conflict by
-      // the registry's own dedup. Gives a reload somewhere to fall back to
-      // if the single configured endpoint happens to be down at that exact
-      // moment; the next successful discovery cycle supersedes it either way.
-      ...bootstrapClusterEndpoints(getDiscoveredEndpoints(), 'environment'),
-      // Wall-clock, so the timestamps the registry stamps on health — last
-      // success, last failure — are readable as dates on the Status screen.
-      // Nothing outside the registry compares against its *durations* any
-      // more: `EndpointCandidate.ready` answers "is this endpoint out of
-      // cooldown" from inside, against whatever clock it actually holds.
-    ], Date.now),
+      environment: sameOrigin.endpoint ? [sameOrigin.endpoint] : [],
+      // Membership confirmed reachable in a previous run, so a reload has
+      // somewhere to go if the configured endpoint is down at that moment.
+      // Core seeds it as discovered, which is what keeps it remembered: the
+      // health cycle rewrites the remembered list from discovered entries
+      // alone, and this client used to seed it as environment, which wiped
+      // it on the first cycle after every load.
+      remembered: getDiscoveredEndpoints(),
+    }),
+    // Wall-clock, so the timestamps the registry stamps on health — last
+    // success, last failure — are readable as dates on the Status screen.
+    // Nothing outside the registry compares against its *durations* any
+    // more: `EndpointCandidate.ready` answers "is this endpoint out of
+    // cooldown" from inside, against whatever clock it actually holds.
+    Date.now),
     [endpointKey],
   );
   const endpointCandidates = useEndpointCandidates(endpointRegistry);
@@ -362,6 +365,7 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
     (endpointIds: readonly string[]) => {
       const endpointId = preferredEndpointForNode(endpointRegistry.candidates(), endpointIds);
       if (endpointId !== undefined) endpointRegistry.prefer(endpointId);
+      return endpointId;
     },
     [endpointRegistry],
   );
@@ -384,12 +388,12 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
    * throughput evidence such a session will ever produce.
    */
   useEffect(() => {
-    setDirectPlayTransferListener(
+    setMediaTransferListener(
       (url, bytes, durationMs) => endpointRegistry.recordTransferByUrl(url, bytes, durationMs),
     );
-    return () => setDirectPlayTransferListener(undefined);
+    return () => setMediaTransferListener(undefined);
   }, [endpointRegistry]);
-  const { auth, ready: sessionReady, roles, mintFailure } = useSession({
+  const { auth, ready: sessionReady, roles, mintFailure, signOut: endSession } = useSession({
     connectionRequired,
     serverConfigured: effectiveEndpoints.length > 0,
     endpointRegistry,
@@ -407,9 +411,6 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
     managementAvailable,
   } = useMachaServices({ endpointRegistry, auth, apiOverride, playbackOverride });
   useEndpointHealthMonitor(endpointRegistry, clusterStatusApi, auth, connectionRequired && effectiveEndpoints.length > 0 && !effectiveConnectionGate);
-  // Same condition, different question: the health loop asks how the nodes
-  // are, this asks which endpoints are the same node.
-  useNodeIdentity(endpointRegistry, clusterStatusApi, auth, connectionRequired && effectiveEndpoints.length > 0 && !effectiveConnectionGate);
   // Not before the session has settled. `SessionManager.fetch` retries a 401
   // only when it actually sent a token, so a whoami that goes out during the
   // cold-start mint is answered 401, returned as-is, and the roles are never
@@ -455,6 +456,8 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
   // there is nothing there to show rather than something to reveal. `hasRole`
   // is the strict test — `undefined` is false — which is exactly that.
   const usersAvailable = hasRole(roles, 'manage_users');
+  // The server asks `manager` of every change under /api/v1/manage: the
+  // library's matches and files, and a node's identity association on Status.
   const libraryManagementAvailable = managementAvailable && permits('manager');
   const mediaAvailable = permits('media_viewer');
   /**
@@ -465,7 +468,7 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
    * pointing it at the section root would bounce it to Settings, which is the
    * section it could not use rather than the one it could.
    */
-  const manageLanding = libraryManagementAvailable ? routes.manage
+  const manageLanding = libraryManagementAvailable ? routes.manageUnmatched
     : usersAvailable ? routes.manageUsers
       : undefined;
   /**
@@ -479,7 +482,6 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
    */
   const landing = mediaAvailable ? routes.home : manageLanding ?? routes.settings;
   const metadataEditingAvailable = libraryManagementAvailable;
-  const [unmatchedCount, setUnmatchedCount] = useState(0);
 
   // What the instruction chooser reasons from: the server's reported facts for
   // the item about to play, and the platform truths no probe can discover.
@@ -495,7 +497,10 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
     facts: async (media: MediaSummary) => (await playbackFactsApi.facts({ itemId: media.id }))[0],
     policyOverrides: (platform as { playbackPolicy?: PlaybackPolicyOverrides }).playbackPolicy,
   }), [playbackFactsApi, platform]);
-  const { runtime: playbackRuntime, state: playbackRuntimeState } = usePlaybackRuntime(platform, playbackResolver, playbackRuntimeOptions);
+  // Every session core asks for is timed from the request, so the player's
+  // first fragment closes a measurement of what that node costs to start.
+  const measuredResolver = useMemo(() => measureStartCosts(playbackResolver), [playbackResolver]);
+  const { runtime: playbackRuntime, state: playbackRuntimeState } = usePlaybackRuntime(platform, measuredResolver, playbackRuntimeOptions);
   const preparePlaybackProfile = useCallback((profile: CatalogueMediaProfile) => {
     playbackRuntime.prepare(technicalProfileFromCatalogue(profile));
   }, [playbackRuntime]);
@@ -524,18 +529,6 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
   });
   const activePlayback = playback.activePlayback;
 
-  useEffect(() => {
-    if (!managementAvailable || effectiveConnectionGate) {
-      setUnmatchedCount(0);
-      return undefined;
-    }
-    let cancelled = false;
-    void manageApi.unmatched()
-      .then((items) => { if (!cancelled) setUnmatchedCount(items.length); })
-      .catch(() => { /* Manage itself will surface API errors when opened. */ });
-    return () => { cancelled = true; };
-  }, [effectiveConnectionGate, manageApi, managementAvailable]);
-
   const samsungBack = useCallback(() => {
     if (!buildPlatformTraits.receivesBackKeyEvents) return false;
     if (effectiveConnectionGate) return true;
@@ -554,10 +547,9 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
   useTvNavigation(samsungBack);
 
   useEffect(() => {
-    const onServerUnreachable = (event: Event) => {
+    const onServerUnreachable = () => {
       if (!connectionRequired) return;
-      const detail = (event as CustomEvent<{ message?: string }>).detail;
-      setConnectionNotice(detail?.message ?? SERVER_UNREACHABLE_MESSAGE);
+      setConnectionNotice(SERVER_UNREACHABLE_TEXT);
       setClusterUnreachable(true);
     };
     const onServerReachable = () => setClusterUnreachable(false);
@@ -597,7 +589,29 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
   /**
    * Finish the journey the login interrupted, rather than ending it at the form.
    */
+  const [signOutNotice, setSignOutNotice] = useState<string>();
+  /**
+   * Log out, in the order core states: playback first, because a playback
+   * session opened under this token cannot be closed once the token is gone
+   * and the node would hold its transcode slot for thirty minutes; then the
+   * session, which is revoked and never used again; then who this is, read
+   * afresh. A revoke that fails still leaves this device signed out, and the
+   * viewer is told the session lives on at the server.
+   */
+  const signOut = useCallback(async () => {
+    setSignOutNotice(undefined);
+    await playback.stop();
+    try {
+      await endSession();
+    } catch {
+      setSignOutNotice(SIGN_OUT_UNCONFIRMED_TEXT);
+    }
+    refreshSession();
+    navigate(routes.home, { replace: true });
+  }, [endSession, navigate, playback.stop, refreshSession]);
+
   const finishSignIn = useCallback(() => {
+    setSignOutNotice(undefined);
     refreshSession();
     navigate(postSignInDestination((location.state as { from?: unknown } | null)?.from, landing), { replace: true });
   }, [landing, location.state, navigate, refreshSession]);
@@ -670,10 +684,8 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
   const managePane = (section: ManageSection) => (
     <ManageScreen
       api={manageApi}
-      catalogueApi={catalogueApi}
       section={section}
       users={usersPane}
-      onUnmatchedCountChange={setUnmatchedCount}
     />
   );
 
@@ -762,7 +774,7 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
       : <LoginScreen
           guestAllowed={false}
           connectionReachable
-          notice={lockoutNotice(lockout)}
+          notice={signOutNotice ?? lockoutNotice(lockout)}
           onSignIn={(username, password) => sessionManager.signIn({ username, password })}
           onSignedIn={finishSignIn}
         />}
@@ -771,6 +783,7 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
   const musicSectionActive = location.pathname === routes.music || location.pathname.startsWith(`${routes.music}/`);
   const statusSectionActive = location.pathname === routes.status || location.pathname.startsWith(`${routes.status}/`);
   const manageSectionActive = location.pathname === routes.manage || location.pathname.startsWith(`${routes.manage}/`);
+  const importSectionActive = location.pathname === routes.ingest || location.pathname.startsWith(`${routes.ingest}/`);
 
   return (
     <div className={`app-shell${miniPlayerActive ? ' has-mini-player' : ''}`}>
@@ -798,7 +811,6 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
                 className={({ isActive }: { isActive: boolean }) => isActive ? 'active' : undefined}
               >
                 {item.label}
-                {item.to === routes.manage && unmatchedCount > 0 && <span className="manage-badge">{unmatchedCount}</span>}
               </NavLink>
             );
           })}
@@ -808,7 +820,7 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
             and Status already reports the platform under Playback support,
             beside the codec probes that give it meaning. */}
         <div className="topbar-trailing">
-          {session && <AccountMenu api={usersApi} session={session} onSignedOut={refreshSession} />}
+          {session && <AccountMenu session={session} onSignOut={signOut} />}
           <NavLink
             to={routes.settings}
             className={({ isActive }: { isActive: boolean }) => `topbar-settings${isActive ? ' active' : ''}`}
@@ -820,13 +832,21 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
           </NavLink>
         </div>
       </header>
-      {!playback.playerRouteActive && (musicSectionActive || statusSectionActive || manageSectionActive) && (
+      {signOutNotice && (
+        <p className="app-notice" role="alert">
+          {signOutNotice}
+          <button className="secondary-button" type="button" onClick={() => setSignOutNotice(undefined)} data-tv-focusable="true">Dismiss</button>
+        </p>
+      )}
+      {!playback.playerRouteActive && (musicSectionActive || statusSectionActive || manageSectionActive || importSectionActive) && (
         <div className="section-nav-slot">
           {musicSectionActive
             ? <MusicNav />
             : statusSectionActive
               ? <StatusNav />
-              : <ManageNav managementAvailable={libraryManagementAvailable} usersAvailable={usersAvailable} />}
+              : importSectionActive
+                ? <ImportNav />
+                : <ManageNav managementAvailable={libraryManagementAvailable} usersAvailable={usersAvailable} />}
         </div>
       )}
       <main>
@@ -850,12 +870,17 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
           <Route path="/items/:itemId" element={mediaPane(<DetailRoute api={api} onPlay={openPlayer} onPlayFromStart={openPlayerFromStart} progressById={playback.progressById} parameter="itemId" onEdit={metadataEditingAvailable ? openMetadataEditor : undefined} onMediaProfile={preparePlaybackProfile} />)} />
           <Route path="/items/:itemId/edit" element={metadataEditingAvailable ? <MetadataEditorRoute api={catalogueApi} /> : <Navigate to={landing} replace />} />
           <Route path={routes.search} element={mediaPane(<SearchScreen api={api} onOpen={open} />)} />
-          <Route path={routes.ingest} element={permits('importer') ? <IngestScreen api={acquisitionApi} /> : <Navigate to={landing} replace />} />
-          <Route path={routes.status} element={permits('view_status') ? <StatusScreen api={clusterStatusApi} endpointRegistry={endpointRegistry} platform={platform} manageApi={managementAvailable ? manageApi : undefined} section="overview" auth={auth} /> : <Navigate to={landing} replace />} />
-          <Route path={routes.statusClient} element={permits('view_status') ? <StatusScreen api={clusterStatusApi} endpointRegistry={endpointRegistry} platform={platform} manageApi={managementAvailable ? manageApi : undefined} section="client" auth={auth} /> : <Navigate to={landing} replace />} />
-          <Route path={routes.statusConnectivity} element={permits('view_status') ? <StatusScreen api={clusterStatusApi} endpointRegistry={endpointRegistry} platform={platform} manageApi={managementAvailable ? manageApi : undefined} section="connectivity" auth={auth} /> : <Navigate to={landing} replace />} />
+          <Route path={routes.ingest} element={<Navigate to={routes.ingestTorrents} replace />} />
+          <Route path={routes.ingestTorrents} element={permits('importer') ? <IngestScreen api={acquisitionApi} section="torrents" /> : <Navigate to={landing} replace />} />
+          <Route path={routes.ingestFiles} element={permits('importer') ? <IngestScreen api={acquisitionApi} section="files" /> : <Navigate to={landing} replace />} />
+          <Route path={`${routes.ingestTorrents}/:torrentId`} element={permits('importer') ? <TorrentDetailScreen api={acquisitionApi} /> : <Navigate to={landing} replace />} />
+          <Route path={routes.status} element={permits('view_status') ? <StatusScreen api={clusterStatusApi} endpointRegistry={endpointRegistry} platform={platform} manageApi={libraryManagementAvailable ? manageApi : undefined} section="overview" auth={auth} /> : <Navigate to={landing} replace />} />
+          <Route path={routes.statusClient} element={permits('view_status') ? <StatusScreen api={clusterStatusApi} endpointRegistry={endpointRegistry} platform={platform} manageApi={libraryManagementAvailable ? manageApi : undefined} section="client" auth={auth} /> : <Navigate to={landing} replace />} />
+          <Route path={routes.statusConnectivity} element={permits('view_status') ? <StatusScreen api={clusterStatusApi} endpointRegistry={endpointRegistry} platform={platform} manageApi={libraryManagementAvailable ? manageApi : undefined} section="connectivity" auth={auth} /> : <Navigate to={landing} replace />} />
           <Route path="/status/nodes/:nodeId" element={permits('view_status') ? <NodeStatusScreen api={clusterStatusApi} /> : <Navigate to={landing} replace />} />
-          <Route path={routes.manage} element={libraryManagementAvailable ? managePane('unmatched') : <Navigate to={routes.settings} replace />} />
+          <Route path={routes.manage} element={<Navigate to={libraryManagementAvailable ? routes.manageUnmatched : usersAvailable ? routes.manageUsers : routes.settings} replace />} />
+          <Route path={routes.manageUnmatched} element={libraryManagementAvailable ? managePane('unmatched') : <Navigate to={routes.settings} replace />} />
+          <Route path={`${routes.manageUnmatched}/:fileId`} element={libraryManagementAvailable ? <UnmatchedFilePage api={manageApi} catalogueApi={catalogueApi} /> : <Navigate to={routes.settings} replace />} />
           <Route path={routes.manageFiles} element={libraryManagementAvailable ? managePane('files') : <Navigate to={routes.settings} replace />} />
           <Route path={routes.manageUsers} element={usersAvailable ? managePane('users') : <Navigate to={routes.settings} replace />} />
           <Route path={routes.settings} element={settingsPane} />

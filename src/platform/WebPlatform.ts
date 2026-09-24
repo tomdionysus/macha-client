@@ -20,17 +20,20 @@ import {
   directPlayReadAheadMetrics,
   directPlayReadAheadUrl,
   releaseDirectPlayReadAhead,
+  reportFragmentTransfer,
   setDirectPlayReadAheadMode,
+  directPlayReadAheadSourceStatus,
   subscribeDirectPlayReadAheadFailure,
 } from '../playback/directPlayReadAhead';
 import { hlsEventSummary, videoState, WebMediaDiagnostics } from './WebMediaDiagnostics';
+import { nodeStartCosts } from '../playback/nodeStartCosts';
+import { shouldReportStart, StartRecorder, type StartOutcome, type StartRole, type StartSample } from './startRecorder';
 import {
   isHlsNetworkDegradation,
   isHlsSegmentHold,
   isHlsSourceNotFound,
   isSourceGoneStatus,
   managedHlsErrorAction,
-  SEGMENT_NOT_READY_STATUS,
   webHlsBufferConfig,
 } from './WebHlsPolicy';
 import {
@@ -44,6 +47,13 @@ import {
 
 export { hlsEventSummary } from './WebMediaDiagnostics';
 export { webHlsBufferConfig } from './WebHlsPolicy';
+
+/**
+ * How long a start is recorded before it is reported as never having shown a
+ * frame: a node reclaims a session that was never streamed at 120 s, so past
+ * this the question is no longer the start but the reclaim.
+ */
+const START_RECORD_LIMIT_MS = 120_000;
 
 function clearTextTrackCues(track: TextTrack): void {
   // TextTrack.cues may be null while disabled. Hidden keeps the track
@@ -181,166 +191,6 @@ export async function preflightWebHlsSource(
   }
 }
 
-/**
- * How long a node is given to produce the first fragment of a fresh
- * generation before the wait becomes evidence against it.
- *
- * **The fallback only.** The real deadline is `source.budgets.deadlineMs`, from
- * the node actually serving the source, and the call site passes it. This value
- * is what a node too old to state one gets.
- *
- * Generous deliberately. `500 segment_not_ready` is the node stating that it
- * is working on a fragment it has already promised, and abandoning it costs
- * more than waiting does: the replacement starts its own generation from
- * nothing, so the viewer waits out a cold start instead of the tail of a warm
- * one.
- *
- * It used to be justified as "five of the server's own six-second holds", and
- * that reasoning is withdrawn: the multiplier was invented to stand in for a
- * figure the client had no way to read. The node's `startup_timeout_ms` *is*
- * the bound on what this wait is waiting for — `macha/docs/streaming.md` states
- * that it "independently bounds the wait for the first transformed fragment" —
- * so a node that has not served by then has stopped trying, and waiting past it
- * spends the time on something that cannot arrive. The number is unchanged
- * because a conservative fallback is the safe direction when nothing is stated;
- * only the claim behind it is.
- */
-export const NATIVE_HLS_FIRST_FRAGMENT_TIMEOUT_MS = 30_000;
-
-/** Only reached where the node did not say; a held fragment carries `Retry-After`. */
-const NATIVE_HLS_HOLD_RETRY_MS = 500;
-
-/** Longest a single stated `Retry-After` is honoured, so one bad header cannot park playback. */
-const NATIVE_HLS_MAX_RETRY_MS = 5_000;
-
-export interface NativeHlsReadiness {
-  ready: boolean;
-  /** Why not, in the terms the node stated it. */
-  reason?: string;
-  /**
-   * The refusal was about the object rather than the node: 404, or 410 for a
-   * generation that has been superseded. Reported separately because the two
-   * demand opposite things of the caller — one asks for a new generation, the
-   * other is evidence against the endpoint.
-   */
-  gone: boolean;
-  waitedMs: number;
-  attempts: number;
-}
-
-type FragmentProbe =
-  | { ready: true }
-  | { ready: false; hold: boolean; gone?: boolean; reason: string; retryMs?: number };
-
-function statedRetryMs(response: Response): number | undefined {
-  const stated = response.headers.get('Retry-After');
-  if (!stated) return undefined;
-  const seconds = Number(stated);
-  if (!Number.isFinite(seconds) || seconds < 0) return undefined;
-  return Math.min(seconds * 1_000, NATIVE_HLS_MAX_RETRY_MS);
-}
-
-function refusal(response: Response, what: string): FragmentProbe {
-  return {
-    ready: false,
-    hold: response.status === SEGMENT_NOT_READY_STATUS,
-    gone: isSourceGoneStatus(response.status),
-    reason: `${what} answered ${response.status}`,
-    retryMs: statedRetryMs(response),
-  };
-}
-
-async function probeFirstFragment(manifestUrl: string, fetchImpl: typeof fetch): Promise<FragmentProbe> {
-  let url = manifestUrl;
-  for (let depth = 0; depth < 2; depth += 1) {
-    const response = await fetchImpl(url, { method: 'GET', cache: 'no-store' });
-    if (!response.ok) return refusal(response, 'playlist');
-    const targets = webHlsPreflightTargets(await response.text(), url);
-    if (targets.variantUrl) {
-      url = targets.variantUrl;
-      continue;
-    }
-    if (targets.mediaUrls.length === 0) return { ready: false, hold: false, reason: 'playlist names no fragment' };
-    for (const mediaUrl of targets.mediaUrls) {
-      // One byte is the whole question. The node admits and holds this request
-      // through the same path as the player's own fragment fetch, so a
-      // fragment still being produced answers it exactly as it would answer
-      // the player — and a Range this small cannot cost a segment's traffic.
-      const media = await fetchImpl(mediaUrl, {
-        method: 'GET',
-        headers: { Range: 'bytes=0-0' },
-        cache: 'no-store',
-      });
-      if (!media.ok) return refusal(media, 'fragment');
-    }
-    return { ready: true };
-  }
-  return { ready: false, hold: false, reason: 'playlist nests variants past one level' };
-}
-
-/**
- * Hold a native HLS source until the node will actually serve its first
- * fragment.
- *
- * A native player has no retry policy this client can reach: hand it a
- * playlist whose first fragment is still being produced and it reports a
- * network failure immediately and permanently. The coordinator can only read
- * that as the node having failed, so it moves to the next one — which
- * cold-starts its own generation and answers the same way. Three of those
- * exhaust a healthy cluster in seconds, which is exactly what the Samsung set
- * does on every failover.
- *
- * hls.js needs none of this because it retries fragments itself and
- * `isHlsSegmentHold` already teaches it that a 500 is not node evidence. This
- * is that same contract honoured on the one path that cannot honour it from
- * inside the player, so it is asked before the element is ever given the URL.
- */
-export async function awaitNativeHlsFirstFragment(
-  manifestUrl: string,
-  options: {
-    fetchImpl?: typeof fetch;
-    now?: () => number;
-    sleep?: (ms: number) => Promise<void>;
-    timeoutMs?: number;
-    /** Abandons the wait when a later generation has taken over. */
-    superseded?: () => boolean;
-  } = {},
-): Promise<NativeHlsReadiness> {
-  const {
-    fetchImpl = fetch,
-    now = () => Date.now(),
-    sleep = (ms: number) => new Promise<void>((resolve) => { setTimeout(resolve, ms); }),
-    timeoutMs = NATIVE_HLS_FIRST_FRAGMENT_TIMEOUT_MS,
-    superseded = () => false,
-  } = options;
-  const started = now();
-  const deadline = started + timeoutMs;
-  let attempts = 0;
-  let reason = 'superseded before the node was asked';
-  let gone = false;
-  while (!superseded()) {
-    attempts += 1;
-    let probe: FragmentProbe;
-    try {
-      probe = await probeFirstFragment(manifestUrl, fetchImpl);
-    } catch (error) {
-      // A transfer that never became a response is evidence about the node,
-      // never about the fragment, so it is not something to wait out.
-      probe = { ready: false, hold: false, reason: error instanceof Error ? error.message : String(error) };
-    }
-    if (probe.ready) return { ready: true, gone: false, waitedMs: now() - started, attempts };
-    reason = probe.reason;
-    gone = probe.gone ?? false;
-    if (!probe.hold) break;
-    const retryMs = probe.retryMs ?? NATIVE_HLS_HOLD_RETRY_MS;
-    if (now() + retryMs >= deadline) {
-      reason = `${reason} for ${Math.round((now() - started) / 1_000)}s`;
-      break;
-    }
-    await sleep(retryMs);
-  }
-  return { ready: false, reason, gone, waitedMs: now() - started, attempts };
-}
 
 /**
  * Budgets for a seamless generation handover. All of them fail *towards* the
@@ -480,7 +330,27 @@ export function handoverFallbackPositionMs(
   clockOffsetMs: number,
   livePositionMs: number,
 ): number {
-  return Math.max(requestedMs, livePositionMs + clockOffsetMs);
+  // Never before the generation's start: after a lead move core's request is
+  // negative, and the earliest place a replacement can attach is its first
+  // frame.
+  return Math.max(0, requestedMs, livePositionMs + clockOffsetMs);
+}
+
+/**
+ * What the handover does with a join that may lie before the incoming
+ * generation's start.
+ *
+ * After a lead move (core `d58375a`) the node produces from ahead of the
+ * viewer, so the join is negative in the new clock until the viewer, still
+ * watching the outgoing element, reaches the generation's start. That wait is
+ * the lead working, and must not be run through the convergence race, which
+ * would read a join behind the buffer as one receding faster than it fills. A
+ * stopped outgoing picture ends the wait: the cut goes to the start, because
+ * the position it was waiting for will never come.
+ */
+export function leadJoinStep(joinNewMs: number, outgoingStalled: boolean): 'wait' | 'join-at-start' | 'race' {
+  if (joinNewMs >= 0) return 'race';
+  return outgoingStalled ? 'join-at-start' : 'wait';
 }
 
 /** What the hold needs to know about the two sides of a relocation. */
@@ -638,6 +508,30 @@ export interface WebPlayerOptions {
 }
 
 class WebPlayer implements Player {
+  /**
+   * Whether a lead move may hand this player a negative position.
+   *
+   * Only the managed-HLS handover can keep the outgoing picture playing while
+   * the viewer travels to a generation that starts ahead of them. Native HLS,
+   * which the Samsung build forces, declines the handover and would attach at
+   * the generation's start, skipping the viewer forward by the whole lead.
+   */
+  get holdsThroughLead(): boolean {
+    return shouldUseManagedHls(this.options.forceNativeHls, managedHlsSupported());
+  }
+
+  /**
+   * Whether core must hold a source back until the node has produced media.
+   *
+   * The native-HLS path only, the complement of the path above: a native
+   * player handed a playlist whose first fragment answers `500
+   * segment_not_ready` reports a network failure immediately and permanently,
+   * and has no retry policy this client can reach. hls.js retries holds itself.
+   */
+  get needsProducedSource(): boolean {
+    return !shouldUseManagedHls(this.options.forceNativeHls, managedHlsSupported());
+  }
+
   private host?: HTMLElement;
   private video?: HTMLVideoElement;
   private hls?: Hls;
@@ -659,6 +553,14 @@ class WebPlayer implements Player {
   private readonly playerId = ++webPlayerSequence;
   private readonly log = createClientLogger('playback.web', { playerId: this.playerId });
   private readonly diagnostics = new WebMediaDiagnostics(this.log);
+  /** Each element's source buffers by track, while hls.js has them; for `WebMediaDiagnostics`. */
+  private readonly trackBuffers = new WeakMap<HTMLVideoElement, Partial<Record<string, SourceBuffer>>>();
+  /** One per element that is starting a source; see `armStartRecorder`. */
+  private readonly startRecorders = new WeakMap<HTMLVideoElement, {
+    recorder: StartRecorder;
+    requests: () => PerformanceResourceTiming[] | undefined;
+    cleanup: () => void;
+  }>();
   private initialSeekCleanup?: () => void;
   private subtitleGeneration = 0;
   private subtitleCleanup?: () => void;
@@ -774,7 +676,7 @@ class WebPlayer implements Player {
       video.setAttribute('autoplay', 'autoplay');
       video.setAttribute('preload', 'auto');
     }
-    this.diagnostics.attach(video, () => this.directReadAheadSourceUrl);
+    this.diagnostics.attach(video, () => this.directReadAheadSourceUrl, () => this.trackBuffers.get(video));
 
     const publish = () => this.publish(video);
     video.addEventListener('timeupdate', publish);
@@ -804,16 +706,28 @@ class WebPlayer implements Player {
       // that the worker already told us this source was gone, for this same
       // generation. Without that memory the reported title's own path, which is
       // Direct Play on Chrome, would still condemn a healthy node.
-      if (this.notFoundSourceGeneration === this.sourceGeneration) {
-        this.reportSourceGone(
-          this.sourceGeneration,
-          new PlaybackSourceError('The node no longer has this source.', 'not-found', video.error),
-          videoState(video),
-        );
+      const generation = this.sourceGeneration;
+      const judge = (status: number | undefined) => {
+        if (generation !== this.sourceGeneration || video !== this.video || !this.activeSource) return;
+        if (this.notFoundSourceGeneration === generation || isSourceGoneStatus(status)) {
+          this.reportSourceGone(
+            generation,
+            new PlaybackSourceError('The node no longer has this source.', 'not-found', video.error),
+            videoState(video),
+          );
+          return;
+        }
+        this.failSourceGeneration(generation, webMediaElementFailure(video.error), videoState(video));
+      };
+      // The worker's report can arrive after this error: it hands the element
+      // the 404 and posts separately. Measured 2026-09-23, a reclaimed session
+      // ended on "unsupported" that way. So a read-ahead source asks the
+      // worker what the node said before the error is judged terminal.
+      if (this.notFoundSourceGeneration === generation || !this.directReadAheadSourceUrl) {
+        judge(undefined);
         return;
       }
-      const failure = webMediaElementFailure(video.error);
-      this.failSourceGeneration(this.sourceGeneration, failure, videoState(video));
+      void directPlayReadAheadSourceStatus(this.directReadAheadSourceUrl).then(judge);
     });
     // Evidence that bytes actually reached the element, ending the start
     // watchdog. `progress` is the one that matters — it fires as media data
@@ -861,6 +775,10 @@ class WebPlayer implements Player {
       // or the fallback for a slow handover is a rewind of however long it took.
       positionMs = handover.resumeAtMs ?? positionMs;
     }
+    // A lead move's position is negative until the viewer reaches the
+    // generation. Every path below attaches, and nothing can attach before
+    // the generation's first frame.
+    positionMs = Math.max(0, positionMs);
     // The teardown path below blanks the element, because hls.js is handed a
     // MediaSource object URL and attaching a new one resets whatever was
     // showing. Hold the picture instead: pause where they were, build the
@@ -984,6 +902,7 @@ class WebPlayer implements Player {
     // both the fetching and its own (bounded) error channel. Only the former
     // can starve silently, so only the former is watched.
     let elementOwnsFetch = false;
+    this.armStartRecorder(video, source.url, 'primary');
 
     // Declared by the resolver, never sniffed: a native player handed an
     // undeclared .m3u8 parses the playlist as media and reports a source error.
@@ -1006,40 +925,14 @@ class WebPlayer implements Player {
         this.log.info('hls-native-selected', { url: source.url });
         // No removeAttribute('src')/load() reset here, for the reason the
         // direct path below records: it was observed live to leave the element
-        // at readyState 0 forever, no request issued and no error raised. What
-        // that reset was for — a failure from the generation being replaced
-        // being charged to its replacement — is handled by
-        // `attachedSourceGeneration` instead, which costs the element nothing.
-        const readiness = await awaitNativeHlsFirstFragment(source.url, {
-          // The serving node's own bound on bringing a first fragment up, or
-          // the conservative fallback when it did not state one. Never shorter
-          // than the constant on the strength of a missing field.
-          timeoutMs: source.budgets?.deadlineMs ?? NATIVE_HLS_FIRST_FRAGMENT_TIMEOUT_MS,
-          superseded: () => sourceGeneration !== this.sourceGeneration,
-        });
-        if (sourceGeneration !== this.sourceGeneration || video !== this.video) return false;
-        // Warned rather than logged when it actually had to wait: a wait is
-        // the node at its production frontier and worth seeing, and the
-        // Samsung build keeps `warn` and above, which is the one target that
-        // cannot be watched any other way.
-        const waited = { url: source.url, ...readiness };
-        if (readiness.attempts > 1) this.log.warn('hls-native-first-fragment-held', waited);
-        else this.log.info('hls-native-first-fragment', waited);
-        if (!readiness.ready) {
-          // A generation that is gone is not a node that is unwell, and the
-          // difference decides whether this endpoint is condemned or asked for
-          // a replacement. `not-found` also carries the obligation not to tear
-          // the presentation down, which is what keeps the picture up while
-          // core regenerates.
-          this.failSourceGeneration(
-            sourceGeneration,
-            readiness.gone
-              ? new PlaybackSourceError(`The node no longer has this generation: ${readiness.reason}.`, 'not-found')
-              : new PlaybackSourceError(`The node did not serve the first fragment: ${readiness.reason}.`, 'stream'),
-            readiness,
-          );
-          return false;
-        }
+        // at readyState 0 forever, no request issued and no error raised.
+        //
+        // No readiness wait here either. A native player cannot ride a
+        // `500 segment_not_ready` hold, so it must not be handed a generation
+        // that has produced nothing; core now holds the source back until the
+        // session route reports media produced, because this player declares
+        // `needsProducedSource`. The zero-byte fragment probe that did this
+        // here is gone (Tom, 2026-09-23: a zero-byte check is a hack).
         video.src = source.url;
         this.attachedSourceGeneration = sourceGeneration;
         elementOwnsFetch = true;
@@ -1195,8 +1088,11 @@ class WebPlayer implements Player {
     // viewer is at `outgoingEvent.positionMs` on the old one and core is asking
     // for `positionMs` on the new one, so those denote the same content.
     const clockOffsetMs = positionMs - outgoingEvent.positionMs;
+    // How far ahead of the viewer this generation starts, when core led it.
+    const leadMs = positionMs < 0 ? -positionMs : 0;
     this.log.info('handover-begin', {
       url: source.url,
+      leadMs,
       requestedPositionMs: positionMs,
       outgoingPositionMs: outgoingEvent.positionMs,
       clockOffsetMs,
@@ -1234,6 +1130,7 @@ class WebPlayer implements Player {
         elapsedMs: Math.round(performance.now() - startedAt),
         resumeAtMs,
       });
+      if (incoming) this.finishStartRecorder(incoming, 'abandoned');
       try { built?.hls.destroy(); } catch { /* the fallback path rebuilds regardless */ }
       try { incoming?.remove(); } catch { /* already detached */ }
       return { handedOver: false, resumeAtMs };
@@ -1246,6 +1143,7 @@ class WebPlayer implements Player {
       incoming.style.display = 'none';
       incoming.muted = true;
       host.appendChild(incoming);
+      this.armStartRecorder(incoming, source.url, 'handover');
       // Where the cut will land, near enough: the viewer is at `positionMs` on
       // the replacement's clock the moment core asks, and will have moved a
       // little further by the time this is ready. Only a starting hint — the
@@ -1253,7 +1151,11 @@ class WebPlayer implements Player {
       const expectedJoinMs = Math.max(0, positionMs + HANDOVER_JOIN_LEAD_MS);
       built = this.attachHls(hlsModule, incoming, source.url, sourceGeneration, false, expectedJoinMs);
 
-      const ready = await waitForMediaEvent(incoming, 'canplay', HANDOVER_READY_TIMEOUT_MS);
+      // A led generation may take as long as its lead to become ready: the
+      // viewer is still watching the outgoing picture for all of it. Measured
+      // 2026-09-23: gbni-1 took 20.3 s to a first fragment, past the 20 s
+      // this used to allow everything.
+      const ready = await waitForMediaEvent(incoming, 'canplay', Math.max(HANDOVER_READY_TIMEOUT_MS, leadMs));
       if (!ready) return abandon('not-ready-in-time');
       if (this.video !== outgoing) return abandon('superseded-while-preparing');
 
@@ -1287,7 +1189,7 @@ class WebPlayer implements Player {
       // moving; a point chosen once goes stale while the data is still arriving.
       let joinAtOldMs = 0;
       let targetMediaMs: number | undefined;
-      const bufferDeadline = performance.now() + HANDOVER_BUFFER_TIMEOUT_MS;
+      let bufferDeadline = performance.now() + HANDOVER_BUFFER_TIMEOUT_MS;
       let bufferLastSeenMs = livePositionMs();
       let bufferLastAdvancedAt = performance.now();
       // Where the race stood when it began, so that whether the replacement is
@@ -1299,6 +1201,27 @@ class WebPlayer implements Player {
         if (this.video !== outgoing) return abandon('superseded-while-buffering');
         if (outgoing.paused) return abandon('outgoing-paused-while-buffering');
         joinAtOldMs = livePositionMs() + HANDOVER_JOIN_LEAD_MS;
+        const leadStep = leadJoinStep(
+          joinAtOldMs + clockOffsetMs,
+          performance.now() - bufferLastAdvancedAt > HANDOVER_OUTGOING_STALL_MS,
+        );
+        if (leadStep === 'wait') {
+          // The viewer has not reached the generation yet. Nothing here is a
+          // race and no budget runs: both start when the join enters it.
+          const nowMs = livePositionMs();
+          if (nowMs > bufferLastSeenMs + 1) {
+            bufferLastSeenMs = nowMs;
+            bufferLastAdvancedAt = performance.now();
+          }
+          convergenceStartedAt = undefined;
+          bufferDeadline = performance.now() + HANDOVER_BUFFER_TIMEOUT_MS;
+          await new Promise((resolve) => setTimeout(resolve, HANDOVER_BUFFER_POLL_MS));
+          continue;
+        }
+        if (leadStep === 'join-at-start') {
+          this.log.warn('handover-lead-join-forced-by-stall', { joinAtOldMs, clockOffsetMs });
+          joinAtOldMs = -clockOffsetMs;
+        }
         targetMediaMs = timeline.toMediaTime(joinAtOldMs + clockOffsetMs);
         if (targetMediaMs === undefined) return abandon('incoming-join-unmappable');
         const targetSeconds = targetMediaMs / 1000;
@@ -1491,6 +1414,7 @@ class WebPlayer implements Player {
     let built: { hls: InstanceType<typeof import('hls.js').default>; recovery: ManagedHlsMediaRecoveryBudget } | undefined;
     const abandon = (reason: string, detail?: unknown) => {
       this.log.warn('relocation-hold-abandoned', { reason, detail, elapsedMs: Math.round(performance.now() - startedAt) });
+      if (incoming) this.finishStartRecorder(incoming, 'abandoned');
       try { built?.hls.destroy(); } catch { /* the fallback path rebuilds regardless */ }
       try { incoming?.remove(); } catch { /* already detached */ }
       this.pictureHold = undefined;
@@ -1505,6 +1429,7 @@ class WebPlayer implements Player {
       incoming.style.display = 'none';
       incoming.muted = true;
       host.appendChild(incoming);
+      this.armStartRecorder(incoming, source.url, 'relocation');
       built = this.attachHls(hlsModule, incoming, source.url, sourceGeneration, false);
 
       if (!await waitForMediaEvent(incoming, 'canplay', HANDOVER_READY_TIMEOUT_MS)) return abandon('not-ready-in-time');
@@ -2062,6 +1987,7 @@ class WebPlayer implements Player {
     this.mediaTimeline = undefined;
     this.lastPublishedEvent = undefined;
     this.log.debug('stop', this.video ? videoState(this.video) : undefined);
+    if (this.video) this.finishStartRecorder(this.video, 'abandoned');
     this.startWatchdog.stop();
     this.stallWatchdog.stop();
     this.hls?.destroy();
@@ -2099,6 +2025,90 @@ class WebPlayer implements Player {
   subscribeDegradation(listener: PlaybackDegradationListener): () => void {
     this.degradationListeners.add(listener);
     return () => this.degradationListeners.delete(listener);
+  }
+
+  /**
+   * Record what this element does between being given a source and showing a
+   * frame, and say so in one line if that was slow or never happened.
+   *
+   * For the `readyState` 0 P0 (`TODO/ACTIVE.md`): the stall raises nothing
+   * until something else gives up, so the evidence has to be gathered from
+   * before `src` is set rather than reconstructed afterwards. Covers managed
+   * HLS as well as element-owned fetches, and the standby elements of a
+   * handover and a relocation hold as well as the one on screen: the start
+   * watchdog only watches the element-owned path, and a handover standby sat
+   * at `readyState` 0 for 16 s on the first live node move (2026-09-23) with
+   * nothing recording it.
+   *
+   * Observes only. It never fails, degrades or retries anything; the
+   * watchdogs own those decisions.
+   */
+  private armStartRecorder(video: HTMLVideoElement, url: string, role: StartRole): void {
+    this.finishStartRecorder(video, 'abandoned');
+    const recorder = new StartRecorder(role, url, () => performance.now());
+    const armedAt = performance.now();
+    const sample = (): StartSample => ({
+      readyState: video.readyState,
+      networkState: video.networkState,
+      bufferedEndS: video.buffered.length > 0 ? video.buffered.end(video.buffered.length - 1) : undefined,
+      hidden: typeof document !== 'undefined' && document.hidden,
+    });
+    const names = [
+      'loadstart', 'loadedmetadata', 'loadeddata', 'canplay', 'playing', 'waiting', 'stalled',
+      'suspend', 'emptied', 'abort', 'error', 'seeking', 'seeked',
+    ] as const;
+    const handlers = names.map((name) => [name, () => {
+      recorder.event(name, sample());
+      // HAVE_CURRENT_DATA is the first frame: something is paintable.
+      if (video.readyState >= 2 && (name === 'loadeddata' || name === 'canplay' || name === 'playing')) {
+        this.finishStartRecorder(video, 'first-frame');
+      }
+    }] as const);
+    for (const [name, handler] of handlers) video.addEventListener(name, handler);
+    const timer = setInterval(() => {
+      recorder.sample(sample());
+      if (performance.now() - armedAt >= START_RECORD_LIMIT_MS) this.finishStartRecorder(video, 'no-first-frame');
+    }, 1_000);
+    // An observer rather than `getEntriesByType`: the page's Resource Timing
+    // buffer holds 250 entries and was measured full eleven seconds after
+    // load, after which the buffer answers nothing new and a start that sent
+    // twenty requests reads as one that sent none. An observer is not bound
+    // by the buffer. Where there is none, the record says unknown.
+    const requests: PerformanceResourceTiming[] = [];
+    let observer: PerformanceObserver | undefined;
+    try {
+      observer = new PerformanceObserver((list) => {
+        requests.push(...list.getEntries() as PerformanceResourceTiming[]);
+      });
+      observer.observe({ type: 'resource' });
+    } catch {
+      observer = undefined;
+    }
+    this.startRecorders.set(video, {
+      recorder,
+      requests: () => {
+        if (!observer) return undefined;
+        requests.push(...observer.takeRecords() as PerformanceResourceTiming[]);
+        return requests;
+      },
+      cleanup: () => {
+        for (const [name, handler] of handlers) video.removeEventListener(name, handler);
+        clearInterval(timer);
+        observer?.disconnect();
+      },
+    });
+  }
+
+  private finishStartRecorder(video: HTMLVideoElement, outcome: StartOutcome): void {
+    const armed = this.startRecorders.get(video);
+    if (!armed) return;
+    this.startRecorders.delete(video);
+    const entries = armed.requests();
+    armed.cleanup();
+    const record = armed.recorder.finish(outcome, entries);
+    // Warn, so the Samsung build keeps it: that is the one target that cannot
+    // be watched any other way.
+    if (record && shouldReportStart(record)) this.log.warn('source-start-record', record);
   }
 
   /**
@@ -2276,6 +2286,7 @@ class WebPlayer implements Player {
     this.playRequestGeneration += 1;
     this.wantsPlayback = false;
     this.log.error('source-terminal-failure', { error, detail });
+    if (this.video) this.finishStartRecorder(this.video, 'failed');
     const hls = this.hls;
     this.hls = undefined;
     this.hlsMediaRecovery = undefined;
@@ -2346,6 +2357,18 @@ class WebPlayer implements Player {
     }
     const attachedAt = performance.now();
 
+    this.trackBuffers.delete(video);
+    // Only ever this instance's own entry: a retired hls.js detaches after
+    // its replacement has already created buffers on the same element.
+    let createdBuffers: Partial<Record<string, SourceBuffer>> | undefined;
+    hls.on(Hls.Events.BUFFER_CREATED, (_event, data) => {
+      createdBuffers = {};
+      for (const [name, track] of Object.entries(data.tracks)) if (track) createdBuffers[name] = track.buffer;
+      this.trackBuffers.set(video, createdBuffers);
+    });
+    hls.on(Hls.Events.MEDIA_DETACHED, () => {
+      if (createdBuffers && this.trackBuffers.get(video) === createdBuffers) this.trackBuffers.delete(video);
+    });
     hls.on(Hls.Events.MEDIA_ATTACHED, () => {
       this.log.debug('hls-media-attached');
       this.requestPlay(video, 'hls-media-attached');
@@ -2361,8 +2384,20 @@ class WebPlayer implements Player {
     });
     hls.on(Hls.Events.LEVEL_SWITCHING, (_event, data) => this.log.debug('hls-level-switching', hlsEventSummary(data)));
     hls.on(Hls.Events.LEVEL_SWITCHED, (_event, data) => this.log.debug('hls-level-switched', hlsEventSummary(data)));
-    hls.on(Hls.Events.FRAG_LOADING, (_event, data) => this.log.debug('hls-fragment-loading', hlsEventSummary(data)));
-    hls.on(Hls.Events.FRAG_LOADED, (_event, data) => this.log.debug('hls-fragment-loaded', hlsEventSummary(data)));
+    hls.on(Hls.Events.FRAG_LOADING, (_event, data) => {
+      this.startRecorders.get(video)?.recorder.fragment('asked', data.frag?.sn);
+      this.log.debug('hls-fragment-loading', hlsEventSummary(data));
+    });
+    hls.on(Hls.Events.FRAG_LOADED, (_event, data) => {
+      this.startRecorders.get(video)?.recorder.fragment('got', data.frag?.sn);
+      const stats = data.frag?.stats;
+      if (stats && data.frag?.url) reportFragmentTransfer(data.frag.url, stats.loaded, stats.loading.first, stats.loading.end);
+      if (data.frag?.sn !== 'initSegment') {
+        const costMs = nodeStartCosts.firstFragment(url);
+        if (costMs !== undefined) this.log.info('node-start-cost-measured', { url, costMs });
+      }
+      this.log.debug('hls-fragment-loaded', hlsEventSummary(data));
+    });
     hls.on(Hls.Events.FRAG_BUFFERED, (_event, data) => {
       this.log.debug('hls-fragment-buffered', { data: hlsEventSummary(data), state: videoState(video) });
       mediaRecovery.observeBufferedContent();
@@ -2370,6 +2405,9 @@ class WebPlayer implements Player {
     });
     hls.on(Hls.Events.BUFFER_FLUSHED, () => this.publish(video));
     hls.on(Hls.Events.ERROR, (_event, data) => {
+      // Before the guard: a standby's hls is not `this.hls` yet, and its
+      // errors are exactly what a start that never arrives needs on record.
+      this.startRecorders.get(video)?.recorder.hlsError(data as Parameters<StartRecorder['hlsError']>[0]);
       if (sourceGeneration !== this.sourceGeneration || this.hls !== hls) return;
       const payload = { data: hlsEventSummary(data), state: videoState(video) };
       // The earliest and cheapest recovery this client has. hls.js populates

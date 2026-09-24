@@ -75,7 +75,7 @@ const sourceByKey = new Map<string, string>();
 const failureListenersBySource = new Map<string, Set<(error: DirectPlayReadAheadError) => void>>();
 /** Last counters seen per source, so each message contributes only new bytes. */
 const lastTransferBySource = new Map<string, { fetchedBytes: number; fetchActiveMs: number }>();
-let transferListener: DirectPlayTransferListener | undefined;
+let transferListener: MediaTransferListener | undefined;
 let registrationPromise: Promise<ServiceWorkerRegistration | undefined> | undefined;
 let messageListenerInstalled = false;
 
@@ -159,8 +159,8 @@ function installMessageListener(): void {
   });
 }
 
-/** Real media bytes moved by the worker, and the node that served them. */
-export type DirectPlayTransferListener = (origin: string, bytes: number, durationMs: number) => void;
+/** Real media bytes moved, and the node that served them. */
+export type MediaTransferListener = (origin: string, bytes: number, durationMs: number) => void;
 
 /**
  * Report media throughput to whoever ranks endpoints.
@@ -176,9 +176,37 @@ export type DirectPlayTransferListener = (origin: string, bytes: number, duratio
  * Injected rather than imported for the same reason the HTTP layer's recorder
  * is: playback has no business reaching into cluster bookkeeping.
  */
-export function setDirectPlayTransferListener(listener: DirectPlayTransferListener | undefined): void {
+export function setMediaTransferListener(listener: MediaTransferListener | undefined): void {
   transferListener = listener;
   if (!listener) lastTransferBySource.clear();
+}
+
+/**
+ * One hls.js fragment, reported through the same listener as Direct Play.
+ *
+ * **Without it a transcode or remux session produced no media evidence at
+ * all**, and core's throughput record for a node served only that way was
+ * its JSON reads: measured on 2026-09-23, the one question that record would
+ * be asked, whether a node can carry a stream to this viewer, was being
+ * answered from catalogue payloads.
+ *
+ * Timed from the first byte to the last, not from the request: the wait
+ * before the first byte is the node deciding, and the rest is the link. On
+ * that day gbni-1 answered every fragment in 0.1-0.35 s and then delivered
+ * at 0.26-1.32 MB/s against a 0.63 MB/s stream, and only the second figure
+ * says whether it can keep up.
+ */
+export function reportFragmentTransfer(url: string, bytes: number, firstByteAtMs: number, endAtMs: number): void {
+  if (!transferListener || !(bytes > 0)) return;
+  const durationMs = endAtMs - firstByteAtMs;
+  if (!(durationMs > 0)) return;
+  let origin: string;
+  try {
+    origin = new URL(url).origin;
+  } catch {
+    return;
+  }
+  transferListener(origin, bytes, Math.round(durationMs * 10) / 10);
 }
 
 function reportTransfer(sourceUrl: string, metrics: DirectPlayReadAheadMetrics): void {
@@ -194,6 +222,35 @@ function reportTransfer(sourceUrl: string, metrics: DirectPlayReadAheadMetrics):
   // message measures from the new generation.
   if (bytes <= 0 || durationMs <= 0) return;
   transferListener(metrics.sourceOrigin, bytes, durationMs);
+}
+
+/** Long enough for a worker that is running; a worker that is not has nothing to say. */
+const SOURCE_STATUS_TIMEOUT_MS = 1_000;
+
+/**
+ * What the node last answered the worker for this source, when that was a
+ * failure status, or undefined when there is none, no worker, or no answer in
+ * time. For an element that errors before the worker's own report arrives:
+ * the worker records the status before the response reaches the element, so
+ * asking settles what the report's ordering cannot.
+ */
+export function directPlayReadAheadSourceStatus(sourceUrl: string | undefined): Promise<number | undefined> {
+  const sourceKey = sourceUrl ? keyBySource.get(sourceUrl) : undefined;
+  const controller = serviceWorkerAvailable() ? navigator.serviceWorker.controller : null;
+  if (!sourceKey || !controller) return Promise.resolve(undefined);
+  return new Promise((resolve) => {
+    const channel = new MessageChannel();
+    const timer = setTimeout(() => {
+      channel.port1.close();
+      resolve(undefined);
+    }, SOURCE_STATUS_TIMEOUT_MS);
+    channel.port1.onmessage = (event: MessageEvent<{ status?: unknown }>) => {
+      clearTimeout(timer);
+      channel.port1.close();
+      resolve(typeof event.data?.status === 'number' ? event.data.status : undefined);
+    };
+    controller.postMessage({ type: 'macha-direct-read-ahead-status', sourceKey }, [channel.port2]);
+  });
 }
 
 export function subscribeDirectPlayReadAheadFailure(

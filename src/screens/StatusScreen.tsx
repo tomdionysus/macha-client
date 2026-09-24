@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { MetricTile } from '../components/MetricTile';
 import { Link, useParams } from 'react-router-dom';
 import type { Platform } from '@machafoundation/core';
 import { DeviceCapabilities } from '../components/DeviceCapabilities';
@@ -10,11 +11,11 @@ import type {
   NodeRuntimeStatus,
   PublicConnectivityStatus,
 } from '@machafoundation/core';
-import { startupPhaseLabel, startupReadyCount, startupSubsystems } from '@machafoundation/core';
+import { startupReadyCount, startupSubsystems } from '@machafoundation/core';
+import { diagnosticErrorText, startupPhaseLabel, startupSubsystemLabel, viewerErrorText } from '../text/viewerText';
 import type { IdentityAssociationResetResult, ManageApi } from '@machafoundation/core';
 import { routes } from '@machafoundation/core';
 import { usePollingTask } from '../hooks/usePollingTask';
-import { errorMessage } from '@machafoundation/core';
 import { EndpointRegistry, type EndpointCandidate } from '@machafoundation/core';
 import { ConfirmModal } from '../components/Modal';
 import { AsyncIconButton } from '../components/AsyncIconButton';
@@ -197,10 +198,6 @@ function UsageBar({ used, capacity }: { used: number; capacity: number }) {
   return <div className="cluster-usage-bar" aria-hidden="true"><span style={{ width: `${width}%` }} /></div>;
 }
 
-function ClusterMetric({ label, value, detail }: { label: string; value: string; detail?: string }) {
-  return <article className="cluster-metric"><span>{label}</span><strong>{value}</strong>{detail && <small>{detail}</small>}</article>;
-}
-
 export function StatusHeader({ eyebrow, title = 'Status', health, refreshing, onRefresh }: {
   eyebrow: string;
   title?: string;
@@ -349,14 +346,14 @@ function PublicConnectivity({ connectivity }: { connectivity: PublicConnectivity
           <DetailItem label="CGNAT / private WAN">{yesNo(upnp.private_wan)}</DetailItem>
           <DetailItem label="Mapping owned">{yesNo(upnp.mapping_owned)}</DetailItem>
           <DetailItem label="Lease">{upnp.lease_seconds ? `${upnp.lease_seconds}s` : 'Permanent / router default'}</DetailItem>
-          {upnp.error && <DetailItem label="UPnP error"><span className="cluster-connectivity-error">{upnp.error}</span></DetailItem>}
+          {diagnosticErrorText(upnp) && <DetailItem label="UPnP error"><span className="cluster-connectivity-error">{diagnosticErrorText(upnp)}</span></DetailItem>}
         </dl></article>
 
         {(connectivity.external_ip.enabled || connectivity.external_ip.attempted) && <article className="node-detail-card"><h2>External IP fallback</h2><dl>
           <DetailItem label="Enabled">{yesNo(connectivity.external_ip.enabled)}</DetailItem>
           <DetailItem label="Attempted">{yesNo(connectivity.external_ip.attempted)}</DetailItem>
           <DetailItem label="Address"><code>{connectivity.external_ip.address ?? '—'}</code></DetailItem>
-          {connectivity.external_ip.error && <DetailItem label="Lookup error"><span className="cluster-connectivity-error">{connectivity.external_ip.error}</span></DetailItem>}
+          {diagnosticErrorText(connectivity.external_ip) && <DetailItem label="Lookup error"><span className="cluster-connectivity-error">{diagnosticErrorText(connectivity.external_ip)}</span></DetailItem>}
         </dl></article>}
       </div>
     </>
@@ -385,6 +382,7 @@ function NodeCard({ node, canManage, resetting, onReset }: { node: ClusterNodeSt
           <span className={telemetryAgeClassName(node)}>{freshnessLabel(node)}</span>
         </div>
         <dl className="cluster-node-stats">
+          <div><dt>Uptime</dt><dd>{node.runtime.uptime_ms != null ? formatDuration(node.runtime.uptime_ms) : '—'}</dd></div>
           <div><dt>Storage</dt><dd>{formatBytes(node.storage.used_bytes)} / {formatBytes(node.storage.capacity_bytes)}</dd></div>
           <div><dt>Cache</dt><dd>{node.cache.capacity_bytes ? `${formatBytes(node.cache.used_bytes)} / ${formatBytes(node.cache.capacity_bytes)}` : '—'}</dd></div>
           <div><dt>Load</dt><dd>{node.runtime.load1 != null ? node.runtime.load1.toFixed(2) : '—'}</dd></div>
@@ -457,14 +455,14 @@ export function StatusScreen({ api, endpointRegistry, manageApi, platform, secti
       setSnapshot(omitRetiredNodes(await api.status()));
       setError(undefined);
     } catch (cause) {
-      setError(errorMessage(cause));
+      setError(viewerErrorText(cause));
     }
   }, [api, omitRetiredNodes]);
 
   usePollingTask({
     load: () => api.status(),
     onValue: (value) => { setSnapshot(omitRetiredNodes(value)); setError(undefined); },
-    onError: (cause) => setError(errorMessage(cause)),
+    onError: (cause) => setError(viewerErrorText(cause)),
     intervalMs: 5000,
     dependencies: [api, omitRetiredNodes],
     allowOverlap: true,
@@ -487,7 +485,7 @@ export function StatusScreen({ api, endpointRegistry, manageApi, platform, secti
         await refresh();
       }
     } catch (cause) {
-      setError(errorMessage(cause));
+      setError(viewerErrorText(cause));
     } finally {
       setRefreshing(false);
     }
@@ -506,7 +504,7 @@ export function StatusScreen({ api, endpointRegistry, manageApi, platform, secti
         setResetCandidate(undefined);
       }, refresh);
     } catch (cause) {
-      setError(errorMessage(cause));
+      setError(viewerErrorText(cause));
     } finally {
       setResettingNodeId(undefined);
     }
@@ -544,19 +542,19 @@ export function StatusScreen({ api, endpointRegistry, manageApi, platform, secti
         </div>
         <div className="cluster-startup-grid">
           {startupSubsystems(snapshot.startup).map((subsystem) => <div key={subsystem.key}>
-            <span>{subsystem.label}</span><strong className={`cluster-startup-state ${subsystem.state}`}>{subsystem.state}</strong>
+            <span>{startupSubsystemLabel(subsystem.key)}</span><strong className={`cluster-startup-state ${subsystem.state}`}>{subsystem.state}</strong>
           </div>)}
         </div>
-        {snapshot.startup.error && <p className="cluster-startup-error">{snapshot.startup.error}</p>}
+        {diagnosticErrorText(snapshot.startup) && <p className="cluster-startup-error">{diagnosticErrorText(snapshot.startup)}</p>}
       </section>}
       {clusterConditions.length > 0 && <div className="cluster-conditions">
         {clusterConditions.map((condition) => <span key={condition}>{condition}</span>)}
       </div>}
-      <div className="cluster-metric-grid">
-        <ClusterMetric label="Nodes" value={`${cluster.nodes_online} / ${cluster.nodes_known}`} detail="online" />
-        <ClusterMetric label="Metadata" value={cluster.metadata_availability === 'writable' ? 'Writable' : cluster.metadata_availability === 'read-only' ? 'Read-only' : 'Unavailable'} detail={`${cluster.metadata_voters_online}/${cluster.metadata_voters} voters · ${cluster.metadata_quorum_required} required`} />
-        <ClusterMetric label="Durable storage" value={`${formatBytes(cluster.storage_online.capacity_bytes)} / ${formatBytes(cluster.storage_known.capacity_bytes)}`} detail={`${formatBytes(cluster.storage_known.used_bytes)} known used`} />
-        <ClusterMetric label="Cache" value={cluster.cache_known.capacity_bytes ? `${formatBytes(cluster.cache_online.capacity_bytes)} / ${formatBytes(cluster.cache_known.capacity_bytes)}` : 'None'} detail={cluster.cache_known.capacity_bytes ? `${formatBytes(cluster.cache_known.used_bytes)} known used` : undefined} />
+      <div className="metric-grid">
+        <MetricTile label="Nodes" value={`${cluster.nodes_online} / ${cluster.nodes_known}`} detail="online" />
+        <MetricTile label="Metadata" value={cluster.metadata_availability === 'writable' ? 'Writable' : cluster.metadata_availability === 'read-only' ? 'Read-only' : 'Unavailable'} detail={`${cluster.metadata_voters_online}/${cluster.metadata_voters} voters · ${cluster.metadata_quorum_required} required`} />
+        <MetricTile label="Durable storage" value={`${formatBytes(cluster.storage_online.capacity_bytes)} / ${formatBytes(cluster.storage_known.capacity_bytes)}`} detail={`${formatBytes(cluster.storage_known.used_bytes)} known used`} />
+        <MetricTile label="Cache" value={cluster.cache_known.capacity_bytes ? `${formatBytes(cluster.cache_online.capacity_bytes)} / ${formatBytes(cluster.cache_known.capacity_bytes)}` : 'None'} detail={cluster.cache_known.capacity_bytes ? `${formatBytes(cluster.cache_known.used_bytes)} known used` : undefined} />
       </div>
 
       <div className="cluster-capacity-grid">
@@ -615,7 +613,7 @@ export function NodeStatusScreen({ api }: { api: ClusterStatusApi }) {
       setNode(await api.node(nodeId));
       setError(undefined);
     } catch (cause) {
-      setError(errorMessage(cause));
+      setError(viewerErrorText(cause));
     }
   }, [api, nodeId]);
 
@@ -626,7 +624,7 @@ export function NodeStatusScreen({ api }: { api: ClusterStatusApi }) {
       setCheck(await api.checkConnectivity(nodeId));
       await refresh();
     } catch (cause) {
-      setError(errorMessage(cause));
+      setError(viewerErrorText(cause));
     } finally {
       setRefreshing(false);
     }
@@ -635,7 +633,7 @@ export function NodeStatusScreen({ api }: { api: ClusterStatusApi }) {
   usePollingTask({
     load: () => api.node(nodeId!),
     onValue: (value) => { setNode(value); setError(undefined); },
-    onError: (cause) => setError(errorMessage(cause)),
+    onError: (cause) => setError(viewerErrorText(cause)),
     intervalMs: 5000,
     dependencies: [api, nodeId],
     allowOverlap: true,
@@ -654,7 +652,7 @@ export function NodeStatusScreen({ api }: { api: ClusterStatusApi }) {
       <Link className="back-button" to={routes.status} data-tv-focusable="true">← Overview</Link>
       <StatusHeader eyebrow="Cluster node" title={nodeName(node)} health={{ className: nodeNotYetReady(node) ? 'recovering' : node.state === 'online' ? 'healthy' : node.state === 'retired' ? 'degraded' : 'critical', label: nodeStatusLabel(node) }} refreshing={refreshing} onRefresh={() => void refreshPage()} />
       {error && <p className="manage-error">Live refresh failed: {error}</p>}
-      {connectivity && <p className={`cluster-check-result ${connectivity.reachable ? 'reachable' : 'unreachable'}`}>Connectivity: {connectivity.reachable ? 'reachable' : 'unreachable'}{connectivity.error ? ` · ${connectivity.error}` : ''}</p>}
+      {connectivity && <p className={`cluster-check-result ${connectivity.reachable ? 'reachable' : 'unreachable'}`}>Connectivity: {connectivity.reachable ? 'reachable' : 'unreachable'}{diagnosticErrorText(connectivity) ? ` · ${diagnosticErrorText(connectivity)}` : ''}</p>}
 
       <div className="node-detail-grid">
         <article className="node-detail-card"><h2>Overview</h2><dl>

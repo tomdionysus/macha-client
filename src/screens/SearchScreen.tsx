@@ -1,8 +1,24 @@
-import { useEffect, useState, type ChangeEvent } from 'react';
+import { useEffect, useMemo, useState, type ChangeEvent } from 'react';
+import {
+  DEFAULT_SEARCH_CATEGORIES,
+  DEFAULT_SEARCH_SORT,
+  isMediaSortKey,
+  isSearchable,
+  orderMedia,
+  SEARCH_CATEGORIES,
+  SEARCH_SORTS,
+  type MediaSortKey,
+  type SearchCategoryKey,
+} from '@machafoundation/core';
 import type { MediaApi } from '@machafoundation/core';
 import type { MediaSummary } from '@machafoundation/core';
 import { MediaCard } from '../components/MediaCard';
+import { AlphabetIndex } from '../components/AlphabetIndex';
+import { AsyncIconButton } from '../components/AsyncIconButton';
+import { RefreshIcon } from '../components/ManageIcons';
 import { MediaPageTitle } from '../components/MediaPageTitle';
+import { useAlphabetIndex } from '../hooks/useAlphabetIndex';
+import { searchCategoryLabel, sortChoiceLabel } from '../text/viewerText';
 
 interface Props {
   api: MediaApi;
@@ -15,10 +31,20 @@ export function SearchScreen({ api, onOpen }: Props) {
   const [error, setError] = useState<string>();
   const [refreshToken, setRefreshToken] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
+  const [sort, setSort] = useState<MediaSortKey>(DEFAULT_SEARCH_SORT);
+  const [categories, setCategories] = useState<readonly SearchCategoryKey[]>(DEFAULT_SEARCH_CATEGORIES);
+  // Any combination, including none; kept in core's order so the same set is the same array.
+  const toggleCategory = (key: SearchCategoryKey) => setCategories((current) => SEARCH_CATEGORIES
+    .map((category) => category.key)
+    .filter((candidate) => (candidate === key) !== current.includes(candidate)));
+  const ordered = useMemo(() => orderMedia(results, sort), [results, sort]);
+  const alphabet = useAlphabetIndex(ordered);
 
   useEffect(() => {
+    // Core decides what is worth a search: the words titles ignore for
+    // ordering never trigger one, and never reach the catalogue.
     const normalized = query.trim();
-    if (normalized.length < 2) {
+    if (!isSearchable(normalized)) {
       setResults([]);
       setError(undefined);
       setRefreshing(false);
@@ -28,7 +54,7 @@ export function SearchScreen({ api, onOpen }: Props) {
     setRefreshing(true);
     setError(undefined);
     const timer = window.setTimeout(() => {
-      void api.search(normalized)
+      void api.search(normalized, undefined, { categories })
         .then((value) => { if (active) setResults(value); })
         .catch((reason: unknown) => { if (active) setError(String(reason)); })
         .finally(() => { if (active) setRefreshing(false); });
@@ -37,23 +63,70 @@ export function SearchScreen({ api, onOpen }: Props) {
       active = false;
       window.clearTimeout(timer);
     };
-  }, [api, query, refreshToken]);
+  }, [api, query, categories, refreshToken]);
 
   return (
-    <section>
-      <MediaPageTitle refreshing={refreshing} onRefresh={() => setRefreshToken((value) => value + 1)}>Search</MediaPageTitle>
+    <section className="catalogue-indexed">
+      <MediaPageTitle>Search</MediaPageTitle>
       {error && <p className="manage-error media-refresh-error">Refresh failed: {error}</p>}
-      <input
-        className="search-input"
-        data-tv-focusable="true"
-        value={query}
-        onChange={(event: ChangeEvent<HTMLInputElement>) => setQuery(event.target.value)}
-        placeholder="Search your library"
-        autoFocus
-      />
-      <div className="media-grid search-results">
-        {results.map((item) => <MediaCard key={item.id} api={api} item={item} onOpen={onOpen} />)}
+      <div className="search-bar">
+        <input
+          className="search-input"
+          data-tv-focusable="true"
+          value={query}
+          onChange={(event: ChangeEvent<HTMLInputElement>) => setQuery(event.target.value)}
+          placeholder="Search your library"
+          autoFocus
+        />
+        <div className="sort-control">
+          <select
+            data-tv-focusable="true"
+            aria-label="Sort results"
+            value={sort}
+            onChange={(event: ChangeEvent<HTMLSelectElement>) => { if (isMediaSortKey(event.target.value)) setSort(event.target.value); }}
+          >
+            {SEARCH_SORTS.map((entry) => <option key={entry.key} value={entry.key}>{sortChoiceLabel(entry.key)}</option>)}
+          </select>
+        </div>
+        <div className="search-type-filter" role="group" aria-label="Title types">
+          {SEARCH_CATEGORIES.map((category) => (
+            <button
+              key={category.key}
+              type="button"
+              className="search-type-pill"
+              data-tv-focusable="true"
+              aria-pressed={categories.includes(category.key)}
+              onClick={() => toggleCategory(category.key)}
+            >
+              {searchCategoryLabel(category.key)}
+            </button>
+          ))}
+        </div>
+        <AsyncIconButton
+          className="search-bar-refresh"
+          label="Refresh Search"
+          busy={refreshing}
+          onClick={() => setRefreshToken((value) => value + 1)}
+          icon={<RefreshIcon />}
+        />
       </div>
+      {query.trim() !== '' && ordered.length === 0 && !refreshing && !error && (
+        <p className="search-empty" role="status">Nothing found. Try different search terms or filters.</p>
+      )}
+      <div className="media-grid search-results">
+        {ordered.map((item) => (
+          <MediaCard
+            key={item.id}
+            api={api}
+            item={item}
+            onOpen={onOpen}
+            variant="in-context"
+            elementRef={(element) => alphabet.registerItem(item.id, element)}
+          />
+        ))}
+      </div>
+      {/* A letter marks a place only in title order; under any other it points nowhere useful. */}
+      {ordered.length > 0 && sort === 'title' && <AlphabetIndex availableKeys={alphabet.availableKeys} onSelect={alphabet.jumpTo} />}
     </section>
   );
 }

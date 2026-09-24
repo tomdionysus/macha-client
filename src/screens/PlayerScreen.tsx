@@ -6,18 +6,22 @@ import { createClientLogger } from '@machafoundation/core';
 import { useArtworkUrl } from '../hooks/useArtworkUrl';
 import { requestTvDefaultFocus } from '../hooks/useTvNavigation';
 import { useElapsedMs } from '../hooks/useElapsedMs';
+import { usePointerIdle } from '../hooks/usePointerIdle';
+import { cardSubtitle, episodeCode, playbackNoticeText, playbackTimeText, streamStatusText } from '../text/viewerText';
 import type { Platform } from '@machafoundation/core';
 import { platformTraits } from '../platform/traits';
 import type { PlaybackUpdate } from '@machafoundation/core';
 import { isSubtitleOnlyPlaybackUpdate, type PlaybackCoordinatorSnapshot } from '@machafoundation/core';
 import { PlaybackRuntime, type PlaybackRuntimeRequest, type PlaybackRuntimeSnapshot } from '@machafoundation/core';
-import { formatPlaybackTime } from '@machafoundation/core';
 import { uiSettings } from '../settings';
 import { describePlaybackSession } from '@machafoundation/core';
 import { playbackFailureTrail, type PlaybackFailureTrailEntry } from './player/failureTrail';
 import { playerNodeChoices } from './player/nodeChoices';
+import { moveStreamToNode } from './player/nodeMove';
+import { nodeStartCosts } from '../playback/nodeStartCosts';
+import { MOVE_LEAD_MARGIN_MS } from '@machafoundation/core';
 import { failureTrailEnabled } from '../diagnostics/failureTrailSetting';
-import { accountSessionLimitNotice, failureCauseMessages } from '../diagnostics/failureCauses';
+import { accountSessionLimitNotice, playbackFailureHeadline } from '../diagnostics/failureCauses';
 import { bufferedTimelineSegments } from '@machafoundation/core';
 import type { MediaSummary, PlaybackEvent, PlaybackProgress } from '@machafoundation/core';
 import { PlayerOptions } from './player/PlayerOptions';
@@ -51,7 +55,7 @@ interface Props {
    * The registry belongs to the app, not to a player that comes and goes, so
    * the pin is set where the registry lives and this player only says which.
    */
-  onPinEndpoint?: (endpointIds: readonly string[]) => void;
+  onPinEndpoint?: (endpointIds: readonly string[]) => string | undefined;
 }
 
 
@@ -179,20 +183,17 @@ function shouldTrackProgress(media: MediaSummary): boolean {
 /**
  * The line under the title in the player bar.
  *
- * The catalogue supplies no subtitle for a movie, so that line sat empty
- * where the year is the one piece of identifying context worth having —
- * remakes and re-releases share titles freely. Everything else keeps the
- * subtitle it already had, and a movie with no year still shows nothing
- * rather than an empty separator.
+ * Worded here from the item's facts, since core writes no viewer text: an
+ * episode is its series and code ("The Show S01E01"), a movie its year, since
+ * remakes and re-releases share titles freely, and anything else the line
+ * its card shows. A movie with no year shows nothing rather than an empty
+ * separator.
  */
 export function playerMediaSubtitle(media: MediaSummary): string | undefined {
   if (media.kind === 'episode') {
-    return `${media.playbackContext?.series.title ?? ''} ${media.subtitle ?? ''}`.trim() || undefined;
+    return `${media.playbackContext?.series.title ?? ''} ${episodeCode(media) ?? ''}`.trim() || undefined;
   }
-  if (media.kind === 'movie' && media.subtitle === undefined) {
-    return media.year !== undefined ? String(media.year) : undefined;
-  }
-  return media.subtitle;
+  return cardSubtitle(media);
 }
 
 export function webSeekDeltaForKey(key: string): number | undefined {
@@ -256,7 +257,7 @@ export function webArrowTargetOwnsKey(target: EventTarget | null): boolean {
 
 export const isSubtitleOnlyUpdate = isSubtitleOnlyPlaybackUpdate;
 
-function PlayerSession({ api, media, platform, runtime, startPositionMs, presentation, onProgress, onPosition, onMinimize, onExpand, onStop, onPrevious, onNext, onEnded, canPrevious, canNext, queuePosition, volume, onVolumeChange, endpoints, onPinEndpoint, returnTo }: Omit<Props, 'request'> & { media: MediaSummary; startPositionMs: number; returnTo: string }) {
+function PlayerSession({ api, media, platform, runtime, startPositionMs, presentation, onProgress, onPosition, onMinimize, onExpand, onStop, onPrevious, onNext, onEnded, canPrevious, canNext, queuePosition, volume, onVolumeChange, endpoints, onPinEndpoint }: Omit<Props, 'request'> & { media: MediaSummary; startPositionMs: number }) {
   const pageRef = useRef<HTMLElement | null>(null);
   const hostRef = useRef<HTMLDivElement | null>(null);
   const chromeRef = useRef<HTMLDivElement | null>(null);
@@ -291,6 +292,7 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
     fatalError: runtimeState.fatalError,
   };
   const [controlsVisible, setControlsVisible] = useState(!interactionControlled);
+  const pointer = usePointerIdle(uiSettings.playerControlsHideDelayMs);
   const [fullscreen, setFullscreen] = useState(false);
   const [optionsVisible, setOptionsVisible] = useState(false);
   const [scrubValue, setScrubValue] = useState<number>();
@@ -380,7 +382,7 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
   }, [onEnded, playback.event.ended]);
 
   const fatalError = runtimeState.fatalError ?? playback.fatalError;
-  const playbackNotice = localNotice ?? playback.notice;
+  const playbackNotice = localNotice ?? (playback.notice && playbackNoticeText(playback.notice));
 
   const hideControls = useCallback(() => {
     if (hideTimerRef.current !== undefined) {
@@ -485,7 +487,8 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
     // A stream that cannot seek never moves, so nothing should have stopped.
     if (!accepted) {
       releasePicture();
-      setLocalNotice(runtime.getPlaybackSnapshot()?.notice);
+      const notice = runtime.getPlaybackSnapshot()?.notice;
+      setLocalNotice(notice && playbackNoticeText(notice));
     }
     if (!interactionControlled) showControls();
     return accepted;
@@ -517,23 +520,19 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
   /**
    * Send this stream to the node the viewer picked, from where they are.
    *
-   * **A new generation, not a redirected one.** A playback session belongs to
-   * the node that created it, so "stream from that node instead" is a session
-   * on that node at this position — which is what `play()` does, closing the
-   * one on screen first so the node it leaves is not left holding a
-   * transcode slot.
+   * **A new session there, promoted under the picture.** A playback session
+   * belongs to the node that created it, so "stream from that node instead"
+   * is a session on that node at this position. Core's `moveTo` builds it
+   * while the old one keeps presenting, swaps, then releases the old one;
+   * `moveStreamToNode` says what happens when it cannot.
    *
    * **The pin is set before the request, and outlives it.** Ordering is what
    * makes the resolver choose, so the choice has to be in the registry before
    * anything resolves; leaving it there is what keeps the next seek, mode
    * change and recovery on the node the viewer asked for.
    *
-   * **Not seamless yet, and the gap is real.** Core already has the machinery
-   * that would make it so — `prepareAlternate` builds a standby on another
-   * node and promotion swaps to it under the picture, which is how failover
-   * moves a viewer without a black frame — but it is reached from inside the
-   * coordinator, on failure, and there is no public way to ask for it by
-   * name. Until there is, this costs what starting a stream costs.
+   * **Restarting was 13.2 s of black**, measured between fi-1 and gbni-1,
+   * because `play()` closes before it starts. That is what this replaced.
    */
   const nodeChoices = useMemo(
     () => playerNodeChoices(endpoints ?? [], playback.session?.endpoint?.id),
@@ -556,19 +555,34 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
     const choice = nodeChoices.find((node) => node.id === nodeId);
     if (!onPinEndpoint || !choice) return;
     const positionMs = Math.max(0, Math.round(scrubValueRef.current ?? playback.intent.positionMs));
+    // This viewer's latest start cost for that node, with core's margin. No
+    // fresh figure means no host lead: core then uses its own estimate.
+    const measured = nodeStartCosts.forNode(choice.endpointIds);
+    const leadMs = measured ? measured.costMs + MOVE_LEAD_MARGIN_MS : undefined;
     log.info('node-move-request', {
       from: playback.session?.endpoint?.id,
       to: choice.endpointIds,
       positionMs,
+      leadMs,
+      measuredStartCostMs: measured?.costMs,
+      measuredAgeMs: measured?.ageMs,
       sessionId: playback.session?.sessionId,
     });
     setLocalNotice(undefined);
+    const endpointId = onPinEndpoint(choice.endpointIds);
+    if (endpointId === undefined) return;
     setMovingToNode(nodeId);
-    onPinEndpoint(choice.endpointIds);
-    // The viewer's own choices follow them across, or the move would quietly
-    // undo the mode and the audio track they had picked.
-    void runtime.play({ media, startPositionMs: positionMs, returnTo }, playback.session?.preferences);
-  }, [log, media, nodeChoices, onPinEndpoint, playback.intent.positionMs, playback.session?.endpoint?.id, playback.session?.preferences, playback.session?.sessionId, returnTo, runtime]);
+    // Cleared when the move settles rather than when a session appears: a
+    // move never takes the session away, so the note would clear at once.
+    void moveStreamToNode(runtime, endpointId, Boolean(fatalError), leadMs)
+      .then((outcome) => {
+        log.info('node-move-settled', { to: endpointId, outcome });
+        if (outcome === 'refused') {
+          setLocalNotice(`${choice.label} could not take this stream, so it is still playing from here.`);
+        }
+      })
+      .finally(() => setMovingToNode(undefined));
+  }, [fatalError, log, nodeChoices, onPinEndpoint, playback.intent.positionMs, playback.session?.endpoint?.id, playback.session?.sessionId, runtime]);
 
   useEffect(() => {
     if (presentation === 'full') {
@@ -782,14 +796,6 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
 
   const session = playback.session;
   const event = playback.event;
-  // The move is over when a generation is playing, wherever it landed. It can
-  // land somewhere else — the node may refuse, and recovery is entitled to
-  // walk — so this clears on arrival rather than on arrival *there*, or the
-  // note would sit under the pills for the rest of the film.
-  useEffect(() => {
-    if (movingToNode === undefined) return;
-    if (session?.endpoint?.id !== undefined && !playback.starting) setMovingToNode(undefined);
-  }, [movingToNode, playback.starting, session?.endpoint?.id]);
   const duration = firstUsableDurationMs(session?.durationMs, event.durationMs, media.durationMs);
   const displayedProgress = scrubValue ?? Math.min(duration, playback.intent.positionMs);
   const playedPercent = Math.max(0, Math.min(100, displayedProgress / Math.max(1, duration) * 100));
@@ -812,7 +818,8 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
     </span>
   );
   const audio = media.kind === 'track';
-  const streamStatus = describePlaybackSession(session, event.streamOrigin);
+  const described = describePlaybackSession(session, event.streamOrigin);
+  const streamStatus = described && { endpoint: described.endpoint, ...streamStatusText(described) };
   const mediaSubtitle = playerMediaSubtitle(media);
   const pausedForControl = playerControlShowsPlay(playback.intent.paused, Boolean(fatalError));
   const queueLabel = queuePosition && queuePosition.total > 1 ? `${queuePosition.index + 1} of ${queuePosition.total}` : undefined;
@@ -826,9 +833,12 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
   return (
     <section
       ref={pageRef}
-      className={`player-page player-presentation-${presentation} ${audio ? 'audio-player' : ''} ${fullscreen && !controlsVisible && !fatalError ? 'cursor-hidden' : ''} ${fatalError ? 'player-failed' : ''}`}
+      className={`player-page player-presentation-${presentation} ${audio ? 'audio-player' : ''} ${fullscreen && !controlsVisible && pointer.idle && !fatalError ? 'cursor-hidden' : ''} ${fatalError ? 'player-failed' : ''}`}
       onPointerMove={(pointerEvent) => {
         if (presentation !== 'full') return;
+        // The cursor comes back on any movement; the chrome only where its
+        // own rules say, below.
+        pointer.noteMovement();
         if (webControls) {
           if (!pointerEvent.pointerType || pointerEvent.pointerType === 'mouse') noteWebPointerMovement(pointerEvent.clientY);
         } else if (!samsungControls) {
@@ -867,7 +877,11 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
       {fatalError && (
         <div className="player-fatal-error" role="alert">
           <strong>Playback failed</strong>
-          <span>{fatalError.message}</span>
+          {/* Core's sentence, never `.message`: by the time a failure reaches
+              here its message is two of core's envelopes and a node address.
+              The trail below still carries the whole chain for anyone who
+              switched it on. */}
+          <span>{playbackFailureHeadline(fatalError)}</span>
           {/* **The cap explains why recovery could not finish. It is not what
               went wrong**, and putting it first would tell a viewer their
               account is busy when a node had just died under them. Core's head
@@ -877,12 +891,6 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
           {accountSessionLimitNotice(fatalError) && (
             <span className="player-failure-notice">{accountSessionLimitNotice(fatalError)}</span>
           )}
-          {/* What core chained beneath it. The head names the failure that
-              started the recovery; these are the attempts that ended it, and
-              a viewer reporting only one of the two reports half of it. */}
-          {failureCauseMessages(fatalError).map((message) => (
-            <span className="player-failure-cause" key={message}>{message}</span>
-          ))}
           {failureTrail.length > 0 && (
             <ol className="player-failure-trail">
               {failureTrail.map((entry) => (
@@ -973,7 +981,7 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
         )}
 
         <div className="player-scrubber-row">
-          <span>{formatPlaybackTime(displayedProgress)}</span>
+          <span>{playbackTimeText(displayedProgress)}</span>
           <div className="player-scrubber-shell">
             {scrubberVisual}
             <input
@@ -984,7 +992,7 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
               step={1_000}
               value={displayedProgress}
               aria-label="Playback position"
-              aria-valuetext={`${formatPlaybackTime(displayedProgress)} of ${formatPlaybackTime(duration)}`}
+              aria-valuetext={`${playbackTimeText(displayedProgress)} of ${playbackTimeText(duration)}`}
               data-tv-focusable="true"
               onChange={(changeEvent: ChangeEvent<HTMLInputElement>) => setScrubPosition(Number(changeEvent.target.value))}
               onPointerUp={() => {
@@ -1025,7 +1033,7 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
               }}
             />
           </div>
-          <span>{formatPlaybackTime(duration)}</span>
+          <span>{playbackTimeText(duration)}</span>
         </div>
 
         <div className="player-button-row">
@@ -1069,8 +1077,8 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
       <div className="player-mini-chrome" aria-label="Now playing">
         <button className="player-mini-copy" type="button" data-tv-focusable="true" onClick={onExpand} aria-label={`Open player for ${media.title}`}>
           <span className="player-mini-title">{media.title}</span>
-          <span className="player-mini-subtitle">{fatalError ? `Playback failed · ${fatalError.message}` : playerSubtitle || 'Now playing'}</span>
-          <span className="player-mini-time">{formatPlaybackTime(displayedProgress)} / {formatPlaybackTime(duration)}</span>
+          <span className="player-mini-subtitle">{fatalError ? `Playback failed · ${playbackFailureHeadline(fatalError)}` : playerSubtitle || 'Now playing'}</span>
+          <span className="player-mini-time">{playbackTimeText(displayedProgress)} / {playbackTimeText(duration)}</span>
           <span className="player-mini-progress" aria-hidden="true"><span style={{ width: `${Math.min(100, displayedProgress / Math.max(1, duration) * 100)}%` }} /></span>
         </button>
         <div className="player-mini-controls">
@@ -1099,7 +1107,6 @@ export function PlayerHost(props: Props) {
       {...sessionProps}
       media={request.media}
       startPositionMs={request.startPositionMs}
-      returnTo={request.returnTo}
     />
   );
 }

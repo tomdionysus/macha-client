@@ -1,565 +1,325 @@
-import { useCallback, useMemo, useState, type ChangeEvent, type FormEvent, type ReactNode } from 'react';
-import { CardCloseButton } from '../components/CardCloseButton';
-import type {
-  AcquisitionApi,
-  AcquisitionSnapshot,
-  IngestJob,
-  TorrentJob,
-} from '@machafoundation/core';
-import { usePollingTask } from '../hooks/usePollingTask';
-import { errorMessage } from '@machafoundation/core';
-import { presentedTime } from '../diagnostics/timestamps';
+import { useMemo, useState, type ChangeEvent, type FormEvent, type MouseEvent } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import { routes, type AcquisitionApi, type IngestJob, type TorrentJob } from '@machafoundation/core';
+import { JobControls, Progress } from './ingest/JobControls';
+import { formatAge, formatBytes, formatEta, formatPercent, formatRate, formatRatio, formatTimestamp, percent, stateLabel } from './ingest/format';
+import { canPause, canResume, canRetryImport, displayStateOf, jobKey, linkedIngestOf } from './ingest/jobs';
+import { DEFAULT_TORRENT_SORT, sortTorrents, TORRENT_SORT_KEYS } from './ingest/torrentSort';
+import { SortControl, SortHeader, useListSort } from '../components/ListSortControls';
+import { BulkActions, ListHeading, Pager, SelectPageBox, SelectRowBox, useListSelection } from '../components/ListParts';
+import { ConfirmModal } from '../components/Modal';
+import { pageSlice } from '../lists/paging';
+import { useAcquisition } from './ingest/useAcquisition';
+import { jobErrorText, viewerErrorText } from '../text/viewerText';
+
+/** Import's pages: torrents and filesystem imports are different kinds of job, each with its own page. */
+export type IngestSection = 'torrents' | 'files';
 
 interface Props {
   api: AcquisitionApi;
+  section: IngestSection;
 }
 
-type JobKind = 'ingest' | 'torrent';
-type JobAction = 'pause' | 'resume' | 'retry' | 'remove';
-
-const ingestPauseableStates = new Set(['queued', 'scanning', 'importing']);
-const ingestResumableStates = new Set(['paused', 'blocked', 'failed']);
-const torrentPauseableStates = new Set(['queued', 'metadata', 'downloading', 'verifying', 'downloaded', 'importing']);
-const torrentResumableStates = new Set(['paused', 'blocked']);
-const terminalStates = new Set(['completed', 'cancelled', 'failed']);
-
-function formatBytes(value: number): string {
-  if (!Number.isFinite(value) || value <= 0) return '0 B';
-  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-  let amount = value;
-  let index = 0;
-  while (amount >= 1024 && index < units.length - 1) {
-    amount /= 1024;
-    index += 1;
-  }
-  const decimals = index === 0 || amount >= 100 ? 0 : amount >= 10 ? 1 : 2;
-  return `${amount.toFixed(decimals)} ${units[index]}`;
+/** A torrent's own page, carrying the list's sort so coming back lands on the same order. */
+export function torrentPath(id: string, search = ''): string {
+  return `${routes.ingestTorrent(id)}${search}`;
 }
 
-function formatRate(value: number): string {
-  return value > 0 ? `${formatBytes(value)}/s` : '—';
-}
-
-function formatEta(value: number | null): string {
-  if (value === null || value < 0 || !Number.isFinite(value)) return '—';
-  if (value < 60) return `${Math.ceil(value)}s`;
-  if (value < 3600) return `${Math.ceil(value / 60)}m`;
-  const hours = Math.floor(value / 3600);
-  const minutes = Math.ceil((value % 3600) / 60);
-  return minutes ? `${hours}h ${minutes}m` : `${hours}h`;
-}
-
-function percent(progress: number | null, completed: number, total: number): number | null {
-  if (progress !== null && Number.isFinite(progress)) return Math.max(0, Math.min(100, progress * 100));
-  if (total > 0) return Math.max(0, Math.min(100, (completed / total) * 100));
-  return null;
-}
-
-function formatTimestamp(value: number): string {
-  return presentedTime(value);
-}
-
-// Elapsed time, floored: an ETA rounds up because it promises no earlier than
-// it says, while an age counts what has actually gone by. Sharing formatEta
-// here reported a job created 3600.4s ago as "1h 1m old".
-function formatAge(value: number, now: number): string {
-  if (!value) return '—';
-  const seconds = Math.floor((now - value) / 1000);
-  if (seconds < 60) return 'just now';
-  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
-  const hours = Math.floor(seconds / 3600);
-  if (hours >= 48) return `${Math.floor(hours / 24)}d ago`;
-  const minutes = Math.floor((seconds % 3600) / 60);
-  return minutes ? `${hours}h ${minutes}m ago` : `${hours}h ago`;
-}
-
-function stateLabel(state: string): string {
-  return state.replace(/_/g, ' ').replace(/^./, (value) => value.toUpperCase());
-}
-
-function jobKey(kind: JobKind, id: string): string {
-  return `${kind}:${id}`;
-}
-
-function canPause(kind: JobKind, state: string): boolean {
-  return kind === 'ingest' ? ingestPauseableStates.has(state) : torrentPauseableStates.has(state);
-}
-
-function canResume(kind: JobKind, state: string): boolean {
-  return kind === 'ingest' ? ingestResumableStates.has(state) : torrentResumableStates.has(state);
-}
-
-function isTerminal(state: string): boolean {
-  return terminalStates.has(state);
-}
-
-function torrentLifecycleMessage(job: TorrentJob, linkedIngest?: IngestJob): string | undefined {
-  if (!job.ingest_job_id) return undefined;
-  const state = linkedIngest?.state ?? job.state;
-  if (state === 'completed') return 'Imported into Macha.';
-  if (state === 'cataloguing') return 'Imported into the Macha namespace; cataloguing media.';
-  if (state === 'cancelled') return 'Import cancelled.';
-  if (state === 'failed') return undefined;
-  return 'Downloaded; importing into the Macha namespace.';
-}
-
-function Progress({ value }: { value: number | null }) {
-  return (
-    <div className="ingest-progress-track" aria-hidden="true">
-      <span className={value === null ? 'indeterminate' : undefined} style={value === null ? undefined : { width: `${value}%` }} />
-    </div>
-  );
-}
-
-function JobControls({ kind, id, state, retryable = false, busyAction, confirmRemove, onAction, onConfirmRemove }: {
-  kind: JobKind;
-  id: string;
-  state: string;
-  retryable?: boolean;
-  busyAction: JobAction | undefined;
-  confirmRemove: boolean;
-  onAction: (kind: JobKind, id: string, state: string, action: JobAction) => void;
-  onConfirmRemove: (key: string | undefined) => void;
-}) {
-  const active = busyAction !== undefined;
-  return (
-    <div className="ingest-job-actions">
-      {canPause(kind, state) && (
-        <button className="secondary-button" data-tv-focusable="true" disabled={active} onClick={() => onAction(kind, id, state, 'pause')}>
-          {active && busyAction === 'pause' ? 'Pausing…' : 'Pause'}
-        </button>
-      )}
-      {canResume(kind, state) && (
-        <button className="secondary-button" data-tv-focusable="true" disabled={active} onClick={() => onAction(kind, id, state, 'resume')}>
-          {active && busyAction === 'resume' ? 'Resuming…' : 'Resume'}
-        </button>
-      )}
-      {kind === 'torrent' && retryable && (
-        <button className="secondary-button" data-tv-focusable="true" disabled={active} onClick={() => onAction(kind, id, state, 'retry')}>
-          {active && busyAction === 'retry' ? 'Retrying…' : 'Retry import'}
-        </button>
-      )}
-      {confirmRemove && !isTerminal(state) && (
-        <>
-          <button className="secondary-button ingest-delete-button confirm" data-tv-focusable="true" disabled={active} onClick={() => onAction(kind, id, state, 'remove')}>
-            {active && busyAction === 'remove' ? 'Removing…' : 'Confirm remove'}
-          </button>
-          <button className="secondary-button" data-tv-focusable="true" disabled={active} onClick={() => onConfirmRemove(undefined)}>
-            Keep
-          </button>
-        </>
-      )}
-    </div>
-  );
-}
-
-function IngestJobCard({ job, busyAction, confirmRemove, onAction, onConfirmRemove }: {
-  job: IngestJob;
-  busyAction: JobAction | undefined;
-  confirmRemove: boolean;
-  onAction: (kind: JobKind, id: string, state: string, action: JobAction) => void;
-  onConfirmRemove: (key: string | undefined) => void;
-}) {
-  const progress = percent(job.progress, job.bytes_completed, job.bytes_total);
-  return (
-    <article className={`ingest-job-card state-${job.state}`}>
-      <CardCloseButton
-        className="ingest-job-remove"
-        label={`Remove ${job.display_name || job.source_path} import job`}
-        disabled={busyAction !== undefined}
-        onClick={() => isTerminal(job.state)
-          ? onAction('ingest', job.id, job.state, 'remove')
-          : onConfirmRemove(jobKey('ingest', job.id))}
-      />
-      <div className="ingest-job-heading">
-        <div>
-          <span className="ingest-state">{stateLabel(job.state)}</span>
-          <h3>{job.display_name || job.source_path}</h3>
-          <p className="ingest-source" title={job.source_path}>{job.source_path}</p>
-        </div>
-        <strong className="ingest-percent">{progress === null ? '—' : `${Math.round(progress)}%`}</strong>
-      </div>
-      <Progress value={progress} />
-      <dl className="ingest-job-stats">
-        <div><dt>Copied</dt><dd>{formatBytes(job.bytes_completed)} / {formatBytes(job.bytes_total)}</dd></div>
-        <div><dt>Files</dt><dd>{job.files_completed} / {job.files_total}</dd></div>
-        <div><dt>Rate</dt><dd>{formatRate(job.rate_bytes_per_second)}</dd></div>
-        <div><dt>ETA</dt><dd>{formatEta(job.eta_seconds)}</dd></div>
-      </dl>
-      {job.current_file && <p className="ingest-current">Current: <span>{job.current_file}</span></p>}
-      {job.error && <p className="ingest-job-error">{job.error}</p>}
-      <JobControls kind="ingest" id={job.id} state={job.state} busyAction={busyAction} confirmRemove={confirmRemove} onAction={onAction} onConfirmRemove={onConfirmRemove} />
-    </article>
-  );
-}
-
-function DetailRow({ label, children }: { label: string; children: ReactNode }) {
-  return <div><dt>{label}</dt><dd>{children}</dd></div>;
-}
-
-function DetailGroup({ title, children }: { title: string; children: ReactNode }) {
-  return <section className="ingest-detail-group"><h4>{title}</h4><dl>{children}</dl></section>;
-}
-
-/**
- * Share ratio against what this node actually received, not against the
- * torrent's advertised size: a job that has fetched a tenth of the payload and
- * uploaded the same amount has served its peers a full ratio of what it holds.
- */
-function shareRatio(job: TorrentJob): string {
-  return job.bytes_completed > 0 ? (job.uploaded_total / job.bytes_completed).toFixed(2) : '—';
-}
-
-/**
- * Everything the server reports about one torrent, laid out for the question
- * "why is this not finished". The card above says what state the job is in;
- * this says what that state is made of -- who it is talking to, what it has
- * moved, where the payload went, and whether cataloguing recognised any of it.
- */
-function TorrentDetail({ id, job, linkedIngest }: { id: string; job: TorrentJob; linkedIngest?: IngestJob }) {
-  const now = Date.now();
-  const catalogue = job.catalogue;
-  return (
-    <div className="ingest-job-detail" id={id}>
-      <DetailGroup title="Transfer">
-        <DetailRow label="Received">{formatBytes(job.bytes_completed)} / {formatBytes(job.bytes_total)}</DetailRow>
-        <DetailRow label="Down">{formatRate(job.download_rate)}</DetailRow>
-        <DetailRow label="Up">{formatRate(job.upload_rate)}</DetailRow>
-        <DetailRow label="Uploaded">{formatBytes(job.uploaded_total)}</DetailRow>
-        <DetailRow label="Ratio">{shareRatio(job)}</DetailRow>
-        <DetailRow label="Peers">{job.peers}</DetailRow>
-        <DetailRow label="Seeds">{job.seeds}</DetailRow>
-        <DetailRow label="ETA">{formatEta(job.eta_seconds)}</DetailRow>
-      </DetailGroup>
-      <DetailGroup title="Torrent">
-        <DetailRow label="Info hash"><code>{job.info_hash || 'Not yet known'}</code></DetailRow>
-        {job.node_id && <DetailRow label="Node">{job.node_id}</DetailRow>}
-        <DetailRow label="Added">{formatTimestamp(job.created_unix_ms)}</DetailRow>
-        <DetailRow label="Age">{formatAge(job.created_unix_ms, now)}</DetailRow>
-        <DetailRow label="Last change">{formatAge(job.updated_unix_ms, now)}</DetailRow>
-        <DetailRow label="Job">{job.id}</DetailRow>
-      </DetailGroup>
-      {linkedIngest && (
-        <DetailGroup title="Import job">
-          <DetailRow label="State">{stateLabel(linkedIngest.state)}</DetailRow>
-          <DetailRow label="Copied">{formatBytes(linkedIngest.bytes_completed)} / {formatBytes(linkedIngest.bytes_total)}</DetailRow>
-          <DetailRow label="Files">{linkedIngest.files_completed} / {linkedIngest.files_total}</DetailRow>
-          <DetailRow label="Rate">{formatRate(linkedIngest.rate_bytes_per_second)}</DetailRow>
-          <DetailRow label="Staged at">{linkedIngest.source_path}</DetailRow>
-          {linkedIngest.current_file && <DetailRow label="Current file">{linkedIngest.current_file}</DetailRow>}
-          {linkedIngest.current_destination && <DetailRow label="Destination">{linkedIngest.current_destination}</DetailRow>}
-        </DetailGroup>
-      )}
-      {catalogue && (catalogue.total > 0 || catalogue.state !== 'waiting') && (
-        <DetailGroup title="Catalogue">
-          <DetailRow label="State">{stateLabel(catalogue.state)}</DetailRow>
-          <DetailRow label="Catalogued">{catalogue.catalogued} / {catalogue.total}</DetailRow>
-          <DetailRow label="Pending">{catalogue.pending}</DetailRow>
-          <DetailRow label="No match">{catalogue.no_match}</DetailRow>
-          <DetailRow label="Failed">{catalogue.failed}</DetailRow>
-        </DetailGroup>
-      )}
-    </div>
-  );
-}
-
-function TorrentJobCard({ job, linkedIngest, busyAction, confirmRemove, expanded, onAction, onConfirmRemove, onToggleDetail }: {
-  job: TorrentJob;
-  linkedIngest?: IngestJob;
-  busyAction: JobAction | undefined;
-  confirmRemove: boolean;
-  expanded: boolean;
-  onAction: (kind: JobKind, id: string, state: string, action: JobAction) => void;
-  onConfirmRemove: (key: string | undefined) => void;
-  onToggleDetail: (id: string) => void;
-}) {
-  const progress = percent(job.progress, job.bytes_completed, job.bytes_total);
-  const displayState = linkedIngest?.state ?? job.state;
-  const displayError = job.error || linkedIngest?.error;
-  const detailId = `torrent-detail-${job.id}`;
-  return (
-    <article className={`ingest-job-card state-${displayState}`}>
-      <CardCloseButton
-        className="ingest-job-remove"
-        label={`Remove ${job.name || 'torrent'} job`}
-        disabled={busyAction !== undefined}
-        onClick={() => isTerminal(job.state)
-          ? onAction('torrent', job.id, job.state, 'remove')
-          : onConfirmRemove(jobKey('torrent', job.id))}
-      />
-      <button
-        type="button"
-        className="ingest-job-open"
-        data-tv-focusable="true"
-        aria-expanded={expanded}
-        aria-controls={detailId}
-        aria-label={`${job.name || 'Torrent'} details`}
-        onClick={() => onToggleDetail(job.id)}
-      >
-        <div className="ingest-job-heading">
-          <div>
-            <span className="ingest-state">{stateLabel(displayState)}</span>
-            <h3>{job.name || 'Torrent'}</h3>
-            {job.info_hash && <p className="ingest-source">{job.info_hash}</p>}
-          </div>
-          <strong className="ingest-percent">{progress === null ? '—' : `${Math.round(progress)}%`}</strong>
-          <span className="ingest-disclosure" aria-hidden="true">{expanded ? '▴' : '▾'}</span>
-        </div>
-      </button>
-      <Progress value={progress} />
-      {job.ingest_job_id ? (
-        <>
-          <dl className="ingest-job-stats ingest-job-stats-import">
-            <div><dt>Copied</dt><dd>{formatBytes(job.bytes_completed)} / {formatBytes(job.bytes_total)}</dd></div>
-            <div><dt>Rate</dt><dd>{formatRate(job.download_rate)}</dd></div>
-            <div><dt>ETA</dt><dd>{formatEta(job.eta_seconds)}</dd></div>
-          </dl>
-          {torrentLifecycleMessage(job, linkedIngest) && <p className="ingest-current">{torrentLifecycleMessage(job, linkedIngest)}</p>}
-        </>
-      ) : (
-        <dl className="ingest-job-stats">
-          <div><dt>Received</dt><dd>{formatBytes(job.bytes_completed)} / {formatBytes(job.bytes_total)}</dd></div>
-          <div><dt>Down</dt><dd>{formatRate(job.download_rate)}</dd></div>
-          <div><dt>Up</dt><dd>{formatRate(job.upload_rate)}</dd></div>
-          <div><dt>ETA</dt><dd>{formatEta(job.eta_seconds)}</dd></div>
-          <div><dt>Peers</dt><dd>{job.peers}</dd></div>
-          <div><dt>Seeds</dt><dd>{job.seeds}</dd></div>
-        </dl>
-      )}
-      {displayError && <p className="ingest-job-error">{displayError}</p>}
-      {expanded && <TorrentDetail id={detailId} job={job} linkedIngest={linkedIngest} />}
-      <JobControls
-        kind="torrent"
-        id={job.id}
-        state={job.state}
-        retryable={job.state === 'failed' && Boolean(job.ingest_job_id) && linkedIngest?.state === 'failed'}
-        busyAction={busyAction}
-        confirmRemove={confirmRemove}
-        onAction={onAction}
-        onConfirmRemove={onConfirmRemove}
-      />
-    </article>
-  );
-}
-
-export function IngestScreen({ api }: Props) {
-  const [snapshot, setSnapshot] = useState<AcquisitionSnapshot>();
+export function IngestScreen({ api, section }: Props) {
+  const acquisition = useAcquisition(api);
+  const { snapshot, loading, error, setError, notice, setNotice, refresh, busyByJob, confirmRemove, setConfirmRemove, act, actMany } = acquisition;
   const [path, setPath] = useState('');
   const [magnet, setMagnet] = useState('');
-  const [loading, setLoading] = useState(true);
-  const [busyByJob, setBusyByJob] = useState<Record<string, JobAction>>({});
   const [submitting, setSubmitting] = useState<'path' | 'magnet'>();
-  const [error, setError] = useState<string>();
-  const [notice, setNotice] = useState<string>();
-  const [confirmRemove, setConfirmRemove] = useState<string>();
-  const [openTorrent, setOpenTorrent] = useState<string>();
-
-  const refresh = useCallback(async () => {
-    const value = await api.snapshot();
-    setSnapshot(value);
-    setError(undefined);
-    return value;
-  }, [api]);
-
-  usePollingTask({
-    load: () => api.snapshot(),
-    onValue: (value) => {
-      setSnapshot(value);
-      setError(undefined);
-      setLoading(false);
-    },
-    onError: (reason) => {
-      setError(errorMessage(reason));
-      setLoading(false);
-    },
-    intervalMs: 1500,
-    dependencies: [api],
-  });
+  const navigate = useNavigate();
+  const { sort, setSort, sortBy, page, setPage, search } = useListSort(TORRENT_SORT_KEYS, DEFAULT_TORRENT_SORT);
 
   const filesystemJobs = useMemo(
-    () => snapshot?.ingestJobs.filter((job) => job.source_type !== 'torrent') ?? [],
+    () => (snapshot?.ingestJobs.filter((job) => job.source_type !== 'torrent') ?? [])
+      .slice()
+      .sort((left, right) => right.created_unix_ms - left.created_unix_ms || (left.id < right.id ? -1 : 1)),
     [snapshot?.ingestJobs],
   );
+  // Keyed on the sort's two fields: the object itself is rebuilt from the
+  // address on every render.
+  const { key: sortKey, direction: sortDirection } = sort;
   const torrentJobs = useMemo(
-    () => snapshot?.torrentJobs ?? [],
-    [snapshot?.torrentJobs],
+    () => sortTorrents(
+      snapshot?.torrentJobs ?? [],
+      { key: sortKey, direction: sortDirection },
+      (job) => displayStateOf(job, linkedIngestOf(job, snapshot?.ingestJobs)),
+    ),
+    [snapshot?.torrentJobs, snapshot?.ingestJobs, sortKey, sortDirection],
   );
 
-  const submitPath = async (event: FormEvent) => {
-    event.preventDefault();
-    const value = path.trim();
-    if (!value) return;
-    setSubmitting('path');
-    setError(undefined);
-    setNotice(undefined);
-    try {
-      await api.submitPath(value);
-      setPath('');
-      setNotice(`Import queued: ${value}`);
-      await refresh();
-    } catch (reason: unknown) {
-      setError(errorMessage(reason));
-    } finally {
-      setSubmitting(undefined);
+  const torrentPage = pageSlice(torrentJobs, page);
+  const selection = useListSelection(torrentJobs);
+  const selected = torrentJobs.filter((job) => selection.checked.has(job.id));
+  const pausable = selected.filter((job) => canPause('torrent', job.state));
+  const resumable = selected.filter((job) => canResume('torrent', job.state));
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [confirmBulkRemove, setConfirmBulkRemove] = useState(false);
+
+  const bulk = async (jobs: readonly TorrentJob[], action: 'pause' | 'resume' | 'remove') => {
+    setBulkBusy(true);
+    const succeeded = await actMany('torrent', jobs, action);
+    if (action === 'remove') {
+      setConfirmBulkRemove(false);
+      if (succeeded) selection.clear();
     }
+    setBulkBusy(false);
   };
 
-  const submitMagnet = async (event: FormEvent) => {
+  const submit = async (kind: 'path' | 'magnet', event: FormEvent) => {
     event.preventDefault();
-    const value = magnet.trim();
+    const value = (kind === 'path' ? path : magnet).trim();
     if (!value) return;
-    if (!/^magnet:\?/i.test(value)) {
+    if (kind === 'magnet' && !/^magnet:\?/i.test(value)) {
       setError('Enter a magnet link beginning with magnet:?.');
       return;
     }
-    setSubmitting('magnet');
+    setSubmitting(kind);
     setError(undefined);
     setNotice(undefined);
     try {
-      await api.submitMagnet(value);
-      setMagnet('');
-      setNotice('Torrent queued.');
+      if (kind === 'path') {
+        await api.submitPath(value);
+        setPath('');
+        setNotice(`Import queued: ${value}`);
+      } else {
+        await api.submitMagnet(value);
+        setMagnet('');
+        setNotice('Torrent queued.');
+      }
       await refresh();
     } catch (reason: unknown) {
-      setError(errorMessage(reason));
+      setError(viewerErrorText(reason));
     } finally {
       setSubmitting(undefined);
     }
   };
-
-  const act = useCallback(async (kind: JobKind, id: string, state: string, action: JobAction) => {
-    const key = jobKey(kind, id);
-    setBusyByJob((current) => ({ ...current, [key]: action }));
-    setError(undefined);
-    setNotice(undefined);
-    try {
-      if (kind === 'ingest') {
-        if (action === 'pause') await api.pauseIngest(id);
-        else if (action === 'resume') await api.resumeIngest(id);
-        else {
-          if (!isTerminal(state)) await api.cancelIngest(id);
-          await api.clearIngest(id);
-        }
-      } else {
-        if (action === 'pause') await api.pauseTorrent(id);
-        else if (action === 'resume') await api.resumeTorrent(id);
-        else if (action === 'retry') await api.retryTorrent(id);
-        else {
-          if (!isTerminal(state)) await api.cancelTorrent(id);
-          await api.clearTorrent(id);
-        }
-      }
-      if (action === 'remove') setConfirmRemove(undefined);
-      await refresh();
-    } catch (reason: unknown) {
-      setError(errorMessage(reason));
-    } finally {
-      setBusyByJob((current) => {
-        if (current[key] !== action) return current;
-        const next = { ...current };
-        delete next[key];
-        return next;
-      });
-    }
-  }, [api, refresh]);
 
   const ingestEnabled = snapshot?.ingestStatus.enabled ?? false;
   const torrentEnabled = snapshot?.torrentStatus.enabled ?? false;
   const torrentBuilt = snapshot?.torrentStatus.build_available ?? false;
   const staging = snapshot?.ingestStatus.staging;
+  const now = Date.now();
+
+  /** The whole row opens the torrent, except where a control inside it was the target. */
+  const openRow = (event: MouseEvent<HTMLTableRowElement>, job: TorrentJob) => {
+    if ((event.target as HTMLElement).closest('button, a, input, select')) return;
+    navigate(torrentPath(job.id, search));
+  };
 
   return (
     <section className="ingest-screen">
-      <div className="ingest-header">
-        <div>
-          <p className="eyebrow">Acquisition</p>
-          <h1>Import</h1>
-          <p>Bring media into Macha from a server-side filesystem path or a BitTorrent magnet link.</p>
-        </div>
+      <header className="ingest-header">
+        <h1>Import</h1>
         {staging && (
-          <div className="ingest-staging-summary">
-            <span>Staging</span>
-            <strong>{formatBytes(staging.accounted_bytes)} / {formatBytes(staging.limit_bytes)}</strong>
-            <small title={staging.path}>{staging.path}</small>
-          </div>
+          <p className="ingest-staging-summary" title={staging.path}>
+            Staging <strong>{formatBytes(staging.accounted_bytes)} / {formatBytes(staging.limit_bytes)}</strong>
+          </p>
         )}
-      </div>
+      </header>
 
-      <div className="ingest-submit-grid">
-        <form className="ingest-submit-card" onSubmit={(event: FormEvent<HTMLFormElement>) => { void submitMagnet(event); }}>
-          <span className="ingest-submit-label">Torrent</span>
-          <h2>Magnet link</h2>
-          <p>The server downloads into its configured staging area and submits the completed payload for import.</p>
-          <div className="ingest-submit-line">
-            <input data-tv-focusable="true" value={magnet} onChange={(event: ChangeEvent<HTMLInputElement>) => setMagnet(event.target.value)} placeholder="magnet:?xt=urn:btih:…" disabled={!torrentEnabled || submitting === 'magnet'} />
+      <div className="ingest-add-bar">
+        {section === 'torrents' ? (
+          <form className="ingest-add-form" onSubmit={(event) => { void submit('magnet', event); }}>
+            <input
+              data-tv-focusable="true"
+              aria-label="Magnet link"
+              value={magnet}
+              onChange={(event: ChangeEvent<HTMLInputElement>) => setMagnet(event.target.value)}
+              placeholder="magnet:?xt=urn:btih:…"
+              disabled={!torrentEnabled || submitting === 'magnet'}
+            />
             <button className="primary-button" data-tv-focusable="true" type="submit" disabled={!torrentEnabled || !magnet.trim() || Boolean(submitting)}>
               {submitting === 'magnet' ? 'Adding…' : 'Add torrent'}
             </button>
-          </div>
-          {!torrentBuilt && snapshot && <p className="ingest-disabled-note">This server was built without libtorrent-rasterbar.</p>}
-          {torrentBuilt && !torrentEnabled && snapshot && <p className="ingest-disabled-note">Torrent acquisition is disabled in server configuration.</p>}
-        </form>
-
-        <form className="ingest-submit-card" onSubmit={(event: FormEvent<HTMLFormElement>) => { void submitPath(event); }}>
-          <span className="ingest-submit-label">Filesystem</span>
-          <h2>File or folder path</h2>
-          <p>The path is on the Macha server, for example a mounted USB disk. Sources are preserved after a normal manual import.</p>
-          <div className="ingest-submit-line">
-            <input data-tv-focusable="true" value={path} onChange={(event: ChangeEvent<HTMLInputElement>) => setPath(event.target.value)} placeholder="/media/usb/Movies" disabled={!ingestEnabled || submitting === 'path'} />
+          </form>
+        ) : (
+          <form className="ingest-add-form" onSubmit={(event) => { void submit('path', event); }}>
+            <input
+              data-tv-focusable="true"
+              aria-label="Server file or folder path"
+              title="A path on the Macha server, for example a mounted USB disk. Sources are preserved after a manual import."
+              value={path}
+              onChange={(event: ChangeEvent<HTMLInputElement>) => setPath(event.target.value)}
+              placeholder="/media/usb/Movies"
+              disabled={!ingestEnabled || submitting === 'path'}
+            />
             <button className="primary-button" data-tv-focusable="true" type="submit" disabled={!ingestEnabled || !path.trim() || Boolean(submitting)}>
-              {submitting === 'path' ? 'Adding…' : 'Start import'}
+              {submitting === 'path' ? 'Adding…' : 'Import path'}
             </button>
-          </div>
-          {!ingestEnabled && snapshot && <p className="ingest-disabled-note">Filesystem import is disabled in server configuration.</p>}
-        </form>
+          </form>
+        )}
       </div>
+      {section === 'torrents' && snapshot && !torrentBuilt && <p className="ingest-disabled-note">This server was built without libtorrent-rasterbar.</p>}
+      {section === 'torrents' && snapshot && torrentBuilt && !torrentEnabled && <p className="ingest-disabled-note">Torrent acquisition is disabled in server configuration.</p>}
+      {section === 'files' && snapshot && !ingestEnabled && <p className="ingest-disabled-note">Filesystem import is disabled in server configuration.</p>}
 
       {error && <p className="ingest-page-error" role="alert">{error}</p>}
       {notice && <p className="ingest-page-notice">{notice}</p>}
       {loading && !snapshot && <p className="ingest-loading">Loading import state…</p>}
 
-      <section className="ingest-job-section">
-        <div className="ingest-section-heading">
-          <h2>Torrents</h2>
-          <span>{torrentJobs.length}</span>
-        </div>
-        <div className="ingest-job-list">
-          {torrentJobs.map((job) => (
-            <TorrentJobCard
-              key={job.id}
-              job={job}
-              linkedIngest={job.ingest_job_id ? snapshot?.ingestJobs.find((candidate) => candidate.id === job.ingest_job_id) : undefined}
-              busyAction={busyByJob[jobKey('torrent', job.id)]}
-              confirmRemove={confirmRemove === jobKey('torrent', job.id)}
-              expanded={openTorrent === job.id}
-              onAction={(kind, id, state, action) => { void act(kind, id, state, action); }}
-              onConfirmRemove={setConfirmRemove}
-              onToggleDetail={(id) => setOpenTorrent((current) => (current === id ? undefined : id))}
-            />
-          ))}
-          {snapshot && torrentJobs.length === 0 && <p className="ingest-empty">No torrent jobs.</p>}
-        </div>
+      {section === 'torrents' && (
+      <section className="ingest-job-section" aria-labelledby="ingest-torrents-heading">
+        <ListHeading id="ingest-torrents-heading" title="Torrents" count={torrentJobs.length}>
+          <SortControl keys={TORRENT_SORT_KEYS} sort={sort} onChange={setSort} />
+        </ListHeading>
+        <BulkActions label="Selected torrent actions" selection={selection} disabled={bulkBusy}>
+          <button className="secondary-button" type="button" disabled={bulkBusy || pausable.length === 0} onClick={() => void bulk(pausable, 'pause')} data-tv-focusable="true">Pause</button>
+          <button className="secondary-button" type="button" disabled={bulkBusy || resumable.length === 0} onClick={() => void bulk(resumable, 'resume')} data-tv-focusable="true">Resume</button>
+          <button className="secondary-button ingest-delete-button" type="button" disabled={bulkBusy} onClick={() => setConfirmBulkRemove(true)} data-tv-focusable="true">Remove</button>
+        </BulkActions>
+        {snapshot && torrentJobs.length === 0 ? <p className="list-empty">No torrent jobs.</p> : (
+          <div className="data-table-scroll">
+            <table className="data-table torrent-table" aria-labelledby="ingest-torrents-heading">
+              <thead>
+                <tr>
+                  <th scope="col" className="col-check">
+                    <SelectPageBox ids={torrentPage.items.map((job) => job.id)} selection={selection} disabled={bulkBusy} />
+                  </th>
+                  <SortHeader label="Name" sortKey="name" sort={sort} onSort={sortBy} className="col-name" />
+                  <SortHeader label="Size" sortKey="size" sort={sort} onSort={sortBy} className="col-size" />
+                  <SortHeader label="Progress" sortKey="progress" sort={sort} onSort={sortBy} className="col-progress" />
+                  <SortHeader label="Status" sortKey="status" sort={sort} onSort={sortBy} className="col-status" />
+                  <SortHeader label="Down" sortKey="down" sort={sort} onSort={sortBy} className="col-rate" />
+                  <SortHeader label="Up" sortKey="up" sort={sort} onSort={sortBy} className="col-rate col-optional" />
+                  <SortHeader label="ETA" sortKey="eta" sort={sort} onSort={sortBy} className="col-eta" />
+                  <th scope="col" className="col-peers col-optional">Seeds</th>
+                  <th scope="col" className="col-peers col-optional">Peers</th>
+                  <SortHeader label="Ratio" sortKey="ratio" sort={sort} onSort={sortBy} className="col-ratio col-optional" />
+                  <SortHeader label="Added" sortKey="added" sort={sort} onSort={sortBy} className="col-added col-optional" />
+                  <th scope="col" className="col-actions"><span className="visually-hidden">Actions</span></th>
+                </tr>
+              </thead>
+              <tbody>
+                {torrentPage.items.map((job) => {
+                  const linked = linkedIngestOf(job, snapshot?.ingestJobs);
+                  const state = displayStateOf(job, linked);
+                  const failure = jobErrorText(job) ?? jobErrorText(linked);
+                  const progress = percent(job.progress, job.bytes_completed, job.bytes_total);
+                  const name = job.name || 'Torrent';
+                  return (
+                    <tr key={job.id} className={`state-${state}${selection.checked.has(job.id) ? ' selected' : ''}`} onClick={(event) => openRow(event, job)}>
+                      <td className="col-check">
+                        <SelectRowBox id={job.id} name={name} selection={selection} disabled={bulkBusy} />
+                      </td>
+                      <td className="col-name">
+                        <Link to={torrentPath(job.id, search)} data-tv-focusable="true" title={name}>{name}</Link>
+                      </td>
+                      <td className="col-size">{job.bytes_total > 0 ? formatBytes(job.bytes_total) : '—'}</td>
+                      <td className="col-progress">
+                        <Progress value={progress} />
+                        <span>{formatPercent(progress)}</span>
+                      </td>
+                      <td className={`col-status${failure ? ' has-error' : ''}`} title={failure}>{stateLabel(state)}</td>
+                      <td className="col-rate">{formatRate(job.download_rate)}</td>
+                      <td className="col-rate col-optional">{formatRate(job.upload_rate)}</td>
+                      <td className="col-eta">{formatEta(job.eta_seconds)}</td>
+                      <td className="col-peers col-optional">{job.seeds}</td>
+                      <td className="col-peers col-optional">{job.peers}</td>
+                      <td className="col-ratio col-optional">{formatRatio(job)}</td>
+                      <td className="col-added col-optional" title={formatTimestamp(job.created_unix_ms)}>{formatAge(job.created_unix_ms, now)}</td>
+                      <td className="col-actions">
+                        <JobControls
+                          variant="row"
+                          kind="torrent"
+                          id={job.id}
+                          name={name}
+                          state={job.state}
+                          retryable={canRetryImport(job, linked)}
+                          busyAction={busyByJob[jobKey('torrent', job.id)]}
+                          confirming={confirmRemove === jobKey('torrent', job.id)}
+                          onAction={(action) => { void act('torrent', job.id, job.state, action); }}
+                          onConfirm={setConfirmRemove}
+                        />
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <Pager label="Torrent pages" {...torrentPage} total={torrentJobs.length} onPage={setPage} />
+        <ConfirmModal
+          open={confirmBulkRemove}
+          title={selected.length === 1 ? 'Remove this torrent?' : `Remove ${selected.length} torrents?`}
+          confirmLabel="Remove"
+          destructive
+          busy={bulkBusy}
+          onCancel={() => setConfirmBulkRemove(false)}
+          onConfirm={() => void bulk(selected, 'remove')}
+        >
+          <p>Any still downloading or seeding are cancelled first.</p>
+        </ConfirmModal>
       </section>
+      )}
 
-      <section className="ingest-job-section">
-        <div className="ingest-section-heading">
-          <h2>File and folder imports</h2>
-          <span>{filesystemJobs.length}</span>
-        </div>
-        <div className="ingest-job-list">
-          {filesystemJobs.map((job) => (
-            <IngestJobCard
-              key={job.id}
-              job={job}
-              busyAction={busyByJob[jobKey('ingest', job.id)]}
-              confirmRemove={confirmRemove === jobKey('ingest', job.id)}
-              onAction={(kind, id, state, action) => { void act(kind, id, state, action); }}
-              onConfirmRemove={setConfirmRemove}
-            />
-          ))}
-          {snapshot && filesystemJobs.length === 0 && <p className="ingest-empty">No filesystem import jobs.</p>}
-        </div>
+      {section === 'files' && (
+      <section className="ingest-job-section" aria-labelledby="ingest-files-heading">
+        <ListHeading id="ingest-files-heading" title="File and folder imports" count={filesystemJobs.length} />
+        {snapshot && filesystemJobs.length === 0 ? <p className="list-empty">No filesystem import jobs.</p> : (
+          <div className="data-table-scroll">
+            <table className="data-table" aria-labelledby="ingest-files-heading">
+              <thead>
+                <tr>
+                  <th scope="col" className="col-name">Name</th>
+                  <th scope="col" className="col-size">Copied</th>
+                  <th scope="col" className="col-progress">Progress</th>
+                  <th scope="col" className="col-status">Status</th>
+                  <th scope="col" className="col-rate">Rate</th>
+                  <th scope="col" className="col-eta">ETA</th>
+                  <th scope="col" className="col-peers col-optional">Files</th>
+                  <th scope="col" className="col-actions"><span className="visually-hidden">Actions</span></th>
+                </tr>
+              </thead>
+              <tbody>
+                {filesystemJobs.map((job: IngestJob) => {
+                  const progress = percent(job.progress, job.bytes_completed, job.bytes_total);
+                  const name = job.display_name || job.source_path;
+                  const failure = jobErrorText(job);
+                  return [
+                    <tr key={job.id} className={`state-${job.state}`}>
+                      <td className="col-name" title={job.current_file ? `${job.source_path}\nCurrent: ${job.current_file}` : job.source_path}>{name}</td>
+                      <td className="col-size">{formatBytes(job.bytes_completed)} / {formatBytes(job.bytes_total)}</td>
+                      <td className="col-progress">
+                        <Progress value={progress} />
+                        <span>{formatPercent(progress)}</span>
+                      </td>
+                      <td className={`col-status${failure ? ' has-error' : ''}`}>{stateLabel(job.state)}</td>
+                      <td className="col-rate">{formatRate(job.rate_bytes_per_second)}</td>
+                      <td className="col-eta">{formatEta(job.eta_seconds)}</td>
+                      <td className="col-peers col-optional">{job.files_completed} / {job.files_total}</td>
+                      <td className="col-actions">
+                        <JobControls
+                          variant="row"
+                          kind="ingest"
+                          id={job.id}
+                          name={name}
+                          state={job.state}
+                          busyAction={busyByJob[jobKey('ingest', job.id)]}
+                          confirming={confirmRemove === jobKey('ingest', job.id)}
+                          onAction={(action) => { void act('ingest', job.id, job.state, action); }}
+                          onConfirm={setConfirmRemove}
+                        />
+                      </td>
+                    </tr>,
+                    failure && (
+                      <tr key={`${job.id}-error`} className="ingest-error-row">
+                        <td colSpan={8}>{failure}</td>
+                      </tr>
+                    ),
+                  ];
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
       </section>
+      )}
     </section>
   );
 }

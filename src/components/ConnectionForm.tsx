@@ -1,5 +1,5 @@
 import { useState, type ChangeEvent, type FormEvent } from 'react';
-import { errorMessage } from '@machafoundation/core';
+import { viewerErrorText } from '../text/viewerText';
 
 export interface ConnectionFormProps {
   bootstrapEndpoints: readonly string[];
@@ -31,7 +31,7 @@ export function ConnectionForm({ bootstrapEndpoints, onSave, submitLabel = 'Save
     try {
       setError(await onSave(urls.split(/[\n,]/)));
     } catch (cause) {
-      setError(errorMessage(cause));
+      setError(viewerErrorText(cause));
     } finally {
       setSaving(false);
     }

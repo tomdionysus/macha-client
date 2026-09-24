@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react';
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
+import { routes } from '@machafoundation/core';
+import { BulkActions, DetailCard, DetailHeader, Facts, ListHeading, Pager, runBulkOperation, SelectPageBox, SelectRowBox, useListSelection } from '../components/ListParts';
+import { pageSlice } from '../lists/paging';
+import { SortControl, SortHeader, useListSort } from '../components/ListSortControls';
+import { sortRows, type ListSort, type SortKeyDef } from '../lists/listSort';
+import { formatAge, formatBytes, formatTimestamp } from './ingest/format';
 import { ConfirmModal, Modal } from '../components/Modal';
 import { FileIcon, FolderIcon, OpenIcon, RefreshIcon, UpIcon } from '../components/ManageIcons';
 import { AsyncIconButton } from '../components/AsyncIconButton';
@@ -13,28 +20,14 @@ import type {
   UnmatchedDetail,
   UnmatchedFile,
 } from '@machafoundation/core';
-import { errorMessage } from '@machafoundation/core';
+import { hintResultLabel, viewerErrorText } from '../text/viewerText';
 
 export type ManageSection = 'unmatched' | 'files' | 'users';
 
 interface Props {
   api: ManageApi;
-  catalogueApi: CatalogueApi;
   section: ManageSection;
   users: ReactNode;
-  onUnmatchedCountChange?: (count: number) => void;
-}
-
-function formatBytes(value: number): string {
-  if (!Number.isFinite(value) || value <= 0) return '0 B';
-  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-  let size = value;
-  let unit = 0;
-  while (size >= 1024 && unit + 1 < units.length) {
-    size /= 1024;
-    unit += 1;
-  }
-  return `${size >= 10 || unit === 0 ? size.toFixed(0) : size.toFixed(1)} ${units[unit]}`;
 }
 
 function fileName(path: string): string {
@@ -53,27 +46,6 @@ export function pathBreadcrumbs(path: string): Array<{ label: string; path: stri
     { label: 'MachaDFS', path: '/' },
     ...names.map((label, index) => ({ label, path: `/${names.slice(0, index + 1).join('/')}` })),
   ];
-}
-
-export async function runBulkOperation(ids: string[], operation: (id: string) => Promise<void>): Promise<number> {
-  const results = await Promise.allSettled(ids.map(operation));
-  return results.filter((result) => result.status === 'rejected').length;
-}
-
-export const UNMATCHED_PAGE_SIZE = 20;
-
-export function pageSlice<T>(items: T[], page: number, pageSize = UNMATCHED_PAGE_SIZE): {
-  items: T[];
-  page: number;
-  pageCount: number;
-} {
-  const pageCount = Math.max(1, Math.ceil(items.length / pageSize));
-  const boundedPage = Math.min(Math.max(0, page), pageCount - 1);
-  return {
-    items: items.slice(boundedPage * pageSize, (boundedPage + 1) * pageSize),
-    page: boundedPage,
-    pageCount,
-  };
 }
 
 function candidateSummary(candidate: MediaProbeCandidate): string {
@@ -202,7 +174,7 @@ function ManualMetadataForm({ detail, probe, api, catalogueApi, onResolved }: {
       }
       onResolved();
     } catch (cause) {
-      setError(errorMessage(cause));
+      setError(viewerErrorText(cause));
     } finally {
       setBusy(false);
     }
@@ -256,169 +228,67 @@ function ManualMetadataForm({ detail, probe, api, catalogueApi, onResolved }: {
   );
 }
 
-function UnmatchedReview({ item, api, catalogueApi, onResolved, onDeleteRequest }: {
-  item: UnmatchedFile;
-  api: ManageApi;
-  catalogueApi: CatalogueApi;
-  onResolved: () => void;
-  onDeleteRequest: () => void;
-}) {
-  const [detail, setDetail] = useState<UnmatchedDetail>();
-  const [matches, setMatches] = useState<ManageCatalogueMatch[]>([]);
-  const [query, setQuery] = useState('');
-  const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState(false);
-  const [manualOpen, setManualOpen] = useState(false);
-  const [manualProbeIndex, setManualProbeIndex] = useState(0);
-  const [error, setError] = useState<string>();
-  const manualFormRef = useRef<HTMLDivElement>(null);
+type UnmatchedSortKey = 'updated' | 'name' | 'size' | 'result' | 'attempts';
 
-  useEffect(() => {
-    if (manualOpen) manualFormRef.current?.scrollIntoView({ block: 'nearest' });
-  }, [manualOpen, manualProbeIndex]);
+const UNMATCHED_SORT_KEYS: readonly SortKeyDef<UnmatchedSortKey>[] = [
+  { key: 'updated', label: 'Last attempt', direction: 'desc' },
+  { key: 'name', label: 'Name', direction: 'asc' },
+  { key: 'size', label: 'Size', direction: 'desc' },
+  { key: 'result', label: 'Result', direction: 'asc' },
+  { key: 'attempts', label: 'Attempts', direction: 'desc' },
+];
 
-  const loadMatches = useCallback(async (search?: string) => {
-    const result = await api.prospectiveMatches(item.id, search?.trim() || undefined);
-    setMatches(result.matches);
-    if (!search) setQuery(result.query);
-  }, [api, item.id]);
+const DEFAULT_UNMATCHED_SORT: ListSort<UnmatchedSortKey> = { key: 'updated', direction: 'desc' };
 
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    setError(undefined);
-    void Promise.all([api.unmatchedDetail(item.id), api.prospectiveMatches(item.id)])
-      .then(([nextDetail, result]) => {
-        if (cancelled) return;
-        setDetail(nextDetail);
-        setMatches(result.matches);
-        setQuery(result.query);
-      })
-      .catch((cause) => { if (!cancelled) setError(errorMessage(cause)); })
-      .finally(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; };
-  }, [api, item.id]);
-
-  const resolve = useCallback(async (action: () => Promise<void>) => {
-    setBusy(true);
-    setError(undefined);
-    try {
-      await action();
-      onResolved();
-    } catch (cause) {
-      setError(errorMessage(cause));
-      setBusy(false);
-    }
-  }, [onResolved]);
-
-  // Indices are kept alongside, because the manual form is seeded by index
-  // into the unfiltered probe list.
-  const newCandidates = (detail?.probes ?? [])
-    .map((candidate, index) => ({ candidate, index }))
-    .filter(({ candidate }) => !candidateAlreadyCatalogued(candidate, matches))
-    .slice(0, 4);
-
-  if (loading) return <div className="manage-review"><p>Loading match details…</p></div>;
-
-  return (
-    <div className="manage-review">
-      {error && <p className="manage-error">{error}</p>}
-      {detail?.probes?.length === 0 && <p>No usable metadata could be inferred from the file.</p>}
-      {newCandidates.length > 0 && (
-        <div className="manage-probe-list">
-          <span className="manage-label">Not in the catalogue · choose one to create it</span>
-          {newCandidates.map(({ candidate, index }) => (
-            <button
-              key={`${candidate.generator}-${index}`}
-              type="button"
-              className={`manage-probe ${manualOpen && manualProbeIndex === index ? 'chosen' : ''}`}
-              data-tv-focusable="true"
-              aria-pressed={manualOpen && manualProbeIndex === index}
-              disabled={busy}
-              onClick={() => { setManualProbeIndex(index); setManualOpen(true); }}
-            >
-              <strong>{candidateSummary(candidate)}</strong>
-              <span>{candidate.generator} · score {candidate.score}</span>
-            </button>
-          ))}
-        </div>
-      )}
-
-      <section className="manage-match-section">
-        <h3>Prospective matches</h3>
-        <form className="manage-search-row" onSubmit={(event) => { event.preventDefault(); void loadMatches(query).catch((cause) => setError(errorMessage(cause))); }}>
-          <input value={query} onChange={(event) => setQuery(event.target.value)} aria-label="Search catalogue" />
-          <button className="secondary-button" type="submit" disabled={busy} data-tv-focusable="true">Search</button>
-        </form>
-        {matches.length === 0 ? <p className="manage-muted">No existing catalogue items match this search.</p> : (
-          <div className="manage-match-list">
-            {matches.map((match) => (
-              <div key={match.id} className="manage-match-row">
-                <div><strong>{match.title}</strong><span>{matchSubtitle(match)}</span></div>
-                <button className="secondary-button" type="button" disabled={busy} onClick={() => void resolve(() => api.match(item.id, match.id))} data-tv-focusable="true">Use match</button>
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
-
-      <div className="manage-actions">
-        <button className="secondary-button" type="button" disabled={busy} onClick={() => void resolve(() => api.retry(item.id))} data-tv-focusable="true">Retry match</button>
-        <button className="secondary-button" type="button" disabled={busy} onClick={() => setManualOpen((value) => !value)} data-tv-focusable="true">{manualOpen ? 'Hide manual metadata' : 'Enter manually'}</button>
-        <button className="secondary-button manage-danger" type="button" disabled={busy} onClick={onDeleteRequest} data-tv-focusable="true">Delete media file</button>
-      </div>
-
-      {manualOpen && detail && (
-        // Keyed on the candidate: the form seeds its fields from it once, at
-        // mount, so choosing another has to build a new form rather than leave
-        // the first one's values sitting in it. Scrolled to on open because it
-        // renders at the foot of a tall panel — choosing a candidate at the top
-        // and seeing nothing move reads as a button that does nothing.
-        <div ref={manualFormRef}>
-          <ManualMetadataForm
-            key={`manual-${manualProbeIndex}`}
-            detail={detail}
-            probe={detail.probes[manualProbeIndex]}
-            api={api}
-            catalogueApi={catalogueApi}
-            onResolved={onResolved}
-          />
-        </div>
-      )}
-    </div>
-  );
+function unmatchedSortValue(item: UnmatchedFile, key: UnmatchedSortKey): number | string | undefined {
+  switch (key) {
+    case 'updated': return item.updated_unix_ms || undefined;
+    case 'name': return fileName(item.path) || undefined;
+    case 'size': return item.size > 0 ? item.size : undefined;
+    case 'result': return item.result || undefined;
+    case 'attempts': return item.attempts;
+  }
 }
 
-function UnmatchedManager({ api, catalogueApi, onCountChange }: {
-  api: ManageApi;
-  catalogueApi: CatalogueApi;
-  onCountChange?: (count: number) => void;
-}) {
+/** The unmatched files in the order asked for, stable for the same files. */
+export function sortUnmatched(items: readonly UnmatchedFile[], sort: ListSort<UnmatchedSortKey>): UnmatchedFile[] {
+  return sortRows(items, sort, unmatchedSortValue, (item) => fileName(item.path), (item) => item.id);
+}
+
+function folderOf(path: string): string {
+  const slash = path.lastIndexOf('/');
+  return slash > 0 ? path.slice(0, slash) : '/';
+}
+
+/**
+ * The unmatched files as a list in the torrent list's style: one slim row per
+ * file, sortable by column, the order kept in the address, and each file on
+ * its own page. Selection and the bulk retry and delete stay, since this is
+ * the page where many files are dealt with at once.
+ */
+function UnmatchedManager({ api }: { api: ManageApi }) {
+  const navigate = useNavigate();
+  const { sort, setSort, sortBy, page, setPage, search } = useListSort(UNMATCHED_SORT_KEYS, DEFAULT_UNMATCHED_SORT);
   const [items, setItems] = useState<UnmatchedFile[]>([]);
-  const [reviewing, setReviewing] = useState<string>();
-  const [checked, setChecked] = useState<Set<string>>(() => new Set());
+  const selection = useListSelection(items);
+  const { checked } = selection;
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const [deleteIds, setDeleteIds] = useState<string[]>([]);
-  const [page, setPage] = useState(0);
 
   const reload = useCallback(async () => {
     setError(undefined);
     try {
       const next = await api.unmatched();
       setItems(next);
-      onCountChange?.(next.length);
-      setReviewing((current) => current && next.some((item) => item.id === current) ? current : undefined);
-      setChecked((current) => new Set([...current].filter((id) => next.some((item) => item.id === id))));
-      setPage((current) => pageSlice(next, current).page);
     } catch (cause) {
-      setError(errorMessage(cause));
+      setError(viewerErrorText(cause));
     } finally {
       setLoading(false);
     }
-  }, [api, onCountChange]);
+  }, [api]);
 
   useEffect(() => { void reload(); }, [reload]);
 
@@ -451,77 +321,75 @@ function UnmatchedManager({ api, catalogueApi, onCountChange }: {
     setBusy(false);
   }, [api, deleteIds, reload]);
 
-  if (loading) return <p>Loading unmatched files…</p>;
+  const sorted = useMemo(() => sortUnmatched(items, sort), [items, sort]);
+  const paged = pageSlice(sorted, page);
+  const rows = paged.items;
+  const now = Date.now();
 
-  const paged = pageSlice(items, page);
-  const allSelected = items.length > 0 && checked.size === items.length;
-  const someSelected = checked.size > 0 && !allSelected;
+  if (loading) return <p className="ingest-loading">Loading unmatched files…</p>;
+
+  /** The whole row opens the file, except where a control inside it was the target. */
+  const openRow = (event: MouseEvent<HTMLTableRowElement>, item: UnmatchedFile) => {
+    if ((event.target as HTMLElement).closest('button, a, input, select, label')) return;
+    navigate(`${routes.manageUnmatchedFile(item.id)}${search}`);
+  };
 
   return (
-    <section className="manage-panel">
-      <div className="manage-panel-heading">
-        <div><h2>Unmatched files</h2><p>Only files whose catalogue matching completed without a match appear here.</p></div>
-        <AsyncIconButton label="Refresh unmatched files" busy={refreshing} disabled={busy} onClick={() => void refresh()} icon={<RefreshIcon />} />
-      </div>
+    <section className="unmatched-list" aria-labelledby="unmatched-heading">
+      <ListHeading id="unmatched-heading" title="Unmatched files" count={items.length}>
+        <div className="list-heading-controls">
+          <SortControl keys={UNMATCHED_SORT_KEYS} sort={sort} onChange={setSort} />
+          <AsyncIconButton label="Refresh unmatched files" busy={refreshing} disabled={busy} onClick={() => void refresh()} icon={<RefreshIcon />} />
+        </div>
+      </ListHeading>
+      <p className="list-note">Files whose catalogue matching finished without a match.</p>
       {error && <p className="manage-error">{error}</p>}
-      {items.length > 0 && <div className="manage-list-controls">
-        <label className="manage-select-all">
-          <input
-            type="checkbox"
-            checked={allSelected}
-            ref={(element) => { if (element) element.indeterminate = someSelected; }}
-            onChange={(event) => setChecked(event.target.checked ? new Set(items.map((item) => item.id)) : new Set())}
-            disabled={busy}
-          />
-          <span>Select all</span>
-        </label>
-        <span>{items.length} unmatched {items.length === 1 ? 'file' : 'files'}</span>
-      </div>}
-      {checked.size > 0 && (
-        <div className="manage-bulk-actions" aria-label="Selected unmatched file actions">
-          <span>{checked.size} selected</span>
-          <button className="secondary-button" type="button" disabled={busy} onClick={() => void retryChecked()} data-tv-focusable="true">Retry matching</button>
-          <button className="secondary-button manage-danger" type="button" disabled={busy} onClick={() => setDeleteIds([...checked])} data-tv-focusable="true">Delete files</button>
-          <button className="secondary-button" type="button" disabled={busy} onClick={() => setChecked(new Set())} data-tv-focusable="true">Clear</button>
+      <BulkActions label="Selected unmatched file actions" selection={selection} disabled={busy}>
+        <button className="secondary-button" type="button" disabled={busy} onClick={() => void retryChecked()} data-tv-focusable="true">Retry matching</button>
+        <button className="secondary-button manage-danger" type="button" disabled={busy} onClick={() => setDeleteIds([...checked])} data-tv-focusable="true">Delete files</button>
+      </BulkActions>
+      {items.length === 0 ? <p className="list-empty">No files need matching.</p> : (
+        <div className="data-table-scroll">
+          <table className="data-table unmatched-table" aria-labelledby="unmatched-heading">
+            <thead>
+              <tr>
+                <th scope="col" className="col-check">
+                  <SelectPageBox ids={rows.map((item) => item.id)} selection={selection} disabled={busy} />
+                </th>
+                <SortHeader label="Name" sortKey="name" sort={sort} onSort={sortBy} className="col-name" />
+                <th scope="col" className="col-folder col-optional">Folder</th>
+                <SortHeader label="Size" sortKey="size" sort={sort} onSort={sortBy} className="col-size" />
+                <SortHeader label="Result" sortKey="result" sort={sort} onSort={sortBy} className="col-status" />
+                <th scope="col" className="col-provider col-optional">Provider</th>
+                <SortHeader label="Attempts" sortKey="attempts" sort={sort} onSort={sortBy} className="col-attempts col-optional" />
+                <SortHeader label="Last attempt" sortKey="updated" sort={sort} onSort={sortBy} className="col-added col-optional" />
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((item) => {
+                const name = fileName(item.path);
+                return (
+                  <tr key={item.id} className={checked.has(item.id) ? 'selected' : undefined} onClick={(event) => openRow(event, item)}>
+                    <td className="col-check">
+                      <SelectRowBox id={item.id} name={name} selection={selection} disabled={busy} />
+                    </td>
+                    <td className="col-name">
+                      <Link to={`${routes.manageUnmatchedFile(item.id)}${search}`} data-tv-focusable="true" title={item.path}>{name}</Link>
+                    </td>
+                    <td className="col-folder col-optional" title={folderOf(item.path)}>{folderOf(item.path)}</td>
+                    <td className="col-size">{formatBytes(item.size)}</td>
+                    <td className="col-status">{hintResultLabel(item.result)}</td>
+                    <td className="col-provider col-optional">{item.provider ?? 'catalogue'}</td>
+                    <td className="col-attempts col-optional">{item.attempts}</td>
+                    <td className="col-added col-optional" title={formatTimestamp(item.updated_unix_ms)}>{formatAge(item.updated_unix_ms, now)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       )}
-      {items.length === 0 ? <div className="manage-empty">No files need matching.</div> : (
-        <div className="manage-unmatched-list">
-          {paged.items.map((item) => (
-            <article key={item.id} className={`manage-unmatched-item${reviewing === item.id ? ' selected' : ''}`}>
-              <div className="manage-unmatched-summary">
-                <label className="manage-unmatched-check">
-                  <input
-                    type="checkbox"
-                    checked={checked.has(item.id)}
-                    onChange={(event) => setChecked((current) => {
-                      const next = new Set(current);
-                      if (event.target.checked) next.add(item.id); else next.delete(item.id);
-                      return next;
-                    })}
-                    aria-label={`Select ${fileName(item.path)}`}
-                    disabled={busy}
-                  />
-                </label>
-                <div className="manage-file-main">
-                  <strong>{fileName(item.path)}</strong>
-                  <code>{item.path}</code>
-                  <span>{formatBytes(item.size)} · {item.provider ?? 'catalogue'} · {item.result}</span>
-                </div>
-                <button className="secondary-button manage-review-button" type="button" onClick={() => setReviewing(reviewing === item.id ? undefined : item.id)} data-tv-focusable="true">
-                  {reviewing === item.id ? 'Close' : 'Review'}
-                </button>
-              </div>
-              {reviewing === item.id && <UnmatchedReview item={item} api={api} catalogueApi={catalogueApi} onResolved={() => void reload()} onDeleteRequest={() => setDeleteIds([item.id])} />}
-            </article>
-          ))}
-        </div>
-      )}
-      {items.length > UNMATCHED_PAGE_SIZE && <nav className="manage-pagination" aria-label="Unmatched files pages">
-        <button className="secondary-button" type="button" disabled={paged.page === 0 || busy} onClick={() => { setReviewing(undefined); setPage(paged.page - 1); }} data-tv-focusable="true">Previous</button>
-        <span>Page {paged.page + 1} of {paged.pageCount}</span>
-        <button className="secondary-button" type="button" disabled={paged.page + 1 >= paged.pageCount || busy} onClick={() => { setReviewing(undefined); setPage(paged.page + 1); }} data-tv-focusable="true">Next</button>
-      </nav>}
+      <Pager label="Unmatched files pages" {...paged} total={sorted.length} onPage={setPage} />
       <ConfirmModal
         open={deleteIds.length > 0}
         title={deleteIds.length === 1 ? 'Delete media file?' : `Delete ${deleteIds.length} media files?`}
@@ -532,6 +400,197 @@ function UnmatchedManager({ api, catalogueApi, onCountChange }: {
         onConfirm={() => void deleteChecked()}
       >
         <p>This permanently removes {deleteIds.length === 1 ? 'the selected file' : 'the selected files'} from MachaDFS.</p>
+      </ConfirmModal>
+    </section>
+  );
+}
+
+/**
+ * One unmatched file's own page, in the torrent page's style: what the file
+ * is, what the probes inferred that is not yet in the catalogue, the
+ * catalogue items it might be, and the manual form. Whatever resolves it
+ * (a match, a retry, a new entry, deletion) returns to the list.
+ */
+export function UnmatchedFilePage({ api, catalogueApi }: { api: ManageApi; catalogueApi: CatalogueApi }) {
+  const { fileId = '' } = useParams();
+  const { search } = useLocation();
+  const navigate = useNavigate();
+  const back = `${routes.manageUnmatched}${search}`;
+  const [detail, setDetail] = useState<UnmatchedDetail>();
+  const [matches, setMatches] = useState<ManageCatalogueMatch[]>([]);
+  const [query, setQuery] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [manualOpen, setManualOpen] = useState(false);
+  const [manualProbeIndex, setManualProbeIndex] = useState(0);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [error, setError] = useState<string>();
+  const manualFormRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (manualOpen) manualFormRef.current?.scrollIntoView({ block: 'nearest' });
+  }, [manualOpen, manualProbeIndex]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(undefined);
+    void Promise.all([api.unmatchedDetail(fileId), api.prospectiveMatches(fileId)])
+      .then(([nextDetail, result]) => {
+        if (cancelled) return;
+        setDetail(nextDetail);
+        setMatches(result.matches);
+        setQuery(result.query);
+      })
+      .catch((cause) => { if (!cancelled) setError(viewerErrorText(cause)); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [api, fileId]);
+
+  const resolve = useCallback(async (action: () => Promise<void>) => {
+    setBusy(true);
+    setError(undefined);
+    try {
+      await action();
+      navigate(back);
+    } catch (cause) {
+      setError(viewerErrorText(cause));
+      setBusy(false);
+    }
+  }, [back, navigate]);
+
+  const searchMatches = async () => {
+    try {
+      const result = await api.prospectiveMatches(fileId, query.trim() || undefined);
+      setMatches(result.matches);
+    } catch (cause) {
+      setError(viewerErrorText(cause));
+    }
+  };
+
+  const backLink = <Link className="back-button" to={back} data-tv-focusable="true">← Unmatched</Link>;
+  if (!detail) {
+    return (
+      <section className="manage-screen detail-screen">
+        {backLink}
+        {error && <p className="manage-error" role="alert">{error}</p>}
+        {loading ? <p className="ingest-loading">Loading file…</p> : !error && <p className="list-empty">This file is no longer unmatched.</p>}
+      </section>
+    );
+  }
+
+  const { item } = detail;
+  // Indices are kept alongside, because the manual form is seeded by index
+  // into the unfiltered probe list.
+  const newCandidates = detail.probes
+    .map((candidate, index) => ({ candidate, index }))
+    .filter(({ candidate }) => !candidateAlreadyCatalogued(candidate, matches))
+    .slice(0, 4);
+  const now = Date.now();
+
+  return (
+    <section className="manage-screen detail-screen">
+      {backLink}
+      <DetailHeader
+        kicker={hintResultLabel(item.result)}
+        title={fileName(item.path)}
+        actions={(
+          <div className="detail-actions">
+            <button className="secondary-button" type="button" disabled={busy} onClick={() => void resolve(() => api.retry(item.id))} data-tv-focusable="true">Retry match</button>
+            <button className="secondary-button" type="button" disabled={busy} onClick={() => setManualOpen((value) => !value)} data-tv-focusable="true">{manualOpen ? 'Hide manual entry' : 'Enter manually'}</button>
+            <button className="secondary-button manage-danger" type="button" disabled={busy} onClick={() => setDeleteOpen(true)} data-tv-focusable="true">Delete file</button>
+          </div>
+        )}
+      />
+      {error && <p className="manage-error" role="alert">{error}</p>}
+
+      <DetailCard id="unmatched-file-heading" title="File">
+        <Facts rows={[
+          ['Path', <code>{item.path}</code>],
+          ['Size', formatBytes(item.size)],
+          ['Provider', item.provider ?? 'catalogue'],
+          ['Result', hintResultLabel(item.result)],
+          ['Attempts', String(item.attempts)],
+          ['Last attempt', `${formatTimestamp(item.updated_unix_ms)} (${formatAge(item.updated_unix_ms, now)})`],
+          ...(item.media_id ? [['Media', <code>{item.media_id}</code>] as const] : []),
+        ]} />
+      </DetailCard>
+
+      <div className="unmatched-choices">
+        <DetailCard id="unmatched-candidates-heading" title="Not in the catalogue">
+          {detail.probes.length === 0
+            ? <p className="list-note">No usable metadata could be inferred from the file.</p>
+            : newCandidates.length === 0
+              ? <p className="list-note">Everything inferred from the file is already in the catalogue: use a match.</p>
+              : (
+                <div className="manage-probe-list">
+                  <p className="list-note">Choose one to create it in the catalogue.</p>
+                  {newCandidates.map(({ candidate, index }) => (
+                    <button
+                      key={`${candidate.generator}-${index}`}
+                      type="button"
+                      className={`manage-probe ${manualOpen && manualProbeIndex === index ? 'chosen' : ''}`}
+                      data-tv-focusable="true"
+                      aria-pressed={manualOpen && manualProbeIndex === index}
+                      disabled={busy}
+                      onClick={() => { setManualProbeIndex(index); setManualOpen(true); }}
+                    >
+                      <strong>{candidateSummary(candidate)}</strong>
+                      <span>{candidate.generator} · score {candidate.score}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+        </DetailCard>
+
+        <DetailCard id="unmatched-matches-heading" title="Prospective matches">
+          <form className="manage-search-row" onSubmit={(event) => { event.preventDefault(); void searchMatches(); }}>
+            <input value={query} onChange={(event) => setQuery(event.target.value)} aria-label="Search catalogue" />
+            <button className="secondary-button" type="submit" disabled={busy} data-tv-focusable="true">Search</button>
+          </form>
+          {matches.length === 0 ? <p className="list-note">No existing catalogue items match this search.</p> : (
+            <div className="manage-match-list">
+              {matches.map((match) => (
+                <div key={match.id} className="manage-match-row">
+                  <div><strong>{match.title}</strong><span>{matchSubtitle(match)}</span></div>
+                  <button className="secondary-button" type="button" disabled={busy} onClick={() => void resolve(() => api.match(item.id, match.id))} data-tv-focusable="true">Use match</button>
+                </div>
+              ))}
+            </div>
+          )}
+        </DetailCard>
+      </div>
+
+      {manualOpen && (
+        // Keyed on the candidate: the form seeds its fields from it once, at
+        // mount, so choosing another has to build a new form rather than leave
+        // the first one's values sitting in it. Scrolled to on open because it
+        // renders below the cards, and choosing a candidate above and seeing
+        // nothing move reads as a button that does nothing.
+        <div ref={manualFormRef}>
+          <DetailCard id="unmatched-manual-heading" title="Enter manually">
+            <ManualMetadataForm
+              key={`manual-${manualProbeIndex}`}
+              detail={detail}
+              probe={detail.probes[manualProbeIndex]}
+              api={api}
+              catalogueApi={catalogueApi}
+              onResolved={() => navigate(back)}
+            />
+          </DetailCard>
+        </div>
+      )}
+
+      <ConfirmModal
+        open={deleteOpen}
+        title="Delete media file?"
+        confirmLabel="Delete file"
+        destructive
+        busy={busy}
+        onCancel={() => setDeleteOpen(false)}
+        onConfirm={() => { setDeleteOpen(false); void resolve(() => api.deleteUnmatched(item.id)); }}
+      >
+        <p>This permanently removes the file from MachaDFS.</p>
       </ConfirmModal>
     </section>
   );
@@ -556,7 +615,7 @@ function FileManager({ api }: { api: ManageApi }) {
       setSelected(undefined);
       setDestination('');
     } catch (cause) {
-      setError(errorMessage(cause));
+      setError(viewerErrorText(cause));
     } finally {
       setLoading(false);
     }
@@ -572,7 +631,7 @@ function FileManager({ api }: { api: ManageApi }) {
       await browse(refreshPath);
       return true;
     } catch (cause) {
-      setError(errorMessage(cause));
+      setError(viewerErrorText(cause));
       return false;
     } finally {
       setBusy(false);
@@ -678,15 +737,15 @@ function FileManager({ api }: { api: ManageApi }) {
   );
 }
 
-export function ManageScreen({ api, catalogueApi, section, users, onUnmatchedCountChange }: Props) {
+export function ManageScreen({ api, section, users }: Props) {
   return (
-    <div className="manage-screen">
+    <div className={`manage-screen manage-screen-${section}`}>
       <h1>Manage</h1>
       {section === 'users'
         ? users
         : section === 'files'
           ? <FileManager api={api} />
-          : <UnmatchedManager api={api} catalogueApi={catalogueApi} onCountChange={onUnmatchedCountChange} />}
+          : <UnmatchedManager api={api} />}
     </div>
   );
 }

@@ -10,6 +10,7 @@ import { requestTvDefaultFocus } from '../hooks/useTvNavigation';
 import { buildPlatformTraits } from '../platform/traits';
 import { useEffect } from 'react';
 import { EditButton } from '../components/EditButton';
+import { episodeCode } from '../text/viewerText';
 import { MediaPageTitle } from '../components/MediaPageTitle';
 
 interface Props {
@@ -85,7 +86,7 @@ export function DetailScreen({ api, itemId, onBack, onPlay, onPlayFromStart, pro
     <div className="detail-copy">
       <p className="eyebrow">{media.kind}{media.year ? ` · ${media.year}` : ''}</p>
       <MediaPageTitle refreshing={details.refreshing} onRefresh={details.refresh}>{media.title}</MediaPageTitle>
-      {media.subtitle && <p className="subtitle">{media.subtitle}</p>}
+      {media.kind === 'episode' && episodeCode(media) && <p className="subtitle">{episodeCode(media)}</p>}
       {profile.value && <p className="media-profile-summary">{mediaProfileSummary(profile.value)}</p>}
       {media.synopsis && <p className="synopsis">{media.synopsis}</p>}
       {playable && (

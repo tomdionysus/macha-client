@@ -113,7 +113,16 @@ function createHarness(fetchImpl: (url: string, options?: FetchOptions) => Promi
     return await responsePromise;
   }
 
-  return { configure, addSource, setMode, release, request, metrics };
+  function askStatus(): unknown[] {
+    const answers: unknown[] = [];
+    listeners.get('message')?.({
+      data: { type: 'macha-direct-read-ahead-status', sourceKey },
+      ports: [{ postMessage: (message: unknown) => answers.push(message) }],
+    });
+    return answers;
+  }
+
+  return { configure, addSource, setMode, release, request, askStatus, metrics };
 }
 
 describe('Direct Play read-ahead Service Worker', () => {
@@ -382,6 +391,22 @@ describe('Direct Play read-ahead Service Worker', () => {
       type: 'macha-direct-read-ahead-source-failed',
       status: 404,
     }));
+  });
+
+  it('answers what the node said when asked, for an element that errors before the report arrives', async () => {
+    // The report above is posted after an await, and the 404 response can
+    // reach the element first; measured 2026-09-23, the page then read the
+    // element's error as "unsupported". The status is recorded before the
+    // response is returned, so a page that asks gets the answer regardless.
+    const harness = createHarness(async () => new Response('not found', { status: 404 }));
+    harness.configure();
+    releases.push(harness.release);
+    expect(harness.askStatus()).toEqual([{ type: 'macha-direct-read-ahead-status', status: undefined }]);
+
+    const response = await harness.request('bytes=0-3');
+
+    expect(response.status).toBe(404);
+    expect(harness.askStatus()).toEqual([{ type: 'macha-direct-read-ahead-status', status: 404 }]);
   });
 
   it('does not attach a status to a transport failure that never became a response', async () => {

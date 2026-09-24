@@ -72,16 +72,13 @@ describe('player UI transport bindings', () => {
       expect(playerMediaSubtitle(movie())).toBeUndefined();
     });
 
-    it('never displaces a subtitle the catalogue did supply', () => {
-      expect(playerMediaSubtitle(movie({ subtitle: 'Extended cut', year: 2007 }))).toBe('Extended cut');
-    });
-
     it('leaves the episode line as series plus episode number', () => {
       const episode: MediaSummary = {
         id: 'e1',
         kind: 'episode',
         title: 'Pilot',
-        subtitle: 'S01E01',
+        seasonNumber: 1,
+        episodeNumber: 1,
         year: 2005,
         mediaIds: ['file:e1'],
         playbackContext: { series: { id: 's1', title: 'The Show' }, season: { id: 'se1', title: 'Season 1', seasonNumber: 1 } },
@@ -91,7 +88,7 @@ describe('player UI transport bindings', () => {
     });
 
     it('leaves a track showing its track number, not its year', () => {
-      expect(playerMediaSubtitle({ id: 't1', kind: 'track', title: 'Song', subtitle: 'Track 3', year: 1999, mediaIds: ['file:t1'] })).toBe('Track 3');
+      expect(playerMediaSubtitle({ id: 't1', kind: 'track', title: 'Song', trackNumber: 3, year: 1999, mediaIds: ['file:t1'] })).toBe('Track 3');
     });
   });
 });

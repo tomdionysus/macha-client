@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { errorMessage, routes, SessionNotStartedError } from '@machafoundation/core';
+import { routes, SessionNotStartedError } from '@machafoundation/core';
 import { machaLogoUrl as logoUrl } from '../uiAssets';
+import { viewerErrorText } from '../text/viewerText';
 
 interface Props {
   /** Exchanges credentials for a session. Rejects on a refusal, which is the whole point. */
@@ -79,7 +80,7 @@ function signInComplaint(cause: unknown): string {
   const status = (cause as { status?: unknown } | undefined)?.status;
   return status === 401 || status === 403
     ? 'That username and password were not recognised. Please try again.'
-    : errorMessage(cause);
+    : viewerErrorText(cause);
 }
 
 /**
@@ -149,9 +150,13 @@ export function LoginScreen({ onSignIn, onSignedIn, guestAllowed = true, connect
     // it, below a header, so it centres in the space it was actually given.
     <div className="login-screen">
       <section className="connection-gate-panel">
-        <img className="connection-gate-logo" src={logoUrl} alt="" />
-        <p className="eyebrow">Macha media client</p>
-        <h1>Log in</h1>
+        <div className="connection-gate-brand">
+          <img className="connection-gate-logo" src={logoUrl} alt="" />
+          <div>
+            <p className="eyebrow">Macha media client</p>
+            <h1>Log in</h1>
+          </div>
+        </div>
         {/* The notice replaces the standing invitation rather than joining
             it: a viewer whose account holds no roles is not here to be told
             what signing in would buy them, because they have signed in and
