@@ -8,6 +8,7 @@ import { requestTvDefaultFocus } from '../hooks/useTvNavigation';
 import { useElapsedMs } from '../hooks/useElapsedMs';
 import { usePointerIdle } from '../hooks/usePointerIdle';
 import { cardSubtitle, episodeCode, playbackNoticeText, playbackTimeText, streamStatusText } from '../text/viewerText';
+import { TrackFacts } from './player/TrackFacts';
 import type { Platform } from '@machafoundation/core';
 import { platformTraits } from '../platform/traits';
 import type { PlaybackUpdate } from '@machafoundation/core';
@@ -77,10 +78,11 @@ interface Props {
  * that bound a start — negotiating a generation, waiting for its first
  * fragment, and starvation once a URL is attached — are sequential and nothing
  * bounds their sum, so a cold node can spend the better part of a minute with
- * every budget behaving exactly as written. Law 2: a degraded state must be
- * visible and actionable rather than becoming indefinite waiting, and a viewer
- * told what is being waited for and for how long is in a different position
- * from one watching a spinner, even though the wait is identical.
+ * every budget behaving exactly as written. The principle that work is bounded
+ * and event-driven: a degraded state must be visible and actionable rather than
+ * becoming indefinite waiting, and a viewer told what is being waited for and
+ * for how long is in a different position from one watching a spinner, even
+ * though the wait is identical.
  *
  * Only a start. A rebuffer mid-film has the picture behind it to say what is
  * going on, and a timer over that would turn every brief hesitation into an
@@ -867,6 +869,7 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
           {cover ? <img src={cover} alt="" /> : <div className="audio-player-placeholder">♪</div>}
         </div>
       )}
+      {audio && <TrackFacts track={media} />}
       {showBuffering && (
         <Loading
           delayMs={playback.starting ? 0 : uiSettings.playerSeekSpinnerDelayMs}
