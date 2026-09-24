@@ -1481,8 +1481,13 @@ records the status before returning the response and answers a
 read-ahead source asks it (1 s budget) before judging, so a 404 becomes
 `not-found` (re-create) whichever arrives first. Seen red first in both
 halves: the player test read `unsupported`, the worker test had no answer.
-**Owed:** a live run (play direct, delete the session on the node from the
-page, seek outside the buffer). **Still open:** whether a start in a hidden
+**Live run 2026-09-24:** direct play from the worker, the session deleted on
+the node from the page (204), then a seek from 56 min to 100 min. The worker
+reported the 404 (`source-degraded`, status 404), the element's error became
+`source-gone` rather than `unsupported`, the client re-created the session in
+direct mode and was playing at 100:21 with no failure screen. In that run the
+worker's report beat the element's error, so it exercised the existing path;
+the reverse order, which is the one this fix is for, is unit-tested only. **Still open:** whether a start in a hidden
 tab should hold off rather than let the node's 120 s reclaim run out.
 
 The same run also hit the mode-switch P1 below: a direct-to-remux press on
