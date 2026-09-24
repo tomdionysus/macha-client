@@ -1460,7 +1460,24 @@ fault, and nothing tries to rebuild it. Two things to settle: what the
 direct read-ahead cache serves once its session is gone (the format error
 is presumably its response, not the media), and whether a hidden start
 should hold off rather than let the reclaim run out. Tom, 2026-09-23: "this
-is a problem in itself". Not diagnosed further.
+is a problem in itself".
+
+**Mechanism found and fixed 2026-09-24; unit-tested, not yet seen live.**
+Not the worker losing its configuration on a restart: the proxy URL carries
+source, size and mime, and a restarted worker rebuilds from it. It is a
+race. The worker hands the element the node's 404 and posts its
+"source gone" report separately, after an await; the element's `error`
+handler judged terminal unless that report had already landed
+(`notFoundSourceGeneration`), and nothing ordered the two. The trail fits:
+`media-error`, terminal, DELETE, and no `source-degraded`. Now the worker
+records the status before returning the response and answers a
+`macha-direct-read-ahead-status` query, and the element error handler for a
+read-ahead source asks it (1 s budget) before judging, so a 404 becomes
+`not-found` (re-create) whichever arrives first. Seen red first in both
+halves: the player test read `unsupported`, the worker test had no answer.
+**Owed:** a live run (play direct, delete the session on the node from the
+page, seek outside the buffer). **Still open:** whether a start in a hidden
+tab should hold off rather than let the node's 120 s reclaim run out.
 
 The same run also hit the mode-switch P1 below: a direct-to-remux press on
 macnessa (across the WAN from here) stalled at 9.81 s, was read terminal

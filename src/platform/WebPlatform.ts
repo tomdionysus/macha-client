@@ -22,6 +22,7 @@ import {
   releaseDirectPlayReadAhead,
   reportFragmentTransfer,
   setDirectPlayReadAheadMode,
+  directPlayReadAheadSourceStatus,
   subscribeDirectPlayReadAheadFailure,
 } from '../playback/directPlayReadAhead';
 import { hlsEventSummary, videoState, WebMediaDiagnostics } from './WebMediaDiagnostics';
@@ -705,16 +706,28 @@ class WebPlayer implements Player {
       // that the worker already told us this source was gone, for this same
       // generation. Without that memory the reported title's own path, which is
       // Direct Play on Chrome, would still condemn a healthy node.
-      if (this.notFoundSourceGeneration === this.sourceGeneration) {
-        this.reportSourceGone(
-          this.sourceGeneration,
-          new PlaybackSourceError('The node no longer has this source.', 'not-found', video.error),
-          videoState(video),
-        );
+      const generation = this.sourceGeneration;
+      const judge = (status: number | undefined) => {
+        if (generation !== this.sourceGeneration || video !== this.video || !this.activeSource) return;
+        if (this.notFoundSourceGeneration === generation || isSourceGoneStatus(status)) {
+          this.reportSourceGone(
+            generation,
+            new PlaybackSourceError('The node no longer has this source.', 'not-found', video.error),
+            videoState(video),
+          );
+          return;
+        }
+        this.failSourceGeneration(generation, webMediaElementFailure(video.error), videoState(video));
+      };
+      // The worker's report can arrive after this error: it hands the element
+      // the 404 and posts separately. Measured 2026-09-23, a reclaimed session
+      // ended on "unsupported" that way. So a read-ahead source asks the
+      // worker what the node said before the error is judged terminal.
+      if (this.notFoundSourceGeneration === generation || !this.directReadAheadSourceUrl) {
+        judge(undefined);
         return;
       }
-      const failure = webMediaElementFailure(video.error);
-      this.failSourceGeneration(this.sourceGeneration, failure, videoState(video));
+      void directPlayReadAheadSourceStatus(this.directReadAheadSourceUrl).then(judge);
     });
     // Evidence that bytes actually reached the element, ending the start
     // watchdog. `progress` is the one that matters — it fires as media data

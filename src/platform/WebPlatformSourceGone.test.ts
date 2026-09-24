@@ -8,9 +8,12 @@ import type { PlaybackSource } from '@machafoundation/core';
  * Mocked at the module boundary so the failure can be delivered directly.
  */
 const readAheadFailureListeners: Array<(error: Error & { status?: number }) => void> = [];
+/** What the worker says the node answered for the source, when asked. */
+let workerSourceStatus: number | undefined;
 vi.mock('../playback/directPlayReadAhead', () => ({
   addDirectPlayReadAheadAlternative: vi.fn(() => false),
   directPlayReadAheadMetrics: vi.fn(() => undefined),
+  directPlayReadAheadSourceStatus: vi.fn(async () => workerSourceStatus),
   directPlayReadAheadUrl: vi.fn((source: PlaybackSource) => `${source.url}#proxied`),
   releaseDirectPlayReadAhead: vi.fn(),
   setDirectPlayReadAheadMode: vi.fn(),
@@ -71,6 +74,7 @@ const directSource: PlaybackSource = {
 describe('a source the node no longer has must not take the presentation with it', () => {
   afterEach(() => {
     readAheadFailureListeners.length = 0;
+    workerSourceStatus = undefined;
     vi.unstubAllGlobals();
   });
 
@@ -114,9 +118,27 @@ describe('a source the node no longer has must not take the presentation with it
     // a viewer watching nothing with no message.
     const { video, failures } = await playingPlayer();
     emit(video, 'error');
+    await vi.waitFor(() => expect(failures).toHaveLength(1));
 
     expect(failures).toHaveLength(1);
     expect(failures[0].kind).toBe('unsupported');
     expect(video.pauseCalls).toBeGreaterThan(0);
+  });
+
+  it('reads a 404 the worker saw even when the element errors before the worker says so', async () => {
+    // Measured 2026-09-23: a Direct Play session the node had reclaimed ended
+    // on "Web media source is unsupported" with no `source-degraded` in the
+    // trail. The worker hands the element the 404 and posts its report
+    // separately, so the element's error can arrive first; the latch above
+    // was empty and the error was read as terminal. Asked, the worker already
+    // knows what the node said.
+    workerSourceStatus = 404;
+    const { video, failures } = await playingPlayer();
+    emit(video, 'error');
+    await vi.waitFor(() => expect(failures.length).toBeGreaterThan(0));
+
+    expect(failures.map((failure) => failure.kind)).toContain('not-found');
+    expect(failures.map((failure) => failure.kind)).not.toContain('unsupported');
+    expect(video.pauseCalls).toBe(0);
   });
 });

@@ -455,6 +455,10 @@ async function postMetrics(cache, force) {
 }
 
 async function postSourceFailure(cache, sourceUrl, error) {
+  // Recorded before anything awaits, so it is in place before the response
+  // that carried it reaches the element. The page asks for it when the
+  // element errors first, which the report below cannot promise to beat.
+  if (error && typeof error.status === 'number') cache.sourceStatus = error.status;
   if (cache.released || cache.sourceFailureNotified) return;
   cache.sourceFailureNotified = true;
   const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
@@ -1081,6 +1085,12 @@ self.addEventListener('message', (event) => {
     if (data.mode === 'bootstrap' || data.mode === 'playing' || data.mode === 'seeking' || data.mode === 'paused') {
       setMode(data.sourceKey, data.mode);
     }
+    return;
+  }
+  if (data.type === 'macha-direct-read-ahead-status' && typeof data.sourceKey === 'string') {
+    const port = event.ports && event.ports[0];
+    const cache = sourceCaches.get(data.sourceKey);
+    if (port) port.postMessage({ type: 'macha-direct-read-ahead-status', status: cache ? cache.sourceStatus : undefined });
     return;
   }
   if (data.type !== 'macha-direct-read-ahead-release' || typeof data.sourceKey !== 'string') return;

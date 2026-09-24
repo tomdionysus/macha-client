@@ -224,6 +224,35 @@ function reportTransfer(sourceUrl: string, metrics: DirectPlayReadAheadMetrics):
   transferListener(metrics.sourceOrigin, bytes, durationMs);
 }
 
+/** Long enough for a worker that is running; a worker that is not has nothing to say. */
+const SOURCE_STATUS_TIMEOUT_MS = 1_000;
+
+/**
+ * What the node last answered the worker for this source, when that was a
+ * failure status, or undefined when there is none, no worker, or no answer in
+ * time. For an element that errors before the worker's own report arrives:
+ * the worker records the status before the response reaches the element, so
+ * asking settles what the report's ordering cannot.
+ */
+export function directPlayReadAheadSourceStatus(sourceUrl: string | undefined): Promise<number | undefined> {
+  const sourceKey = sourceUrl ? keyBySource.get(sourceUrl) : undefined;
+  const controller = serviceWorkerAvailable() ? navigator.serviceWorker.controller : null;
+  if (!sourceKey || !controller) return Promise.resolve(undefined);
+  return new Promise((resolve) => {
+    const channel = new MessageChannel();
+    const timer = setTimeout(() => {
+      channel.port1.close();
+      resolve(undefined);
+    }, SOURCE_STATUS_TIMEOUT_MS);
+    channel.port1.onmessage = (event: MessageEvent<{ status?: unknown }>) => {
+      clearTimeout(timer);
+      channel.port1.close();
+      resolve(typeof event.data?.status === 'number' ? event.data.status : undefined);
+    };
+    controller.postMessage({ type: 'macha-direct-read-ahead-status', sourceKey }, [channel.port2]);
+  });
+}
+
 export function subscribeDirectPlayReadAheadFailure(
   sourceUrl: string,
   listener: (error: DirectPlayReadAheadError) => void,
