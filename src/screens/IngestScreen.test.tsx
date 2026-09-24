@@ -150,7 +150,7 @@ describe('the torrent list', () => {
     renderAt('/ingest/torrents?sort=name&dir=desc', snapshot(three));
     fireEvent.click(await screen.findByRole('link', { name: 'Alpha' }));
     expect(screen.getByTestId('where').textContent).toBe('/ingest/torrents/a?sort=name&dir=desc');
-    fireEvent.click(await screen.findByRole('link', { name: 'Torrents' }));
+    fireEvent.click(await screen.findByRole('link', { name: '← Torrents' }));
     expect(screen.getByTestId('where').textContent).toBe('/ingest/torrents?sort=name&dir=desc');
   });
 

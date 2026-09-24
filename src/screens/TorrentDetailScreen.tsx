@@ -154,7 +154,7 @@ export function TorrentDetailScreen({ api }: { api: AcquisitionApi }) {
   if (!job) {
     return (
       <section className="ingest-screen torrent-detail-screen">
-        <Link className="ingest-back" to={back} data-tv-focusable="true">Torrents</Link>
+        <Link className="back-button" to={back} data-tv-focusable="true">← Torrents</Link>
         {error && <p className="ingest-page-error" role="alert">{error}</p>}
         {loading && !snapshot ? <p className="ingest-loading">Loading torrent…</p> : snapshot && <p className="ingest-empty">This torrent is no longer on the server.</p>}
       </section>
@@ -167,7 +167,7 @@ export function TorrentDetailScreen({ api }: { api: AcquisitionApi }) {
   const name = job.name || 'Torrent';
   return (
     <section className="ingest-screen torrent-detail-screen">
-      <Link className="ingest-back" to={back} data-tv-focusable="true">Torrents</Link>
+      <Link className="back-button" to={back} data-tv-focusable="true">← Torrents</Link>
       <header className="torrent-detail-header">
         <div>
           <span className={`ingest-state state-${state}`}>{stateLabel(state)}</span>

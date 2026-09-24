@@ -111,9 +111,8 @@
 .ingest-delete-button.confirm { background: #30070bd4; border-color: #8a303b; }
 
 /* A torrent's own page. */
-.ingest-back { display: inline-block; margin-bottom: .6rem; color: var(--text-dim); font-size: .85rem; text-decoration: none; }
-.ingest-back::before { content: '‹ '; }
-.ingest-back:hover { color: #e2e2e6; }
+/* The shared back button, as a link so it carries the list's sort home. */
+.torrent-detail-screen > .back-button { display: inline-block; margin-bottom: .6rem; text-decoration: none; }
 .torrent-detail-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; }
 .torrent-detail-header > div { min-width: 0; }
 .torrent-detail-header h1 { margin: .2rem 0 0; font-size: clamp(1.5rem, 3vw, 2.1rem); line-height: 1.15; overflow-wrap: anywhere; }
