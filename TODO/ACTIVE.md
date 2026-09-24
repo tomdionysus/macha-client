@@ -2577,6 +2577,20 @@ both measured, neither this client's to build.
       state about a node's start cost without a stream request; the
       one-byte probe is ruled out (Tom, 2026-09-23).
 
+## P2 — A general metadata editor over the whole catalogue (Tom, 2026-09-24: "later")
+
+Tom: extend the merged match-and-edit interface into "a general metadata
+editor that lists all catalogued media, and allows bulk reassociations,
+edits, renames, moves, etc - but, later". Not started, deliberately. Build
+the merged unmatched/metadata editor (the current work) so this grows out of
+it: the shared list parts already carry sorting, paging, selection and a bulk
+bar (`ListParts`, `useListSelection`, `BulkActions`), and the editor's
+identify-or-edit panel should take any catalogue item, not only an unmatched
+file. Server needs it will surface then: a paged, filterable listing of every
+kind (today `GET /api/v1/catalogue/items` has no text filter and no paging),
+and parent validation plus partial updates on `PUT`, which the merged editor
+needs first anyway.
+
 ## P2 — Pause follow-ups that survived the reap run
 
 The pause P0 is closed (`COMPLETED.md`, 2026-09-23). Two small things and two

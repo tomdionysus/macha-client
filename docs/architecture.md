@@ -48,6 +48,20 @@ The chooser lives in `@machafoundation/core`, so every Macha client decides
 identically from the same facts. The server performs the result and does not
 substitute for it.
 
+**That includes which file.** A catalogue item can hold several files (a
+second cut, a different resolution, another encode), each with its own media
+information, and choosing among them is the client's decision like any other:
+match every file's facts against this client's capabilities and name the file
+to play (`media_id`) when asking for a session. Tom's ruling, 2026-09-24: "in
+Macha it's the client that makes the decision on what to play, it's the
+client that should match the available media to the client capabilities."
+There is no server pick among an item's files, not even as a fallback (Tom,
+2026-09-24): the ranking the server still runs when only an item is named is
+a violation, and the server has proposed refusing that request (`400` with the
+item's `media_ids`) once a second file exists. **Not yet so:** the
+facts seam in `src/App.tsx` hands core only the first file's facts, and the
+session names only the item; asked of core, whose chooser this is.
+
 **Any node will do.** One endpoint registry, created in `src/App.tsx`, routes
 catalogue, status, management, import and playback. Core's `seedEndpoints`
 fills it in order of standing: configured API URLs, then a Macha node confirmed

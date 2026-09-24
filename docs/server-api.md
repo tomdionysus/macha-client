@@ -101,7 +101,9 @@ add duration, dimensions, codecs and bitrate asynchronously.
 **A profile is never a playback-admission dependency.** The client performs no
 profile preflight and begins session negotiation regardless of whether a profile
 GET has returned; the instruction chooser reads the playback facts endpoint
-instead (see Playback). A session response of `202` with code `profile_pending`
+instead (see Playback). An item with several files has several entries there,
+one per `media_id`, and the client chooses among them; see "Several files on
+one item" under Playback. A session response of `202` with code `profile_pending`
 is non-conforming, and no current server sends one; core treats it as an
 endpoint failure, retries on another node under the same `idempotency_key`, and
 never polls it in the viewer path.
@@ -210,6 +212,28 @@ The response is authoritative and separates `preferences` (what the user
 selected), top-level `mode` (what negotiation resolved), `source` (original
 container and elementary streams), `output` (copy or transcode per selected
 stream), `selection`, `stream`, and server-generated `options`.
+
+### Several files on one item
+
+A catalogue item's `media_ids` is a list: matching or manual entry adds a file
+to an item and never replaces the ones it has, and the scanner merges a second
+matching file into the existing item. Media information is per file, never per
+item: `GET /api/v1/playback/media?item_id=` returns one entry per `media_id`
+(path, size, container, duration, bitrate, streams, operations) and lists
+unreadable ones under `unavailable`.
+
+**Which file plays is the client's decision** (Tom, 2026-09-24): core's
+chooser matches every file's facts against this client's capabilities and
+names the file with `media_id` on `POST /api/v1/playback/sessions`, and
+`PATCH` with `media_id` switches file mid-play. A session reports the file it
+uses (`media_id`, `source`), the item's files (`options.media_ids`) and
+`options.can_switch_media`. There is no server pick among files, not even as
+a fallback (Tom, 2026-09-24). Given only `item_id`, the server today still
+ranks the files itself (first directly-playable in stored order); that is a
+violation it has proposed to remove, answering a multi-file item named
+without a `media_id` with `400` and the item's `media_ids`. Always send
+`media_id`. A full `PUT` of the
+item without `media_ids` unbinds every file.
 
 ### Where a generation begins
 
