@@ -674,8 +674,14 @@ ramaroja over https: `Cache-Control: public, max-age=2592000, immutable`
 answered 304 with no body (4 ms on fi-1, one RTT elsewhere),
 `Timing-Allow-Origin: *`. Every URL now carries one `exp`, 2026-11-03T00:00Z,
 39.7 days out, identical across nodes (es-1 lists one extra artwork, no URL
-differs). So a poster is one download per browser per ~30 days. Not yet
-seen in the browser: the tab would not stay foregrounded for the check.
+differs). So a poster is one download per browser per ~30 days. **Seen in
+the browser the same day:** `Timing-Allow-Origin` makes artwork timing
+readable; Movies with everything cached came from fi-1 with no network
+request, 56 ms median per poster, all 30 visible posters complete 56 ms after
+the cards render. On the first visit after the URL change, 18 of 67 posters
+downloaded (84 KB median, 178 ms first byte from fi-1) and the 49 cache hits
+alongside them took ~580 ms, apparently queued behind those downloads rather
+than slow in themselves.
 
 **Still open:** the slow first read (the server's inference: gbni-1 and es-1
 data disks 89-99% busy with torrent and import writes, a poster read queues
