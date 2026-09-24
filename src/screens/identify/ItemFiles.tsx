@@ -1,16 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { identifyUnmatched, type CatalogueItem, type ManageApi, type PlaybackFactsApi, type PlaybackMediaFacts, type UnmatchedFile } from '@machafoundation/core';
 import { Modal } from '../../components/Modal';
-import { formatBytes } from '../ingest/format';
+import { fileName, formatBytes } from '../ingest/format';
 import { playbackTimeText, viewerErrorText } from '../../text/viewerText';
 
 /** Only these hold files; a series, season, artist or album holds its children instead. */
 const PLAYABLE_KINDS = new Set(['movie', 'episode', 'track']);
 
-function fileName(path: string | undefined, fallback: string): string {
-  if (!path) return fallback;
-  const slash = path.lastIndexOf('/');
-  return slash >= 0 ? path.slice(slash + 1) : path;
+function nameOf(path: string | undefined, fallback: string): string {
+  return path ? fileName(path) : fallback;
 }
 
 /** "1920×1080 HEVC · AAC 6ch · MKV", from what the file states, leaving out what it does not. */
@@ -65,7 +63,7 @@ export function ItemFiles({ item, facts, manage }: { item: CatalogueItem; facts:
             <ul className="item-files-list">
               {files.map((file, index) => (
                 <li key={file.mediaId}>
-                  <strong title={file.path}>{fileName(file.path, `File ${index + 1}`)}</strong>
+                  <strong title={file.path}>{nameOf(file.path, `File ${index + 1}`)}</strong>
                   <span>{[fileSummary(file), file.profile.durationMs ? playbackTimeText(file.profile.durationMs) : '', file.sizeBytes ? formatBytes(file.sizeBytes) : ''].filter(Boolean).join(' · ')}</span>
                 </li>
               ))}
@@ -147,7 +145,7 @@ function AddFileDialog({ open, item, manage, onClose, onAdded }: {
             <ul className="item-files-candidates">
               {shown.map((file) => (
                 <li key={file.id}>
-                  <span title={file.path}>{fileName(file.path, file.id)}<small>{file.path}</small></span>
+                  <span title={file.path}>{fileName(file.path)}<small>{file.path}</small></span>
                   <button className="secondary-button" type="button" disabled={Boolean(busy)} onClick={() => void add(file)} data-tv-focusable="true">
                     {busy === file.id ? 'Adding…' : 'Add as a version'}
                   </button>

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { candidateAlreadyCatalogued, pathBreadcrumbs, sortUnmatched } from './ManageScreen';
+import { pathBreadcrumbs, sortUnmatched } from './ManageScreen';
+import { candidateAlreadyCatalogued } from './identify/UnmatchedFilePage';
 import { runBulkOperation } from '../components/ListParts';
 import type { ManageCatalogueMatch, MediaProbeCandidate, UnmatchedFile } from '@machafoundation/core';
 

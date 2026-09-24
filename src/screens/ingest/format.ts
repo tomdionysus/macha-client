@@ -2,6 +2,12 @@ import { codeWords } from '../../text/viewerText';
 import type { TorrentJob } from '@machafoundation/core';
 import { presentedTime } from '../../diagnostics/timestamps';
 
+/** The last part of a path: the file's own name. */
+export function fileName(path: string): string {
+  const slash = path.lastIndexOf('/');
+  return slash >= 0 ? path.slice(slash + 1) : path;
+}
+
 export function formatBytes(value: number): string {
   if (!Number.isFinite(value) || value <= 0) return '0 B';
   const units = ['B', 'KB', 'MB', 'GB', 'TB'];
