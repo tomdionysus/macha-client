@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { MachaAcquisitionApiError, MachaConnectionError, NOT_PLAYABLE_CODE, SESSION_PROVENANCE_UNKNOWN_CODE, type MediaSummary, type PlaybackStatusDescription, type PlaybackStreamInfo } from '@machafoundation/core';
+import { MachaAcquisitionApiError, MachaConnectionError, MachaPlaybackError, NOT_PLAYABLE_CODE, SESSION_PROVENANCE_UNKNOWN_CODE, type MediaSummary, type PlaybackStatusDescription, type PlaybackStreamInfo } from '@machafoundation/core';
 import {
+  playbackRefusalText,
   diagnosticErrorText,
   hintResultLabel,
   jobErrorText,
@@ -151,5 +152,28 @@ describe('the server\'s codes, worded here (server 0.56.0)', () => {
     expect(serverStatusText({ code: 'ok', detail: null })).toBeUndefined();
     expect(serverStatusText({ code: null, detail: null })).toBeUndefined();
     expect(serverStatusText({ code: 'playback_unavailable', detail: null })).toBe('Playback unavailable');
+  });
+});
+
+describe('a refused playback change says why (Tom: no more "That change could not be made")', () => {
+  const refusal = (code: string, choice?: string, detail?: string) => {
+    const error = new MachaPlaybackError('log text', 400, code, undefined, undefined, detail);
+    if (choice) error.choice = choice;
+    return error;
+  };
+
+  it('words a stream choice the node refused', () => {
+    expect(playbackRefusalText(refusal('choice_required', 'audio_stream'))).toBe('This file has more than one audio track and none was chosen.');
+    expect(playbackRefusalText(refusal('choice_not_available', 'subtitle_stream'))).toBe('The chosen subtitle track is not in this file.');
+  });
+
+  it('carries the node\'s own reason for anything else, and says plainly when there was none', () => {
+    expect(playbackRefusalText(refusal('bad_request', undefined, 'A quality limit needs a converted stream.'))).toBe('A quality limit needs a converted stream.');
+    expect(playbackRefusalText(undefined)).toBe('The node refused it without saying why.');
+  });
+
+  it('never shows the old sentence', () => {
+    expect(playbackNoticeText({ code: 'update-failed', error: refusal('choice_required', 'container') })).toBe('Playback settings were not changed: This file has more than one streaming format and none was chosen.');
+    expect(playbackNoticeText({ code: 'update-failed' })).not.toMatch(/could not be made/);
   });
 });

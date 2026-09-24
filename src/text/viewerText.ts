@@ -1,5 +1,8 @@
 import {
+  CHOICE_NOT_AVAILABLE_CODE,
+  CHOICE_REQUIRED_CODE,
   MachaAcquisitionApiError,
+  MachaPlaybackError,
   MachaConnectionError,
   NOT_PLAYABLE_CODE,
   REGENERATION_ENDPOINT_GONE_CODE,
@@ -273,6 +276,29 @@ export function viewerErrorText(error: unknown, fallback = 'Something went wrong
   return fallback;
 }
 
+const CHOICE_NAMES: Record<string, string> = {
+  audio_stream: 'audio track',
+  video_stream: 'video track',
+  subtitle_stream: 'subtitle track',
+  container: 'streaming format',
+};
+
+/**
+ * Why the node refused a playback change, as specifically as it said. A
+ * stream choice (server 0.58.0) is worded from its code; anything else is the
+ * server's own sentence; and where nothing said why, it says so plainly
+ * rather than inventing a reason (Tom, 2026-09-25: "That change could not be
+ * made" was "worse than 'something has gone wrong'").
+ */
+export function playbackRefusalText(error: unknown): string {
+  if (error instanceof MachaPlaybackError && error.choice) {
+    const what = CHOICE_NAMES[error.choice] ?? error.choice.replace(/_/g, ' ');
+    if (error.code === CHOICE_NOT_AVAILABLE_CODE) return `The chosen ${what} is not in this file.`;
+    if (error.code === CHOICE_REQUIRED_CODE) return `This file has more than one ${what} and none was chosen.`;
+  }
+  return viewerErrorText(error, 'The node refused it without saying why.');
+}
+
 /** The player's passing notice for one of core's notice codes. */
 export function playbackNoticeText(notice: PlaybackNotice): string {
   switch (notice.code) {
@@ -280,9 +306,9 @@ export function playbackNoticeText(notice: PlaybackNotice): string {
     case 'decode-fallback': return 'This device could not play the original streams, so they are being converted.';
     case 'cannot-seek': return 'This stream cannot seek.';
     case 'not-ready': return 'Playback is still loading.';
-    case 'instruction-failed': return 'Could not work out how to play this here.';
+    case 'instruction-failed': return `Could not start this way: ${playbackRefusalText(notice.error)}`;
     case 'subtitles-loading': return 'Loading subtitles…';
-    case 'update-failed': return 'That change could not be made.';
+    case 'update-failed': return `Playback settings were not changed: ${playbackRefusalText(notice.error)}`;
   }
 }
 
