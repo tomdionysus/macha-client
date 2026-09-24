@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { renderHook } from '@testing-library/react';
+import { act, renderHook } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { useSession } from './useSession';
 import { SessionManager } from '@machafoundation/core';
@@ -103,5 +103,58 @@ describe('useSession', () => {
     unmount();
 
     expect(manager.isReady).toBe(true); // stop() halts the lifecycle without clearing the token/ready state
+  });
+
+  describe('signing out', () => {
+    type Call = { method: string; path: string; authorization: string | null };
+
+    /** A node that mints token-a first and token-b after, and records who asked for what. */
+    function node(revoke: () => Promise<Response>) {
+      const calls: Call[] = [];
+      let minted = 0;
+      const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const method = init?.method ?? 'GET';
+        const path = new URL(String(input)).pathname;
+        calls.push({ method, path, authorization: new Headers(init?.headers).get('Authorization') });
+        if (path === '/api/v1/health') return new Response(JSON.stringify({ service: 'macha', status: 'ok' }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        if (method === 'DELETE') return revoke();
+        minted += 1;
+        const token = minted === 1 ? 'token-a' : 'token-b';
+        return new Response(
+          JSON.stringify({ id: `session-${minted}`, token, token_type: 'Bearer', roles: ['media_viewer'], created_unix_ms: 1, expires_unix_ms: Date.now() + 60_000 }),
+          { status: 201, headers: { 'Content-Type': 'application/json' } },
+        );
+      });
+      return { calls, fetch };
+    }
+
+    it('revokes the session, then starts afresh without ever sending the revoked token again', async () => {
+      const { calls, fetch } = node(async () => new Response(null, { status: 204 }));
+      vi.stubGlobal('fetch', fetch);
+      const { manager, result } = renderSession();
+      await vi.waitFor(() => expect(result.current.ready).toBe(true));
+      const before = calls.length;
+
+      await act(() => result.current.signOut());
+
+      const after = calls.slice(before);
+      expect(after[0]).toMatchObject({ method: 'DELETE', path: '/api/v1/session', authorization: 'Bearer token-a' });
+      await vi.waitFor(() => expect(result.current.ready).toBe(true));
+      expect(calls.slice(before + 1).every((call) => call.authorization !== 'Bearer token-a')).toBe(true);
+      expect(await manager.authorization()).toBe('Bearer token-b');
+    });
+
+    it('still starts afresh when the server cannot be told, and says so', async () => {
+      const { calls, fetch } = node(async () => { throw new TypeError('Failed to fetch'); });
+      vi.stubGlobal('fetch', fetch);
+      const { result } = renderSession();
+      await vi.waitFor(() => expect(result.current.ready).toBe(true));
+      const before = calls.length;
+
+      await act(async () => { await expect(result.current.signOut()).rejects.toBeTruthy(); });
+
+      await vi.waitFor(() => expect(calls.slice(before).some((call) => call.method === 'POST')).toBe(true));
+      expect(calls.slice(before).filter((call) => call.method !== 'DELETE').every((call) => call.authorization !== 'Bearer token-a')).toBe(true);
+    });
   });
 });

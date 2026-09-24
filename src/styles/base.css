@@ -1223,3 +1223,7 @@ h2 { font-size: clamp(1.2rem, 2vw, 1.75rem); letter-spacing: -.01em; margin: 1.1
 .account-login:hover, .account-login:focus-visible { color: inherit; }
 .topbar-settings { display: inline-flex; align-items: center; color: var(--text-dim); padding: .3rem; border-radius: .45rem; }
 .topbar-settings:hover, .topbar-settings:focus-visible, .topbar-settings.active { color: inherit; }
+
+/* An app-wide notice under the top bar, for something the viewer must know that belongs to no one screen. */
+.app-notice { display: flex; align-items: center; gap: .8rem; margin: .6rem 1.5rem 0; padding: .6rem .85rem; border: 1px solid #7b273133; border-radius: .55rem; background: #35080c73; color: #ffb4b4; }
+.app-notice button { margin: 0 0 0 auto; padding: .35rem .7rem; }

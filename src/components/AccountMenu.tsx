@@ -1,15 +1,16 @@
 import { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { isSignedIn, routes, type CurrentSession, type UsersApi } from '@machafoundation/core';
+import { isSignedIn, routes, type CurrentSession } from '@machafoundation/core';
 import { OverflowMenu } from './OverflowMenu';
 import { ConfirmModal } from './Modal';
-import { viewerErrorText } from '../text/viewerText';
 
 interface Props {
-  api: UsersApi;
   session: CurrentSession;
-  /** Called once the session is gone, so the app can re-derive who it is talking to. */
-  onSignedOut: () => void;
+  /**
+   * Logs out: stops playback, revokes the session and starts afresh. The app
+   * owns it because all three are app-wide, and it reports its own failure.
+   */
+  onSignOut: () => Promise<void>;
 }
 
 function UserIcon() {
@@ -39,7 +40,7 @@ function UserIcon() {
  * capability check, and it is the only place in this client that names an
  * account at all.
  */
-export function AccountMenu({ api, session, onSignedOut }: Props) {
+export function AccountMenu({ session, onSignOut }: Props) {
   const navigate = useNavigate();
   // Recorded on the login link below, so signing in returns the viewer to the
   // page they were on rather than to Home.
@@ -47,20 +48,14 @@ export function AccountMenu({ api, session, onSignedOut }: Props) {
   const who = session.username?.trim() || '';
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string>();
 
   const signOut = async () => {
     setBusy(true);
-    setError(undefined);
     try {
-      await api.logout();
-      setConfirming(false);
-      onSignedOut();
-      navigate(routes.home, { replace: true });
-    } catch (cause) {
-      setError(viewerErrorText(cause));
+      await onSignOut();
     } finally {
       setBusy(false);
+      setConfirming(false);
     }
   };
 
@@ -103,7 +98,7 @@ export function AccountMenu({ api, session, onSignedOut }: Props) {
         confirmLabel="Log out"
         destructive
         busy={busy}
-        onCancel={() => { setConfirming(false); setError(undefined); }}
+        onCancel={() => setConfirming(false)}
         onConfirm={() => void signOut()}
       >
         {/* What logout actually does, measured rather than assumed: `logout()`
@@ -123,7 +118,6 @@ export function AccountMenu({ api, session, onSignedOut }: Props) {
           This signs <strong>{who}</strong> out on this device only — anywhere else stays signed in.
           Anything playing here will stop.
         </p>
-        {error && <p className="manage-error" role="alert">{error}</p>}
       </ConfirmModal>
     </div>
   );

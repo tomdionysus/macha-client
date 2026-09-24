@@ -35,6 +35,17 @@ export interface Session {
    * core's contract is that it is never assumed fit to show a viewer.
    */
   mintFailure: SessionMintFailure | undefined;
+  /**
+   * Ends this session server-side and locally, then starts again, so the app
+   * learns what an anonymous viewer may do here: browse, or sign in.
+   *
+   * Core's `signOut` clears the token first and never mints a replacement;
+   * wanting a session afterwards is this client's decision, and it always
+   * does. Starting again happens even when the revoke failed, because the
+   * local token is already gone either way. Rejects when the cluster could
+   * not be told, since the session is then still valid on the server.
+   */
+  signOut: () => Promise<void>;
 }
 
 /**
@@ -73,10 +84,19 @@ export function useSession(options: {
     return () => manager.stop();
   }, [connectionRequired, endpointRegistry, manager, serverConfigured]);
 
+  const signOut = useCallback(async () => {
+    try {
+      await manager.signOut();
+    } finally {
+      if (connectionRequired && serverConfigured) manager.start(endpointRegistry);
+    }
+  }, [connectionRequired, endpointRegistry, manager, serverConfigured]);
+
   return {
     auth: manager,
     ready: !connectionRequired || !serverConfigured || managerState.ready,
     roles: managerState.roles,
     mintFailure: managerState.mintFailure,
+    signOut,
   };
 }

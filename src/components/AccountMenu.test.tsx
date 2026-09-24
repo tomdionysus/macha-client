@@ -1,13 +1,9 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { describe, expect, it, vi } from 'vitest';
-import type { CurrentSession, UsersApi } from '@machafoundation/core';
+import type { CurrentSession } from '@machafoundation/core';
 import { AccountMenu } from './AccountMenu';
-
-function api(): UsersApi {
-  return { logout: vi.fn(() => Promise.resolve()) } as unknown as UsersApi;
-}
 
 function session(overrides: Partial<CurrentSession> = {}): CurrentSession {
   return {
@@ -19,12 +15,13 @@ function session(overrides: Partial<CurrentSession> = {}): CurrentSession {
   };
 }
 
-function show(current: CurrentSession) {
+function show(current: CurrentSession, onSignOut = vi.fn(() => Promise.resolve())) {
   render(
     <MemoryRouter>
-      <AccountMenu api={api()} session={current} onSignedOut={vi.fn()} />
+      <AccountMenu session={current} onSignOut={onSignOut} />
     </MemoryRouter>,
   );
+  return onSignOut;
 }
 
 describe('AccountMenu', () => {
@@ -95,6 +92,17 @@ describe('AccountMenu', () => {
     const dialog = screen.getByRole('dialog');
     expect(dialog.textContent).toContain('on this device only');
     expect(dialog.textContent).not.toMatch(/everywhere/i);
+  });
+
+  it('logs out through the app, which stops playback and revokes the session, only once confirmed', async () => {
+    const onSignOut = show(session());
+    fireEvent.click(screen.getByRole('button', { name: 'Account options for alice' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Log out' }));
+    expect(onSignOut).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Log out' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(onSignOut).toHaveBeenCalledTimes(1);
   });
 
   it('treats a username that is only whitespace as no username', () => {
