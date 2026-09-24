@@ -651,6 +651,15 @@ fi-1 site, test account, dev client:
   http nodes are not candidates, so a deployed https client gains only where
   a nearer https node exists. The https layer on macnessa also adds ~1.5 RTT
   per request against the node's plain http.
+- **A host that dies silently holds each poster ~15 s.** Core never leads
+  with a host in failure cooldown (`4f50200`), but between a silent death
+  and the health cycle charging it, the loader moves on only at the img's
+  error event. Measured in Chrome 2026-09-24: connection refused errors in
+  19 ms (falls through at once); a silently dropping host errors at 14.7 s.
+  Watching `ArtworkSource.ready` would gain little while core's health cycle
+  is 10 s plus a probe timeout, and a client time limit would abandon slow
+  but working loads on a weak link, so neither is built. Tom's call if the
+  window matters.
 - **The browser cannot measure it.** Artwork responses carry no
   `Timing-Allow-Origin`, so Resource Timing hides first byte and size for
   every cross-origin poster. A server header, one line.
