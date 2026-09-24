@@ -299,6 +299,18 @@ Assets are gzipped by the server on demand (593 KB of JS goes out as 172 KB).
 There are no precompressed `.gz` siblings in `dist/`, which the server would
 prefer; generating them is a build change nobody has asked for yet.
 
+**`main`'s build deployed to fi-1 and gbni-1, 2026-09-24 20:51 (local), on
+Tom's instruction; es-1 offline and untouched.** Bundle `index-DKJODXg4.js`,
+676,409 bytes, `shasum` `779412b5f4a7`, the same bundle `main` builds against
+published core 0.19.0 (built here from `develop` against core's linked
+tree, clean at `afa30d0`, which produced the identical hash). Backups at
+`/etc/macha/web.bak-20260924-205123.tar.gz` on both; rsync additive, 24
+files, 1,849,144 bytes each. Verified served on both via
+`http://127.0.0.1:7438/`: index names the bundle, `200` at full size with a
+matching `shasum`, owned `1000:50`; `hls-Bt6kO1A0.js` and the previous
+`index-8e3uI4_9.js` still `200`. `macnessa.macha.network` serves it too. Not
+yet opened in a browser on either node.
+
 **develop deployed to fi-1 and gbni-1, 2026-09-24 18:03 (local), on Tom's
 instruction; es-1 is offline for the foreseeable future and was not
 touched.** Bundle `index-8e3uI4_9.js`, 674,669 bytes, `shasum`
