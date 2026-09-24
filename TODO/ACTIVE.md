@@ -3022,7 +3022,15 @@ input they are most likely to reach for first.
 
 Revealing the chrome on movement is probably right rather than only restoring
 the cursor, since that is what the hidden state is paired with — but a pointer
-that moves must at minimum become visible again. Worth checking the mini player
+that moves must at minimum become visible again.
+
+**Fixed 2026-09-24, unit-tested, not yet seen by hand.** A pointer handler had
+since been added, but it reveals the chrome only when the pointer is over the
+control bar, and the cursor still shared the chrome's flag, so movement
+anywhere else left it hidden. The cursor now answers to the pointer alone
+(`usePointerIdle`): any movement shows it, and it hides again after the
+chrome's own 3 s delay without movement. The chrome keeps its rules. Owed: a
+look in fullscreen on a desktop. Worth checking the mini player
 and the non-fullscreen page at the same time, since the class is gated on
 `fullscreen` and the behaviour should not differ in a way nobody chose.
 

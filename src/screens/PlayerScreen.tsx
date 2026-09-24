@@ -6,6 +6,7 @@ import { createClientLogger } from '@machafoundation/core';
 import { useArtworkUrl } from '../hooks/useArtworkUrl';
 import { requestTvDefaultFocus } from '../hooks/useTvNavigation';
 import { useElapsedMs } from '../hooks/useElapsedMs';
+import { usePointerIdle } from '../hooks/usePointerIdle';
 import type { Platform } from '@machafoundation/core';
 import { platformTraits } from '../platform/traits';
 import type { PlaybackUpdate } from '@machafoundation/core';
@@ -294,6 +295,7 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
     fatalError: runtimeState.fatalError,
   };
   const [controlsVisible, setControlsVisible] = useState(!interactionControlled);
+  const pointer = usePointerIdle(uiSettings.playerControlsHideDelayMs);
   const [fullscreen, setFullscreen] = useState(false);
   const [optionsVisible, setOptionsVisible] = useState(false);
   const [scrubValue, setScrubValue] = useState<number>();
@@ -832,9 +834,12 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
   return (
     <section
       ref={pageRef}
-      className={`player-page player-presentation-${presentation} ${audio ? 'audio-player' : ''} ${fullscreen && !controlsVisible && !fatalError ? 'cursor-hidden' : ''} ${fatalError ? 'player-failed' : ''}`}
+      className={`player-page player-presentation-${presentation} ${audio ? 'audio-player' : ''} ${fullscreen && !controlsVisible && pointer.idle && !fatalError ? 'cursor-hidden' : ''} ${fatalError ? 'player-failed' : ''}`}
       onPointerMove={(pointerEvent) => {
         if (presentation !== 'full') return;
+        // The cursor comes back on any movement; the chrome only where its
+        // own rules say, below.
+        pointer.noteMovement();
         if (webControls) {
           if (!pointerEvent.pointerType || pointerEvent.pointerType === 'mouse') noteWebPointerMovement(pointerEvent.clientY);
         } else if (!samsungControls) {
