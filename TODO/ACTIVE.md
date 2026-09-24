@@ -664,6 +664,23 @@ fi-1 site, test account, dev client:
   `Timing-Allow-Origin`, so Resource Timing hides first byte and size for
   every cross-origin poster. A server header, one line.
 
+**Server 0.54.1 (all nodes 07:36Z 2026-09-24) fixed the caching half, verified
+from here the same morning** on all three nodes over http and on macnessa and
+ramaroja over https: `Cache-Control: public, max-age=2592000, immutable`
+(30 days, tied to the capability), `ETag` = the artwork id, `If-None-Match`
+answered 304 with no body (4 ms on fi-1, one RTT elsewhere),
+`Timing-Allow-Origin: *`. Every URL now carries one `exp`, 2026-11-03T00:00Z,
+39.7 days out, identical across nodes (es-1 lists one extra artwork, no URL
+differs). So a poster is one download per browser per ~30 days. Not yet
+seen in the browser: the tab would not stay foregrounded for the check.
+
+**Still open:** the slow first read (the server's inference: gbni-1 and es-1
+data disks 89-99% busy with torrent and import writes, a poster read queues
+behind that I/O; Tom has put the torrent work ahead of it), and sized
+variants (not started; a feature, Tom's priority call). The https overhead
+through macnessa is a TLS front, not macha's server; what terminates it is
+unknown.
+
 Asked of the server session 2026-09-24 with this evidence: cold-read cost,
 a stable (not daily) capability for immutable content-addressed artwork,
 sized variants, `Timing-Allow-Origin`. Not yet seen: Tom's own view (which
