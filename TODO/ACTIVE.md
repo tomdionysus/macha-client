@@ -309,6 +309,17 @@ tar -czf /etc/macha/web.bak-$(date +%Y%m%d-%H%M%S).tar.gz -C /etc/macha web
 rsync -a --omit-dir-times --chown=1000:50 dist/ root@<node>:/etc/macha/web/
 ```
 
+**develop deployed to gbni-1 only, 2026-09-25 02:02 (local), on Tom's
+instruction ("es-1 and gbni-1"); es-1 did not answer (ssh timed out, no
+health) and was not deployed.** Bundle `index-DajU39j8.js`, 688,067 bytes,
+`shasum` `84fb9962152b`, built against core `0cbf584` (0bce895 in behaviour),
+which sends `media_id` and never `item_id`: server 0.58.0 (the media_id-only
+release, briefly called 0.57.1) refuses `item_id`, so every build before this
+one cannot start playback against it. Backup `web.bak-20260925-020200`;
+additive rsync, 24 files; served on `127.0.0.1:7438` with a matching `shasum`,
+`hls-Bt6kO1A0.js` `200`, and on `macnessa`. **fi-1 still runs
+`index-BJKj6lvr.js`, which sends `item_id`.**
+
 **Deploy additively — no `--delete`.** The hashed assets of the previous build
 stay, so a session still running it does not 404 on a lazily-loaded chunk. The
 `hls` chunk is the one that matters: it is fetched on first playback, not at
