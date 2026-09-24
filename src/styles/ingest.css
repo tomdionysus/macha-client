@@ -35,7 +35,7 @@
 .torrent-sort-direction.secondary-button { margin: 0; padding: .3rem .55rem; font-size: .78rem; }
 
 .ingest-table-scroll { overflow-x: auto; border: 1px solid #ffffff12; border-radius: .5rem; background: #151517d8; }
-.ingest-table { width: 100%; border-collapse: collapse; font-size: .84rem; font-variant-numeric: tabular-nums; }
+.ingest-table { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: .84rem; font-variant-numeric: tabular-nums; }
 .ingest-table th {
   padding: .35rem .55rem;
   border-bottom: 1px solid #ffffff14;
@@ -64,11 +64,27 @@
 .ingest-table tbody tr:last-child td { border-bottom: 0; }
 .torrent-table tbody tr { cursor: pointer; }
 .ingest-table tbody tr:hover td { background: #ffffff06; }
-.ingest-table .col-name { width: 100%; max-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ingest-table .col-name { overflow: hidden; text-overflow: ellipsis; }
 .ingest-table .col-name a { color: #e2e2e6; text-decoration: none; }
 .ingest-table .col-name a:hover { text-decoration: underline; }
 .ingest-table .col-name a:focus-visible { outline: 1px solid var(--focus); outline-offset: 2px; }
-.ingest-table .col-progress { min-width: 8.5rem; }
+/*
+ * Fixed layout, and every column but the name a fixed width set to the
+ * longest text its formatter can produce (padding included, as fixed layout
+ * counts it), so a changing speed, status or ETA never reflows the row; the
+ * name takes whatever is left. Automatic layout could not do this: the name's
+ * old width: 100% squeezed every other column to its current content. Actions
+ * is sized for the remove prompt, the widest thing it shows, so opening that
+ * does not move the columns either.
+ */
+.ingest-table .col-progress { width: 9rem; }
+.ingest-table .col-size { width: 4.5rem; }
+.ingest-table .col-rate { width: 5.5rem; }
+.ingest-table .col-eta { width: 4.8rem; }
+.ingest-table .col-peers { width: 3rem; }
+.ingest-table .col-ratio { width: 3.7rem; }
+.ingest-table .col-added { width: 6.1rem; }
+.ingest-table .col-status { width: 8.5rem; max-width: 8.5rem; overflow: hidden; text-overflow: ellipsis; }
 .ingest-table .col-progress > span { display: inline-block; width: 3.2rem; text-align: right; color: #d0d0d4; }
 .ingest-table .col-size, .ingest-table .col-rate, .ingest-table .col-eta, .ingest-table .col-peers, .ingest-table .col-ratio { text-align: right; }
 .ingest-table th.col-size, .ingest-table th.col-rate, .ingest-table th.col-eta, .ingest-table th.col-peers, .ingest-table th.col-ratio { text-align: right; }
@@ -76,7 +92,7 @@
 .ingest-table td.col-status.has-error, .ingest-table tr.state-failed td.col-status, .ingest-table tr.state-blocked td.col-status { color: #e49a9f; }
 .ingest-table tr.state-paused td.col-status { color: #cbbf8a; }
 .ingest-table td.col-added { color: var(--text-faint); }
-.ingest-table .col-actions { width: 1%; padding-right: .35rem; }
+.ingest-table .col-actions { width: 12rem; padding-right: .35rem; text-align: right; }
 .ingest-error-row td { height: auto; padding: .25rem .55rem .45rem; color: #ffb4b4; white-space: normal; font-size: .8rem; }
 .ingest-table .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
@@ -147,7 +163,7 @@
 @media (max-width: 600px) {
   .ingest-section-heading { flex-wrap: wrap; }
   .ingest-table .col-progress .ingest-progress-track { display: none; }
-  .ingest-table .col-progress { min-width: 0; }
+  .ingest-table .col-progress { width: 3.8rem; min-width: 0; }
   .ingest-table .col-size, .ingest-table .col-eta { display: none; }
   .torrent-detail-header { flex-direction: column; }
 }
