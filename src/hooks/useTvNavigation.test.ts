@@ -156,3 +156,82 @@ describe('attachSpatialTvNavigation', () => {
     });
   });
 });
+
+describe('a wide element beside smaller ones', () => {
+  // The search row: a field spanning most of the width, then the sort and a
+  // far refresh, with a row of result cards below. Centres misjudge it: most
+  // cards' centres lie right of the field's centre.
+  let detach: (() => void) | undefined;
+
+  function place(id: string, left: number, top: number, width: number, height: number) {
+    const node = document.getElementById(id) as HTMLElement;
+    node.getBoundingClientRect = () => ({
+      top, bottom: top + height, left, right: left + width, width, height, x: left, y: top, toJSON: () => ({}),
+    });
+    return node;
+  }
+
+  function press(key: string, keyCode: number) {
+    document.dispatchEvent(new KeyboardEvent('keydown', { key, keyCode, bubbles: true, cancelable: true } as KeyboardEventInit));
+  }
+
+  function selected(): string | undefined {
+    return document.querySelector('[data-tv-selected="true"]')?.id;
+  }
+
+  function layout(withSort: boolean) {
+    document.body.innerHTML = `
+      <button data-tv-focusable="true" id="field">Field</button>
+      ${withSort ? '<button data-tv-focusable="true" id="sort">Sort</button>' : ''}
+      <button data-tv-focusable="true" id="refresh">Refresh</button>
+      <button data-tv-focusable="true" id="card-1">1</button>
+      <button data-tv-focusable="true" id="card-2">2</button>
+      <button data-tv-focusable="true" id="card-3">3</button>
+      <button data-tv-focusable="true" id="card-4">4</button>
+      <button data-tv-focusable="true" id="card-5">5</button>
+      <button data-tv-focusable="true" id="card-6">6</button>
+      <button data-tv-focusable="true" id="card-7">7</button>
+      <button data-tv-focusable="true" id="card-8">8</button>
+    `;
+    place('field', 0, 0, 1200, 49);
+    if (withSort) place('sort', 1216, 0, 213, 49);
+    place('refresh', 1800, 0, 49, 49);
+    for (let index = 0; index < 8; index += 1) place(`card-${index + 1}`, index * 160, 81, 150, 225);
+  }
+
+  afterEach(() => {
+    detach?.();
+    detach = undefined;
+    document.body.innerHTML = '';
+  });
+
+  it('goes right from the field to the sort, not to a card below', () => {
+    layout(true);
+    detach = attachSpatialTvNavigation();
+    expect(selected()).toBe('field');
+    press('ArrowRight', 39);
+    expect(selected()).toBe('sort');
+  });
+
+  it('goes right from the field to a far refresh on its row, over a near card below', () => {
+    layout(false);
+    detach = attachSpatialTvNavigation();
+    press('ArrowRight', 39);
+    expect(selected()).toBe('refresh');
+  });
+
+  it('goes right from a card to the next card', () => {
+    layout(true);
+    detach = attachSpatialTvNavigation();
+    (document.getElementById('card-2') as HTMLElement).focus();
+    press('ArrowRight', 39);
+    expect(selected()).toBe('card-3');
+  });
+
+  it('goes down from the field into the results', () => {
+    layout(true);
+    detach = attachSpatialTvNavigation();
+    press('ArrowDown', 40);
+    expect(selected()).toMatch(/^card-/);
+  });
+});

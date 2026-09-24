@@ -84,27 +84,52 @@ function rectGap(start: number, size: number, otherStart: number, otherSize: num
   return 0;
 }
 
-function scoreTvCandidate(current: DOMRect, candidate: DOMRect, direction: SamsungDpadDirection): number | null {
-  const cx = current.left + current.width / 2;
-  const cy = current.top + current.height / 2;
+/**
+ * How far a candidate is in the direction pressed, or null when it is not in
+ * that direction at all. Judged from the current element's edges, not its
+ * centre: a search field spanning most of its row has its centre far from its
+ * right edge, and by centres every result card right of that middle counted
+ * as "right" of the field and beat the sort control beside it. Found by the
+ * Android TV client, which ported this scorer and changed it in step.
+ */
+function scoreTvCandidate(current: DOMRect, candidate: DOMRect, direction: SamsungDpadDirection): { score: number; inLane: boolean } | null {
   const tx = candidate.left + candidate.width / 2;
   const ty = candidate.top + candidate.height / 2;
-  const dx = tx - cx;
-  const dy = ty - cy;
 
-  if (direction === 'left' && dx >= -1) return null;
-  if (direction === 'right' && dx <= 1) return null;
-  if (direction === 'up' && dy >= -1) return null;
-  if (direction === 'down' && dy <= 1) return null;
+  if (direction === 'left' && tx >= current.left) return null;
+  if (direction === 'right' && tx <= current.left + current.width) return null;
+  if (direction === 'up' && ty >= current.top) return null;
+  if (direction === 'down' && ty <= current.top + current.height) return null;
 
   const horizontal = direction === 'left' || direction === 'right';
-  const primary = horizontal ? Math.abs(dx) : Math.abs(dy);
-  const secondary = horizontal ? Math.abs(dy) : Math.abs(dx);
+  const primary = horizontal
+    ? rectGap(current.left, current.width, candidate.left, candidate.width)
+    : rectGap(current.top, current.height, candidate.top, candidate.height);
+  const secondary = horizontal
+    ? Math.abs(ty - (current.top + current.height / 2))
+    : Math.abs(tx - (current.left + current.width / 2));
   const laneGap = horizontal
     ? rectGap(current.top, current.height, candidate.top, candidate.height)
     : rectGap(current.left, current.width, candidate.left, candidate.width);
 
-  return primary + secondary * 0.2 + laneGap * 6;
+  return { score: primary + secondary * 0.2 + laneGap * 6, inLane: laneGap === 0 };
+}
+
+/**
+ * The best candidate, the current row (or column) first: anything that
+ * overlaps the current element across the direction of travel competes alone,
+ * and the next row is reached only once this one runs out. The lane penalty
+ * alone lost this: a far refresh on the same row scored worse than a near
+ * card below it.
+ */
+function bestTvCandidate(current: HTMLElement, elements: HTMLElement[], direction: SamsungDpadDirection): HTMLElement | undefined {
+  const currentRect = current.getBoundingClientRect();
+  const scored = elements
+    .filter((element) => element !== current)
+    .map((element) => ({ element, result: scoreTvCandidate(currentRect, element.getBoundingClientRect(), direction) }))
+    .filter((entry): entry is { element: HTMLElement; result: { score: number; inLane: boolean } } => entry.result !== null);
+  const inLane = scored.filter((entry) => entry.result.inLane);
+  return (inLane.length > 0 ? inLane : scored).sort((a, b) => a.result.score - b.result.score)[0]?.element;
 }
 
 function sequentialCandidate(elements: HTMLElement[], current: HTMLElement, direction: SamsungDpadDirection): HTMLElement | undefined {
@@ -170,11 +195,7 @@ export function attachSpatialTvNavigation(onBack?: () => boolean): () => void {
     const geometryValid = currentRect.width > 0 && currentRect.height > 0;
     let next: HTMLElement | undefined;
     if (geometryValid) {
-      next = elements
-        .filter((element) => element !== current)
-        .map((element) => ({ element, score: scoreTvCandidate(currentRect, element.getBoundingClientRect(), command) }))
-        .filter((entry): entry is { element: HTMLElement; score: number } => entry.score !== null)
-        .sort((a, b) => a.score - b.score)[0]?.element;
+      next = bestTvCandidate(current, elements, command);
     } else {
       next = sequentialCandidate(elements, current, command);
     }
