@@ -15,7 +15,8 @@ import { samsungBackTarget } from './platform/samsungBackNavigation';
 import type { Platform } from '@machafoundation/core';
 import { buildPlatformTraits, isTvBuild } from './platform/traits';
 import type { PlaybackResolver } from '@machafoundation/core';
-import { reportClusterReachable, SERVER_REACHABLE_EVENT, SERVER_UNREACHABLE_EVENT, SERVER_UNREACHABLE_MESSAGE } from '@machafoundation/core';
+import { reportClusterReachable, SERVER_REACHABLE_EVENT, SERVER_UNREACHABLE_EVENT } from '@machafoundation/core';
+import { SERVER_UNREACHABLE_TEXT } from './text/viewerText';
 import type { Episode, MediaSummary, PlaybackProgress, SeasonSummary } from '@machafoundation/core';
 import { ContinueWatchingStore } from '@machafoundation/core';
 import { hasRole, sessionManager, sessionPermits, type UserRole } from '@machafoundation/core';
@@ -544,10 +545,9 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
   useTvNavigation(samsungBack);
 
   useEffect(() => {
-    const onServerUnreachable = (event: Event) => {
+    const onServerUnreachable = () => {
       if (!connectionRequired) return;
-      const detail = (event as CustomEvent<{ message?: string }>).detail;
-      setConnectionNotice(detail?.message ?? SERVER_UNREACHABLE_MESSAGE);
+      setConnectionNotice(SERVER_UNREACHABLE_TEXT);
       setClusterUnreachable(true);
     };
     const onServerReachable = () => setClusterUnreachable(false);

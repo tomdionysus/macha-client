@@ -11,11 +11,11 @@ import type {
   NodeRuntimeStatus,
   PublicConnectivityStatus,
 } from '@machafoundation/core';
-import { startupPhaseLabel, startupReadyCount, startupSubsystems } from '@machafoundation/core';
+import { startupReadyCount, startupSubsystems } from '@machafoundation/core';
+import { startupPhaseLabel, startupSubsystemLabel, viewerErrorText } from '../text/viewerText';
 import type { IdentityAssociationResetResult, ManageApi } from '@machafoundation/core';
 import { routes } from '@machafoundation/core';
 import { usePollingTask } from '../hooks/usePollingTask';
-import { errorMessage } from '@machafoundation/core';
 import { EndpointRegistry, type EndpointCandidate } from '@machafoundation/core';
 import { ConfirmModal } from '../components/Modal';
 import { AsyncIconButton } from '../components/AsyncIconButton';
@@ -454,14 +454,14 @@ export function StatusScreen({ api, endpointRegistry, manageApi, platform, secti
       setSnapshot(omitRetiredNodes(await api.status()));
       setError(undefined);
     } catch (cause) {
-      setError(errorMessage(cause));
+      setError(viewerErrorText(cause));
     }
   }, [api, omitRetiredNodes]);
 
   usePollingTask({
     load: () => api.status(),
     onValue: (value) => { setSnapshot(omitRetiredNodes(value)); setError(undefined); },
-    onError: (cause) => setError(errorMessage(cause)),
+    onError: (cause) => setError(viewerErrorText(cause)),
     intervalMs: 5000,
     dependencies: [api, omitRetiredNodes],
     allowOverlap: true,
@@ -484,7 +484,7 @@ export function StatusScreen({ api, endpointRegistry, manageApi, platform, secti
         await refresh();
       }
     } catch (cause) {
-      setError(errorMessage(cause));
+      setError(viewerErrorText(cause));
     } finally {
       setRefreshing(false);
     }
@@ -503,7 +503,7 @@ export function StatusScreen({ api, endpointRegistry, manageApi, platform, secti
         setResetCandidate(undefined);
       }, refresh);
     } catch (cause) {
-      setError(errorMessage(cause));
+      setError(viewerErrorText(cause));
     } finally {
       setResettingNodeId(undefined);
     }
@@ -541,7 +541,7 @@ export function StatusScreen({ api, endpointRegistry, manageApi, platform, secti
         </div>
         <div className="cluster-startup-grid">
           {startupSubsystems(snapshot.startup).map((subsystem) => <div key={subsystem.key}>
-            <span>{subsystem.label}</span><strong className={`cluster-startup-state ${subsystem.state}`}>{subsystem.state}</strong>
+            <span>{startupSubsystemLabel(subsystem.key)}</span><strong className={`cluster-startup-state ${subsystem.state}`}>{subsystem.state}</strong>
           </div>)}
         </div>
         {snapshot.startup.error && <p className="cluster-startup-error">{snapshot.startup.error}</p>}
@@ -612,7 +612,7 @@ export function NodeStatusScreen({ api }: { api: ClusterStatusApi }) {
       setNode(await api.node(nodeId));
       setError(undefined);
     } catch (cause) {
-      setError(errorMessage(cause));
+      setError(viewerErrorText(cause));
     }
   }, [api, nodeId]);
 
@@ -623,7 +623,7 @@ export function NodeStatusScreen({ api }: { api: ClusterStatusApi }) {
       setCheck(await api.checkConnectivity(nodeId));
       await refresh();
     } catch (cause) {
-      setError(errorMessage(cause));
+      setError(viewerErrorText(cause));
     } finally {
       setRefreshing(false);
     }
@@ -632,7 +632,7 @@ export function NodeStatusScreen({ api }: { api: ClusterStatusApi }) {
   usePollingTask({
     load: () => api.node(nodeId!),
     onValue: (value) => { setNode(value); setError(undefined); },
-    onError: (cause) => setError(errorMessage(cause)),
+    onError: (cause) => setError(viewerErrorText(cause)),
     intervalMs: 5000,
     dependencies: [api, nodeId],
     allowOverlap: true,

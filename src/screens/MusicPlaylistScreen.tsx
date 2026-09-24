@@ -1,6 +1,7 @@
 import { useRef, type DragEvent, type KeyboardEvent } from 'react';
 import type { MediaApi } from '@machafoundation/core';
 import { LazyArtwork } from '../components/LazyArtwork';
+import { trackNumberLabel } from '../text/viewerText';
 import type { MusicPlaylistEntry } from '@machafoundation/core';
 
 interface Props {
@@ -100,7 +101,7 @@ export function MusicPlaylistScreen({ api, entries, onPlay, onShuffle, onRemove,
                 aria-label={`Play ${entry.track.title} now`}
               >
                 <strong>{entry.track.title}</strong>
-                {entry.track.subtitle && <small>{entry.track.subtitle}</small>}
+                {trackNumberLabel(entry.track) && <small>{trackNumberLabel(entry.track)}</small>}
               </button>
               <button
                 className="playlist-remove"

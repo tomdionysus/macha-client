@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { errorMessage, isSignedIn, routes, type CurrentSession, type UsersApi } from '@machafoundation/core';
+import { isSignedIn, routes, type CurrentSession, type UsersApi } from '@machafoundation/core';
 import { OverflowMenu } from './OverflowMenu';
 import { ConfirmModal } from './Modal';
+import { viewerErrorText } from '../text/viewerText';
 
 interface Props {
   api: UsersApi;
@@ -57,7 +58,7 @@ export function AccountMenu({ api, session, onSignedOut }: Props) {
       onSignedOut();
       navigate(routes.home, { replace: true });
     } catch (cause) {
-      setError(errorMessage(cause));
+      setError(viewerErrorText(cause));
     } finally {
       setBusy(false);
     }

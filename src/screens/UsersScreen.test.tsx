@@ -238,7 +238,7 @@ describe('UsersScreen', () => {
 
   it('puts a taken username against the username field, not in a general failure', async () => {
     // Knowing which input was wrong is the whole value of an error code.
-    const update = vi.fn(() => Promise.reject(Object.assign(new Error('That username is taken.'), { code: 'username_taken', status: 409 })));
+    const update = vi.fn(() => Promise.reject(Object.assign(new Error('users request failed: 409'), { detail: 'That username is taken.', code: 'username_taken', status: 409 })));
     render(<UsersScreen api={fakeApi([user()], { update })} session={session()} />);
 
     await chooseAction('alice', 'Edit');
@@ -257,7 +257,7 @@ describe('UsersScreen', () => {
   it('keeps the dialogue open when the server refuses, so the explanation survives', async () => {
     // A dialogue that closes on failure takes the only account of what went
     // wrong with it, and the viewer is left looking at an unchanged list.
-    const update = vi.fn(() => Promise.reject(Object.assign(new Error('That username is taken.'), { code: 'username_taken', status: 409 })));
+    const update = vi.fn(() => Promise.reject(Object.assign(new Error('users request failed: 409'), { detail: 'That username is taken.', code: 'username_taken', status: 409 })));
     render(<UsersScreen api={fakeApi([user()], { update })} session={session()} />);
 
     await chooseAction('alice', 'Edit');
@@ -271,7 +271,7 @@ describe('UsersScreen', () => {
   it('puts a rejected password in the password dialogue, not against the account\'s roles', async () => {
     // The counterpart to the username test, so that one proves a mapping
     // rather than just that a message rendered somewhere.
-    const update = vi.fn(() => Promise.reject(Object.assign(new Error('That password is too weak.'), { code: 'password_rejected', status: 400 })));
+    const update = vi.fn(() => Promise.reject(Object.assign(new Error('users request failed: 400'), { detail: 'That password is too weak.', code: 'password_rejected', status: 400 })));
     render(<UsersScreen api={fakeApi([user()], { update })} session={session()} />);
 
     await chooseAction('alice', 'Set a password');

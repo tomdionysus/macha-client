@@ -1,4 +1,5 @@
-import { isAccountSessionLimit, playbackFailureDetail } from '@machafoundation/core';
+import { isAccountSessionLimit, playbackFailureCode, playbackFailureDetail } from '@machafoundation/core';
+import { playbackFailureCodeText } from '../text/viewerText';
 
 /**
  * The sentence the failure screen leads with.
@@ -21,7 +22,11 @@ import { isAccountSessionLimit, playbackFailureDetail } from '@machafoundation/c
  * belongs.
  */
 export function playbackFailureHeadline(error: unknown): string {
-  return playbackFailureDetail(error) ?? 'The stream stopped and could not be recovered.';
+  // A code core states is worded here, since core writes no viewer text;
+  // otherwise the server's own sentence, otherwise this screen's own.
+  return playbackFailureCodeText(playbackFailureCode(error))
+    ?? playbackFailureDetail(error)
+    ?? 'The stream stopped and could not be recovered.';
 }
 
 /**

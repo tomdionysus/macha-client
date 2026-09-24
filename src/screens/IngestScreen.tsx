@@ -1,11 +1,12 @@
 import { useMemo, useState, type ChangeEvent, type FormEvent, type MouseEvent } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { errorMessage, routes, type AcquisitionApi, type IngestJob, type TorrentJob } from '@machafoundation/core';
+import { routes, type AcquisitionApi, type IngestJob, type TorrentJob } from '@machafoundation/core';
 import { JobControls, Progress } from './ingest/JobControls';
 import { formatAge, formatBytes, formatEta, formatPercent, formatRate, formatRatio, formatTimestamp, percent, stateLabel } from './ingest/format';
 import { canRetryImport, displayStateOf, jobKey, linkedIngestOf } from './ingest/jobs';
 import { parseTorrentSort, sortTorrents, TORRENT_SORT_KEYS, torrentSortParams, type TorrentSort, type TorrentSortKey } from './ingest/torrentSort';
 import { useAcquisition } from './ingest/useAcquisition';
+import { viewerErrorText } from '../text/viewerText';
 
 /** Import's pages: torrents and filesystem imports are different kinds of job, each with its own page. */
 export type IngestSection = 'torrents' | 'files';
@@ -97,7 +98,7 @@ export function IngestScreen({ api, section }: Props) {
       }
       await refresh();
     } catch (reason: unknown) {
-      setError(errorMessage(reason));
+      setError(viewerErrorText(reason));
     } finally {
       setSubmitting(undefined);
     }

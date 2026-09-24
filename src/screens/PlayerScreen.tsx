@@ -7,12 +7,12 @@ import { useArtworkUrl } from '../hooks/useArtworkUrl';
 import { requestTvDefaultFocus } from '../hooks/useTvNavigation';
 import { useElapsedMs } from '../hooks/useElapsedMs';
 import { usePointerIdle } from '../hooks/usePointerIdle';
+import { cardSubtitle, episodeCode, playbackNoticeText, playbackTimeText, streamStatusText } from '../text/viewerText';
 import type { Platform } from '@machafoundation/core';
 import { platformTraits } from '../platform/traits';
 import type { PlaybackUpdate } from '@machafoundation/core';
 import { isSubtitleOnlyPlaybackUpdate, type PlaybackCoordinatorSnapshot } from '@machafoundation/core';
 import { PlaybackRuntime, type PlaybackRuntimeRequest, type PlaybackRuntimeSnapshot } from '@machafoundation/core';
-import { formatPlaybackTime } from '@machafoundation/core';
 import { uiSettings } from '../settings';
 import { describePlaybackSession } from '@machafoundation/core';
 import { playbackFailureTrail, type PlaybackFailureTrailEntry } from './player/failureTrail';
@@ -183,20 +183,17 @@ function shouldTrackProgress(media: MediaSummary): boolean {
 /**
  * The line under the title in the player bar.
  *
- * The catalogue supplies no subtitle for a movie, so that line sat empty
- * where the year is the one piece of identifying context worth having —
- * remakes and re-releases share titles freely. Everything else keeps the
- * subtitle it already had, and a movie with no year still shows nothing
- * rather than an empty separator.
+ * Worded here from the item's facts, since core writes no viewer text: an
+ * episode is its series and code ("The Show S01E01"), a movie its year, since
+ * remakes and re-releases share titles freely, and anything else the line
+ * its card shows. A movie with no year shows nothing rather than an empty
+ * separator.
  */
 export function playerMediaSubtitle(media: MediaSummary): string | undefined {
   if (media.kind === 'episode') {
-    return `${media.playbackContext?.series.title ?? ''} ${media.subtitle ?? ''}`.trim() || undefined;
+    return `${media.playbackContext?.series.title ?? ''} ${episodeCode(media) ?? ''}`.trim() || undefined;
   }
-  if (media.kind === 'movie' && media.subtitle === undefined) {
-    return media.year !== undefined ? String(media.year) : undefined;
-  }
-  return media.subtitle;
+  return cardSubtitle(media);
 }
 
 export function webSeekDeltaForKey(key: string): number | undefined {
@@ -385,7 +382,7 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
   }, [onEnded, playback.event.ended]);
 
   const fatalError = runtimeState.fatalError ?? playback.fatalError;
-  const playbackNotice = localNotice ?? playback.notice;
+  const playbackNotice = localNotice ?? (playback.notice && playbackNoticeText(playback.notice));
 
   const hideControls = useCallback(() => {
     if (hideTimerRef.current !== undefined) {
@@ -490,7 +487,8 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
     // A stream that cannot seek never moves, so nothing should have stopped.
     if (!accepted) {
       releasePicture();
-      setLocalNotice(runtime.getPlaybackSnapshot()?.notice);
+      const notice = runtime.getPlaybackSnapshot()?.notice;
+      setLocalNotice(notice && playbackNoticeText(notice));
     }
     if (!interactionControlled) showControls();
     return accepted;
@@ -820,7 +818,8 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
     </span>
   );
   const audio = media.kind === 'track';
-  const streamStatus = describePlaybackSession(session, event.streamOrigin);
+  const described = describePlaybackSession(session, event.streamOrigin);
+  const streamStatus = described && { endpoint: described.endpoint, ...streamStatusText(described) };
   const mediaSubtitle = playerMediaSubtitle(media);
   const pausedForControl = playerControlShowsPlay(playback.intent.paused, Boolean(fatalError));
   const queueLabel = queuePosition && queuePosition.total > 1 ? `${queuePosition.index + 1} of ${queuePosition.total}` : undefined;
@@ -982,7 +981,7 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
         )}
 
         <div className="player-scrubber-row">
-          <span>{formatPlaybackTime(displayedProgress)}</span>
+          <span>{playbackTimeText(displayedProgress)}</span>
           <div className="player-scrubber-shell">
             {scrubberVisual}
             <input
@@ -993,7 +992,7 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
               step={1_000}
               value={displayedProgress}
               aria-label="Playback position"
-              aria-valuetext={`${formatPlaybackTime(displayedProgress)} of ${formatPlaybackTime(duration)}`}
+              aria-valuetext={`${playbackTimeText(displayedProgress)} of ${playbackTimeText(duration)}`}
               data-tv-focusable="true"
               onChange={(changeEvent: ChangeEvent<HTMLInputElement>) => setScrubPosition(Number(changeEvent.target.value))}
               onPointerUp={() => {
@@ -1034,7 +1033,7 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
               }}
             />
           </div>
-          <span>{formatPlaybackTime(duration)}</span>
+          <span>{playbackTimeText(duration)}</span>
         </div>
 
         <div className="player-button-row">
@@ -1078,8 +1077,8 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
       <div className="player-mini-chrome" aria-label="Now playing">
         <button className="player-mini-copy" type="button" data-tv-focusable="true" onClick={onExpand} aria-label={`Open player for ${media.title}`}>
           <span className="player-mini-title">{media.title}</span>
-          <span className="player-mini-subtitle">{fatalError ? `Playback failed · ${fatalError.message}` : playerSubtitle || 'Now playing'}</span>
-          <span className="player-mini-time">{formatPlaybackTime(displayedProgress)} / {formatPlaybackTime(duration)}</span>
+          <span className="player-mini-subtitle">{fatalError ? `Playback failed · ${playbackFailureHeadline(fatalError)}` : playerSubtitle || 'Now playing'}</span>
+          <span className="player-mini-time">{playbackTimeText(displayedProgress)} / {playbackTimeText(duration)}</span>
           <span className="player-mini-progress" aria-hidden="true"><span style={{ width: `${Math.min(100, displayedProgress / Math.max(1, duration) * 100)}%` }} /></span>
         </button>
         <div className="player-mini-controls">

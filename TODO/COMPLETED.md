@@ -2,6 +2,40 @@
 
 Last updated: 2026-09-24, after the search sort
 
+## Every word a viewer sees is this client's — 2026-09-24, unreleased
+
+Tom's ruling: core composes no viewer text. Core cut it in 826e38a, f016815,
+8db0a12, e28d6ad and f75b2bd; this client now words everything in one module,
+`src/text/viewerText.ts`, from core's structured fields and codes:
+
+- **Media:** episode code (S01E04) and label (Season 1 Episode 4), season,
+  track and disc numbers, album with year, and each card's second line
+  (`cardSubtitle`: year, episode code, album artist, track number), from
+  seasonNumber/episodeNumber/discNumber/trackNumber, playbackContext and
+  musicContext. `MediaSummary.subtitle` no longer exists.
+- **Sort and category names** from their keys ("Sort By Recently added",
+  Movies / TV Shows / Music).
+- **Playback:** a sentence per notice code; the failure screen keys on core's
+  codes (provenance unknown, endpoint gone, not playable), then the server's
+  own sentence, then its own line; the mini player no longer shows a raw
+  message; the stream-status lines are core's old formatter ported whole, and
+  reproduce every string core's old tests expected; the scrubber clock.
+- **Errors:** `viewerErrorText` replaces every `errorMessage(cause)` (about
+  20 sites): a coded sentence, else the server's `detail` from anywhere in the
+  chain, else this client's unreachable sentence for `MachaConnectionError`,
+  else a general line. An error's `message` is core's log text and never
+  shown.
+- **Status and connection:** startup phase and subsystem names, and the
+  unreachable notice, are this client's; the alphabet bar's catch-all key
+  `other` reads "#".
+
+Wording is what viewers already read, except where Tom has ruled. 15 module
+tests plus updated screen tests (the login and users fixtures now carry the
+server's words in `detail`, as the contract does); suite 526, typecheck clean.
+Seen live: search (sorts, pills, episode and track lines, movie years), the
+"#" key, album cards. Not seen live: the player lines and clock (the browser
+extension disconnected) and the startup panel (no node was starting).
+
 ## Import: Torrents and Files as separate pages, and columns that hold still — 2026-09-24, unreleased
 
 - **Import has the standard section submenu** (Tom: "Torrents are only one

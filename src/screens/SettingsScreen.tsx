@@ -9,6 +9,7 @@ import { clientVersion } from '../version';
 import { ConnectionForm } from '../components/ConnectionForm';
 import { failureTrailEnabled, setFailureTrailEnabled } from '../diagnostics/failureTrailSetting';
 import { presentedTime } from '../diagnostics/timestamps';
+import { viewerErrorText } from '../text/viewerText';
 
 interface Props {
   api: MediaApi;
@@ -88,7 +89,7 @@ export function SettingsScreen({ api, serverApi, bootstrapEndpoints, usingHost, 
             <div><dt>Version</dt><dd>{server.value?.version ?? (server.loading ? 'Checking…' : 'Not reported')}</dd></div>
             <div><dt>Playback</dt><dd>{server.error ? 'Unavailable' : playbackState(server.value)}</dd></div>
           </dl>
-          {(server.error || server.value?.message) && <p className="settings-status-error">{server.error?.message ?? server.value?.message}</p>}
+          {(server.error || server.value?.message) && <p className="settings-status-error">{server.error ? viewerErrorText(server.error) : server.value?.message}</p>}
         </article>
 
         <article className="settings-status-card">
@@ -104,7 +105,7 @@ export function SettingsScreen({ api, serverApi, bootstrapEndpoints, usingHost, 
             <div><dt>Last sync</dt><dd>{catalogue.value ? formatLastSync(catalogue.value.last_sync_unix_ms) : '—'}</dd></div>
           </dl>
           {(catalogue.error || catalogue.value?.error) && (
-            <p className="settings-status-error">{catalogue.error?.message ?? catalogue.value?.error}</p>
+            <p className="settings-status-error">{catalogue.error ? viewerErrorText(catalogue.error) : catalogue.value?.error}</p>
           )}
         </article>
 

@@ -3,7 +3,8 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { useEffect, useRef } from 'react';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { routes } from '@machafoundation/core';
+import { MachaConnectionError, routes } from '@machafoundation/core';
+import { SERVER_UNREACHABLE_TEXT } from '../text/viewerText';
 import { LoginScreen } from './LoginScreen';
 
 /** Where the screen asked to go, in order. */
@@ -85,16 +86,26 @@ describe('LoginScreen', () => {
     expect((screen.getByLabelText('Password') as HTMLInputElement).value).toBe('');
   });
 
-  it('keeps the original wording for anything that is not a refusal', async () => {
+  it('says an unreachable server is unreachable, not a wrong password', async () => {
     // An unreachable node is not a wrong password, and saying so sends someone
-    // hunting for a typo that is not there.
-    const outage = Object.assign(new Error('No Macha node could be reached.'), { status: 503 });
-    renderLogin({ onSignIn: vi.fn(() => Promise.reject(outage)) });
+    // hunting for a typo that is not there. The error's message is core's log
+    // text, so the sentence is this client's.
+    renderLogin({ onSignIn: vi.fn(() => Promise.reject(new MachaConnectionError())) });
     fireEvent.change(screen.getByLabelText('Username'), { target: { value: 'alice' } });
     fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'hunter2' } });
     fireEvent.click(screen.getByRole('button', { name: 'Log in' }));
 
-    await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('No Macha node could be reached.'));
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toBe(SERVER_UNREACHABLE_TEXT));
+  });
+
+  it('shows the server\'s own sentence for anything else it refused in words', async () => {
+    const refused = Object.assign(new Error('session request failed: 423'), { detail: 'This account is locked.', status: 423 });
+    renderLogin({ onSignIn: vi.fn(() => Promise.reject(refused)) });
+    fireEvent.change(screen.getByLabelText('Username'), { target: { value: 'alice' } });
+    fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'hunter2' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Log in' }));
+
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('This account is locked.'));
   });
 
   it('waits for the new roles before navigating, so it cannot bounce back here', async () => {

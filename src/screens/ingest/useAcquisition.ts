@@ -1,7 +1,8 @@
 import { useCallback, useState } from 'react';
-import { errorMessage, type AcquisitionApi, type AcquisitionSnapshot } from '@machafoundation/core';
+import { type AcquisitionApi, type AcquisitionSnapshot } from '@machafoundation/core';
 import { usePollingTask } from '../../hooks/usePollingTask';
 import { isTerminal, jobKey, type JobAction, type JobKind } from './jobs';
+import { viewerErrorText } from '../../text/viewerText';
 
 /**
  * The acquisition state and the actions on it, shared by the job list and a
@@ -30,7 +31,7 @@ export function useAcquisition(api: AcquisitionApi) {
       setLoading(false);
     },
     onError: (reason) => {
-      setError(errorMessage(reason));
+      setError(viewerErrorText(reason));
       setLoading(false);
     },
     intervalMs: 1500,
@@ -64,7 +65,7 @@ export function useAcquisition(api: AcquisitionApi) {
       await refresh();
       return true;
     } catch (reason: unknown) {
-      setError(errorMessage(reason));
+      setError(viewerErrorText(reason));
       return false;
     } finally {
       setBusyByJob((current) => {

@@ -18,6 +18,7 @@ import { AsyncIconButton } from '../components/AsyncIconButton';
 import { RefreshIcon } from '../components/ManageIcons';
 import { MediaPageTitle } from '../components/MediaPageTitle';
 import { useAlphabetIndex } from '../hooks/useAlphabetIndex';
+import { searchCategoryLabel, sortChoiceLabel } from '../text/viewerText';
 
 interface Props {
   api: MediaApi;
@@ -84,7 +85,7 @@ export function SearchScreen({ api, onOpen }: Props) {
             value={sort}
             onChange={(event: ChangeEvent<HTMLSelectElement>) => { if (isMediaSortKey(event.target.value)) setSort(event.target.value); }}
           >
-            {SEARCH_SORTS.map((entry) => <option key={entry.key} value={entry.key}>{entry.choiceLabel}</option>)}
+            {SEARCH_SORTS.map((entry) => <option key={entry.key} value={entry.key}>{sortChoiceLabel(entry.key)}</option>)}
           </select>
         </div>
         <div className="search-type-filter" role="group" aria-label="Title types">
@@ -97,7 +98,7 @@ export function SearchScreen({ api, onOpen }: Props) {
               aria-pressed={categories.includes(category.key)}
               onClick={() => toggleCategory(category.key)}
             >
-              {category.label}
+              {searchCategoryLabel(category.key)}
             </button>
           ))}
         </div>

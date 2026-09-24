@@ -1,7 +1,8 @@
 import { Fragment } from 'react';
 import { Link } from 'react-router-dom';
 import type { MediaApi } from '@machafoundation/core';
-import { albumLabel, episodeLabel, routes, trackNumberLabel } from '@machafoundation/core';
+import { routes } from '@machafoundation/core';
+import { albumLabel, cardSubtitle, episodeLabel, seasonLabel, trackNumberLabel } from '../text/viewerText';
 import type { MediaSummary } from '@machafoundation/core';
 import { CardCloseButton } from './CardCloseButton';
 import { LazyArtwork } from './LazyArtwork';
@@ -69,7 +70,7 @@ function contextLines(item: MediaSummary): ContextLink[][] | undefined {
     const { series, season } = item.playbackContext;
     return [
       [{ to: routes.show(series.id), label: series.title }],
-      [{ to: routes.season(series.id, season.id), label: episodeLabel(item) ?? season.title }],
+      [{ to: routes.season(series.id, season.id), label: episodeLabel(item) ?? (season.title || seasonLabel(season.seasonNumber) || series.title) }],
     ];
   }
   if (item.kind === 'track' && item.musicContext) {
@@ -164,7 +165,7 @@ function ContinueWatchingCard({ api, item, onOpen, onRemoveFromContinueWatching,
       >
         <Poster api={api} item={item} progress={progress} />
         <span className="card-title">{item.title}</span>
-        {(item.subtitle || item.year) && <span className="card-subtitle">{item.subtitle ?? item.year}</span>}
+        {cardSubtitle(item) && <span className="card-subtitle">{cardSubtitle(item)}</span>}
       </button>
       {onRemoveFromContinueWatching && (
         <CardCloseButton
@@ -192,12 +193,12 @@ function ActionableMediaCard({ api, item, onOpen, actions = [], progress, elemen
         <span className="card-title">{item.title}</span>
         {item.kind === 'track' && item.musicContext ? (
           // Tom, 2026-09-24: on Music the artist sits below the album name, for
-          // tracks as for albums (whose subtitle core now makes the artist).
+          // tracks as for albums (whose second line is the artist).
           <>
             <span className="card-subtitle">{item.musicContext.album.title}</span>
             {item.musicContext.artist && <span className="card-subtitle">{item.musicContext.artist.title}</span>}
           </>
-        ) : (item.subtitle || item.year) && <span className="card-subtitle">{item.subtitle ?? item.year}</span>}
+        ) : cardSubtitle(item) && <span className="card-subtitle">{cardSubtitle(item)}</span>}
       </button>
       <OverflowMenu
         className="card-overflow-menu"
@@ -257,7 +258,7 @@ export function MediaCard({ api, item, onOpen, onRemoveFromContinueWatching, act
     <button ref={elementRef} className={`media-card media-card-${item.kind}`} data-tv-focusable="true" onClick={() => onOpen(item)}>
       <Poster api={api} item={item} progress={progress} />
       <span className="card-title">{item.title}</span>
-      {(item.subtitle || item.year) && <span className="card-subtitle">{item.subtitle ?? item.year}</span>}
+      {cardSubtitle(item) && <span className="card-subtitle">{cardSubtitle(item)}</span>}
     </button>
   );
 }

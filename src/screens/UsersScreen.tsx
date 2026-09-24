@@ -1,6 +1,5 @@
 import { Fragment, useCallback, useState } from 'react';
 import {
-  errorMessage,
   hasRole,
   USER_ROLES,
   type CurrentSession,
@@ -15,6 +14,7 @@ import { AsyncIconButton } from '../components/AsyncIconButton';
 import { RefreshIcon } from '../components/ManageIcons';
 import { ConfirmModal, FormModal } from '../components/Modal';
 import { OverflowMenu } from '../components/OverflowMenu';
+import { viewerErrorText } from '../text/viewerText';
 
 interface Props {
   api: UsersApi;
@@ -133,7 +133,7 @@ interface FieldError {
 
 function fieldError(cause: unknown): FieldError {
   const code = (cause as { code?: string } | undefined)?.code;
-  return { field: fieldForCode(code), message: errorMessage(cause) };
+  return { field: fieldForCode(code), message: viewerErrorText(cause) };
 }
 
 function passwordComplaint(password: string, policy: PasswordPolicy | undefined): string | undefined {
@@ -450,7 +450,7 @@ function UserRow({ api, user, policy, isSelf, onChanged }: {
       setDialogue(undefined);
       onChanged();
     } catch (cause) {
-      setRemoveError(errorMessage(cause));
+      setRemoveError(viewerErrorText(cause));
     } finally {
       setRemoveBusy(false);
     }

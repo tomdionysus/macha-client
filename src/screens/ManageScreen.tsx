@@ -13,7 +13,7 @@ import type {
   UnmatchedDetail,
   UnmatchedFile,
 } from '@machafoundation/core';
-import { errorMessage } from '@machafoundation/core';
+import { viewerErrorText } from '../text/viewerText';
 
 export type ManageSection = 'unmatched' | 'files' | 'users';
 
@@ -201,7 +201,7 @@ function ManualMetadataForm({ detail, probe, api, catalogueApi, onResolved }: {
       }
       onResolved();
     } catch (cause) {
-      setError(errorMessage(cause));
+      setError(viewerErrorText(cause));
     } finally {
       setBusy(false);
     }
@@ -293,7 +293,7 @@ function UnmatchedReview({ item, api, catalogueApi, onResolved, onDeleteRequest 
         setMatches(result.matches);
         setQuery(result.query);
       })
-      .catch((cause) => { if (!cancelled) setError(errorMessage(cause)); })
+      .catch((cause) => { if (!cancelled) setError(viewerErrorText(cause)); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [api, item.id]);
@@ -305,7 +305,7 @@ function UnmatchedReview({ item, api, catalogueApi, onResolved, onDeleteRequest 
       await action();
       onResolved();
     } catch (cause) {
-      setError(errorMessage(cause));
+      setError(viewerErrorText(cause));
       setBusy(false);
     }
   }, [onResolved]);
@@ -345,7 +345,7 @@ function UnmatchedReview({ item, api, catalogueApi, onResolved, onDeleteRequest 
 
       <section className="manage-match-section">
         <h3>Prospective matches</h3>
-        <form className="manage-search-row" onSubmit={(event) => { event.preventDefault(); void loadMatches(query).catch((cause) => setError(errorMessage(cause))); }}>
+        <form className="manage-search-row" onSubmit={(event) => { event.preventDefault(); void loadMatches(query).catch((cause) => setError(viewerErrorText(cause))); }}>
           <input value={query} onChange={(event) => setQuery(event.target.value)} aria-label="Search catalogue" />
           <button className="secondary-button" type="submit" disabled={busy} data-tv-focusable="true">Search</button>
         </form>
@@ -411,7 +411,7 @@ function UnmatchedManager({ api, catalogueApi }: {
       setChecked((current) => new Set([...current].filter((id) => next.some((item) => item.id === id))));
       setPage((current) => pageSlice(next, current).page);
     } catch (cause) {
-      setError(errorMessage(cause));
+      setError(viewerErrorText(cause));
     } finally {
       setLoading(false);
     }
@@ -553,7 +553,7 @@ function FileManager({ api }: { api: ManageApi }) {
       setSelected(undefined);
       setDestination('');
     } catch (cause) {
-      setError(errorMessage(cause));
+      setError(viewerErrorText(cause));
     } finally {
       setLoading(false);
     }
@@ -569,7 +569,7 @@ function FileManager({ api }: { api: ManageApi }) {
       await browse(refreshPath);
       return true;
     } catch (cause) {
-      setError(errorMessage(cause));
+      setError(viewerErrorText(cause));
       return false;
     } finally {
       setBusy(false);
