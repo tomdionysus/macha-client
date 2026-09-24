@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { MetricTile } from '../components/MetricTile';
 import { Link, useParams } from 'react-router-dom';
 import type { Platform } from '@machafoundation/core';
 import { DeviceCapabilities } from '../components/DeviceCapabilities';
@@ -195,10 +196,6 @@ export function conditionStatedPerNode(condition: string): boolean {
 function UsageBar({ used, capacity }: { used: number; capacity: number }) {
   const width = capacity ? Math.min(100, Math.max(0, used / capacity * 100)) : 0;
   return <div className="cluster-usage-bar" aria-hidden="true"><span style={{ width: `${width}%` }} /></div>;
-}
-
-function ClusterMetric({ label, value, detail }: { label: string; value: string; detail?: string }) {
-  return <article className="cluster-metric"><span>{label}</span><strong>{value}</strong>{detail && <small>{detail}</small>}</article>;
 }
 
 export function StatusHeader({ eyebrow, title = 'Status', health, refreshing, onRefresh }: {
@@ -552,11 +549,11 @@ export function StatusScreen({ api, endpointRegistry, manageApi, platform, secti
       {clusterConditions.length > 0 && <div className="cluster-conditions">
         {clusterConditions.map((condition) => <span key={condition}>{condition}</span>)}
       </div>}
-      <div className="cluster-metric-grid">
-        <ClusterMetric label="Nodes" value={`${cluster.nodes_online} / ${cluster.nodes_known}`} detail="online" />
-        <ClusterMetric label="Metadata" value={cluster.metadata_availability === 'writable' ? 'Writable' : cluster.metadata_availability === 'read-only' ? 'Read-only' : 'Unavailable'} detail={`${cluster.metadata_voters_online}/${cluster.metadata_voters} voters · ${cluster.metadata_quorum_required} required`} />
-        <ClusterMetric label="Durable storage" value={`${formatBytes(cluster.storage_online.capacity_bytes)} / ${formatBytes(cluster.storage_known.capacity_bytes)}`} detail={`${formatBytes(cluster.storage_known.used_bytes)} known used`} />
-        <ClusterMetric label="Cache" value={cluster.cache_known.capacity_bytes ? `${formatBytes(cluster.cache_online.capacity_bytes)} / ${formatBytes(cluster.cache_known.capacity_bytes)}` : 'None'} detail={cluster.cache_known.capacity_bytes ? `${formatBytes(cluster.cache_known.used_bytes)} known used` : undefined} />
+      <div className="metric-grid">
+        <MetricTile label="Nodes" value={`${cluster.nodes_online} / ${cluster.nodes_known}`} detail="online" />
+        <MetricTile label="Metadata" value={cluster.metadata_availability === 'writable' ? 'Writable' : cluster.metadata_availability === 'read-only' ? 'Read-only' : 'Unavailable'} detail={`${cluster.metadata_voters_online}/${cluster.metadata_voters} voters · ${cluster.metadata_quorum_required} required`} />
+        <MetricTile label="Durable storage" value={`${formatBytes(cluster.storage_online.capacity_bytes)} / ${formatBytes(cluster.storage_known.capacity_bytes)}`} detail={`${formatBytes(cluster.storage_known.used_bytes)} known used`} />
+        <MetricTile label="Cache" value={cluster.cache_known.capacity_bytes ? `${formatBytes(cluster.cache_online.capacity_bytes)} / ${formatBytes(cluster.cache_known.capacity_bytes)}` : 'None'} detail={cluster.cache_known.capacity_bytes ? `${formatBytes(cluster.cache_known.used_bytes)} known used` : undefined} />
       </div>
 
       <div className="cluster-capacity-grid">

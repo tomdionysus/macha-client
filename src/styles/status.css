@@ -29,11 +29,6 @@
 .cluster-check-result { margin: 0 0 1rem; color: var(--text-dim); font-size: .9rem; }
 .cluster-check-result.reachable { color: #a8c8ae; }
 .cluster-check-result.unreachable { color: #e4a9ad; }
-.cluster-metric-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .8rem; }
-.cluster-metric { min-width: 0; padding: 1rem 1.05rem; border: 1px solid #ffffff10; border-radius: .75rem; background: #151517c9; box-shadow: 0 10px 26px #0003; }
-.cluster-metric > span { display: block; color: var(--text-faint); text-transform: uppercase; letter-spacing: .09em; font-size: .7rem; }
-.cluster-metric > strong { display: block; margin: .35rem 0 .25rem; color: #e0e0e4; font-size: clamp(1.08rem, 2vw, 1.35rem); overflow-wrap: anywhere; }
-.cluster-metric > small { display: block; color: var(--text-dim); line-height: 1.35; }
 .cluster-capacity-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .8rem; margin-top: .8rem; }
 .cluster-capacity-card { padding: .9rem 1.05rem; border: 1px solid #ffffff0d; border-radius: .7rem; background: #111113bd; }
 .cluster-capacity-card > div:first-child { display: flex; justify-content: space-between; gap: 1rem; color: var(--text-dim); font-size: .84rem; }
@@ -91,7 +86,6 @@
 .node-detail-card code { font-size: .78rem; word-break: break-all; }
 
 @media (max-width: 900px) {
-  .cluster-metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .cluster-startup-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .cluster-node-grid, .node-detail-grid, .cluster-connectivity-grid, .client-endpoint-grid { grid-template-columns: 1fr; }
 }
@@ -99,7 +93,7 @@
 @media (max-width: 620px) {
   .cluster-status-heading { align-items: stretch; flex-direction: column; }
   .cluster-status-heading .secondary-button { align-self: start; }
-  .cluster-metric-grid, .cluster-capacity-grid { grid-template-columns: 1fr; }
+  .cluster-capacity-grid { grid-template-columns: 1fr; }
   .cluster-startup-grid { grid-template-columns: 1fr; }
   .cluster-node-meta, .cluster-capacity-card > div:first-child { align-items: start; flex-direction: column; gap: .25rem; }
   .cluster-node-meta span:last-child, .cluster-capacity-card strong { text-align: left; }

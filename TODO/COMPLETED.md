@@ -11,6 +11,17 @@ Last updated: 2026-09-24, after the search sort
   names are core's (`routes.ingestTorrents`, `ingestTorrent(id)`,
   `ingestFiles`, core `287e959`). Two tests, red against the unsplit screen;
   seen in the page.
+- **A torrent's page is laid out for "why is this not finished"** (Tom: less
+  compressed, filling the page with useful information, in our style). A
+  headline panel for whichever stage is under way, named ("Copying into the
+  library", 11.7%, bytes, files, ETA); four tiles (download, upload, ratio,
+  added) in the Status pages' tile, now a shared `MetricTile`; three stage
+  cards, Download, Import and Catalogue, each with its status, bar, summary
+  and facts, the running one lit; and an identity card. The stages come
+  from `torrentStages` (five tests). Found on the live data: while a torrent
+  imports, the server reports the import's bytes, progress and rate in the
+  torrent's own fields, so the download's figures are read only while it
+  runs. Seen live on an importing and a finished-with-issues torrent.
 - **The torrent columns no longer jump** as speeds, statuses and ETAs change:
   fixed table layout, every column but the name sized to its formatter's
   longest text (padding included) and actions to the remove prompt. Measured

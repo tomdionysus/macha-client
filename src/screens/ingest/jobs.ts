@@ -1,4 +1,5 @@
 import type { IngestJob, TorrentJob } from '@machafoundation/core';
+import { stateLabel } from './format';
 
 export type JobKind = 'ingest' | 'torrent';
 export type JobAction = 'pause' | 'resume' | 'retry' | 'remove';
@@ -47,4 +48,52 @@ export function torrentLifecycleMessage(job: TorrentJob, linkedIngest?: IngestJo
   if (state === 'cancelled') return 'Import cancelled.';
   if (state === 'failed') return undefined;
   return 'Downloaded; importing into the Macha namespace.';
+}
+
+export type StageStatus = 'waiting' | 'active' | 'paused' | 'done' | 'issues' | 'failed';
+export interface TorrentStage {
+  key: 'download' | 'import' | 'catalogue';
+  status: StageStatus;
+  label: string;
+}
+
+const torrentPastDownload = new Set(['downloaded', 'importing', 'cataloguing', 'completed']);
+const stoppedStates = new Set(['failed', 'cancelled', 'blocked']);
+
+function stageOf(state: string, done: boolean): Pick<TorrentStage, 'status' | 'label'> {
+  if (done) return { status: 'done', label: 'Complete' };
+  if (stoppedStates.has(state)) return { status: 'failed', label: stateLabel(state) };
+  if (state === 'paused') return { status: 'paused', label: 'Paused' };
+  return { status: 'active', label: stateLabel(state) };
+}
+
+/**
+ * Where a torrent is on its way into the library: downloaded, then copied in
+ * by an import job, then catalogued. Each stage says whether it is waiting,
+ * running, done or stopped, so the page answers "why is this not finished"
+ * by showing which stage it is stuck in.
+ */
+export function torrentStages(job: TorrentJob, linkedIngest?: IngestJob): TorrentStage[] {
+  const downloaded = Boolean(job.ingest_job_id) || torrentPastDownload.has(job.state) || (job.progress ?? 0) >= 1;
+  const download = stageOf(job.state, downloaded);
+
+  const imported = linkedIngest ? linkedIngest.state === 'completed' || linkedIngest.state === 'cataloguing' : false;
+  const importStage: Pick<TorrentStage, 'status' | 'label'> = linkedIngest
+    ? stageOf(linkedIngest.state, imported)
+    : { status: 'waiting', label: downloaded ? 'Starting' : 'After the download' };
+
+  const catalogue = job.catalogue;
+  const catalogueStage: Pick<TorrentStage, 'status' | 'label'> = !catalogue || catalogue.state === 'waiting'
+    ? { status: 'waiting', label: 'After the import' }
+    : catalogue.state === 'processing'
+      ? { status: 'active', label: 'Cataloguing' }
+      : catalogue.state === 'completed_with_issues'
+        ? { status: 'issues', label: 'Completed with issues' }
+        : { status: 'done', label: 'Complete' };
+
+  return [
+    { key: 'download', ...download },
+    { key: 'import', ...importStage },
+    { key: 'catalogue', ...catalogueStage },
+  ];
 }

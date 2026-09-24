@@ -150,7 +150,7 @@ describe('the torrent list', () => {
     renderAt('/ingest/torrents?sort=name&dir=desc', snapshot(three));
     fireEvent.click(await screen.findByRole('link', { name: 'Alpha' }));
     expect(screen.getByTestId('where').textContent).toBe('/ingest/torrents/a?sort=name&dir=desc');
-    fireEvent.click(await screen.findByRole('link', { name: 'Import' }));
+    fireEvent.click(await screen.findByRole('link', { name: 'Torrents' }));
     expect(screen.getByTestId('where').textContent).toBe('/ingest/torrents?sort=name&dir=desc');
   });
 
@@ -162,43 +162,48 @@ describe('the torrent list', () => {
 });
 
 describe("a torrent's own page", () => {
-  const detail = () => {
-    const pane = document.querySelector('.ingest-job-detail');
-    expect(pane).not.toBeNull();
-    return (label: string) => [...pane!.querySelectorAll('div')]
-      .find((row) => row.querySelector('dt')?.textContent === label)
-      ?.querySelector('dd')?.textContent;
-  };
+  /** A labelled value from the facts list inside `scope`. */
+  const fact = (scope: Element, label: string) => [...scope.querySelectorAll('.torrent-facts > div')]
+    .find((row) => row.querySelector('dt')?.textContent === label)
+    ?.querySelector('dd')?.textContent;
+  const stage = (key: string) => document.getElementById(`stage-${key}`)!.closest('.torrent-stage')!;
+  const tile = (label: string) => [...document.querySelectorAll('.metric-tile')]
+    .find((node) => node.querySelector('span')?.textContent === label)?.querySelector('strong')?.textContent;
 
   it('reports the facts the list has no room for: hash, node, ratio and cataloguing outcome', async () => {
     renderAt('/ingest/torrents/tor-1', snapshot([torrentJob()]));
     await screen.findByRole('heading', { name: 'Some.Release.2024.1080p' });
-    const value = detail();
+    const identity = document.querySelector('.torrent-identity')!;
 
-    expect(value('Info hash')).toBe('c2a1f0e9b8d7c6b5a4938271605f4e3d2c1b0a99');
-    expect(value('Node')).toBe('855716bd8bb0ad12b0c4f876386699de');
+    expect(fact(identity, 'Info hash')).toBe('c2a1f0e9b8d7c6b5a4938271605f4e3d2c1b0a99');
+    expect(fact(identity, 'Node')).toBe('855716bd8bb0ad12b0c4f876386699de');
     // 250 MB served against the 1 GB this node actually holds.
-    expect(value('Ratio')).toBe('0.25');
-    expect(value('Age')).toBe('1h ago');
+    expect(tile('Ratio')).toBe('0.25');
+    expect(tile('Added')).toBe('1h ago');
     // A torrent that downloaded cleanly and catalogued nothing is a failed
     // acquisition wearing a completed badge; the counts are the only tell.
-    expect(value('State')).toBe('Completed with issues');
-    expect(value('Catalogued')).toBe('1 / 2');
-    expect(value('No match')).toBe('1');
+    const catalogue = stage('catalogue');
+    expect(catalogue.querySelector('.torrent-stage-status')?.textContent).toBe('Completed with issues');
+    expect(fact(catalogue, 'Catalogued')).toBe('1 / 2');
+    expect(fact(catalogue, 'No match')).toBe('1');
   });
 
-  it('omits the import group for a torrent that has not been handed to ingest', async () => {
+  it('shows the import as still to come for a torrent that has not been handed to ingest', async () => {
     renderAt('/ingest/torrents/tor-1', snapshot([torrentJob()]));
-    await screen.findByText('Transfer');
-    expect(screen.queryByText('Import job')).toBeNull();
+    await screen.findByRole('heading', { name: 'Import' });
+    expect(stage('import').classList).toContain('stage-waiting');
+    expect(fact(stage('import'), 'Staged at')).toBeUndefined();
   });
 
   it('reports the linked import job once the payload is being copied in', async () => {
     renderAt('/ingest/torrents/tor-1', snapshot([torrentJob({ ingest_job_id: 'ing-1' })], [importing]));
-    expect(await screen.findByText('Import job')).not.toBeNull();
-    expect(screen.getByText('/srv/staging/tor-1')).not.toBeNull();
-    expect(screen.getByText('episode-03.mkv')).not.toBeNull();
-    expect(screen.getByText('/macha/shows/some-release/episode-03.mkv')).not.toBeNull();
+    await screen.findByRole('heading', { name: 'Import' });
+    const copying = stage('import');
+    expect(copying.classList).toContain('stage-active');
+    expect(fact(copying, 'Staged at')).toBe('/srv/staging/tor-1');
+    expect(fact(copying, 'Now copying')).toBe('episode-03.mkv');
+    expect(fact(copying, 'Into')).toBe('/macha/shows/some-release/episode-03.mkv');
+    expect(stage('download').classList).toContain('stage-done');
   });
 
   it('says a torrent that has gone is gone, rather than showing an empty page', async () => {

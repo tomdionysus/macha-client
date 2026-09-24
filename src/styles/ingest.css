@@ -116,46 +116,59 @@
 .ingest-back:hover { color: #e2e2e6; }
 .torrent-detail-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; }
 .torrent-detail-header > div { min-width: 0; }
-.torrent-detail-header h1 { margin: .15rem 0 0; font-size: 1.35rem; overflow-wrap: anywhere; }
+.torrent-detail-header h1 { margin: .2rem 0 0; font-size: clamp(1.5rem, 3vw, 2.1rem); line-height: 1.15; overflow-wrap: anywhere; }
 .ingest-state { color: var(--text-faint); text-transform: uppercase; letter-spacing: .1em; font-size: .68rem; }
 .ingest-state.state-failed, .ingest-state.state-blocked { color: #e49a9f; }
-.torrent-detail-progress { display: flex; align-items: center; gap: .6rem; margin: .8rem 0; }
-.torrent-detail-progress .ingest-progress-track { flex: 1; width: auto; height: 6px; margin: 0; }
-.torrent-detail-progress strong { color: #d8d8dc; font-variant-numeric: tabular-nums; }
 .ingest-current { margin: .5rem 0 0; color: var(--text-faint); font-size: .85rem; }
 .ingest-job-error { margin: .5rem 0 0; color: #ffb4b4; line-height: 1.45; }
-.ingest-job-detail {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));
-  gap: 1rem 1.5rem;
-  margin-top: 1rem;
-  padding-top: 1rem;
-  border-top: 1px solid #ffffff12;
-}
-.ingest-detail-group { min-width: 0; }
-.ingest-detail-group h2 {
-  margin: 0 0 .5rem;
-  color: var(--text-faint);
-  text-transform: uppercase;
-  letter-spacing: .1em;
-  font-size: .68rem;
-  font-weight: 600;
-}
-.ingest-detail-group dl { display: grid; gap: .3rem; margin: 0; }
-.ingest-detail-group dl > div { display: flex; justify-content: space-between; gap: 1rem; min-width: 0; }
-.ingest-detail-group dt { flex: 0 0 auto; color: var(--text-faint); font-size: .82rem; }
-.ingest-detail-group dd {
-  min-width: 0;
-  margin: 0;
-  color: #d0d0d4;
-  font-size: .82rem;
-  text-align: right;
-  overflow-wrap: anywhere;
-  font-variant-numeric: tabular-nums;
-}
-.ingest-detail-group code { color: #dedee2; }
+
+/*
+ * A torrent's page reads top to bottom as the question "why is this not
+ * finished": how far it has got, what it is exchanging with its peers, which
+ * of the three stages into the library it is in, and then who it is. Cards
+ * and tiles in the Status pages' vocabulary.
+ */
+.torrent-hero { margin: 1rem 0 .8rem; padding: 1.15rem 1.2rem 1.25rem; border: 1px solid #ffffff10; border-radius: .75rem; background: #151517c9; box-shadow: 0 10px 26px #0003; }
+.torrent-hero-stage { display: block; margin-bottom: .45rem; color: var(--text-faint); text-transform: uppercase; letter-spacing: .09em; font-size: .7rem; }
+.torrent-hero-figures { display: flex; align-items: baseline; flex-wrap: wrap; gap: .4rem 1rem; margin-bottom: .85rem; }
+.torrent-hero-figures strong { color: #ececef; font-size: clamp(1.9rem, 4vw, 2.6rem); font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; }
+.torrent-hero-figures span { color: var(--text-dim); font-size: .95rem; font-variant-numeric: tabular-nums; }
+.torrent-hero .ingest-progress-track { width: 100%; height: 8px; margin: 0; }
+
+.torrent-stages { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .8rem; margin-top: .8rem; }
+.torrent-stage { min-width: 0; padding: 1rem 1.05rem 1.1rem; border: 1px solid #ffffff10; border-radius: .75rem; background: #151517c9; }
+.torrent-stage > header { display: flex; align-items: center; gap: .6rem; margin-bottom: .75rem; }
+.torrent-stage h2 { margin: 0; font-size: 1rem; }
+.torrent-stage-number { display: inline-grid; place-items: center; width: 1.5rem; height: 1.5rem; border: 1px solid #ffffff1c; border-radius: 999px; color: var(--text-faint); font-size: .75rem; font-variant-numeric: tabular-nums; }
+.torrent-stage-status { margin-left: auto; padding: .22rem .5rem; border-radius: 999px; background: #292a2d; color: #b8b8bf; font-size: .7rem; white-space: nowrap; }
+.torrent-stage .ingest-progress-track { width: 100%; height: 5px; margin: 0; }
+.torrent-stage-summary { margin: .7rem 0 0; color: #d0d0d4; font-size: .88rem; line-height: 1.4; }
+.torrent-stage .torrent-facts { margin-top: .75rem; padding-top: .7rem; border-top: 1px solid #ffffff0b; }
+.torrent-stage.stage-active { border-color: #6200144d; background: #1a1113d0; }
+.torrent-stage.stage-active .torrent-stage-number { border-color: var(--red-400); color: #ececef; }
+.torrent-stage.stage-active .torrent-stage-status { background: #3a0a12; color: #efc3c8; }
+.torrent-stage.stage-done .torrent-stage-status { background: #253427; color: #afd0b4; }
+.torrent-stage.stage-done .ingest-progress-track > span { background: #6f9a76; }
+.torrent-stage.stage-issues .torrent-stage-status, .torrent-stage.stage-paused .torrent-stage-status { background: #3c2c18; color: #dfc08c; }
+.torrent-stage.stage-issues .ingest-progress-track > span { background: #b8913f; }
+.torrent-stage.stage-failed { border-color: #8a303b66; }
+.torrent-stage.stage-failed .torrent-stage-status { background: #3c181c; color: #dda8ad; }
+.torrent-stage.stage-waiting { background: #111113bd; }
+.torrent-stage.stage-waiting h2, .torrent-stage.stage-waiting .torrent-stage-summary { color: var(--text-faint); }
+
+.torrent-facts { display: grid; gap: .45rem; margin: 0; }
+.torrent-facts > div { display: grid; grid-template-columns: minmax(6.5rem, auto) minmax(0, 1fr); gap: .8rem; align-items: baseline; }
+.torrent-facts dt { color: var(--text-faint); font-size: .82rem; }
+.torrent-facts dd { min-width: 0; margin: 0; color: #d0d0d4; font-size: .82rem; text-align: right; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.torrent-facts code { color: #dedee2; font-size: .78rem; word-break: break-all; }
+
+.torrent-identity { margin-top: .8rem; padding: 1rem 1.05rem 1.1rem; border: 1px solid #ffffff0d; border-radius: .7rem; background: #111113bd; }
+.torrent-identity h2 { margin: 0 0 .75rem; color: var(--text-faint); text-transform: uppercase; letter-spacing: .09em; font-size: .7rem; font-weight: 600; }
+.torrent-identity .torrent-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .5rem 2rem; }
 
 @media (max-width: 900px) {
+  .torrent-stages { grid-template-columns: 1fr; }
+  .torrent-identity .torrent-facts { grid-template-columns: 1fr; }
   .ingest-table .col-optional { display: none; }
 }
 
