@@ -1,10 +1,12 @@
 import { useMemo, useState, type ChangeEvent, type FormEvent, type MouseEvent } from 'react';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { routes, type AcquisitionApi, type IngestJob, type TorrentJob } from '@machafoundation/core';
 import { JobControls, Progress } from './ingest/JobControls';
 import { formatAge, formatBytes, formatEta, formatPercent, formatRate, formatRatio, formatTimestamp, percent, stateLabel } from './ingest/format';
 import { canRetryImport, displayStateOf, jobKey, linkedIngestOf } from './ingest/jobs';
-import { parseTorrentSort, sortTorrents, TORRENT_SORT_KEYS, torrentSortParams, type TorrentSort, type TorrentSortKey } from './ingest/torrentSort';
+import { DEFAULT_TORRENT_SORT, sortTorrents, TORRENT_SORT_KEYS } from './ingest/torrentSort';
+import { SortControl, SortHeader, useListSort } from '../components/ListSortControls';
+import { ListHeading } from '../components/ListParts';
 import { useAcquisition } from './ingest/useAcquisition';
 import { viewerErrorText } from '../text/viewerText';
 
@@ -21,41 +23,14 @@ export function torrentPath(id: string, search = ''): string {
   return `${routes.ingestTorrent(id)}${search}`;
 }
 
-/** Column headers that sort, the way a torrent client's do. */
-function SortHeader({ label, sortKey, sort, onSort, className }: {
-  label: string;
-  sortKey: TorrentSortKey;
-  sort: TorrentSort;
-  onSort: (key: TorrentSortKey) => void;
-  className?: string;
-}) {
-  const active = sort.key === sortKey;
-  return (
-    <th className={className} aria-sort={active ? (sort.direction === 'asc' ? 'ascending' : 'descending') : 'none'} scope="col">
-      <button type="button" className={`torrent-sort-header${active ? ' active' : ''}`} onClick={() => onSort(sortKey)}>
-        {label}
-        {active && <span aria-hidden="true">{sort.direction === 'asc' ? ' ▴' : ' ▾'}</span>}
-      </button>
-    </th>
-  );
-}
-
 export function IngestScreen({ api, section }: Props) {
   const acquisition = useAcquisition(api);
   const { snapshot, loading, error, setError, notice, setNotice, refresh, busyByJob, confirmRemove, setConfirmRemove, act } = acquisition;
   const [path, setPath] = useState('');
   const [magnet, setMagnet] = useState('');
   const [submitting, setSubmitting] = useState<'path' | 'magnet'>();
-  const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
-  const sort = parseTorrentSort(searchParams);
-  const search = searchParams.toString() ? `?${searchParams.toString()}` : '';
-
-  const setSort = (next: TorrentSort) => setSearchParams(torrentSortParams(next), { replace: true });
-  const sortBy = (key: TorrentSortKey) => {
-    if (sort.key === key) setSort({ key, direction: sort.direction === 'asc' ? 'desc' : 'asc' });
-    else setSort({ key, direction: TORRENT_SORT_KEYS.find((entry) => entry.key === key)!.direction });
-  };
+  const { sort, setSort, sortBy, search } = useListSort(TORRENT_SORT_KEYS, DEFAULT_TORRENT_SORT);
 
   const filesystemJobs = useMemo(
     () => (snapshot?.ingestJobs.filter((job) => job.source_type !== 'torrent') ?? [])
@@ -169,36 +144,12 @@ export function IngestScreen({ api, section }: Props) {
 
       {section === 'torrents' && (
       <section className="ingest-job-section" aria-labelledby="ingest-torrents-heading">
-        <div className="ingest-section-heading">
-          <h2 id="ingest-torrents-heading">Torrents <span>{torrentJobs.length}</span></h2>
-          <div className="sort-control">
-            <label>
-              Sort by
-              <select
-                data-tv-focusable="true"
-                value={sort.key}
-                onChange={(event: ChangeEvent<HTMLSelectElement>) => {
-                  const key = event.target.value as TorrentSortKey;
-                  setSort({ key, direction: TORRENT_SORT_KEYS.find((entry) => entry.key === key)!.direction });
-                }}
-              >
-                {TORRENT_SORT_KEYS.map((entry) => <option key={entry.key} value={entry.key}>{entry.label}</option>)}
-              </select>
-            </label>
-            <button
-              type="button"
-              className="secondary-button torrent-sort-direction"
-              data-tv-focusable="true"
-              aria-label={sort.direction === 'asc' ? 'Ascending; switch to descending' : 'Descending; switch to ascending'}
-              onClick={() => setSort({ key: sort.key, direction: sort.direction === 'asc' ? 'desc' : 'asc' })}
-            >
-              {sort.direction === 'asc' ? 'Asc' : 'Desc'}
-            </button>
-          </div>
-        </div>
-        {snapshot && torrentJobs.length === 0 ? <p className="ingest-empty">No torrent jobs.</p> : (
-          <div className="ingest-table-scroll">
-            <table className="ingest-table torrent-table" aria-labelledby="ingest-torrents-heading">
+        <ListHeading id="ingest-torrents-heading" title="Torrents" count={torrentJobs.length}>
+          <SortControl keys={TORRENT_SORT_KEYS} sort={sort} onChange={setSort} />
+        </ListHeading>
+        {snapshot && torrentJobs.length === 0 ? <p className="list-empty">No torrent jobs.</p> : (
+          <div className="data-table-scroll">
+            <table className="data-table torrent-table" aria-labelledby="ingest-torrents-heading">
               <thead>
                 <tr>
                   <SortHeader label="Name" sortKey="name" sort={sort} onSort={sortBy} className="col-name" />
@@ -266,12 +217,10 @@ export function IngestScreen({ api, section }: Props) {
 
       {section === 'files' && (
       <section className="ingest-job-section" aria-labelledby="ingest-files-heading">
-        <div className="ingest-section-heading">
-          <h2 id="ingest-files-heading">File and folder imports <span>{filesystemJobs.length}</span></h2>
-        </div>
-        {snapshot && filesystemJobs.length === 0 ? <p className="ingest-empty">No filesystem import jobs.</p> : (
-          <div className="ingest-table-scroll">
-            <table className="ingest-table" aria-labelledby="ingest-files-heading">
+        <ListHeading id="ingest-files-heading" title="File and folder imports" count={filesystemJobs.length} />
+        {snapshot && filesystemJobs.length === 0 ? <p className="list-empty">No filesystem import jobs.</p> : (
+          <div className="data-table-scroll">
+            <table className="data-table" aria-labelledby="ingest-files-heading">
               <thead>
                 <tr>
                   <th scope="col" className="col-name">Name</th>

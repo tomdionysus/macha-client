@@ -4,12 +4,9 @@ import { routes, type AcquisitionApi, type IngestJob, type TorrentJob } from '@m
 import { JobControls, Progress } from './ingest/JobControls';
 import { formatAge, formatBytes, formatEta, formatPercent, formatRate, formatRatio, formatTimestamp, percent, stateLabel } from './ingest/format';
 import { MetricTile } from '../components/MetricTile';
+import { DetailCard, DetailHeader, Facts } from '../components/ListParts';
 import { canRetryImport, displayStateOf, jobKey, linkedIngestOf, torrentLifecycleMessage, torrentStages, type TorrentStage } from './ingest/jobs';
 import { useAcquisition } from './ingest/useAcquisition';
-
-function Facts({ rows }: { rows: ReadonlyArray<readonly [string, ReactNode]> }) {
-  return <dl className="torrent-facts">{rows.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>;
-}
 
 /** One stage of the way in: where it stands, how far it has got, and what it is doing now. */
 function StageCard({ stage, title, number, progress, summary, rows }: {
@@ -127,8 +124,7 @@ function TorrentBody({ job, linkedIngest }: { job: TorrentJob; linkedIngest?: In
         />
       </div>
 
-      <section className="torrent-identity" aria-labelledby="torrent-identity-heading">
-        <h2 id="torrent-identity-heading">Torrent</h2>
+      <DetailCard id="torrent-identity-heading" title="Torrent">
         <Facts rows={[
           ['Info hash', <code>{job.info_hash || 'Not yet known'}</code>],
           ...(job.node_id ? [['Node', <code>{job.node_id}</code>] as const] : []),
@@ -136,7 +132,7 @@ function TorrentBody({ job, linkedIngest }: { job: TorrentJob; linkedIngest?: In
           ['Job', <code>{job.id}</code>],
           ...(linkedIngest ? [['Import job', <code>{linkedIngest.id}</code>] as const] : []),
         ]} />
-      </section>
+      </DetailCard>
     </>
   );
 }
@@ -153,10 +149,10 @@ export function TorrentDetailScreen({ api }: { api: AcquisitionApi }) {
 
   if (!job) {
     return (
-      <section className="ingest-screen torrent-detail-screen">
+      <section className="ingest-screen detail-screen">
         <Link className="back-button" to={back} data-tv-focusable="true">← Torrents</Link>
         {error && <p className="ingest-page-error" role="alert">{error}</p>}
-        {loading && !snapshot ? <p className="ingest-loading">Loading torrent…</p> : snapshot && <p className="ingest-empty">This torrent is no longer on the server.</p>}
+        {loading && !snapshot ? <p className="ingest-loading">Loading torrent…</p> : snapshot && <p className="list-empty">This torrent is no longer on the server.</p>}
       </section>
     );
   }
@@ -166,30 +162,31 @@ export function TorrentDetailScreen({ api }: { api: AcquisitionApi }) {
   const lifecycle = torrentLifecycleMessage(job, linked);
   const name = job.name || 'Torrent';
   return (
-    <section className="ingest-screen torrent-detail-screen">
+    <section className="ingest-screen detail-screen">
       <Link className="back-button" to={back} data-tv-focusable="true">← Torrents</Link>
-      <header className="torrent-detail-header">
-        <div>
-          <span className={`ingest-state state-${state}`}>{stateLabel(state)}</span>
-          <h1>{name}</h1>
-        </div>
-        <JobControls
-          variant="page"
-          kind="torrent"
-          id={job.id}
-          name={name}
-          state={job.state}
-          retryable={canRetryImport(job, linked)}
-          busyAction={busyByJob[jobKey('torrent', job.id)]}
-          confirming={confirmRemove === jobKey('torrent', job.id)}
-          onAction={(action) => {
-            void act('torrent', job.id, job.state, action).then((done) => {
-              if (done && action === 'remove') navigate(back);
-            });
-          }}
-          onConfirm={setConfirmRemove}
-        />
-      </header>
+      <DetailHeader
+        kicker={stateLabel(state)}
+        kickerClass={`state-${state}`}
+        title={name}
+        actions={(
+          <JobControls
+            variant="page"
+            kind="torrent"
+            id={job.id}
+            name={name}
+            state={job.state}
+            retryable={canRetryImport(job, linked)}
+            busyAction={busyByJob[jobKey('torrent', job.id)]}
+            confirming={confirmRemove === jobKey('torrent', job.id)}
+            onAction={(action) => {
+              void act('torrent', job.id, job.state, action).then((done) => {
+                if (done && action === 'remove') navigate(back);
+              });
+            }}
+            onConfirm={setConfirmRemove}
+          />
+        )}
+      />
       {error && <p className="ingest-page-error" role="alert">{error}</p>}
       {failure && <p className="ingest-job-error">{failure}</p>}
       {lifecycle && <p className="ingest-current">{lifecycle}</p>}

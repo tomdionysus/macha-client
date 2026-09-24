@@ -163,7 +163,7 @@ describe('the torrent list', () => {
 
 describe("a torrent's own page", () => {
   /** A labelled value from the facts list inside `scope`. */
-  const fact = (scope: Element, label: string) => [...scope.querySelectorAll('.torrent-facts > div')]
+  const fact = (scope: Element, label: string) => [...scope.querySelectorAll('.facts > div')]
     .find((row) => row.querySelector('dt')?.textContent === label)
     ?.querySelector('dd')?.textContent;
   const stage = (key: string) => document.getElementById(`stage-${key}`)!.closest('.torrent-stage')!;
@@ -173,7 +173,7 @@ describe("a torrent's own page", () => {
   it('reports the facts the list has no room for: hash, node, ratio and cataloguing outcome', async () => {
     renderAt('/ingest/torrents/tor-1', snapshot([torrentJob()]));
     await screen.findByRole('heading', { name: 'Some.Release.2024.1080p' });
-    const identity = document.querySelector('.torrent-identity')!;
+    const identity = document.querySelector('.detail-card')!;
 
     expect(fact(identity, 'Info hash')).toBe('c2a1f0e9b8d7c6b5a4938271605f4e3d2c1b0a99');
     expect(fact(identity, 'Node')).toBe('855716bd8bb0ad12b0c4f876386699de');

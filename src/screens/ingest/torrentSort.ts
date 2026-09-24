@@ -1,18 +1,15 @@
 import type { TorrentJob } from '@machafoundation/core';
 import { percent, ratioOf } from './format';
+import { listSortParams, parseListSort, sortRows, type ListSort, type SortKeyDef } from '../../lists/listSort';
 
 export type TorrentSortKey = 'added' | 'name' | 'size' | 'progress' | 'status' | 'down' | 'up' | 'eta' | 'ratio';
-export type SortDirection = 'asc' | 'desc';
-export interface TorrentSort {
-  key: TorrentSortKey;
-  direction: SortDirection;
-}
+export type TorrentSort = ListSort<TorrentSortKey>;
 
 /**
  * The keys a viewer can sort by, with the direction each is naturally read
  * in: names A to Z, but speeds, sizes and dates largest or newest first.
  */
-export const TORRENT_SORT_KEYS: readonly { key: TorrentSortKey; label: string; direction: SortDirection }[] = [
+export const TORRENT_SORT_KEYS: readonly SortKeyDef<TorrentSortKey>[] = [
   { key: 'added', label: 'Added', direction: 'desc' },
   { key: 'name', label: 'Name', direction: 'asc' },
   { key: 'size', label: 'Size', direction: 'desc' },
@@ -41,8 +38,6 @@ function statusRank(state: string): number {
   return index === -1 ? STATUS_ORDER.length : index;
 }
 
-const COLLATOR = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
-
 /** The value a job sorts on, or `undefined` for one the server cannot say yet. */
 function sortValue(job: TorrentJob, key: TorrentSortKey, state: string): number | string | undefined {
   switch (key) {
@@ -58,11 +53,6 @@ function sortValue(job: TorrentJob, key: TorrentSortKey, state: string): number 
   }
 }
 
-function compareValues(left: number | string, right: number | string): number {
-  if (typeof left === 'string' && typeof right === 'string') return COLLATOR.compare(left, right);
-  return Number(left) - Number(right);
-}
-
 /**
  * The torrents in the order the viewer asked for, and always the same order
  * for the same jobs: ties fall to the name and then to the job id, so a poll
@@ -75,36 +65,14 @@ export function sortTorrents(
   sort: TorrentSort,
   stateOf: (job: TorrentJob) => string,
 ): TorrentJob[] {
-  const sign = sort.direction === 'asc' ? 1 : -1;
-  return [...jobs].sort((left, right) => {
-    const a = sortValue(left, sort.key, stateOf(left));
-    const b = sortValue(right, sort.key, stateOf(right));
-    if (a === undefined && b !== undefined) return 1;
-    if (b === undefined && a !== undefined) return -1;
-    const primary = a !== undefined && b !== undefined ? sign * compareValues(a, b) : 0;
-    return primary
-      || COLLATOR.compare(left.name || '', right.name || '')
-      || (left.id < right.id ? -1 : left.id > right.id ? 1 : 0);
-  });
-}
-
-function isSortKey(value: string | null): value is TorrentSortKey {
-  return TORRENT_SORT_KEYS.some((entry) => entry.key === value);
+  return sortRows(jobs, sort, (job, key) => sortValue(job, key, stateOf(job)), (job) => job.name || '', (job) => job.id);
 }
 
 /** Read from the address, falling back rather than failing on one that was edited. */
 export function parseTorrentSort(params: URLSearchParams): TorrentSort {
-  const key = params.get('sort');
-  if (!isSortKey(key)) return DEFAULT_TORRENT_SORT;
-  const direction = params.get('dir');
-  return {
-    key,
-    direction: direction === 'asc' || direction === 'desc'
-      ? direction
-      : TORRENT_SORT_KEYS.find((entry) => entry.key === key)!.direction,
-  };
+  return parseListSort(params, TORRENT_SORT_KEYS, DEFAULT_TORRENT_SORT);
 }
 
 export function torrentSortParams(sort: TorrentSort): Record<string, string> {
-  return { sort: sort.key, dir: sort.direction };
+  return listSortParams(sort);
 }

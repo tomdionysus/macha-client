@@ -1,0 +1,100 @@
+/*
+ * Lists of jobs or files and an item's own page, shared by Import and Manage:
+ * a heading with a count and a sort, a fixed-layout table whose columns never
+ * move, sortable headers, and on the item's page a kicker, title and actions,
+ * label/value facts and a quiet card to hold them.
+ */
+.list-empty { color: var(--text-dim); font-size: .9rem; }
+.list-heading { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: .4rem; }
+.list-heading h2 { margin: 0; font-size: 1.05rem; }
+.list-heading h2 > span { margin-left: .4rem; color: var(--text-faint); font-weight: 400; font-variant-numeric: tabular-nums; }
+.sort-direction.secondary-button { margin: 0; padding: .3rem .55rem; font-size: .78rem; }
+.data-table-scroll { overflow-x: auto; border: 1px solid #ffffff12; border-radius: .5rem; background: #151517d8; }
+.data-table { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: .92rem; font-variant-numeric: tabular-nums; }
+.data-table th {
+  padding: .35rem .55rem;
+  border-bottom: 1px solid #ffffff14;
+  color: var(--text-faint);
+  font-size: .76rem;
+  font-weight: 500;
+  letter-spacing: .06em;
+  text-align: left;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.sort-header {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  cursor: pointer;
+}
+.sort-header:hover, .sort-header.active { color: #d0d0d4; }
+.sort-header:focus-visible { outline: 1px solid var(--focus); outline-offset: 2px; }
+.data-table td { height: 2.3rem; padding: 0 .55rem; border-bottom: 1px solid #ffffff08; color: #c8c8cc; white-space: nowrap; }
+.data-table tbody tr:last-child td { border-bottom: 0; }
+.torrent-table tbody tr { cursor: pointer; }
+.data-table tbody tr:hover td { background: #ffffff06; }
+.data-table .col-name { overflow: hidden; text-overflow: ellipsis; }
+.data-table .col-name a { color: #e2e2e6; text-decoration: none; }
+.data-table .col-name a:hover { text-decoration: underline; }
+.data-table .col-name a:focus-visible { outline: 1px solid var(--focus); outline-offset: 2px; }
+/*
+ * Fixed layout, and every column but the name a fixed width set to the
+ * longest text its formatter can produce (padding included, as fixed layout
+ * counts it), so a changing speed, status or ETA never reflows the row; the
+ * name takes whatever is left. Automatic layout could not do this: the name's
+ * old width: 100% squeezed every other column to its current content. Actions
+ * is sized for the remove prompt, the widest thing it shows, so opening that
+ * does not move the columns either.
+ */
+.data-table .col-progress { width: 9.8rem; }
+.data-table .col-size { width: 5rem; }
+.data-table .col-rate { width: 6.1rem; }
+.data-table .col-eta { width: 5.3rem; }
+.data-table .col-peers { width: 3.4rem; }
+.data-table .col-ratio { width: 4.1rem; }
+.data-table .col-added { width: 6.7rem; }
+.data-table .col-status { width: 9.3rem; max-width: 9.3rem; overflow: hidden; text-overflow: ellipsis; }
+.data-table .col-progress > span { display: inline-block; width: 3.2rem; text-align: right; color: #d0d0d4; }
+.data-table .col-size, .data-table .col-rate, .data-table .col-eta, .data-table .col-peers, .data-table .col-ratio { text-align: right; }
+.data-table th.col-size, .data-table th.col-rate, .data-table th.col-eta, .data-table th.col-peers, .data-table th.col-ratio { text-align: right; }
+.data-table td.col-status { color: var(--text-dim); }
+.data-table td.col-status.has-error, .data-table tr.state-failed td.col-status, .data-table tr.state-blocked td.col-status { color: #e49a9f; }
+.data-table tr.state-paused td.col-status { color: #cbbf8a; }
+.data-table td.col-added { color: var(--text-faint); }
+.data-table .col-actions { width: 13.2rem; padding-right: .35rem; text-align: right; }
+.data-table .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+/* A list item's own page: the shared back button as a link, so it carries the list's sort home. */
+.detail-screen > .back-button { display: inline-block; margin-bottom: .6rem; text-decoration: none; }
+.detail-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; }
+.detail-header > div { min-width: 0; }
+.detail-header h1 { margin: .2rem 0 0; font-size: clamp(1.5rem, 3vw, 2.1rem); line-height: 1.15; overflow-wrap: anywhere; }
+.detail-kicker { color: var(--text-faint); text-transform: uppercase; letter-spacing: .1em; font-size: .68rem; }
+.detail-kicker.state-failed, .detail-kicker.state-blocked { color: #e49a9f; }
+.facts { display: grid; gap: .45rem; margin: 0; }
+.facts > div { display: grid; grid-template-columns: minmax(6.5rem, auto) minmax(0, 1fr); gap: .8rem; align-items: baseline; }
+.facts dt { color: var(--text-faint); font-size: .82rem; }
+.facts dd { min-width: 0; margin: 0; color: #d0d0d4; font-size: .82rem; text-align: right; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.facts code { color: #dedee2; font-size: .78rem; word-break: break-all; }
+
+.detail-card { margin-top: .8rem; padding: 1rem 1.05rem 1.1rem; border: 1px solid #ffffff0d; border-radius: .7rem; background: #111113bd; }
+.detail-card h2 { margin: 0 0 .75rem; color: var(--text-faint); text-transform: uppercase; letter-spacing: .09em; font-size: .7rem; font-weight: 600; }
+.detail-card .facts { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .5rem 2rem; }
+
+@media (max-width: 900px) {
+  .detail-card .facts { grid-template-columns: 1fr; }
+  .data-table .col-optional { display: none; }
+}
+
+@media (max-width: 600px) {
+  .list-heading { flex-wrap: wrap; }
+  .data-table .col-progress .ingest-progress-track { display: none; }
+  .data-table .col-progress { width: 3.8rem; min-width: 0; }
+  .data-table .col-size, .data-table .col-eta { display: none; }
+  .detail-header { flex-direction: column; }
+}
