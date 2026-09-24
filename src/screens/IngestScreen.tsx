@@ -8,6 +8,8 @@ import { DEFAULT_TORRENT_SORT, sortTorrents, TORRENT_SORT_KEYS } from './ingest/
 import { SortControl, SortHeader, useListSort } from '../components/ListSortControls';
 import { BulkActions, ListHeading, Pager, SelectPageBox, SelectRowBox, useListSelection } from '../components/ListParts';
 import { ConfirmModal } from '../components/Modal';
+import { AsyncIconButton } from '../components/AsyncIconButton';
+import { RefreshIcon } from '../components/ManageIcons';
 import { pageSlice } from '../lists/paging';
 import { useAcquisition } from './ingest/useAcquisition';
 import { jobErrorText, viewerErrorText } from '../text/viewerText';
@@ -31,6 +33,7 @@ export function IngestScreen({ api, section }: Props) {
   const [path, setPath] = useState('');
   const [magnet, setMagnet] = useState('');
   const [submitting, setSubmitting] = useState<'path' | 'magnet'>();
+  const [refreshing, setRefreshing] = useState(false);
   const navigate = useNavigate();
   const { sort, setSort, sortBy, page, setPage, search } = useListSort(TORRENT_SORT_KEYS, DEFAULT_TORRENT_SORT);
 
@@ -99,6 +102,18 @@ export function IngestScreen({ api, section }: Props) {
     }
   };
 
+  /** A refresh the viewer asked for. The list also polls, quietly, and that does not spin the button. */
+  const refreshNow = async () => {
+    setRefreshing(true);
+    try {
+      await refresh();
+    } catch (reason: unknown) {
+      setError(viewerErrorText(reason));
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
   const ingestEnabled = snapshot?.ingestStatus.enabled ?? false;
   const torrentEnabled = snapshot?.torrentStatus.enabled ?? false;
   const torrentBuilt = snapshot?.torrentStatus.build_available ?? false;
@@ -136,6 +151,7 @@ export function IngestScreen({ api, section }: Props) {
             <button className="primary-button" data-tv-focusable="true" type="submit" disabled={!torrentEnabled || !magnet.trim() || Boolean(submitting)}>
               {submitting === 'magnet' ? 'Adding…' : 'Add torrent'}
             </button>
+            <AsyncIconButton label="Refresh torrents" busy={refreshing || (loading && !snapshot)} onClick={() => void refreshNow()} icon={<RefreshIcon />} />
           </form>
         ) : (
           <form className="ingest-add-form" onSubmit={(event) => { void submit('path', event); }}>

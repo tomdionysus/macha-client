@@ -308,3 +308,39 @@ describe('bulk actions on torrents', () => {
     expect(clearTorrent.mock.calls.map(([id]) => id).sort()).toEqual(['a', 'd']);
   });
 });
+
+describe('refreshing the torrent list', () => {
+  it('sits last in the add row, after Add torrent, and spins while a refresh it asked for is loading', async () => {
+    const value = snapshot([torrentJob()]);
+    let release: (() => void) | undefined;
+    let calls = 0;
+    const api = fakeApi(value, {
+      snapshot: () => {
+        calls += 1;
+        // The first answer arrives at once; the viewer's refresh waits until released.
+        return calls === 1 ? Promise.resolve(value) : new Promise<AcquisitionSnapshot>((resolve) => { release = () => resolve(value); });
+      },
+    });
+    renderAt('/ingest/torrents', value, api);
+    await screen.findByText('Some.Release.2024.1080p');
+
+    const form = screen.getByLabelText('Magnet link').closest('form') as HTMLFormElement;
+    const buttons = within(form).getAllByRole('button');
+    expect(buttons.map((button) => button.textContent || button.getAttribute('aria-label'))).toEqual(['Add torrent', 'Refresh torrents']);
+
+    fireEvent.click(within(form).getByRole('button', { name: 'Refresh torrents' }));
+    const busy = await within(form).findByRole('button', { name: 'Refresh torrents in progress' });
+    expect(busy.querySelector('.button-spinner')).toBeTruthy();
+    expect(calls).toBe(2);
+
+    release?.();
+    await within(form).findByRole('button', { name: 'Refresh torrents' });
+    expect(form.querySelector('.button-spinner')).toBeNull();
+  });
+
+  it('spins while the list is first loading', async () => {
+    const value = snapshot([torrentJob()]);
+    renderAt('/ingest/torrents', value, fakeApi(value, { snapshot: () => new Promise<AcquisitionSnapshot>(() => undefined) }));
+    expect(await screen.findByRole('button', { name: 'Refresh torrents in progress' })).toBeTruthy();
+  });
+});

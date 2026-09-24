@@ -20,6 +20,8 @@
 }
 .ingest-add-form input:focus { outline: 1px solid var(--focus); border-color: var(--focus); }
 .ingest-add-form button { flex: 0 0 auto; margin: 0; padding: .45rem .8rem; font-size: .85rem; }
+/* The refresh at the row's far right: square, and as tall as the field and Add torrent beside it. */
+.ingest-add-form .secondary-button.async-icon-button { width: auto; height: auto; align-self: stretch; aspect-ratio: 1; }
 .ingest-add-form button:disabled, .ingest-job-actions button:disabled { opacity: .4; cursor: default; }
 .ingest-disabled-note { margin: .2rem 0; color: #d9a9ad; font-size: .8rem; }
 
