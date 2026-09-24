@@ -86,6 +86,20 @@
 .detail-card h2 { margin: 0 0 .75rem; color: var(--text-faint); text-transform: uppercase; letter-spacing: .09em; font-size: .7rem; font-weight: 600; }
 .detail-card .facts { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .5rem 2rem; }
 
+.list-heading-controls { display: flex; align-items: center; gap: .6rem; }
+.list-note { margin: 0 0 .6rem; color: var(--text-dim); font-size: .85rem; line-height: 1.45; }
+.data-table tbody tr { cursor: pointer; }
+.data-table tbody tr.selected td { background: #ffffff09; }
+.data-table .col-check { width: 2.4rem; text-align: center; }
+.data-table .col-check input { width: 1rem; height: 1rem; margin: 0; accent-color: var(--red-400); vertical-align: middle; }
+/* An item page's own buttons, beside its title. */
+.detail-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem; justify-content: flex-end; }
+.detail-actions .secondary-button { margin: 0; padding: .45rem .8rem; font-size: .85rem; }
+
+.pager { display: flex; align-items: center; justify-content: center; gap: .8rem; margin: .8rem 0 0; }
+.pager button { margin: 0; padding: .4rem .8rem; font-size: .85rem; }
+.pager span { color: var(--text-dim); font-size: .85rem; font-variant-numeric: tabular-nums; }
+
 @media (max-width: 900px) {
   .detail-card .facts { grid-template-columns: 1fr; }
   .data-table .col-optional { display: none; }

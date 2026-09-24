@@ -2,18 +2,28 @@ import type { ChangeEvent } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { listSortParams, parseListSort, type ListSort, type SortKeyDef } from '../lists/listSort';
 
-/** A sortable list's order, kept in the address so the way back lands on it. */
+/**
+ * A list's order and page, kept in the address so the way back from an item
+ * lands on the same order and page. A new order starts again at the first page.
+ */
 export function useListSort<K extends string>(keys: readonly SortKeyDef<K>[], fallback: ListSort<K>) {
   const [searchParams, setSearchParams] = useSearchParams();
   const sort = parseListSort(searchParams, keys, fallback);
+  const pageParam = Number(searchParams.get('page'));
+  const page = Number.isInteger(pageParam) && pageParam > 1 ? pageParam - 1 : 0;
   const search = searchParams.toString() ? `?${searchParams.toString()}` : '';
-  const setSort = (next: ListSort<K>) => setSearchParams(listSortParams(next), { replace: true });
+  const write = (next: ListSort<K>, nextPage: number) => setSearchParams(
+    { ...listSortParams(next), ...(nextPage > 0 ? { page: String(nextPage + 1) } : {}) },
+    { replace: true },
+  );
+  const setSort = (next: ListSort<K>) => write(next, 0);
+  const setPage = (nextPage: number) => write(sort, nextPage);
   /** A header press: the same key again reverses it, a new one starts in its natural direction. */
   const sortBy = (key: K) => {
     if (sort.key === key) setSort({ key, direction: sort.direction === 'asc' ? 'desc' : 'asc' });
     else setSort({ key, direction: keys.find((entry) => entry.key === key)!.direction });
   };
-  return { sort, setSort, sortBy, search };
+  return { sort, setSort, sortBy, page, setPage, search };
 }
 
 /** A column header that sorts, the way a torrent client's does. */

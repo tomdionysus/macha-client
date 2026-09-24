@@ -6,7 +6,8 @@ import { formatAge, formatBytes, formatEta, formatPercent, formatRate, formatRat
 import { canRetryImport, displayStateOf, jobKey, linkedIngestOf } from './ingest/jobs';
 import { DEFAULT_TORRENT_SORT, sortTorrents, TORRENT_SORT_KEYS } from './ingest/torrentSort';
 import { SortControl, SortHeader, useListSort } from '../components/ListSortControls';
-import { ListHeading } from '../components/ListParts';
+import { ListHeading, Pager } from '../components/ListParts';
+import { pageSlice } from '../lists/paging';
 import { useAcquisition } from './ingest/useAcquisition';
 import { viewerErrorText } from '../text/viewerText';
 
@@ -30,7 +31,7 @@ export function IngestScreen({ api, section }: Props) {
   const [magnet, setMagnet] = useState('');
   const [submitting, setSubmitting] = useState<'path' | 'magnet'>();
   const navigate = useNavigate();
-  const { sort, setSort, sortBy, search } = useListSort(TORRENT_SORT_KEYS, DEFAULT_TORRENT_SORT);
+  const { sort, setSort, sortBy, page, setPage, search } = useListSort(TORRENT_SORT_KEYS, DEFAULT_TORRENT_SORT);
 
   const filesystemJobs = useMemo(
     () => (snapshot?.ingestJobs.filter((job) => job.source_type !== 'torrent') ?? [])
@@ -49,6 +50,8 @@ export function IngestScreen({ api, section }: Props) {
     ),
     [snapshot?.torrentJobs, snapshot?.ingestJobs, sortKey, sortDirection],
   );
+
+  const torrentPage = pageSlice(torrentJobs, page);
 
   const submit = async (kind: 'path' | 'magnet', event: FormEvent) => {
     event.preventDefault();
@@ -167,7 +170,7 @@ export function IngestScreen({ api, section }: Props) {
                 </tr>
               </thead>
               <tbody>
-                {torrentJobs.map((job) => {
+                {torrentPage.items.map((job) => {
                   const linked = linkedIngestOf(job, snapshot?.ingestJobs);
                   const state = displayStateOf(job, linked);
                   const failure = job.error || linked?.error || undefined;
@@ -212,6 +215,7 @@ export function IngestScreen({ api, section }: Props) {
             </table>
           </div>
         )}
+        <Pager label="Torrent pages" {...torrentPage} total={torrentJobs.length} onPage={setPage} />
       </section>
       )}
 

@@ -42,3 +42,23 @@ export function DetailCard({ id, title, children }: { id: string; title: string;
     </section>
   );
 }
+
+/** Previous and next through a long list, with where the page sits in it. Nothing for a list of one page. */
+export function Pager({ label, page, pageCount, first, last, total, onPage }: {
+  label: string;
+  page: number;
+  pageCount: number;
+  first: number;
+  last: number;
+  total: number;
+  onPage: (page: number) => void;
+}) {
+  if (pageCount <= 1) return null;
+  return (
+    <nav className="pager" aria-label={label}>
+      <button className="secondary-button" type="button" disabled={page === 0} onClick={() => onPage(page - 1)} data-tv-focusable="true">Previous</button>
+      <span>{first}–{last} of {total} · page {page + 1} of {pageCount}</span>
+      <button className="secondary-button" type="button" disabled={page + 1 >= pageCount} onClick={() => onPage(page + 1)} data-tv-focusable="true">Next</button>
+    </nav>
+  );
+}

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { candidateAlreadyCatalogued, pageSlice, pathBreadcrumbs, runBulkOperation } from './ManageScreen';
-import type { ManageCatalogueMatch, MediaProbeCandidate } from '@machafoundation/core';
+import { candidateAlreadyCatalogued, pathBreadcrumbs, runBulkOperation, sortUnmatched } from './ManageScreen';
+import type { ManageCatalogueMatch, MediaProbeCandidate, UnmatchedFile } from '@machafoundation/core';
 
 function probe(overrides: Partial<MediaProbeCandidate> = {}): MediaProbeCandidate {
   return {
@@ -71,11 +71,29 @@ describe('ManageScreen helpers', () => {
     expect(operation.mock.calls.map(([id]) => id)).toEqual(['one', 'broken', 'three']);
   });
 
-  it('bounds list pages and slices without dropping the final partial page', () => {
-    const items = Array.from({ length: 43 }, (_, index) => index);
-    expect(pageSlice(items, 0).items).toEqual(items.slice(0, 20));
-    expect(pageSlice(items, 2)).toEqual({ items: [40, 41, 42], page: 2, pageCount: 3 });
-    expect(pageSlice(items, 99).page).toBe(2);
-    expect(pageSlice([], 4)).toEqual({ items: [], page: 0, pageCount: 1 });
+});
+
+describe('the unmatched list order', () => {
+  const file = (id: string, path: string, overrides: Partial<UnmatchedFile> = {}): UnmatchedFile => ({
+    id, path, provider: null, media_id: null, result: 'no_match', attempts: 1, updated_unix_ms: 1_000, size: 100, mtime_ns: 0, current: true, ...overrides,
+  });
+  const files = [
+    file('a', '/Movies/b.mkv', { updated_unix_ms: 3_000, size: 10, attempts: 2 }),
+    file('b', '/Movies/a.mkv', { updated_unix_ms: 1_000, size: 30, attempts: 5 }),
+    file('c', '/Shows/c.mkv', { updated_unix_ms: 2_000, size: 20, attempts: 1 }),
+  ];
+  const ids = (sorted: UnmatchedFile[]) => sorted.map((entry) => entry.id);
+
+  it('shows the most recent attempt first until asked otherwise', () => {
+    expect(ids(sortUnmatched(files, { key: 'updated', direction: 'desc' }))).toEqual(['a', 'c', 'b']);
+  });
+
+  it('sorts by file name, not by the folder it sits in', () => {
+    expect(ids(sortUnmatched(files, { key: 'name', direction: 'asc' }))).toEqual(['b', 'a', 'c']);
+  });
+
+  it('sorts by size and attempts, largest first', () => {
+    expect(ids(sortUnmatched(files, { key: 'size', direction: 'desc' }))).toEqual(['b', 'c', 'a']);
+    expect(ids(sortUnmatched(files, { key: 'attempts', direction: 'desc' }))).toEqual(['b', 'a', 'c']);
   });
 });

@@ -2,6 +2,25 @@
 
 Last updated: 2026-09-24, after the search sort
 
+## Manage Unmatched in the torrent list's style, each file on its own page, and paging — 2026-09-24, unreleased
+
+- **Unmatched files** (Tom: copy the torrent list's style; a file's detail is
+  its own page, not a dropdown): a full-width slim table, sortable by name,
+  size, result, attempts and last attempt (newest first), order and page
+  kept in the address, checkboxes and the bulk retry and delete kept. A
+  file's page at `/manage/unmatched/:id` (core `1edf1c6`): the result as
+  kicker, the file name as title, Retry, Enter manually and Delete beside
+  it, a File facts card, the not-yet-catalogued candidates beside the
+  prospective-match search, and the manual form; anything that resolves the
+  file returns to the list. `/manage` goes to Unmatched.
+- **Shared parts** drawn out of Import (Tom): the list sort, sortable
+  headers and control, the list heading, the fixed-layout data table, the
+  item page's header, facts and card, and the pager, in `ListParts`,
+  `ListSortControls`, `lists/` and `lists.css`.
+- **Paging** on the torrent and unmatched lists (Tom), fifty rows a page,
+  the page in the address beside the sort. Seen live: 614 unmatched files in
+  13 pages.
+
 ## Every word a viewer sees is this client's — 2026-09-24, unreleased
 
 Tom's ruling: core composes no viewer text. Core cut it in 826e38a, f016815,

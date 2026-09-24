@@ -51,7 +51,7 @@ import { SponsorScreen } from './screens/SponsorScreen';
 import { MetadataEditorScreen } from './screens/MetadataEditorScreen';
 import { IngestScreen } from './screens/IngestScreen';
 import { TorrentDetailScreen } from './screens/TorrentDetailScreen';
-import { ManageScreen, type ManageSection } from './screens/ManageScreen';
+import { ManageScreen, UnmatchedFilePage, type ManageSection } from './screens/ManageScreen';
 import { NodeStatusScreen, StatusScreen } from './screens/StatusScreen';
 import { pathForMedia, routes } from '@machafoundation/core';
 import { playerRouteItemId } from '@machafoundation/core';
@@ -466,7 +466,7 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
    * pointing it at the section root would bounce it to Settings, which is the
    * section it could not use rather than the one it could.
    */
-  const manageLanding = libraryManagementAvailable ? routes.manage
+  const manageLanding = libraryManagementAvailable ? routes.manageUnmatched
     : usersAvailable ? routes.manageUsers
       : undefined;
   /**
@@ -660,7 +660,6 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
   const managePane = (section: ManageSection) => (
     <ManageScreen
       api={manageApi}
-      catalogueApi={catalogueApi}
       section={section}
       users={usersPane}
     />
@@ -849,7 +848,9 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
           <Route path={routes.statusClient} element={permits('view_status') ? <StatusScreen api={clusterStatusApi} endpointRegistry={endpointRegistry} platform={platform} manageApi={managementAvailable ? manageApi : undefined} section="client" auth={auth} /> : <Navigate to={landing} replace />} />
           <Route path={routes.statusConnectivity} element={permits('view_status') ? <StatusScreen api={clusterStatusApi} endpointRegistry={endpointRegistry} platform={platform} manageApi={managementAvailable ? manageApi : undefined} section="connectivity" auth={auth} /> : <Navigate to={landing} replace />} />
           <Route path="/status/nodes/:nodeId" element={permits('view_status') ? <NodeStatusScreen api={clusterStatusApi} /> : <Navigate to={landing} replace />} />
-          <Route path={routes.manage} element={libraryManagementAvailable ? managePane('unmatched') : <Navigate to={routes.settings} replace />} />
+          <Route path={routes.manage} element={<Navigate to={libraryManagementAvailable ? routes.manageUnmatched : usersAvailable ? routes.manageUsers : routes.settings} replace />} />
+          <Route path={routes.manageUnmatched} element={libraryManagementAvailable ? managePane('unmatched') : <Navigate to={routes.settings} replace />} />
+          <Route path={`${routes.manageUnmatched}/:fileId`} element={libraryManagementAvailable ? <UnmatchedFilePage api={manageApi} catalogueApi={catalogueApi} /> : <Navigate to={routes.settings} replace />} />
           <Route path={routes.manageFiles} element={libraryManagementAvailable ? managePane('files') : <Navigate to={routes.settings} replace />} />
           <Route path={routes.manageUsers} element={usersAvailable ? managePane('users') : <Navigate to={routes.settings} replace />} />
           <Route path={routes.settings} element={settingsPane} />

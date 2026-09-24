@@ -231,3 +231,18 @@ describe('each kind of import on its own page', () => {
     expect(screen.queryByText('Some.Release.2024.1080p')).toBeNull();
   });
 });
+
+describe('a long torrent list', () => {
+  it('shows fifty rows a page, and keeps the page in the address', async () => {
+    const many = Array.from({ length: 60 }, (_, index) => torrentJob({ id: `t${index}`, name: `Torrent ${String(index).padStart(2, '0')}`, created_unix_ms: 1_000 + index }));
+    renderAt('/ingest/torrents', snapshot(many));
+    await screen.findByText('Torrent 59');
+    expect(document.querySelectorAll('.torrent-table tbody tr')).toHaveLength(50);
+    expect(screen.getByText('1–50 of 60 · page 1 of 2')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    await screen.findByText('Torrent 09');
+    expect(document.querySelectorAll('.torrent-table tbody tr')).toHaveLength(10);
+    expect(screen.getByTestId('where').textContent).toBe('/ingest/torrents?sort=added&dir=desc&page=2');
+  });
+});

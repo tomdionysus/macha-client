@@ -14,28 +14,9 @@
 .manage-error { padding: .7rem .85rem; border: 1px solid #7b273133; border-radius: .55rem; background: #35080c73; color: #ffb4b4; }
 .manage-muted, .manage-empty { color: var(--text-dim); }
 .manage-empty { padding: 1rem; border: 1px dashed #ffffff14; border-radius: .55rem; text-align: center; }
-.manage-unmatched-list { display: grid; gap: .4rem; }
-.manage-unmatched-item { overflow: hidden; border: 1px solid #ffffff10; border-radius: .7rem; background: #171719c7; }
-.manage-unmatched-item.selected { border-color: #ffffff1f; }
-.manage-unmatched-summary { display: flex; justify-content: space-between; align-items: center; gap: .7rem; padding: .55rem .7rem; text-align: left; }
-.manage-unmatched-check { flex: 0 0 auto; display: grid; place-items: center; width: 1.4rem; height: 1.4rem; }
-.manage-unmatched-check input { width: 1rem; height: 1rem; margin: 0; accent-color: var(--red-400); }
-.manage-file-main { flex: 1 1 auto; width: 100%; min-width: 0; display: grid; justify-items: start; gap: .22rem; text-align: left; }
-.manage-file-main strong { overflow-wrap: anywhere; font-size: .95rem; }
-.manage-file-main code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-faint); }
-.manage-file-main span { color: var(--text-dim); font-size: .78rem; }
-.manage-review-button { flex: 0 0 auto; padding: .48rem .7rem; }
 .manage-bulk-actions { position: sticky; top: 132px; z-index: 4; display: flex; align-items: center; gap: .55rem; margin: 0 0 .65rem; padding: .55rem .7rem; border: 1px solid #ffffff14; border-radius: .6rem; background: #111113f2; backdrop-filter: var(--glass-blur); }
 .manage-bulk-actions span { margin-right: auto; color: var(--text-dim); }
 .manage-bulk-actions button { margin: 0; padding: .5rem .7rem; }
-.manage-list-controls { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin: 0 0 .55rem; padding: 0 .7rem; color: var(--text-faint); font-size: .82rem; text-align: left; }
-.manage-select-all { display: inline-flex; align-items: center; gap: .5rem; color: var(--text-dim); cursor: pointer; }
-.manage-select-all input { width: 1rem; height: 1rem; margin: 0; accent-color: var(--red-400); }
-.manage-pagination { display: flex; align-items: center; justify-content: center; gap: .75rem; margin-top: .8rem; }
-.manage-pagination button { margin: 0; }
-.manage-pagination span { min-width: 7rem; color: var(--text-dim); text-align: center; font-variant-numeric: tabular-nums; }
-.manage-review { padding: 1rem; border-top: 1px solid #ffffff0d; background: #0d0d0fd1; text-align: left; }
-.manage-review > section + section, .manage-review > .manage-actions { margin-top: 1rem; }
 .manage-label { margin: 0 0 .55rem; color: var(--text-faint); text-transform: uppercase; letter-spacing: .09em; font-size: .72rem; }
 .manage-probe-list, .manage-match-list { display: grid; gap: .5rem; }
 /* A button now, not a panel: choosing one seeds the manual metadata form. */
@@ -108,3 +89,16 @@
   .manage-path-actions { justify-content: flex-end; }
   .manage-fs-row { align-items: center; }
 }
+
+/* The unmatched list's own columns, on the shared data table. */
+.unmatched-table .col-folder { color: var(--text-faint); overflow: hidden; text-overflow: ellipsis; }
+.unmatched-table .col-provider { width: 6.5rem; color: var(--text-dim); }
+.unmatched-table .col-attempts { width: 5.6rem; text-align: right; }
+.unmatched-table .col-status { width: 21rem; max-width: 21rem; }
+/* A file's page: what it could be, beside what it could be matched to. */
+.unmatched-choices { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .8rem; }
+.unmatched-choices .detail-card { margin-top: .8rem; }
+.detail-screen .manage-search-row { margin-bottom: .7rem; }
+@media (max-width: 900px) { .unmatched-choices { grid-template-columns: 1fr; } }
+/* The unmatched list and a file's page run the page's full width, as Import's do. */
+.manage-screen.manage-screen-unmatched, .manage-screen.detail-screen { width: 100%; }

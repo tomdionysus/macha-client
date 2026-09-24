@@ -1,7 +1,7 @@
 import { routes } from '@machafoundation/core';
 import { SectionNav, type SectionNavItem } from './SectionNav';
 
-const unmatched: SectionNavItem = { to: routes.manage, label: 'Unmatched', end: true };
+const unmatched: SectionNavItem = { to: routes.manageUnmatched, label: 'Unmatched' };
 const files: SectionNavItem = { to: routes.manageFiles, label: 'Files' };
 const users: SectionNavItem = { to: routes.manageUsers, label: 'Users' };
 
