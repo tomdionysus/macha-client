@@ -14,9 +14,6 @@
 .manage-error { padding: .7rem .85rem; border: 1px solid #7b273133; border-radius: .55rem; background: #35080c73; color: #ffb4b4; }
 .manage-muted, .manage-empty { color: var(--text-dim); }
 .manage-empty { padding: 1rem; border: 1px dashed #ffffff14; border-radius: .55rem; text-align: center; }
-.manage-bulk-actions { position: sticky; top: 132px; z-index: 4; display: flex; align-items: center; gap: .55rem; margin: 0 0 .65rem; padding: .55rem .7rem; border: 1px solid #ffffff14; border-radius: .6rem; background: #111113f2; backdrop-filter: var(--glass-blur); }
-.manage-bulk-actions span { margin-right: auto; color: var(--text-dim); }
-.manage-bulk-actions button { margin: 0; padding: .5rem .7rem; }
 .manage-label { margin: 0 0 .55rem; color: var(--text-faint); text-transform: uppercase; letter-spacing: .09em; font-size: .72rem; }
 .manage-probe-list, .manage-match-list { display: grid; gap: .5rem; }
 /* A button now, not a panel: choosing one seeds the manual metadata form. */
@@ -84,7 +81,6 @@
   .manage-panel-heading, .manage-match-row { align-items: stretch; flex-direction: column; }
   .manage-field-row { grid-template-columns: 1fr; }
   .manage-search-row { display: grid; }
-  .manage-bulk-actions { align-items: stretch; flex-direction: column; }
   .manage-pathbar { align-items: stretch; flex-direction: column; }
   .manage-path-actions { justify-content: flex-end; }
   .manage-fs-row { align-items: center; }

@@ -3,13 +3,14 @@ import { Link, useNavigate } from 'react-router-dom';
 import { routes, type AcquisitionApi, type IngestJob, type TorrentJob } from '@machafoundation/core';
 import { JobControls, Progress } from './ingest/JobControls';
 import { formatAge, formatBytes, formatEta, formatPercent, formatRate, formatRatio, formatTimestamp, percent, stateLabel } from './ingest/format';
-import { canRetryImport, displayStateOf, jobKey, linkedIngestOf } from './ingest/jobs';
+import { canPause, canResume, canRetryImport, displayStateOf, jobKey, linkedIngestOf } from './ingest/jobs';
 import { DEFAULT_TORRENT_SORT, sortTorrents, TORRENT_SORT_KEYS } from './ingest/torrentSort';
 import { SortControl, SortHeader, useListSort } from '../components/ListSortControls';
-import { ListHeading, Pager } from '../components/ListParts';
+import { BulkActions, ListHeading, Pager, SelectPageBox, SelectRowBox, useListSelection } from '../components/ListParts';
+import { ConfirmModal } from '../components/Modal';
 import { pageSlice } from '../lists/paging';
 import { useAcquisition } from './ingest/useAcquisition';
-import { viewerErrorText } from '../text/viewerText';
+import { jobErrorText, viewerErrorText } from '../text/viewerText';
 
 /** Import's pages: torrents and filesystem imports are different kinds of job, each with its own page. */
 export type IngestSection = 'torrents' | 'files';
@@ -26,7 +27,7 @@ export function torrentPath(id: string, search = ''): string {
 
 export function IngestScreen({ api, section }: Props) {
   const acquisition = useAcquisition(api);
-  const { snapshot, loading, error, setError, notice, setNotice, refresh, busyByJob, confirmRemove, setConfirmRemove, act } = acquisition;
+  const { snapshot, loading, error, setError, notice, setNotice, refresh, busyByJob, confirmRemove, setConfirmRemove, act, actMany } = acquisition;
   const [path, setPath] = useState('');
   const [magnet, setMagnet] = useState('');
   const [submitting, setSubmitting] = useState<'path' | 'magnet'>();
@@ -52,6 +53,22 @@ export function IngestScreen({ api, section }: Props) {
   );
 
   const torrentPage = pageSlice(torrentJobs, page);
+  const selection = useListSelection(torrentJobs);
+  const selected = torrentJobs.filter((job) => selection.checked.has(job.id));
+  const pausable = selected.filter((job) => canPause('torrent', job.state));
+  const resumable = selected.filter((job) => canResume('torrent', job.state));
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [confirmBulkRemove, setConfirmBulkRemove] = useState(false);
+
+  const bulk = async (jobs: readonly TorrentJob[], action: 'pause' | 'resume' | 'remove') => {
+    setBulkBusy(true);
+    const succeeded = await actMany('torrent', jobs, action);
+    if (action === 'remove') {
+      setConfirmBulkRemove(false);
+      if (succeeded) selection.clear();
+    }
+    setBulkBusy(false);
+  };
 
   const submit = async (kind: 'path' | 'magnet', event: FormEvent) => {
     event.preventDefault();
@@ -150,11 +167,19 @@ export function IngestScreen({ api, section }: Props) {
         <ListHeading id="ingest-torrents-heading" title="Torrents" count={torrentJobs.length}>
           <SortControl keys={TORRENT_SORT_KEYS} sort={sort} onChange={setSort} />
         </ListHeading>
+        <BulkActions label="Selected torrent actions" selection={selection} disabled={bulkBusy}>
+          <button className="secondary-button" type="button" disabled={bulkBusy || pausable.length === 0} onClick={() => void bulk(pausable, 'pause')} data-tv-focusable="true">Pause</button>
+          <button className="secondary-button" type="button" disabled={bulkBusy || resumable.length === 0} onClick={() => void bulk(resumable, 'resume')} data-tv-focusable="true">Resume</button>
+          <button className="secondary-button ingest-delete-button" type="button" disabled={bulkBusy} onClick={() => setConfirmBulkRemove(true)} data-tv-focusable="true">Remove</button>
+        </BulkActions>
         {snapshot && torrentJobs.length === 0 ? <p className="list-empty">No torrent jobs.</p> : (
           <div className="data-table-scroll">
             <table className="data-table torrent-table" aria-labelledby="ingest-torrents-heading">
               <thead>
                 <tr>
+                  <th scope="col" className="col-check">
+                    <SelectPageBox ids={torrentPage.items.map((job) => job.id)} selection={selection} disabled={bulkBusy} />
+                  </th>
                   <SortHeader label="Name" sortKey="name" sort={sort} onSort={sortBy} className="col-name" />
                   <SortHeader label="Size" sortKey="size" sort={sort} onSort={sortBy} className="col-size" />
                   <SortHeader label="Progress" sortKey="progress" sort={sort} onSort={sortBy} className="col-progress" />
@@ -173,11 +198,14 @@ export function IngestScreen({ api, section }: Props) {
                 {torrentPage.items.map((job) => {
                   const linked = linkedIngestOf(job, snapshot?.ingestJobs);
                   const state = displayStateOf(job, linked);
-                  const failure = job.error || linked?.error || undefined;
+                  const failure = jobErrorText(job) ?? jobErrorText(linked);
                   const progress = percent(job.progress, job.bytes_completed, job.bytes_total);
                   const name = job.name || 'Torrent';
                   return (
-                    <tr key={job.id} className={`state-${state}`} onClick={(event) => openRow(event, job)}>
+                    <tr key={job.id} className={`state-${state}${selection.checked.has(job.id) ? ' selected' : ''}`} onClick={(event) => openRow(event, job)}>
+                      <td className="col-check">
+                        <SelectRowBox id={job.id} name={name} selection={selection} disabled={bulkBusy} />
+                      </td>
                       <td className="col-name">
                         <Link to={torrentPath(job.id, search)} data-tv-focusable="true" title={name}>{name}</Link>
                       </td>
@@ -216,6 +244,17 @@ export function IngestScreen({ api, section }: Props) {
           </div>
         )}
         <Pager label="Torrent pages" {...torrentPage} total={torrentJobs.length} onPage={setPage} />
+        <ConfirmModal
+          open={confirmBulkRemove}
+          title={selected.length === 1 ? 'Remove this torrent?' : `Remove ${selected.length} torrents?`}
+          confirmLabel="Remove"
+          destructive
+          busy={bulkBusy}
+          onCancel={() => setConfirmBulkRemove(false)}
+          onConfirm={() => void bulk(selected, 'remove')}
+        >
+          <p>Any still downloading or seeding are cancelled first.</p>
+        </ConfirmModal>
       </section>
       )}
 
@@ -241,6 +280,7 @@ export function IngestScreen({ api, section }: Props) {
                 {filesystemJobs.map((job: IngestJob) => {
                   const progress = percent(job.progress, job.bytes_completed, job.bytes_total);
                   const name = job.display_name || job.source_path;
+                  const failure = jobErrorText(job);
                   return [
                     <tr key={job.id} className={`state-${job.state}`}>
                       <td className="col-name" title={job.current_file ? `${job.source_path}\nCurrent: ${job.current_file}` : job.source_path}>{name}</td>
@@ -249,7 +289,7 @@ export function IngestScreen({ api, section }: Props) {
                         <Progress value={progress} />
                         <span>{formatPercent(progress)}</span>
                       </td>
-                      <td className={`col-status${job.error ? ' has-error' : ''}`}>{stateLabel(job.state)}</td>
+                      <td className={`col-status${failure ? ' has-error' : ''}`}>{stateLabel(job.state)}</td>
                       <td className="col-rate">{formatRate(job.rate_bytes_per_second)}</td>
                       <td className="col-eta">{formatEta(job.eta_seconds)}</td>
                       <td className="col-peers col-optional">{job.files_completed} / {job.files_total}</td>
@@ -267,9 +307,9 @@ export function IngestScreen({ api, section }: Props) {
                         />
                       </td>
                     </tr>,
-                    job.error && (
+                    failure && (
                       <tr key={`${job.id}-error`} className="ingest-error-row">
-                        <td colSpan={8}>{job.error}</td>
+                        <td colSpan={8}>{failure}</td>
                       </tr>
                     ),
                   ];

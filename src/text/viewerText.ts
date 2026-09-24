@@ -1,4 +1,5 @@
 import {
+  MachaAcquisitionApiError,
   MachaConnectionError,
   NOT_PLAYABLE_CODE,
   REGENERATION_ENDPOINT_GONE_CODE,
@@ -6,6 +7,7 @@ import {
   playbackFailureCode,
   playbackFailureDetail,
   startupPhase,
+  type CatalogueHintResult,
   type ClusterStartupStatus,
   type MediaSortKey,
   type MediaSummary,
@@ -14,6 +16,8 @@ import {
   type PlaybackStatusDescription,
   type SearchCategoryKey,
   type StartupSubsystem,
+  type TorrentJobErrorCode,
+  type UpnpErrorCode,
 } from '@machafoundation/core';
 
 /**
@@ -128,6 +132,127 @@ export function startupSubsystemLabel(key: StartupSubsystem['key']): string {
   return SUBSYSTEM_LABELS[key];
 }
 
+/**
+ * Server 0.56.0 puts a code beside every sentence it sends, and the code is
+ * what this client words. One rule for all of them: a code this client knows
+ * gets its sentence here; a code that says only that something went wrong
+ * underneath (libtorrent's error, a storage error) gets its sentence and then
+ * the server's, which is where the substance is; a code this client does not
+ * know, or none from a node older than 0.56.0, shows the server's sentence.
+ */
+function coded<C extends string>(words: Partial<Record<C, string>>, generic: ReadonlySet<string>, code: string | null | undefined, detail: string | null | undefined): string | undefined {
+  const sentence = code ? words[code as C] : undefined;
+  if (!sentence) return detail || undefined;
+  return generic.has(code as string) && detail ? `${sentence} ${detail}` : sentence;
+}
+
+const JOB_ERRORS: Record<TorrentJobErrorCode, string> = {
+  source_unavailable: 'The source cannot be reached.',
+  source_not_regular: 'The source is not an ordinary file.',
+  source_scan_interrupted: 'Scanning the source was interrupted.',
+  source_changed_during_scan: 'The source changed while it was being scanned.',
+  source_disappeared: 'The source has gone.',
+  source_changed: 'The source changed while it was being copied.',
+  source_unreadable: 'The source cannot be read.',
+  source_seek_failed: 'The source could not be read in full.',
+  source_short_read: 'The source could not be read in full.',
+  source_is_symlink: 'The source is a symbolic link, and links are not imported.',
+  no_supported_media: 'No playable media was found in it.',
+  destination_parent_not_directory: 'Where it was to be stored is not a folder.',
+  partial_not_file: 'A half-copied file is in the way.',
+  destination_conflict: 'A file of that name is already stored there.',
+  namespace_short_write: 'The copy was cut short while it was written.',
+  size_mismatch: 'The copy is not the same size as the source.',
+  metadata_unavailable: 'The file\'s details could not be read.',
+  filesystem_error: 'A storage error stopped the import.',
+  import_failed: 'The import failed.',
+  restore_failed: 'The torrent could not be restored after a restart.',
+  ingest_missing: 'Its import has gone missing.',
+  ingest_cancelled: 'Its import was cancelled.',
+  torrent_error: 'The torrent reported an error.',
+  staging_full: 'Waiting for room in staging.',
+  ingest_submit_failed: 'It could not be handed over for import.',
+  ingest_failed: 'Its import failed.',
+  torrent_failed: 'The download failed.',
+};
+const GENERIC_JOB_ERRORS = new Set(['filesystem_error', 'import_failed', 'torrent_error', 'torrent_failed', 'ingest_failed']);
+
+/** Why an import or torrent job failed or is blocked. Undefined when it has not. */
+export function jobErrorText(job: { error?: string | null; error_code?: string | null } | undefined): string | undefined {
+  return job ? coded(JOB_ERRORS, GENERIC_JOB_ERRORS, job.error_code, job.error) : undefined;
+}
+
+const HINT_RESULTS: Record<CatalogueHintResult, string> = {
+  matched: 'Matched',
+  outside_catalogue_roots: 'Outside the catalogue folders',
+  not_media_file: 'Not a media file',
+  no_media_candidate: 'Nothing recognisable',
+  no_provider_match: 'No match found',
+  already_stored: 'Already in the catalogue',
+  profile_prepared: 'Prepared',
+  media_not_live: 'Not live yet',
+  manual_existing_item: 'Matched by hand',
+  manual_metadata: 'Entered by hand',
+};
+
+/** A snake_case code as words, for one this client has no sentence for: "no_match" reads "No match". */
+export function codeWords(code: string): string {
+  return code.replace(/_/g, ' ').replace(/^./, (first) => first.toUpperCase());
+}
+
+/** What catalogue matching made of a file. A node older than 0.56.0 sends a sentence, shown as it is. */
+export function hintResultLabel(result: string): string {
+  if (result in HINT_RESULTS) return HINT_RESULTS[result as CatalogueHintResult];
+  return /^[a-z0-9]+(_[a-z0-9]+)*$/.test(result) ? codeWords(result) : result;
+}
+
+const DIAGNOSTIC_ERRORS: Record<UpnpErrorCode | 'lookup_failed' | 'recovery_failed' | 'rpc_failed', string> = {
+  igd_not_connected: 'The router\'s UPnP gateway is not connected.',
+  port_mapped_elsewhere: 'The router maps this port to another device.',
+  mapping_verification_failed: 'The router did not confirm the port mapping.',
+  add_mapping_failed: 'The router refused the port mapping.',
+  discovery_failed: 'No UPnP router was found.',
+  support_not_built: 'This server was built without UPnP.',
+  lookup_failed: 'The external address could not be looked up.',
+  recovery_failed: 'Recovery at startup failed.',
+  rpc_failed: 'The node did not answer.',
+};
+const NO_GENERIC = new Set<string>();
+
+/** A status diagnostic's error: UPnP, external address, startup, a node's reachability. */
+export function diagnosticErrorText(item: { error?: string | null; error_code?: string | null }): string | undefined {
+  return coded(DIAGNOSTIC_ERRORS, NO_GENERIC, item.error_code, item.error);
+}
+
+const PLACEMENT_REASONS: Record<string, string> = {
+  node_not_member: 'That node is not in this cluster.',
+  node_refused: 'That node refused the torrent.',
+  node_unreachable: 'That node cannot be reached.',
+  node_did_not_start: 'That node did not start the torrent.',
+  missing_uri: 'There was no magnet link to pass on.',
+  add_failed: 'That node could not add the torrent.',
+};
+
+/** A torrent another node would not take: by its reason, or the peer's own code where that is a job's. */
+function placementText(error: unknown): string | undefined {
+  if (!(error instanceof MachaAcquisitionApiError) || error.code !== 'placement_failed' || !error.reason) return undefined;
+  return PLACEMENT_REASONS[error.reason] ?? JOB_ERRORS[error.reason as TorrentJobErrorCode];
+}
+
+/** The server's state on the settings card, where it says anything beyond ok. */
+export function serverStatusText(status: { code: string | null; detail: string | null } | undefined): string | undefined {
+  if (!status) return undefined;
+  if (status.detail) return status.detail;
+  return status.code && status.code !== 'ok' ? codeWords(status.code) : undefined;
+}
+
+/**
+ * Signed out here, and the cluster could not be told. Core has already
+ * dropped the token, so this device is signed out either way; the session
+ * itself stays valid on the server until it expires.
+ */
+export const SIGN_OUT_UNCONFIRMED_TEXT = 'You are signed out on this device, but the server could not be reached to end the session, so it stays valid there until it expires.';
+
 export const SERVER_UNREACHABLE_TEXT = 'The Macha server cannot be reached. Check that the server is running and that the API address is correct.';
 
 /**
@@ -138,9 +263,10 @@ export const SERVER_UNREACHABLE_TEXT = 'The Macha server cannot be reached. Chec
  * general line.
  */
 export function viewerErrorText(error: unknown, fallback = 'Something went wrong. Try again.'): string {
-  const code = playbackFailureCode(error);
-  const coded = playbackFailureCodeText(code);
-  if (coded) return coded;
+  const placed = placementText(error);
+  if (placed) return placed;
+  const codeText = playbackFailureCodeText(playbackFailureCode(error));
+  if (codeText) return codeText;
   const detail = playbackFailureDetail(error);
   if (detail) return detail;
   if (error instanceof MachaConnectionError) return SERVER_UNREACHABLE_TEXT;
@@ -151,6 +277,7 @@ export function viewerErrorText(error: unknown, fallback = 'Something went wrong
 export function playbackNoticeText(notice: PlaybackNotice): string {
   switch (notice.code) {
     case 'copy-refused': return 'This node could not copy the original streams, so they are being converted.';
+    case 'decode-fallback': return 'This device could not play the original streams, so they are being converted.';
     case 'cannot-seek': return 'This stream cannot seek.';
     case 'not-ready': return 'Playback is still loading.';
     case 'instruction-failed': return 'Could not work out how to play this here.';

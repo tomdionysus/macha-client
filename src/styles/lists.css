@@ -96,6 +96,9 @@
 .data-table tbody tr.selected td { background: #ffffff09; }
 .data-table .col-check { width: 2.4rem; text-align: center; }
 .data-table .col-check input { width: 1rem; height: 1rem; margin: 0; accent-color: var(--red-400); vertical-align: middle; }
+.list-bulk-actions { position: sticky; top: 132px; z-index: 4; display: flex; align-items: center; gap: .55rem; margin: 0 0 .65rem; padding: .55rem .7rem; border: 1px solid #ffffff14; border-radius: .6rem; background: #111113f2; backdrop-filter: var(--glass-blur); }
+.list-bulk-actions span { margin-right: auto; color: var(--text-dim); }
+.list-bulk-actions button { margin: 0; padding: .5rem .7rem; }
 /* An item page's own buttons, beside its title. */
 .detail-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem; justify-content: flex-end; }
 .detail-actions .secondary-button { margin: 0; padding: .45rem .8rem; font-size: .85rem; }
@@ -107,6 +110,10 @@
 @media (max-width: 900px) {
   .detail-card .facts { grid-template-columns: 1fr; }
   .data-table .col-optional { display: none; }
+}
+
+@media (max-width: 720px) {
+  .list-bulk-actions { align-items: stretch; flex-direction: column; }
 }
 
 @media (max-width: 600px) {

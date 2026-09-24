@@ -37,6 +37,7 @@ const REASON_TEXT: Record<PlaybackDecisionReason, string> = {
   'executor-cannot-direct': 'this server cannot serve the file directly',
   'executor-cannot-copy-video': 'this server cannot repackage the video',
   'executor-cannot-copy-audio': 'this server cannot repackage the audio',
+  'player-could-not-decode': 'this device could not decode the copied streams',
 };
 
 /**

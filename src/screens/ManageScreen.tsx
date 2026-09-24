@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { routes } from '@machafoundation/core';
-import { DetailCard, DetailHeader, Facts, ListHeading, Pager } from '../components/ListParts';
+import { BulkActions, DetailCard, DetailHeader, Facts, ListHeading, Pager, runBulkOperation, SelectPageBox, SelectRowBox, useListSelection } from '../components/ListParts';
 import { pageSlice } from '../lists/paging';
 import { SortControl, SortHeader, useListSort } from '../components/ListSortControls';
 import { sortRows, type ListSort, type SortKeyDef } from '../lists/listSort';
-import { formatAge, formatBytes, formatTimestamp, stateLabel } from './ingest/format';
+import { formatAge, formatBytes, formatTimestamp } from './ingest/format';
 import { ConfirmModal, Modal } from '../components/Modal';
 import { FileIcon, FolderIcon, OpenIcon, RefreshIcon, UpIcon } from '../components/ManageIcons';
 import { AsyncIconButton } from '../components/AsyncIconButton';
@@ -20,7 +20,7 @@ import type {
   UnmatchedDetail,
   UnmatchedFile,
 } from '@machafoundation/core';
-import { viewerErrorText } from '../text/viewerText';
+import { hintResultLabel, viewerErrorText } from '../text/viewerText';
 
 export type ManageSection = 'unmatched' | 'files' | 'users';
 
@@ -46,11 +46,6 @@ export function pathBreadcrumbs(path: string): Array<{ label: string; path: stri
     { label: 'MachaDFS', path: '/' },
     ...names.map((label, index) => ({ label, path: `/${names.slice(0, index + 1).join('/')}` })),
   ];
-}
-
-export async function runBulkOperation(ids: string[], operation: (id: string) => Promise<void>): Promise<number> {
-  const results = await Promise.allSettled(ids.map(operation));
-  return results.filter((result) => result.status === 'rejected').length;
 }
 
 function candidateSummary(candidate: MediaProbeCandidate): string {
@@ -275,7 +270,8 @@ function UnmatchedManager({ api }: { api: ManageApi }) {
   const navigate = useNavigate();
   const { sort, setSort, sortBy, page, setPage, search } = useListSort(UNMATCHED_SORT_KEYS, DEFAULT_UNMATCHED_SORT);
   const [items, setItems] = useState<UnmatchedFile[]>([]);
-  const [checked, setChecked] = useState<Set<string>>(() => new Set());
+  const selection = useListSelection(items);
+  const { checked } = selection;
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -287,7 +283,6 @@ function UnmatchedManager({ api }: { api: ManageApi }) {
     try {
       const next = await api.unmatched();
       setItems(next);
-      setChecked((current) => new Set([...current].filter((id) => next.some((item) => item.id === id))));
     } catch (cause) {
       setError(viewerErrorText(cause));
     } finally {
@@ -333,14 +328,6 @@ function UnmatchedManager({ api }: { api: ManageApi }) {
 
   if (loading) return <p className="ingest-loading">Loading unmatched files…</p>;
 
-  // The header box selects the page on screen; selections on other pages stay.
-  const pageSelected = rows.length > 0 && rows.every((item) => checked.has(item.id));
-  const pagePartly = !pageSelected && rows.some((item) => checked.has(item.id));
-  const toggle = (id: string, on: boolean) => setChecked((current) => {
-    const next = new Set(current);
-    if (on) next.add(id); else next.delete(id);
-    return next;
-  });
   /** The whole row opens the file, except where a control inside it was the target. */
   const openRow = (event: MouseEvent<HTMLTableRowElement>, item: UnmatchedFile) => {
     if ((event.target as HTMLElement).closest('button, a, input, select, label')) return;
@@ -357,34 +344,17 @@ function UnmatchedManager({ api }: { api: ManageApi }) {
       </ListHeading>
       <p className="list-note">Files whose catalogue matching finished without a match.</p>
       {error && <p className="manage-error">{error}</p>}
-      {checked.size > 0 && (
-        <div className="manage-bulk-actions" aria-label="Selected unmatched file actions">
-          <span>{checked.size} selected</span>
-          <button className="secondary-button" type="button" disabled={busy} onClick={() => void retryChecked()} data-tv-focusable="true">Retry matching</button>
-          <button className="secondary-button manage-danger" type="button" disabled={busy} onClick={() => setDeleteIds([...checked])} data-tv-focusable="true">Delete files</button>
-          <button className="secondary-button" type="button" disabled={busy} onClick={() => setChecked(new Set())} data-tv-focusable="true">Clear</button>
-        </div>
-      )}
+      <BulkActions label="Selected unmatched file actions" selection={selection} disabled={busy}>
+        <button className="secondary-button" type="button" disabled={busy} onClick={() => void retryChecked()} data-tv-focusable="true">Retry matching</button>
+        <button className="secondary-button manage-danger" type="button" disabled={busy} onClick={() => setDeleteIds([...checked])} data-tv-focusable="true">Delete files</button>
+      </BulkActions>
       {items.length === 0 ? <p className="list-empty">No files need matching.</p> : (
         <div className="data-table-scroll">
           <table className="data-table unmatched-table" aria-labelledby="unmatched-heading">
             <thead>
               <tr>
                 <th scope="col" className="col-check">
-                  <input
-                    type="checkbox"
-                    aria-label="Select this page"
-                    checked={pageSelected}
-                    ref={(element) => { if (element) element.indeterminate = pagePartly; }}
-                    onChange={(event) => setChecked((current) => {
-                      const next = new Set(current);
-                      for (const item of rows) {
-                        if (event.target.checked) next.add(item.id); else next.delete(item.id);
-                      }
-                      return next;
-                    })}
-                    disabled={busy}
-                  />
+                  <SelectPageBox ids={rows.map((item) => item.id)} selection={selection} disabled={busy} />
                 </th>
                 <SortHeader label="Name" sortKey="name" sort={sort} onSort={sortBy} className="col-name" />
                 <th scope="col" className="col-folder col-optional">Folder</th>
@@ -401,14 +371,14 @@ function UnmatchedManager({ api }: { api: ManageApi }) {
                 return (
                   <tr key={item.id} className={checked.has(item.id) ? 'selected' : undefined} onClick={(event) => openRow(event, item)}>
                     <td className="col-check">
-                      <input type="checkbox" checked={checked.has(item.id)} onChange={(event) => toggle(item.id, event.target.checked)} aria-label={`Select ${name}`} disabled={busy} />
+                      <SelectRowBox id={item.id} name={name} selection={selection} disabled={busy} />
                     </td>
                     <td className="col-name">
                       <Link to={`${routes.manageUnmatchedFile(item.id)}${search}`} data-tv-focusable="true" title={item.path}>{name}</Link>
                     </td>
                     <td className="col-folder col-optional" title={folderOf(item.path)}>{folderOf(item.path)}</td>
                     <td className="col-size">{formatBytes(item.size)}</td>
-                    <td className="col-status">{stateLabel(item.result)}</td>
+                    <td className="col-status">{hintResultLabel(item.result)}</td>
                     <td className="col-provider col-optional">{item.provider ?? 'catalogue'}</td>
                     <td className="col-attempts col-optional">{item.attempts}</td>
                     <td className="col-added col-optional" title={formatTimestamp(item.updated_unix_ms)}>{formatAge(item.updated_unix_ms, now)}</td>
@@ -522,7 +492,7 @@ export function UnmatchedFilePage({ api, catalogueApi }: { api: ManageApi; catal
     <section className="manage-screen detail-screen">
       {backLink}
       <DetailHeader
-        kicker={stateLabel(item.result)}
+        kicker={hintResultLabel(item.result)}
         title={fileName(item.path)}
         actions={(
           <div className="detail-actions">
@@ -539,7 +509,7 @@ export function UnmatchedFilePage({ api, catalogueApi }: { api: ManageApi; catal
           ['Path', <code>{item.path}</code>],
           ['Size', formatBytes(item.size)],
           ['Provider', item.provider ?? 'catalogue'],
-          ['Result', stateLabel(item.result)],
+          ['Result', hintResultLabel(item.result)],
           ['Attempts', String(item.attempts)],
           ['Last attempt', `${formatTimestamp(item.updated_unix_ms)} (${formatAge(item.updated_unix_ms, now)})`],
           ...(item.media_id ? [['Media', <code>{item.media_id}</code>] as const] : []),

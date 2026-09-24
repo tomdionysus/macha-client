@@ -12,7 +12,7 @@ import type {
   PublicConnectivityStatus,
 } from '@machafoundation/core';
 import { startupReadyCount, startupSubsystems } from '@machafoundation/core';
-import { startupPhaseLabel, startupSubsystemLabel, viewerErrorText } from '../text/viewerText';
+import { diagnosticErrorText, startupPhaseLabel, startupSubsystemLabel, viewerErrorText } from '../text/viewerText';
 import type { IdentityAssociationResetResult, ManageApi } from '@machafoundation/core';
 import { routes } from '@machafoundation/core';
 import { usePollingTask } from '../hooks/usePollingTask';
@@ -346,14 +346,14 @@ function PublicConnectivity({ connectivity }: { connectivity: PublicConnectivity
           <DetailItem label="CGNAT / private WAN">{yesNo(upnp.private_wan)}</DetailItem>
           <DetailItem label="Mapping owned">{yesNo(upnp.mapping_owned)}</DetailItem>
           <DetailItem label="Lease">{upnp.lease_seconds ? `${upnp.lease_seconds}s` : 'Permanent / router default'}</DetailItem>
-          {upnp.error && <DetailItem label="UPnP error"><span className="cluster-connectivity-error">{upnp.error}</span></DetailItem>}
+          {diagnosticErrorText(upnp) && <DetailItem label="UPnP error"><span className="cluster-connectivity-error">{diagnosticErrorText(upnp)}</span></DetailItem>}
         </dl></article>
 
         {(connectivity.external_ip.enabled || connectivity.external_ip.attempted) && <article className="node-detail-card"><h2>External IP fallback</h2><dl>
           <DetailItem label="Enabled">{yesNo(connectivity.external_ip.enabled)}</DetailItem>
           <DetailItem label="Attempted">{yesNo(connectivity.external_ip.attempted)}</DetailItem>
           <DetailItem label="Address"><code>{connectivity.external_ip.address ?? '—'}</code></DetailItem>
-          {connectivity.external_ip.error && <DetailItem label="Lookup error"><span className="cluster-connectivity-error">{connectivity.external_ip.error}</span></DetailItem>}
+          {diagnosticErrorText(connectivity.external_ip) && <DetailItem label="Lookup error"><span className="cluster-connectivity-error">{diagnosticErrorText(connectivity.external_ip)}</span></DetailItem>}
         </dl></article>}
       </div>
     </>
@@ -545,7 +545,7 @@ export function StatusScreen({ api, endpointRegistry, manageApi, platform, secti
             <span>{startupSubsystemLabel(subsystem.key)}</span><strong className={`cluster-startup-state ${subsystem.state}`}>{subsystem.state}</strong>
           </div>)}
         </div>
-        {snapshot.startup.error && <p className="cluster-startup-error">{snapshot.startup.error}</p>}
+        {diagnosticErrorText(snapshot.startup) && <p className="cluster-startup-error">{diagnosticErrorText(snapshot.startup)}</p>}
       </section>}
       {clusterConditions.length > 0 && <div className="cluster-conditions">
         {clusterConditions.map((condition) => <span key={condition}>{condition}</span>)}
@@ -652,7 +652,7 @@ export function NodeStatusScreen({ api }: { api: ClusterStatusApi }) {
       <Link className="back-button" to={routes.status} data-tv-focusable="true">← Overview</Link>
       <StatusHeader eyebrow="Cluster node" title={nodeName(node)} health={{ className: nodeNotYetReady(node) ? 'recovering' : node.state === 'online' ? 'healthy' : node.state === 'retired' ? 'degraded' : 'critical', label: nodeStatusLabel(node) }} refreshing={refreshing} onRefresh={() => void refreshPage()} />
       {error && <p className="manage-error">Live refresh failed: {error}</p>}
-      {connectivity && <p className={`cluster-check-result ${connectivity.reachable ? 'reachable' : 'unreachable'}`}>Connectivity: {connectivity.reachable ? 'reachable' : 'unreachable'}{connectivity.error ? ` · ${connectivity.error}` : ''}</p>}
+      {connectivity && <p className={`cluster-check-result ${connectivity.reachable ? 'reachable' : 'unreachable'}`}>Connectivity: {connectivity.reachable ? 'reachable' : 'unreachable'}{diagnosticErrorText(connectivity) ? ` · ${diagnosticErrorText(connectivity)}` : ''}</p>}
 
       <div className="node-detail-grid">
         <article className="node-detail-card"><h2>Overview</h2><dl>

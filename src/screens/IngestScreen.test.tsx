@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { AcquisitionApi, AcquisitionSnapshot, IngestJob, TorrentJob } from '@machafoundation/core';
 import { IngestScreen } from './IngestScreen';
 import { TorrentDetailScreen } from './TorrentDetailScreen';
@@ -46,10 +46,10 @@ function snapshot(torrentJobs: TorrentJob[], ingestJobs: IngestJob[] = []): Acqu
   };
 }
 
-function fakeApi(value: AcquisitionSnapshot): AcquisitionApi {
+function fakeApi(value: AcquisitionSnapshot | (() => AcquisitionSnapshot), overrides: Partial<AcquisitionApi> = {}): AcquisitionApi {
   const unused = () => { throw new Error('not used in this test'); };
   return {
-    snapshot: () => Promise.resolve(value),
+    snapshot: () => Promise.resolve(typeof value === 'function' ? value() : value),
     submitPath: unused,
     submitMagnet: unused,
     pauseIngest: unused,
@@ -61,6 +61,7 @@ function fakeApi(value: AcquisitionSnapshot): AcquisitionApi {
     retryTorrent: unused,
     cancelTorrent: unused,
     clearTorrent: unused,
+    ...overrides,
   } as unknown as AcquisitionApi;
 }
 
@@ -92,8 +93,7 @@ function Where() {
   return <output data-testid="where">{location.pathname + location.search}</output>;
 }
 
-function renderAt(path: string, value: AcquisitionSnapshot) {
-  const api = fakeApi(value);
+function renderAt(path: string, value: AcquisitionSnapshot, api = fakeApi(value)) {
   render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
@@ -247,5 +247,64 @@ describe('a long torrent list', () => {
     await screen.findByText('Torrent 09');
     expect(document.querySelectorAll('.torrent-table tbody tr')).toHaveLength(10);
     expect(screen.getByTestId('where').textContent).toBe('/ingest/torrents?sort=added&dir=desc&page=2');
+  });
+});
+
+describe('bulk actions on torrents', () => {
+  const tick = (name: string) => fireEvent.click(screen.getByRole('checkbox', { name: `Select ${name}` }));
+  const bar = () => screen.getByRole('group', { name: 'Selected torrent actions' });
+
+  it('pauses only the ticked torrents that can pause, and lets go of one that has gone', async () => {
+    const running = torrentJob({ id: 'a', name: 'Alpha' });
+    const paused = torrentJob({ id: 'b', name: 'Bravo', state: 'paused' });
+    const other = torrentJob({ id: 'c', name: 'Charlie' });
+    let current = snapshot([running, paused, other]);
+    const pauseTorrent = vi.fn(async (id: string) => {
+      current = snapshot([running, other]);
+      return torrentJob({ id, state: 'paused' });
+    });
+    renderAt('/ingest/torrents', current, fakeApi(() => current, { pauseTorrent }));
+    await screen.findByText('Alpha');
+    expect(screen.queryByRole('group', { name: 'Selected torrent actions' })).toBeNull();
+
+    tick('Alpha');
+    tick('Bravo');
+    expect(within(bar()).getByText('2 selected')).toBeTruthy();
+    expect((within(bar()).getByRole('button', { name: 'Resume' }) as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(within(bar()).getByRole('button', { name: 'Pause' }));
+
+    await waitFor(() => expect(within(bar()).getByText('1 selected')).toBeTruthy());
+    expect(pauseTorrent.mock.calls).toEqual([['a']]);
+  });
+
+  it('says how many the server refused', async () => {
+    const pauseTorrent = vi.fn(async (id: string) => {
+      if (id === 'b') throw new Error('refused');
+      return torrentJob({ id, state: 'paused' });
+    });
+    const value = snapshot([torrentJob({ id: 'a', name: 'Alpha' }), torrentJob({ id: 'b', name: 'Bravo' })]);
+    renderAt('/ingest/torrents', value, fakeApi(value, { pauseTorrent }));
+    await screen.findByText('Alpha');
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select this page' }));
+    fireEvent.click(within(bar()).getByRole('button', { name: 'Pause' }));
+    expect((await screen.findByRole('alert')).textContent).toBe('1 of 2 torrents could not be paused.');
+  });
+
+  it('asks before removing, cancels those still running, and clears them all', async () => {
+    const cancelTorrent = vi.fn(async (id: string) => torrentJob({ id, state: 'cancelled' }));
+    const clearTorrent = vi.fn(async (_id: string) => undefined);
+    const value = snapshot([torrentJob({ id: 'a', name: 'Alpha' }), torrentJob({ id: 'd', name: 'Delta', state: 'completed' })]);
+    renderAt('/ingest/torrents', value, fakeApi(value, { cancelTorrent, clearTorrent }));
+    await screen.findByText('Alpha');
+    tick('Alpha');
+    tick('Delta');
+    fireEvent.click(within(bar()).getByRole('button', { name: 'Remove' }));
+    const dialog = screen.getByRole('dialog', { name: 'Remove 2 torrents?' });
+    expect(clearTorrent).not.toHaveBeenCalled();
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Remove' }));
+    await waitFor(() => expect(screen.queryByRole('group', { name: 'Selected torrent actions' })).toBeNull());
+    expect(cancelTorrent.mock.calls).toEqual([['a']]);
+    expect(clearTorrent.mock.calls.map(([id]) => id).sort()).toEqual(['a', 'd']);
   });
 });

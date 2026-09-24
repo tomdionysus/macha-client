@@ -1,3 +1,4 @@
+import { codeWords } from '../../text/viewerText';
 import type { TorrentJob } from '@machafoundation/core';
 import { presentedTime } from '../../diagnostics/timestamps';
 
@@ -56,7 +57,7 @@ export function formatAge(value: number, now: number): string {
 }
 
 export function stateLabel(state: string): string {
-  return state.replace(/_/g, ' ').replace(/^./, (value) => value.toUpperCase());
+  return codeWords(state);
 }
 
 /**

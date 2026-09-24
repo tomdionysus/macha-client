@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { routes, type AcquisitionApi, type IngestJob, type TorrentJob } from '@machafoundation/core';
 import { JobControls, Progress } from './ingest/JobControls';
 import { formatAge, formatBytes, formatEta, formatPercent, formatRate, formatRatio, formatTimestamp, percent, stateLabel } from './ingest/format';
+import { jobErrorText } from '../text/viewerText';
 import { MetricTile } from '../components/MetricTile';
 import { DetailCard, DetailHeader, Facts } from '../components/ListParts';
 import { canRetryImport, displayStateOf, jobKey, linkedIngestOf, torrentLifecycleMessage, torrentStages, type TorrentStage } from './ingest/jobs';
@@ -158,7 +159,7 @@ export function TorrentDetailScreen({ api }: { api: AcquisitionApi }) {
   }
 
   const state = displayStateOf(job, linked);
-  const failure = job.error || linked?.error;
+  const failure = jobErrorText(job) ?? jobErrorText(linked);
   const lifecycle = torrentLifecycleMessage(job, linked);
   const name = job.name || 'Torrent';
   return (
