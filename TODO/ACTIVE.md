@@ -656,10 +656,13 @@ fi-1 site, test account, dev client:
   and the health cycle charging it, the loader moves on only at the img's
   error event. Measured in Chrome 2026-09-24: connection refused errors in
   19 ms (falls through at once); a silently dropping host errors at 14.7 s.
-  Watching `ArtworkSource.ready` would gain little while core's health cycle
-  is 10 s plus a probe timeout, and a client time limit would abandon slow
-  but working loads on a weak link, so neither is built. Tom's call if the
-  window matters.
+  Core charges a silently dead node 8-18 s after it dies (an 8 s probe
+  timeout on a 10 s cycle), and since `75c2d27` `ready` stays false from the
+  first failure until the node answers again, so no new poster leads with it
+  after that. The window is therefore up to ~18 s in which posters on that
+  node hang 14.7 s each. Watching `ready` would gain little and a client
+  time limit would abandon slow but working loads on a weak link, so neither
+  is built; core agrees. Tom's call if the window matters.
 - **The browser cannot measure it.** Artwork responses carry no
   `Timing-Allow-Origin`, so Resource Timing hides first byte and size for
   every cross-origin poster. A server header, one line.
