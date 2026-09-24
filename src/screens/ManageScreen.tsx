@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
-import { routes } from '@machafoundation/core';
+import { identifyUnmatched, routes } from '@machafoundation/core';
 import { BulkActions, DetailCard, DetailHeader, Facts, ListHeading, Pager, runBulkOperation, SelectPageBox, SelectRowBox, useListSelection } from '../components/ListParts';
 import { pageSlice } from '../lists/paging';
 import { SortControl, SortHeader, useListSort } from '../components/ListSortControls';
@@ -101,6 +101,7 @@ function matchSubtitle(match: ManageCatalogueMatch): string {
   if (match.season_number != null && match.episode_number != null) {
     parts.push(`S${String(match.season_number).padStart(2, '0')}E${String(match.episode_number).padStart(2, '0')}`);
   }
+  if (match.media_ids.length > 0) parts.push(match.media_ids.length === 1 ? '1 file' : `${match.media_ids.length} files`);
   return parts.join(' · ');
 }
 
@@ -553,7 +554,11 @@ export function UnmatchedFilePage({ api, catalogueApi }: { api: ManageApi; catal
               {matches.map((match) => (
                 <div key={match.id} className="manage-match-row">
                   <div><strong>{match.title}</strong><span>{matchSubtitle(match)}</span></div>
-                  <button className="secondary-button" type="button" disabled={busy} onClick={() => void resolve(() => api.match(item.id, match.id))} data-tv-focusable="true">Use match</button>
+                  {/* An item that already has a file gains this one beside it, as another version; core
+                      routes the choice, and the server never replaces what the item holds. */}
+                  <button className="secondary-button" type="button" disabled={busy} onClick={() => void resolve(async () => { await identifyUnmatched(api, item.id, { from: 'catalogue', catalogueItemId: match.id }); })} data-tv-focusable="true">
+                    {match.media_ids.length > 0 ? 'Add as another version' : 'Use match'}
+                  </button>
                 </div>
               ))}
             </div>

@@ -1,10 +1,15 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { CatalogueApi, CatalogueArtwork, CatalogueItem, CatalogueKind } from '@machafoundation/core';
+import type { CatalogueApi, CatalogueArtwork, CatalogueItem, CatalogueKind, ManageApi, PlaybackFactsApi } from '@machafoundation/core';
+import { ItemFiles } from './identify/ItemFiles';
 import { ErrorMessage, Loading } from '../components/Status';
 import { useAsync } from '../hooks/useAsync';
 
 interface Props {
   api: CatalogueApi;
+  /** Reads what each of the item's files is. */
+  facts: PlaybackFactsApi;
+  /** Present when this account may attach files; adding a version needs it. */
+  manage?: ManageApi;
   itemId: string;
   onBack: () => void;
   onSaved: () => void;
@@ -110,7 +115,9 @@ function ArtworkPreview({ api, artwork, selected, onSelect }: {
   );
 }
 
-function MetadataForm({ api, initial, onBack, onSaved, onCleared }: {
+function MetadataForm({ api, facts, manage, initial, onBack, onSaved, onCleared }: {
+  facts: PlaybackFactsApi;
+  manage?: ManageApi;
   api: CatalogueApi;
   initial: CatalogueItem;
   onBack: () => void;
@@ -303,6 +310,8 @@ function MetadataForm({ api, initial, onBack, onSaved, onCleared }: {
         </section>
       </div>
 
+      <ItemFiles item={initial} facts={facts} manage={manage} />
+
       <section className="metadata-editor-panel metadata-artwork-panel">
         <h2>Artwork</h2>
         {artworkRoles.length === 0 && <p className="metadata-editor-muted">No artwork is currently attached to this item.</p>}
@@ -333,10 +342,10 @@ function MetadataForm({ api, initial, onBack, onSaved, onCleared }: {
   );
 }
 
-export function MetadataEditorScreen({ api, itemId, onBack, onSaved, onCleared }: Props) {
+export function MetadataEditorScreen({ api, facts, manage, itemId, onBack, onSaved, onCleared }: Props) {
   const item = useAsync(() => api.get(itemId), [api, itemId]);
   if (item.loading) return <Loading />;
   if (item.error) return <ErrorMessage error={item.error} />;
   if (!item.value) return null;
-  return <MetadataForm key={`${item.value.id}:${item.value.revision}`} api={api} initial={item.value} onBack={onBack} onSaved={onSaved} onCleared={onCleared} />;
+  return <MetadataForm key={`${item.value.id}:${item.value.revision}`} api={api} facts={facts} manage={manage} initial={item.value} onBack={onBack} onSaved={onSaved} onCleared={onCleared} />;
 }

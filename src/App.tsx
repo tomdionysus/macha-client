@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type ReactElement } from 'react';
 import { Navigate, NavLink, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom';
-import type { CatalogueApi, CatalogueMediaProfile } from '@machafoundation/core';
+import type { CatalogueApi, CatalogueMediaProfile, ManageApi, PlaybackFactsApi } from '@machafoundation/core';
 import type { MediaApi } from '@machafoundation/core';
 import { AppLogo } from './components/AppLogo';
 import { MusicNav } from './components/MusicNav';
@@ -256,12 +256,14 @@ function AlbumRoute({ api, onPlay, onPlayAll, onOpenTrack, onAddToPlaylist, onPl
   );
 }
 
-function MetadataEditorRoute({ api }: { api: CatalogueApi }) {
+function MetadataEditorRoute({ api, facts, manage }: { api: CatalogueApi; facts: PlaybackFactsApi; manage?: ManageApi }) {
   const { itemId } = useParams();
   const navigate = useNavigate();
   return (
     <MetadataEditorScreen
       api={api}
+      facts={facts}
+      manage={manage}
       itemId={required(itemId, 'itemId')}
       onBack={() => navigate(-1)}
       onSaved={() => navigate(-1)}
@@ -868,7 +870,7 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
           <Route path="/music/tracks/:trackId" element={mediaPane(<DetailRoute api={api} onPlay={openPlayer} onPlayFromStart={openPlayerFromStart} progressById={playback.progressById} parameter="trackId" onEdit={metadataEditingAvailable ? openMetadataEditor : undefined} onMediaProfile={preparePlaybackProfile} />)} />
           <Route path="/play/:itemId" element={<div className="player-route-placeholder" aria-hidden="true" />} />
           <Route path="/items/:itemId" element={mediaPane(<DetailRoute api={api} onPlay={openPlayer} onPlayFromStart={openPlayerFromStart} progressById={playback.progressById} parameter="itemId" onEdit={metadataEditingAvailable ? openMetadataEditor : undefined} onMediaProfile={preparePlaybackProfile} />)} />
-          <Route path="/items/:itemId/edit" element={metadataEditingAvailable ? <MetadataEditorRoute api={catalogueApi} /> : <Navigate to={landing} replace />} />
+          <Route path="/items/:itemId/edit" element={metadataEditingAvailable ? <MetadataEditorRoute api={catalogueApi} facts={playbackFactsApi} manage={libraryManagementAvailable ? manageApi : undefined} /> : <Navigate to={landing} replace />} />
           <Route path={routes.search} element={mediaPane(<SearchScreen api={api} onOpen={open} />)} />
           <Route path={routes.ingest} element={<Navigate to={routes.ingestTorrents} replace />} />
           <Route path={routes.ingestTorrents} element={permits('importer') ? <IngestScreen api={acquisitionApi} section="torrents" /> : <Navigate to={landing} replace />} />
