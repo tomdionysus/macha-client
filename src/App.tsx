@@ -6,6 +6,7 @@ import { AppLogo } from './components/AppLogo';
 import { MusicNav } from './components/MusicNav';
 import { StatusNav } from './components/StatusNav';
 import { ManageNav } from './components/ManageNav';
+import { ImportNav } from './components/ImportNav';
 import { machaLogoUrl as logoUrl } from './uiAssets';
 import { useTvNavigation } from './hooks/useTvNavigation';
 import { useEndpointHealthMonitor } from './cluster/useEndpointHealthMonitor';
@@ -759,6 +760,7 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
   const musicSectionActive = location.pathname === routes.music || location.pathname.startsWith(`${routes.music}/`);
   const statusSectionActive = location.pathname === routes.status || location.pathname.startsWith(`${routes.status}/`);
   const manageSectionActive = location.pathname === routes.manage || location.pathname.startsWith(`${routes.manage}/`);
+  const importSectionActive = location.pathname === routes.ingest || location.pathname.startsWith(`${routes.ingest}/`);
 
   return (
     <div className={`app-shell${miniPlayerActive ? ' has-mini-player' : ''}`}>
@@ -807,13 +809,15 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
           </NavLink>
         </div>
       </header>
-      {!playback.playerRouteActive && (musicSectionActive || statusSectionActive || manageSectionActive) && (
+      {!playback.playerRouteActive && (musicSectionActive || statusSectionActive || manageSectionActive || importSectionActive) && (
         <div className="section-nav-slot">
           {musicSectionActive
             ? <MusicNav />
             : statusSectionActive
               ? <StatusNav />
-              : <ManageNav managementAvailable={libraryManagementAvailable} usersAvailable={usersAvailable} />}
+              : importSectionActive
+                ? <ImportNav />
+                : <ManageNav managementAvailable={libraryManagementAvailable} usersAvailable={usersAvailable} />}
         </div>
       )}
       <main>
@@ -837,8 +841,10 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
           <Route path="/items/:itemId" element={mediaPane(<DetailRoute api={api} onPlay={openPlayer} onPlayFromStart={openPlayerFromStart} progressById={playback.progressById} parameter="itemId" onEdit={metadataEditingAvailable ? openMetadataEditor : undefined} onMediaProfile={preparePlaybackProfile} />)} />
           <Route path="/items/:itemId/edit" element={metadataEditingAvailable ? <MetadataEditorRoute api={catalogueApi} /> : <Navigate to={landing} replace />} />
           <Route path={routes.search} element={mediaPane(<SearchScreen api={api} onOpen={open} />)} />
-          <Route path={routes.ingest} element={permits('importer') ? <IngestScreen api={acquisitionApi} /> : <Navigate to={landing} replace />} />
-          <Route path={`${routes.ingest}/torrents/:torrentId`} element={permits('importer') ? <TorrentDetailScreen api={acquisitionApi} /> : <Navigate to={landing} replace />} />
+          <Route path={routes.ingest} element={<Navigate to={routes.ingestTorrents} replace />} />
+          <Route path={routes.ingestTorrents} element={permits('importer') ? <IngestScreen api={acquisitionApi} section="torrents" /> : <Navigate to={landing} replace />} />
+          <Route path={routes.ingestFiles} element={permits('importer') ? <IngestScreen api={acquisitionApi} section="files" /> : <Navigate to={landing} replace />} />
+          <Route path={`${routes.ingestTorrents}/:torrentId`} element={permits('importer') ? <TorrentDetailScreen api={acquisitionApi} /> : <Navigate to={landing} replace />} />
           <Route path={routes.status} element={permits('view_status') ? <StatusScreen api={clusterStatusApi} endpointRegistry={endpointRegistry} platform={platform} manageApi={managementAvailable ? manageApi : undefined} section="overview" auth={auth} /> : <Navigate to={landing} replace />} />
           <Route path={routes.statusClient} element={permits('view_status') ? <StatusScreen api={clusterStatusApi} endpointRegistry={endpointRegistry} platform={platform} manageApi={managementAvailable ? manageApi : undefined} section="client" auth={auth} /> : <Navigate to={landing} replace />} />
           <Route path={routes.statusConnectivity} element={permits('view_status') ? <StatusScreen api={clusterStatusApi} endpointRegistry={endpointRegistry} platform={platform} manageApi={managementAvailable ? manageApi : undefined} section="connectivity" auth={auth} /> : <Navigate to={landing} replace />} />

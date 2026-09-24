@@ -2,6 +2,21 @@
 
 Last updated: 2026-09-24, after the search sort
 
+## Import: Torrents and Files as separate pages, and columns that hold still — 2026-09-24, unreleased
+
+- **Import has the standard section submenu** (Tom: "Torrents are only one
+  type of import"): Torrents at `/ingest/torrents`, Files at `/ingest/files`,
+  each with only its own add form, notes and table; `/ingest` goes to
+  Torrents, and a torrent's page stays under it so Torrents stays lit. Route
+  names are core's (`routes.ingestTorrents`, `ingestTorrent(id)`,
+  `ingestFiles`, core `287e959`). Two tests, red against the unsplit screen;
+  seen in the page.
+- **The torrent columns no longer jump** as speeds, statuses and ETAs change:
+  fixed table layout, every column but the name sized to its formatter's
+  longest text (padding included) and actions to the remove prompt. Measured
+  on the live page: longest and shortest values, and the remove prompt, move
+  no column by a pixel, and nothing clips.
+
 ## Search: full-width bar, core's sort and episode labels, articles ignored, jump bar — 2026-09-24, unreleased
 
 - **The search bar fills the width**, with "Sort by" on the right of the

@@ -7,13 +7,17 @@ import { canRetryImport, displayStateOf, jobKey, linkedIngestOf } from './ingest
 import { parseTorrentSort, sortTorrents, TORRENT_SORT_KEYS, torrentSortParams, type TorrentSort, type TorrentSortKey } from './ingest/torrentSort';
 import { useAcquisition } from './ingest/useAcquisition';
 
+/** Import's pages: torrents and filesystem imports are different kinds of job, each with its own page. */
+export type IngestSection = 'torrents' | 'files';
+
 interface Props {
   api: AcquisitionApi;
+  section: IngestSection;
 }
 
 /** A torrent's own page, carrying the list's sort so coming back lands on the same order. */
 export function torrentPath(id: string, search = ''): string {
-  return `${routes.ingest}/torrents/${encodeURIComponent(id)}${search}`;
+  return `${routes.ingestTorrent(id)}${search}`;
 }
 
 /** Column headers that sort, the way a torrent client's do. */
@@ -35,7 +39,7 @@ function SortHeader({ label, sortKey, sort, onSort, className }: {
   );
 }
 
-export function IngestScreen({ api }: Props) {
+export function IngestScreen({ api, section }: Props) {
   const acquisition = useAcquisition(api);
   const { snapshot, loading, error, setError, notice, setNotice, refresh, busyByJob, confirmRemove, setConfirmRemove, act } = acquisition;
   const [path, setPath] = useState('');
@@ -123,42 +127,46 @@ export function IngestScreen({ api }: Props) {
       </header>
 
       <div className="ingest-add-bar">
-        <form className="ingest-add-form" onSubmit={(event) => { void submit('magnet', event); }}>
-          <input
-            data-tv-focusable="true"
-            aria-label="Magnet link"
-            value={magnet}
-            onChange={(event: ChangeEvent<HTMLInputElement>) => setMagnet(event.target.value)}
-            placeholder="magnet:?xt=urn:btih:…"
-            disabled={!torrentEnabled || submitting === 'magnet'}
-          />
-          <button className="primary-button" data-tv-focusable="true" type="submit" disabled={!torrentEnabled || !magnet.trim() || Boolean(submitting)}>
-            {submitting === 'magnet' ? 'Adding…' : 'Add torrent'}
-          </button>
-        </form>
-        <form className="ingest-add-form" onSubmit={(event) => { void submit('path', event); }}>
-          <input
-            data-tv-focusable="true"
-            aria-label="Server file or folder path"
-            title="A path on the Macha server, for example a mounted USB disk. Sources are preserved after a manual import."
-            value={path}
-            onChange={(event: ChangeEvent<HTMLInputElement>) => setPath(event.target.value)}
-            placeholder="/media/usb/Movies"
-            disabled={!ingestEnabled || submitting === 'path'}
-          />
-          <button className="primary-button" data-tv-focusable="true" type="submit" disabled={!ingestEnabled || !path.trim() || Boolean(submitting)}>
-            {submitting === 'path' ? 'Adding…' : 'Import path'}
-          </button>
-        </form>
+        {section === 'torrents' ? (
+          <form className="ingest-add-form" onSubmit={(event) => { void submit('magnet', event); }}>
+            <input
+              data-tv-focusable="true"
+              aria-label="Magnet link"
+              value={magnet}
+              onChange={(event: ChangeEvent<HTMLInputElement>) => setMagnet(event.target.value)}
+              placeholder="magnet:?xt=urn:btih:…"
+              disabled={!torrentEnabled || submitting === 'magnet'}
+            />
+            <button className="primary-button" data-tv-focusable="true" type="submit" disabled={!torrentEnabled || !magnet.trim() || Boolean(submitting)}>
+              {submitting === 'magnet' ? 'Adding…' : 'Add torrent'}
+            </button>
+          </form>
+        ) : (
+          <form className="ingest-add-form" onSubmit={(event) => { void submit('path', event); }}>
+            <input
+              data-tv-focusable="true"
+              aria-label="Server file or folder path"
+              title="A path on the Macha server, for example a mounted USB disk. Sources are preserved after a manual import."
+              value={path}
+              onChange={(event: ChangeEvent<HTMLInputElement>) => setPath(event.target.value)}
+              placeholder="/media/usb/Movies"
+              disabled={!ingestEnabled || submitting === 'path'}
+            />
+            <button className="primary-button" data-tv-focusable="true" type="submit" disabled={!ingestEnabled || !path.trim() || Boolean(submitting)}>
+              {submitting === 'path' ? 'Adding…' : 'Import path'}
+            </button>
+          </form>
+        )}
       </div>
-      {snapshot && !torrentBuilt && <p className="ingest-disabled-note">This server was built without libtorrent-rasterbar.</p>}
-      {snapshot && torrentBuilt && !torrentEnabled && <p className="ingest-disabled-note">Torrent acquisition is disabled in server configuration.</p>}
-      {snapshot && !ingestEnabled && <p className="ingest-disabled-note">Filesystem import is disabled in server configuration.</p>}
+      {section === 'torrents' && snapshot && !torrentBuilt && <p className="ingest-disabled-note">This server was built without libtorrent-rasterbar.</p>}
+      {section === 'torrents' && snapshot && torrentBuilt && !torrentEnabled && <p className="ingest-disabled-note">Torrent acquisition is disabled in server configuration.</p>}
+      {section === 'files' && snapshot && !ingestEnabled && <p className="ingest-disabled-note">Filesystem import is disabled in server configuration.</p>}
 
       {error && <p className="ingest-page-error" role="alert">{error}</p>}
       {notice && <p className="ingest-page-notice">{notice}</p>}
       {loading && !snapshot && <p className="ingest-loading">Loading import state…</p>}
 
+      {section === 'torrents' && (
       <section className="ingest-job-section" aria-labelledby="ingest-torrents-heading">
         <div className="ingest-section-heading">
           <h2 id="ingest-torrents-heading">Torrents <span>{torrentJobs.length}</span></h2>
@@ -253,7 +261,9 @@ export function IngestScreen({ api }: Props) {
           </div>
         )}
       </section>
+      )}
 
+      {section === 'files' && (
       <section className="ingest-job-section" aria-labelledby="ingest-files-heading">
         <div className="ingest-section-heading">
           <h2 id="ingest-files-heading">File and folder imports <span>{filesystemJobs.length}</span></h2>
@@ -315,6 +325,7 @@ export function IngestScreen({ api }: Props) {
           </div>
         )}
       </section>
+      )}
     </section>
   );
 }

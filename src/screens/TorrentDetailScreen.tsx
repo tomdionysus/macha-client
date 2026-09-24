@@ -72,7 +72,7 @@ export function TorrentDetailScreen({ api }: { api: AcquisitionApi }) {
   const { search } = useLocation();
   const navigate = useNavigate();
   const { snapshot, loading, error, busyByJob, confirmRemove, setConfirmRemove, act } = useAcquisition(api);
-  const back = `${routes.ingest}${search}`;
+  const back = `${routes.ingestTorrents}${search}`;
   const job = snapshot?.torrentJobs.find((candidate) => candidate.id === torrentId);
   const linked = job ? linkedIngestOf(job, snapshot?.ingestJobs) : undefined;
 

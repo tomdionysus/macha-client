@@ -97,7 +97,8 @@ function renderAt(path: string, value: AcquisitionSnapshot) {
   render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
-        <Route path="/ingest" element={<IngestScreen api={api} />} />
+        <Route path="/ingest/torrents" element={<IngestScreen api={api} section="torrents" />} />
+        <Route path="/ingest/files" element={<IngestScreen api={api} section="files" />} />
         <Route path="/ingest/torrents/:torrentId" element={<TorrentDetailScreen api={api} />} />
       </Routes>
       <Where />
@@ -118,25 +119,25 @@ const three = [
 
 describe('the torrent list', () => {
   it('is one slim row per torrent, newest first until asked otherwise', async () => {
-    renderAt('/ingest', snapshot(three));
+    renderAt('/ingest/torrents', snapshot(three));
     await screen.findByText('Alpha');
     expect(await rowNames()).toEqual(['Bravo', 'Charlie', 'Alpha']);
     expect(document.querySelectorAll('.torrent-table tbody tr')).toHaveLength(3);
   });
 
   it('reorders when the viewer picks a sort, and says so in the address', async () => {
-    renderAt('/ingest', snapshot(three));
+    renderAt('/ingest/torrents', snapshot(three));
     await screen.findByText('Alpha');
     fireEvent.change(screen.getByLabelText('Sort by'), { target: { value: 'name' } });
     expect(await rowNames()).toEqual(['Alpha', 'Bravo', 'Charlie']);
-    expect(screen.getByTestId('where').textContent).toBe('/ingest?sort=name&dir=asc');
+    expect(screen.getByTestId('where').textContent).toBe('/ingest/torrents?sort=name&dir=asc');
 
     fireEvent.click(screen.getByRole('button', { name: /Ascending; switch to descending/ }));
     expect(await rowNames()).toEqual(['Charlie', 'Bravo', 'Alpha']);
   });
 
   it('sorts from a column header, and reverses on a second press', async () => {
-    renderAt('/ingest', snapshot(three));
+    renderAt('/ingest/torrents', snapshot(three));
     await screen.findByText('Alpha');
     const header = within(document.querySelector('.torrent-table thead') as HTMLElement).getByRole('button', { name: /Down/ });
     fireEvent.click(header);
@@ -146,15 +147,15 @@ describe('the torrent list', () => {
   });
 
   it('opens a torrent on its own page, keeping the sort for the way back', async () => {
-    renderAt('/ingest?sort=name&dir=desc', snapshot(three));
+    renderAt('/ingest/torrents?sort=name&dir=desc', snapshot(three));
     fireEvent.click(await screen.findByRole('link', { name: 'Alpha' }));
     expect(screen.getByTestId('where').textContent).toBe('/ingest/torrents/a?sort=name&dir=desc');
     fireEvent.click(await screen.findByRole('link', { name: 'Import' }));
-    expect(screen.getByTestId('where').textContent).toBe('/ingest?sort=name&dir=desc');
+    expect(screen.getByTestId('where').textContent).toBe('/ingest/torrents?sort=name&dir=desc');
   });
 
   it('keeps the detail off the list', async () => {
-    renderAt('/ingest', snapshot([torrentJob()]));
+    renderAt('/ingest/torrents', snapshot([torrentJob()]));
     await screen.findByText('Some.Release.2024.1080p');
     expect(screen.queryByText('Info hash')).toBeNull();
   });
@@ -203,5 +204,25 @@ describe("a torrent's own page", () => {
   it('says a torrent that has gone is gone, rather than showing an empty page', async () => {
     renderAt('/ingest/torrents/nope', snapshot([torrentJob()]));
     await waitFor(() => expect(screen.getByText('This torrent is no longer on the server.')).not.toBeNull());
+  });
+});
+
+describe('each kind of import on its own page', () => {
+  const copying: IngestJob = { ...importing, id: 'ing-2', source_type: 'filesystem', source_ref: '/media/usb/Movies', display_name: 'Movies' };
+
+  it('shows torrents and their magnet form on the torrents page, and no file imports', async () => {
+    renderAt('/ingest/torrents', snapshot([torrentJob()], [copying]));
+    await screen.findByText('Some.Release.2024.1080p');
+    expect(screen.getByLabelText('Magnet link')).toBeTruthy();
+    expect(screen.queryByLabelText('Server file or folder path')).toBeNull();
+    expect(screen.queryByRole('table', { name: /file and folder imports/i })).toBeNull();
+  });
+
+  it('shows file imports and their path form on the files page, and no torrents', async () => {
+    renderAt('/ingest/files', snapshot([torrentJob()], [copying]));
+    await screen.findByRole('table', { name: /file and folder imports/i });
+    expect(screen.getByLabelText('Server file or folder path')).toBeTruthy();
+    expect(screen.queryByLabelText('Magnet link')).toBeNull();
+    expect(screen.queryByText('Some.Release.2024.1080p')).toBeNull();
   });
 });
