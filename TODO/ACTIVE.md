@@ -19,6 +19,15 @@ are related. Core is addressed as the `Macha NPM Core` session.
 
 ## Start here
 
+**`main` resolves published core 0.19.0 and is pushed, 2026-09-24 20:50, on
+Tom's word ("Go for it, core 0.19.0").** Merge `26e8bcc`; gate run against
+the registry copy (a real directory, gitHead `4e1746a`, no lockfile link),
+typecheck, suite 542 and build green, and again from a fresh clone with no
+core tree beside it (`npm ci`); bundle `index-DKJODXg4.js`, the same as the
+build against the linked candidate. The client version stays 0.18.0 and the
+changelog section stays Unreleased: no bump or tag was asked for. `develop`
+is linked to core's tree again (`abf7c7b`) and **is not pushed**.
+
 **Release in preparation, 2026-09-24 evening (Tom: "clear up what is in
 flight and stabilise").** Everything in flight is finished and in the working
 tree, uncommitted: bulk torrent actions, server 0.56.0 wording, log out onto
