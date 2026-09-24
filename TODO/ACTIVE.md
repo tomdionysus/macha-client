@@ -19,6 +19,21 @@ are related. Core is addressed as the `Macha NPM Core` session.
 
 ## Start here
 
+**Release in preparation, 2026-09-24 evening (Tom: "clear up what is in
+flight and stabilise").** Everything in flight is finished and in the working
+tree, uncommitted: bulk torrent actions, server 0.56.0 wording, log out onto
+core's session model, `seedEndpoints`, the Status reset gate, the decode
+fallback wording. `CHANGELOG.md`'s Unreleased section now covers everything
+since 0.18.0. What the release needs, all Tom's: a core publish carrying
+`e840d72` or later (this client depends on a great deal of unpublished core);
+`package.json` onto that version, then suite, typecheck and build against it;
+the version bump (README version test); the merge to `main`. Two things to
+decide before it: the Unreleased entry "Choosing a node moves the stream"
+says **"Not releasable until the handover arrives"**, and that handover is
+still an open P0 below; and the paging-test remedy (item 1). Live checks owed
+need a sign-in as Tom: bulk bar, Reset association by role, log out,
+remembered nodes across a reload.
+
 **Where the repo is, 2026-09-24.** `main` is **0.18.0** (`ce74408`).
 `develop` is **34 commits ahead of `origin/develop`** (`6e264bb` was the
 last push), linked to core's tree (`file:../macha-ts`, core clean at
@@ -45,26 +60,95 @@ live; TV focus corrections ported; login, Music and Status touches.
 
 **Next, in order:**
 
-1. **The torrent paging test times out: find why a 50-row re-render costs
-   ~2 s in jsdom.** `IngestScreen.test.tsx`, "a long torrent list shows
-   fifty rows a page", failed in 8 of 12 back-to-back full-suite runs
-   (timeout, 6.3 s against 5 s), and it is in commit `f951e58`. Timed alone:
-   render 0.56 s, data arriving 1.7 s, the Next click (one re-render of 50
-   rows and an address write) 2.0 s, about 40 ms a row. Narrowing the role
-   query saved 0.7 s and is not the cause. Tom: failing tests are problems
-   to investigate, never "flaky". Likely suspects, unchecked: something per
-   row that is expensive under jsdom (JobControls, Progress, the row
-   `Link`), or the whole screen re-rendering on each address write. The
-   3-row sort tests at 1.5 s say the cost is not only row count.
-2. **Bulk actions on torrents** (Tom, asked before the Unmatched work and
-   deferred behind it): selection and bulk pause, resume and remove, in the
-   shared list parts the Unmatched list already uses.
-3. **Seen by hand, not yet:** the unmatched table without a horizontal
+1. **The torrent paging test's timeout: cause found, remedy is Tom's.**
+   `IngestScreen.test.tsx`, "a long torrent list shows fifty rows a page",
+   failed in 8 of 12 full-suite runs on 2026-09-24 (timeout, 6.3 s against
+   5 s; commit `f951e58`). It does not cost ~2 s a re-render. Measured
+   2026-09-24 17:00, quiet machine: 0.45 s alone, CPU profile ~0.3 s of
+   work (React render ~230 ms, whole-page text queries ~180 ms), nothing
+   per row standing out. The run time follows machine load, not the code:
+   0.74 s at load 26, 1.29 s at 36, 1.84 s at 55 and 1.61 s at 135, all
+   green, 530/530 in 5 of 5 runs and in one run at 40 workers. The load was
+   the Server session's `cmake --build build -j8` (six to eleven `clang++`
+   processes) plus the other sessions on this 12-core machine. The load
+   average peaked above 100 during the failing runs and was ~95 over 15
+   minutes when this was measured. Yesterday's "timed alone" figures
+   (4.3 s total) are the same test at ten times today's cost, so they were
+   taken under that load too. The 6.3 s timeout itself was not reproduced
+   (it needs more load than was present). The 3-row sort tests scale the
+   same way, so this is every jsdom test's headroom, and the paging test is
+   simply the heaviest. Open for Tom: accept it as is, raise the jsdom
+   suites' `testTimeout`, or cut the test's cost (table-scoped queries save
+   ~0.18 s).
+2. **Bulk actions on torrents: built and unit-tested, not yet seen live.**
+   Selection (row boxes, a page box, pruning of ids that leave the list)
+   and the bulk bar are now shared parts in `ListParts` (`useListSelection`,
+   `SelectPageBox`, `SelectRowBox`, `BulkActions`, `runBulkOperation`), and
+   Unmatched moved onto them. The torrent bar offers Pause and Resume (each
+   enabled only when a ticked torrent can take it, and applied only to
+   those) and Remove, which always asks and cancels any still running
+   first. `useAcquisition.actMany` shares the single-job dispatch with `act`
+   and says how many the server refused. Three tests, each seen red under a
+   mutation. Owed: a look on the live page, and whether the bar's sticky
+   `top: 132px` (Unmatched's) sits right under Import's header.
+3. **Server 0.56.0: codes on everything** (committed at macha `60ce47a`,
+   not deployed as of 2026-09-24 17:10; the server will send a message as each
+   node goes live). Checked here: nothing breaks when it lands. The one JSON
+   body this client parses itself, the subtitle manifest, ignores unknown
+   keys. **Worded, against core `a5b08f0`:** `viewerText.ts` now words job
+   error codes (`jobErrorText`: Import list, torrent page, file-import
+   rows), catalogue results (`hintResultLabel`: Unmatched list and page),
+   Status diagnostics (`diagnosticErrorText`: UPnP, external IP, startup,
+   node connectivity), `placement_failed` by reason (in `viewerErrorText`),
+   and the Settings server card (`serverStatusText`, from core's new
+   `code`/`detail`, which replaced `ServerStatus.message`). The rule: a
+   known code gets this client's sentence; a generic one (`torrent_error`,
+   `filesystem_error`, `import_failed`, `torrent_failed`, `ingest_failed`)
+   also gets the server's sentence after it; an unknown code, or none from
+   a pre-0.56.0 node, shows the server's sentence. One `codeWords` now
+   backs `stateLabel`. Six tests, seen red under two mutations. Owed: a
+   look at Import, Unmatched and Status against a node once it has 0.56.0
+   (the server will say when), and Tom's eye on the wording.
+4. **Fixed 2026-09-24 evening, from the live page:**
+   - **Remembered endpoints were wiped on every load.** This was found by the
+     Android TV session and seen live here: the list held two URLs 20 s into a
+     load and was null by 114 s. `App.tsx` seeded it as `'environment'`, and
+     core's health cycle keeps only `'discovered'`. It now seeds through
+     core's `seedEndpoints` (core `b47773d`, committed, not pushed). Core also
+     now keeps remembered nodes that have not answered yet. Not yet seen
+     surviving a reload live (the tab is signed out; see below).
+   - **Status offered Reset association to any account that can view
+     status.** It was seen as `webclient` (media_viewer + view_status). It was
+     gated on the `managementAvailable` configuration flag, not a role. The
+     server asks `manager` of every change under `/api/v1/manage`
+     (`service.cpp`), so Status now gets the manage API only with `manager`.
+     Not yet seen live with and without the role.
+   - **Fixed in core `9654e1e` (pushed):** a cold start with fi-1 and es-1
+     down took 17.2 s before anything showed, because the session check
+     walked the nodes one at a time. Validation is now hedged at 1 s. Seen
+     live against `9654e1e`: first screen at 2.8 s, same two nodes down.
+   - **Likely core's, fixed in `9654e1e`:** the dev tab's `webclient` session
+     ended mid-load and a reload landed on `/login`. Core's reading: with no
+     node answering, validation returned the same as a refusal, the manager
+     minted anonymously, the cluster refused, and a good token went unused.
+     Now "nobody answered" keeps the cached session. Not proven to be what
+     happened here. Owed: sign in once, then check the remembered list
+     survives a reload and the Reset association gate by role.
+   - **Core `e840d72`, decode fallback (Tom's ruling):** a copied stream
+     the player cannot decode now gets a transcode on the same node instead
+     of a failure screen, once per playback and never against a mode the
+     viewer chose. Worded here: the `decode-fallback` notice ("This device
+     could not play the original streams, so they are being converted.") and
+     the `player-could-not-decode` reason in the player options. Not seen
+     live; it needs a title the browser cannot decode.
+   - ramaroja is offline for the foreseeable future (Tom, via core). Nothing
+     in this repo points at it; the TVs' saved endpoints need checking.
+5. **Seen by hand, not yet:** the unmatched table without a horizontal
    scrollbar (headers now clip to their column; the likely cause was the
-   last header running past the table edge), uptime on the Status node
-   cards, the player's text after the viewer-text move (stream-status
-   lines, clock, notices), the fullscreen cursor.
-4. The playback P0s as before: the handover with no lead (waiting on a
+   last header running past the table edge), the player's text after the
+   viewer-text move (stream-status lines, clock, notices), the fullscreen
+   cursor. Uptime on the Status node cards: seen live 2026-09-24.
+6. The playback P0s as before: the handover with no lead (waiting on a
    server-stated start cost), the seek freeze reading (the recorder waits
    for one), the `readyState` 0 consequence.
 
@@ -205,6 +289,19 @@ page. Prune deliberately, later, not as part of the deploy.
 Assets are gzipped by the server on demand (593 KB of JS goes out as 172 KB).
 There are no precompressed `.gz` siblings in `dist/`, which the server would
 prefer; generating them is a build change nobody has asked for yet.
+
+**develop deployed to fi-1 and gbni-1, 2026-09-24 18:03 (local), on Tom's
+instruction; es-1 is offline for the foreseeable future and was not
+touched.** Bundle `index-8e3uI4_9.js`, 674,669 bytes, `shasum`
+`1acc554bcd78`, built from the uncommitted `develop` working tree (bulk
+torrent actions, 0.56.0 code wording, `seedEndpoints`, the Status reset gate)
+against linked core `47812f7` (with `6fd7747` notes; tree clean). Backups
+first at `/etc/macha/web.bak-20260924-180351.tar.gz` on both; rsync additive,
+no `--delete`, 24 files and 1,847,166 bytes each. Verified served on both via
+`http://127.0.0.1:7438/`: index names the bundle, the bundle is `200` at full
+size with a matching `shasum`, owned `1000:50`, and `hls-Bt6kO1A0.js` (shared
+with the previous build) still `200`. `macnessa.macha.network` serves it too.
+Not yet opened in a browser on either node.
 
 **0.18.0 is deployed to all three nodes, 2026-09-21 22:53 UTC, on Tom's
 instruction.** Bundle `index-CKNh5Q9D.js`, 633,692 bytes, `shasum`
@@ -2053,11 +2150,17 @@ renamed or removed symbols. That is *compiles and passes*, which is not the
 same as ported, and the distinction is deliberate: two things are still
 untouched.
 
-- [ ] `AccountMenu.tsx:55` still calls `await api.logout()`. It should call
-      `sessionManager.signOut()`, which revokes server-side and does not mint a
-      replacement, then `sessionManager.start(registry)` **only if** that screen
-      actually wants a session afterwards. This is the change held back until
-      core stated the composition; core has now stated it.
+- [x] **Done 2026-09-24 evening, unit-tested, not yet run live.** Log out
+      now stops playback and waits for it (`playback.stop` returns the
+      runtime's promise), then calls `useSession().signOut`, which is core's
+      `signOut()` (clears local state first, then revokes) followed by
+      `start(registry)`. It always starts again, so the app learns what an
+      anonymous viewer may do: browse, or the login wall. A revoke that fails
+      still leaves this device signed out, and an app-wide notice says the
+      session stays valid at the server. `AccountMenu` no longer takes the
+      users API. Tests: the revoke carries the old token, and nothing after
+      it does; a failed revoke still restarts and rejects; the menu calls the
+      app's sign-out only once confirmed. All seen red under mutation.
 - [ ] `lastIdentityChange` (`{ from?, to?, at }`) is subscribed nowhere.
 
 **Why this is not a mechanical swap, measured on this cluster 2026-09-13.**
@@ -2092,11 +2195,12 @@ this; this client does not.
 `sessionStorage` and is carried on every subsequent request until a later 401
 forces a re-mint.
 
-- [ ] Change to the ruled composition. Core will state it on the API surface
-      first — on the `UsersApi.logout` and `SessionManager.signOut` doc
-      comments, which is where all four clients read it. The conditional half
-      — mint anonymous only when one is needed, not always — is the part that
-      is easy to get wrong.
+- [x] Changed to the ruled composition 2026-09-24; see the item above. The
+      "only when needed" half: this client always needs a session afterwards
+      (every screen reads through one, and the anonymous account's roles
+      decide between browsing and the login wall), so it always starts again.
+      Owed: one live sign-out, confirming a DELETE with the old token and no
+      request carrying it afterwards.
 
 **A related core defect, open, and explicitly not to be worked around here.**
 Raised by the `@machafoundation/core` session 2026-09-13: `SessionManager`
