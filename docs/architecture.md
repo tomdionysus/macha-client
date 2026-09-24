@@ -58,9 +58,12 @@ client that should match the available media to the client capabilities."
 There is no server pick among an item's files, not even as a fallback (Tom,
 2026-09-24): the ranking the server still runs when only an item is named is
 a violation, and the server has proposed refusing that request (`400` with the
-item's `media_ids`) once a second file exists. **Not yet so:** the
-facts seam in `src/App.tsx` hands core only the first file's facts, and the
-session names only the item; asked of core, whose chooser this is.
+item's `media_ids`) once a second file exists. The facts seam in `src/App.tsx`
+hands core every file's facts, and core's coordinator (from `284e52e`) runs
+the chooser for each, plays the best (direct, then remux, then transcode) and
+names it as the session's `media_id`, restating it on failover, regeneration
+and moves. Still open, with core and the server: which file when there are no
+facts, or when the viewer chose a mode.
 
 **Any node will do.** One endpoint registry, created in `src/App.tsx`, routes
 catalogue, status, management, import and playback. Core's `seedEndpoints`

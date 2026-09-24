@@ -496,7 +496,9 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
     // The cluster API resolves the preferred endpoint per call, so operations
     // describe the node that will execute the instruction rather than whichever
     // one happened to be preferred at boot.
-    facts: async (media: MediaSummary) => (await playbackFactsApi.facts({ itemId: media.id }))[0],
+    // Every file the item holds: core's chooser weighs each against this
+    // client's capabilities and names the one it plays (Tom, 2026-09-24).
+    facts: async (media: MediaSummary) => playbackFactsApi.facts({ itemId: media.id }),
     policyOverrides: (platform as { playbackPolicy?: PlaybackPolicyOverrides }).playbackPolicy,
   }), [playbackFactsApi, platform]);
   // Every session core asks for is timed from the request, so the player's
