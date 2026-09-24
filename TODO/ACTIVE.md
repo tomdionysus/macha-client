@@ -1452,6 +1452,25 @@ which needs a node stopped at the right moment; the re-arm is unit-covered.
 The "Pause: confirmed not applicable" note under any-node failover below was
 right that pause makes no server call and wrong about the conclusion.
 
+## P1 — Every word a viewer sees is this client's (core hard-cuts its viewer text)
+
+Tom's ruling, relayed by core 2026-09-24: core composes no viewer text at
+all. It will remove episodeLabel, episodeSubtitle, albumLabel, trackSubtitle,
+trackNumberLabel, MediaSort.choiceLabel/label, SearchCategory.label,
+startupPhaseLabel, the subtitles MachaMediaApi writes (SxxEyy, Season N,
+Track N, search subtitles, album = artist), the coordinator's notice
+sentences and core-composed error details, keeping structured data
+(playbackContext, musicContext with year, season/episode/track/disc numbers,
+sort and category keys) and codes in place of sentences. Server text passes
+through. This reverses the direction taken earlier the same day, when those
+helpers were added at this client's request. **Do not build further on
+them.** The web client's inventory went to core the same day: the helpers
+in MediaCard, SearchScreen, StatusScreen and failureCauses; item.subtitle in
+MediaCard, DetailScreen, PlayerScreen and MusicPlaylistScreen; the player
+notice; and ~20 raw errorMessage sites. Waiting on core's list of what goes
+and what replaces each. Then: one client-side strings module keyed on core's
+codes and fields.
+
 ## P1 — A reclaimed direct session is reported as an unsupported format
 
 Seen 2026-09-23, direct Matroska from fi-1, while the tab was hidden. The
