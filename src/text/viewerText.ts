@@ -293,8 +293,17 @@ const CHOICE_NAMES: Record<string, string> = {
  * rather than inventing a reason (Tom, 2026-09-25: "That change could not be
  * made" was "worse than 'something has gone wrong'").
  */
+/**
+ * The node is converting as much as it is allowed to. From server 0.60.0 a
+ * change back into a transcode reacquires the node's slot and can meet this
+ * when another viewer took it meanwhile; the server's own sentence ("video
+ * transcode limit reached") is the operator's, not the viewer's.
+ */
+const RESOURCE_LIMIT_CODE = 'resource_limit';
+
 export function playbackRefusalText(error: unknown, refusal?: PlaybackRefusal): string {
   const code = refusal?.code ?? (error instanceof MachaPlaybackError ? error.code : undefined);
+  if (code === RESOURCE_LIMIT_CODE) return 'This node is already converting as much as it can for other viewers. Try again shortly.';
   const choice = refusal?.choice ?? (error instanceof MachaPlaybackError ? error.choice : undefined);
   if (choice) {
     const what = CHOICE_NAMES[choice] ?? choice.replace(/_/g, ' ');

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { MachaAcquisitionApiError, MachaConnectionError, MachaPlaybackError, NOT_PLAYABLE_CODE, SESSION_PROVENANCE_UNKNOWN_CODE, type MediaSummary, type PlaybackStatusDescription, type PlaybackStreamInfo } from '@machafoundation/core';
+import { MachaAcquisitionApiError, MachaConnectionError, MachaPlaybackError, NOT_PLAYABLE_CODE, SESSION_PROVENANCE_UNKNOWN_CODE, type MediaSummary, type PlaybackNotice, type PlaybackStatusDescription, type PlaybackStreamInfo } from '@machafoundation/core';
 import {
   playbackRefusalText,
   diagnosticErrorText,
@@ -193,5 +193,12 @@ describe('quality wording', () => {
     expect(qualityLimitText({ quality: 720, reason: 'ceiling-preference' })).toBe('Play chooses up to 720p, as set in Settings. Pick a quality to play another.');
     expect(qualityLimitText({ quality: 720, reason: 'ceiling-cellular' })).toBe('Play chooses up to 720p on mobile data. Pick a quality to play another.');
     expect(qualityLimitText({ quality: 1080, reason: 'ceiling-device' })).toBe('Play chooses up to 1080p, the most this device plays. Pick a quality to play another.');
+  });
+});
+
+describe('a refusal because the node is busy', () => {
+  it('says the node is converting for others rather than quoting the server', () => {
+    const error = new MachaPlaybackError('Macha playback request failed: video transcode limit reached', 429, 'resource_limit');
+    expect(playbackNoticeText({ code: 'update-failed', error } as PlaybackNotice)).toBe('Playback settings were not changed: This node is already converting as much as it can for other viewers. Try again shortly.');
   });
 });
