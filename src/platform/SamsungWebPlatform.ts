@@ -2,6 +2,7 @@ import { createClientLogger, type PlaybackPolicyOverrides } from '@machafoundati
 import type { PlaybackCapabilities } from '@machafoundation/core';
 import type { Platform, Player } from '@machafoundation/core';
 import { WebPlatform } from './WebPlatform';
+import { samsungDisplayResolution } from './displayResolution';
 import { registerSamsungMediaKeys } from './SamsungMediaKeys';
 
 /**
@@ -102,6 +103,9 @@ export class SamsungWebPlatform implements Platform {
     // per-client volume (including a stale muted value).
     return 1;
   }
+
+  /** The panel, not the 1920x1080 application surface; see `samsungDisplayResolution`. */
+  readonly displayResolution = samsungDisplayResolution;
 
   async capabilities(): Promise<PlaybackCapabilities> {
     const detected = await this.web.capabilities();

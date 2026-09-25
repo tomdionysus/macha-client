@@ -16,6 +16,7 @@ import {
   playerRouteItemId,
   restoredPlaybackPosition,
   routePlaybackMedia,
+  versionPreferences,
 } from '@machafoundation/core';
 
 export function usePlaybackController(options: {
@@ -163,7 +164,7 @@ export function usePlaybackController(options: {
       media: item,
       startPositionMs: startOptions.fromStart ? 0 : storedPosition,
       returnTo,
-    });
+    }, startOptions.version ? versionPreferences(startOptions.version) : undefined);
     if (persistedQueue.items.length === 1) {
       void widenToSeason(item).catch((error) => console.warn('[macha] unable to load the rest of the season', error));
     }

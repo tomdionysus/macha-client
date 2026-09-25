@@ -861,6 +861,8 @@ h2 { font-size: clamp(1.2rem, 2vw, 1.75rem); letter-spacing: -.01em; margin: 1.1
 .player-button-row button:focus-visible, .media-control-button:focus-visible { outline: 1px solid #620014; outline-offset: 1px; box-shadow: none; }
 .player-button-row button:disabled, .media-control-button:disabled { opacity: .35; cursor: default; }
 .player-button-row button svg, .media-control-button svg { display: block; }
+.media-quality-button { width: auto; padding: 0 1.1rem; border-radius: 1.625rem; font-weight: 600; letter-spacing: .02em; }
+.media-quality-note { margin: -.75rem 0 1.25rem; color: #a9a9b1; font-size: .9rem; }
 .player-volume-control { display: flex; align-items: center; gap: .45rem; min-width: 8.8rem; }
 .player-volume-control > button { flex: 0 0 auto; }
 .player-volume-slider { width: 6.8rem; accent-color: var(--red-400); cursor: pointer; }

@@ -2,10 +2,12 @@ import { useCallback, useState } from 'react';
 import type { MediaApi } from '@machafoundation/core';
 import { MusicPlaylistStore } from '@machafoundation/core';
 import { PlaybackQueueStore, type PlaybackQueueState } from '@machafoundation/core';
-import type { MediaSummary } from '@machafoundation/core';
+import type { MediaSummary, VersionStep } from '@machafoundation/core';
 
 export interface StartPlaybackOptions {
   fromStart?: boolean;
+  /** A quality the viewer picked; see core's `versionPreferences`. Absent is Play, which lets core choose. */
+  version?: VersionStep;
   queue?: MediaSummary[];
   queueIndex?: number;
 }

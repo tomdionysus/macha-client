@@ -1,7 +1,7 @@
 import type { MediaApi } from '@machafoundation/core';
 import type { CatalogueMediaProfile } from '@machafoundation/core';
 import { PlayIcon, RestartIcon } from '../components/PlaybackIcons';
-import type { MediaDetails, MediaSummary, PlaybackProgress } from '@machafoundation/core';
+import type { MediaDetails, MediaSummary, PlaybackProgress, PlaybackVersions, VersionStep } from '@machafoundation/core';
 import { useAsync } from '../hooks/useAsync';
 import { useRefreshableAsync } from '../hooks/useRefreshableAsync';
 import { ErrorMessage, Loading } from '../components/Status';
@@ -10,7 +10,7 @@ import { requestTvDefaultFocus } from '../hooks/useTvNavigation';
 import { buildPlatformTraits } from '../platform/traits';
 import { useEffect } from 'react';
 import { EditButton } from '../components/EditButton';
-import { episodeCode } from '../text/viewerText';
+import { episodeCode, qualityLabel, qualityLimitText } from '../text/viewerText';
 import { MediaPageTitle } from '../components/MediaPageTitle';
 
 interface Props {
@@ -19,6 +19,9 @@ interface Props {
   onBack: () => void;
   onPlay: (item: MediaSummary) => void;
   onPlayFromStart: (item: MediaSummary) => void;
+  /** The qualities to offer beside Play; absent offers Play alone. */
+  loadVersions?: (item: MediaSummary) => Promise<PlaybackVersions>;
+  onPlayVersion?: (item: MediaSummary, version: VersionStep) => void;
   progress?: PlaybackProgress;
   onEdit?: () => void;
   onMediaProfile?: (profile: CatalogueMediaProfile) => void;
@@ -26,6 +29,11 @@ interface Props {
 
 function canPlayDirectly(details: MediaDetails): boolean {
   return details.kind === 'movie' || details.kind === 'episode' || details.kind === 'track';
+}
+
+/** A picture has qualities to pick between; a track's audio does not. */
+function hasPicture(media: MediaSummary): boolean {
+  return media.kind === 'movie' || media.kind === 'episode';
 }
 
 function canResume(media: MediaSummary, progress?: PlaybackProgress): boolean {
@@ -57,7 +65,7 @@ export function mediaProfileSummary(profile: CatalogueMediaProfile): string {
   return parts.join(' · ');
 }
 
-export function DetailScreen({ api, itemId, onBack, onPlay, onPlayFromStart, progress, onEdit, onMediaProfile }: Props) {
+export function DetailScreen({ api, itemId, onBack, onPlay, onPlayFromStart, loadVersions, onPlayVersion, progress, onEdit, onMediaProfile }: Props) {
   const details = useRefreshableAsync(() => api.details(itemId), [api, itemId]);
   const immutableMediaId = details.value?.mediaIds.find((mediaId) => mediaId.startsWith('macha:'));
   const profile = useAsync(
@@ -72,6 +80,14 @@ export function DetailScreen({ api, itemId, onBack, onPlay, onPlayFromStart, pro
   useEffect(() => {
     if (profile.value) onMediaProfile?.(profile.value);
   }, [onMediaProfile, profile.value]);
+  // Tom, 2026-09-25: Play stays and means "make the decision for me"; beside
+  // it, one button per quality the item can be played at. Keyed on the
+  // item, not the details object, so a background refresh does not ask again.
+  const versionsFor = details.value && hasPicture(details.value) && details.value.mediaIds.length > 0 && onPlayVersion ? details.value : undefined;
+  const versions = useAsync(
+    () => versionsFor && loadVersions ? loadVersions(versionsFor) : Promise.resolve(undefined),
+    [loadVersions, versionsFor?.id],
+  );
   if (!details.value) return <section className="detail"><div className="detail-content">
     <button className="back-button" data-tv-focusable="true" onClick={onBack} type="button">← Back</button>
     <MediaPageTitle refreshing={details.refreshing} onRefresh={details.refresh}>Media</MediaPageTitle>
@@ -114,8 +130,25 @@ export function DetailScreen({ api, itemId, onBack, onPlay, onPlayFromStart, pro
               <RestartIcon />
             </button>
           )}
+          {onPlayVersion && versions.value?.steps.map((step) => {
+            const label = qualityLabel(step.quality);
+            return (
+              <button
+                key={step.quality}
+                className="media-control-button media-quality-button"
+                data-tv-focusable="true"
+                onClick={() => onPlayVersion(media, step)}
+                type="button"
+                aria-label={resumable ? `Resume at ${label}` : `Play at ${label}`}
+                title={resumable ? `Resume at ${label}` : `Play at ${label}`}
+              >
+                {label}
+              </button>
+            );
+          })}
         </div>
       )}
+      {playable && versions.value?.limitedBy && <p className="media-quality-note">{qualityLimitText(versions.value.limitedBy)}</p>}
     </div>
   );
 

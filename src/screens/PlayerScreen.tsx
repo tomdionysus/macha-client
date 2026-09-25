@@ -970,6 +970,8 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
               session={session}
               pendingPreferences={playback.pendingPreferences}
               instruction={runtimePlayback?.instruction}
+              versions={runtimePlayback?.versions}
+              onPlayVersion={(step) => { void runtime.playVersion(step); }}
               capabilities={capabilities}
               nodes={nodeChoices}
               movingToNode={movingToNode}

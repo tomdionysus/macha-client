@@ -5,11 +5,14 @@ import type {
   PlaybackSession,
   PlaybackStreamInfo,
   PlaybackUpdate,
+  PlaybackVersions,
+  VersionStep,
 } from '@machafoundation/core';
 import type { PlaybackCapabilities, PlaybackMode } from '@machafoundation/core';
 import { useEffect, useRef } from 'react';
 import type { PlayerNodeChoice } from './nodeChoices';
 import { modeRequest } from './modeTransforms';
+import { qualityLabel } from '../../text/viewerText';
 
 function streamLabel(stream: PlaybackStreamInfo, fallback: string): string {
   const parts = [stream.language ? stream.language.toUpperCase() : fallback, stream.codec.toUpperCase()];
@@ -24,6 +27,7 @@ const REASON_TEXT: Record<PlaybackDecisionReason, string> = {
   'video-codec-not-playable': 'this device cannot decode the video',
   'video-codec-not-deliverable-over-hls': 'the video cannot be delivered over HLS here',
   'video-bit-depth-exceeds-client': 'the video is deeper than this device decodes',
+  'video-size-exceeds-client': 'the picture is larger than this device plays',
   'video-transfer-not-presentable': 'this device cannot present the colour transfer',
   'video-dolby-vision-not-supported': 'this device does not support this Dolby Vision profile',
   'audio-codec-not-playable': 'this device cannot decode the audio',
@@ -99,8 +103,11 @@ function assumptionNote(instruction: PlaybackInstructionReport | undefined): str
   return `Decided without: ${instruction.assumed.join(', ')}.`;
 }
 
-export function PlayerOptions({ session, pendingPreferences, instruction, capabilities, nodes = [], movingToNode, onApply, onSelectNode }: {
+export function PlayerOptions({ session, pendingPreferences, instruction, capabilities, versions, nodes = [], movingToNode, onApply, onPlayVersion, onSelectNode }: {
   session: PlaybackSession;
+  /** The item's qualities, as on its detail page; see core's `snapshot.versions`. */
+  versions?: PlaybackVersions;
+  onPlayVersion?: (step: VersionStep) => void;
   /** What this device can actually decode, which decides what remux may copy. */
   capabilities?: PlaybackCapabilities;
   pendingPreferences?: PlaybackPreferencesUpdate;
@@ -175,7 +182,12 @@ export function PlayerOptions({ session, pendingPreferences, instruction, capabi
         </small>}
       </div>
 
-      {session.options.canChangeQuality && <div className="player-option-group">
+      {versions && versions.steps.length > 0 && onPlayVersion ? <div className="player-option-group">
+        <span>Quality</span>
+        <div>
+          {versions.steps.map((step) => <button type="button" key={step.quality} data-tv-focusable="true" className={instruction?.quality === step.quality ? 'selected' : undefined} onClick={() => onPlayVersion(step)}>{qualityLabel(step.quality)}</button>)}
+        </div>
+      </div> : session.options.canChangeQuality && <div className="player-option-group">
         <span>Quality</span>
         <div>
           <button type="button" data-tv-focusable="true" className={effectivePreferences.maxHeight === null && effectivePreferences.maxBitrate === null ? 'selected' : undefined} onClick={() => preferences({ maxHeight: null, maxBitrate: null })}>Original</button>
