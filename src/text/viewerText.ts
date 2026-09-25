@@ -464,6 +464,7 @@ export function qualityLabel(quality: QualityClass): string {
 export function qualityLimitText(ceiling: QualityCeiling): string {
   const label = qualityLabel(ceiling.quality);
   if (ceiling.reason === 'ceiling-display') return `Play chooses up to ${label}, the most this screen shows. Pick a quality to play another.`;
+  if (ceiling.reason === 'ceiling-device') return `Play chooses up to ${label}, the most this device plays. Pick a quality to play another.`;
   if (ceiling.reason === 'ceiling-cellular') return `Play chooses up to ${label} on mobile data. Pick a quality to play another.`;
   return `Play chooses up to ${label}, as set in Settings. Pick a quality to play another.`;
 }

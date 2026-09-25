@@ -12,7 +12,7 @@ import { TrackFacts } from './player/TrackFacts';
 import type { Platform } from '@machafoundation/core';
 import { platformTraits } from '../platform/traits';
 import type { PlaybackUpdate } from '@machafoundation/core';
-import { isSubtitleOnlyPlaybackUpdate, type PlaybackCoordinatorSnapshot } from '@machafoundation/core';
+import { isSubtitleOnlyPlaybackUpdate, offeredModes, technicalProfileFromSession, type PlaybackCoordinatorSnapshot, type PlaybackPolicyOverrides } from '@machafoundation/core';
 import { PlaybackRuntime, type PlaybackRuntimeRequest, type PlaybackRuntimeSnapshot } from '@machafoundation/core';
 import { uiSettings } from '../settings';
 import { describePlaybackSession } from '@machafoundation/core';
@@ -57,6 +57,11 @@ interface Props {
    * the pin is set where the registry lives and this player only says which.
    */
   onPinEndpoint?: (endpointIds: readonly string[]) => string | undefined;
+  /**
+   * The viewer's "offer everything" setting. Tom, 2026-09-25: limit to the
+   * device's capabilities on all clients, with a setting to turn that off.
+   */
+  offerAll?: boolean;
 }
 
 
@@ -259,7 +264,7 @@ export function webArrowTargetOwnsKey(target: EventTarget | null): boolean {
 
 export const isSubtitleOnlyUpdate = isSubtitleOnlyPlaybackUpdate;
 
-function PlayerSession({ api, media, platform, runtime, startPositionMs, presentation, onProgress, onPosition, onMinimize, onExpand, onStop, onPrevious, onNext, onEnded, canPrevious, canNext, queuePosition, volume, onVolumeChange, endpoints, onPinEndpoint }: Omit<Props, 'request'> & { media: MediaSummary; startPositionMs: number }) {
+function PlayerSession({ api, media, platform, runtime, startPositionMs, presentation, onProgress, onPosition, onMinimize, onExpand, onStop, onPrevious, onNext, onEnded, canPrevious, canNext, queuePosition, volume, onVolumeChange, endpoints, onPinEndpoint, offerAll = false }: Omit<Props, 'request'> & { media: MediaSummary; startPositionMs: number }) {
   const pageRef = useRef<HTMLElement | null>(null);
   const hostRef = useRef<HTMLDivElement | null>(null);
   const chromeRef = useRef<HTMLDivElement | null>(null);
@@ -797,6 +802,14 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
   }, [armControlsHide, canNext, canPrevious, controlsVisible, focusSamsungControls, interactionControlled, onMinimize, onNext, onPrevious, onStop, optionsVisible, playback.intent.paused, presentation, samsungControls, seekBy, setPaused, setScrubPosition, showControls, webControls]);
 
   const session = playback.session;
+  // Which modes this device can play the playing file in, so the options
+  // offer only those unless the viewer asked for everything.
+  const offered = useMemo(() => session && capabilities
+    ? offeredModes(technicalProfileFromSession(session), capabilities, {
+      overrides: (platform as { playbackPolicy?: PlaybackPolicyOverrides }).playbackPolicy,
+      offerAll,
+    })
+    : undefined, [capabilities, offerAll, platform, session]);
   const event = playback.event;
   const duration = firstUsableDurationMs(session?.durationMs, event.durationMs, media.durationMs);
   const displayedProgress = scrubValue ?? Math.min(duration, playback.intent.positionMs);
@@ -968,6 +981,7 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
           session ? (
             <PlayerOptions
               session={session}
+              offered={offered}
               pendingPreferences={playback.pendingPreferences}
               instruction={runtimePlayback?.instruction}
               versions={runtimePlayback?.versions}

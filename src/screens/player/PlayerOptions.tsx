@@ -1,4 +1,5 @@
 import type {
+  OfferedMode,
   PlaybackDecisionReason,
   PlaybackInstructionReport,
   PlaybackPreferencesUpdate,
@@ -103,8 +104,15 @@ function assumptionNote(instruction: PlaybackInstructionReport | undefined): str
   return `Decided without: ${instruction.assumed.join(', ')}.`;
 }
 
-export function PlayerOptions({ session, pendingPreferences, instruction, capabilities, versions, nodes = [], movingToNode, onApply, onPlayVersion, onSelectNode }: {
+export function PlayerOptions({ session, pendingPreferences, instruction, capabilities, versions, offered, nodes = [], movingToNode, onApply, onPlayVersion, onSelectNode }: {
   session: PlaybackSession;
+  /**
+   * Which modes this device can play the file in (core's `offeredModes`).
+   * A mode not offered is not shown; one offered only because the viewer
+   * asked for everything says why the device objects. Absent shows every
+   * mode the node allows.
+   */
+  offered?: readonly OfferedMode[];
   /** The item's qualities, as on its detail page; see core's `snapshot.versions`. */
   versions?: PlaybackVersions;
   onPlayVersion?: (step: VersionStep) => void;
@@ -168,11 +176,18 @@ export function PlayerOptions({ session, pendingPreferences, instruction, capabi
         <span>Mode</span>
         <div>
           <button type="button" data-tv-focusable="true" className={chosenByViewer ? undefined : 'selected'} onClick={() => mode('choose')}>Auto</button>
-          {session.options.modes.map((candidate) => (
-            <button type="button" key={candidate} data-tv-focusable="true" className={effectivePreferences.mode === candidate ? 'selected' : undefined} onClick={() => mode(candidate)}>
-              {candidate === 'direct' ? 'Direct' : candidate === 'remux' ? 'Remux' : 'Transcode'}
-            </button>
-          ))}
+          {session.options.modes.map((candidate) => {
+            const offer = offered?.find((entry) => entry.mode === candidate);
+            if (offer && !offer.offered) return null;
+            const objection = offer && offer.reasons.length > 0
+              ? `This device may not play this: ${offer.reasons.map((reason) => REASON_TEXT[reason] ?? reason).join('; ')}.`
+              : undefined;
+            return (
+              <button type="button" key={candidate} data-tv-focusable="true" className={effectivePreferences.mode === candidate ? 'selected' : undefined} title={objection} onClick={() => mode(candidate)}>
+                {candidate === 'direct' ? 'Direct' : candidate === 'remux' ? 'Remux' : 'Transcode'}
+              </button>
+            );
+          })}
         </div>
         {instructionNote(instruction) && <small className={instruction?.withoutFacts ? 'player-option-note player-option-warning' : 'player-option-note'}>
           {instructionNote(instruction)}

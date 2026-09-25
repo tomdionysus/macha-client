@@ -59,10 +59,18 @@ function formatLastSync(unixMs: number): string {
 
 export function SettingsScreen({ api, serverApi, bootstrapEndpoints, usingHost, connectionNotice, onSave, qualityPreferences, qualityCeiling }: Props) {
   const [failureTrail, setFailureTrail] = useState(failureTrailEnabled);
-  const maximum = useSyncExternalStore(
+  const preference = useSyncExternalStore(
     qualityPreferences?.subscribe ?? noSubscription,
     qualityPreferences?.getSnapshot ?? noPreference,
-  ).wifi;
+  );
+  const maximum = preference.wifi;
+  const setOfferAll = (offerAll: boolean) => {
+    try {
+      qualityPreferences?.setOfferAll(offerAll);
+    } catch {
+      // As for Maximum quality: the switch shows the setting still in force.
+    }
+  };
   const chooseMaximum = (quality: QualityClass | undefined) => {
     try {
       qualityPreferences?.set('wifi', quality);
@@ -160,6 +168,19 @@ export function SettingsScreen({ api, serverApi, bootstrapEndpoints, usingHost, 
           </div>
           <small className="player-option-note">{maximumQualityNote(maximum, qualityCeiling?.())}</small>
         </div>
+        <label className="settings-toggle">
+          <span className="settings-switch">
+            <input
+              type="checkbox"
+              role="switch"
+              data-tv-focusable="true"
+              checked={preference.offerAll === true}
+              onChange={(event) => setOfferAll(event.target.checked)}
+            />
+            <span className="settings-switch-track" aria-hidden="true" />
+          </span>
+          <span className="settings-toggle-label">Offer every quality and mode, even ones this device may not play</span>
+        </label>
       </div>}
 
       <div className="settings-diagnostics">

@@ -46,6 +46,7 @@
    directly on the switch. */
 .settings-playback, .settings-diagnostics { width: 100%; margin-bottom: 2.2rem; }
 .settings-playback h2, .settings-diagnostics h2 { margin-top: 0; margin-bottom: .9rem; }
+.settings-playback .settings-toggle { margin-top: 1.1rem; }
 /* One row: a switch and what it does. Written in flexbox with pixel offsets
    and longhand positioning throughout, because the Samsung build runs
    Chromium 47 — no grid, no flex `gap`, no `inset` shorthand. `inset: 0` was

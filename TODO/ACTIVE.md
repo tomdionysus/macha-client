@@ -78,7 +78,16 @@ advancing 4 s in 4 s at 1920 wide.
    being hidden (Chrome defers media in hidden tabs), not a bug: bisecting to
    `3a5dc56` stalled the same way, and both nodes serve fine. After that failure the title offered Play, not Resume, and
    started at 0: **the resume position (~128 s) was lost on a failed start**,
-   cause not yet traced. Next: commit on Tom's word.
+   cause not yet traced (core `d93c9d8` names one; recheck with a visible
+   tab). Committed `40b453d`. **Device limit (Tom: "limit to the device
+   capabilities for direct on all clients - but, all clients should also have
+   a setting to disable this"), built on core `edfce82`:** the player's modes
+   come from `offeredModes` (an unplayable mode is hidden, or with the setting
+   on it is shown with the device's objection on hover); Settings has "Offer
+   every quality and mode", kept as `offerAll` in core's store and passed to
+   the runtime and the title page. The web states no `maxWidth`/`maxHeight`,
+   since a browser cannot report a decode size limit honestly, so it is
+   limited by codec and container only.
 2. **Retry the titles that would not play** (three media on fi-1:
    `4e1230739de9...`, `af0b9adfbfd3...`, `37e6afd411f2...`). Core `de86392`
    fixed the cause (a session begun direct named no container or stream, so

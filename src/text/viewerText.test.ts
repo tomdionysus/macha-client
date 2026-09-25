@@ -192,5 +192,6 @@ describe('quality wording', () => {
     expect(qualityLimitText({ quality: 1080, reason: 'ceiling-display' })).toBe('Play chooses up to 1080p, the most this screen shows. Pick a quality to play another.');
     expect(qualityLimitText({ quality: 720, reason: 'ceiling-preference' })).toBe('Play chooses up to 720p, as set in Settings. Pick a quality to play another.');
     expect(qualityLimitText({ quality: 720, reason: 'ceiling-cellular' })).toBe('Play chooses up to 720p on mobile data. Pick a quality to play another.');
+    expect(qualityLimitText({ quality: 1080, reason: 'ceiling-device' })).toBe('Play chooses up to 1080p, the most this device plays. Pick a quality to play another.');
   });
 });

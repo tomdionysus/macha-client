@@ -47,6 +47,22 @@ describe('the player\'s quality list', () => {
     expect(selected().filter((label) => ['4K', '2K', '1080p', '720p'].includes(label ?? ''))).toEqual([]);
   });
 
+  it('offers only the modes this device can play, and says why when asked for everything', () => {
+    const { unmount } = render(<PlayerOptions session={session('hd', null)} onApply={vi.fn()} offered={[
+      { mode: 'direct', offered: false, reasons: ['video-codec-not-playable'] },
+      { mode: 'transcode', offered: true, reasons: [] },
+    ]} />);
+    expect(screen.queryByRole('button', { name: 'Direct' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Transcode' })).toBeTruthy();
+    unmount();
+    render(<PlayerOptions session={session('hd', null)} onApply={vi.fn()} offered={[
+      { mode: 'direct', offered: true, reasons: ['video-codec-not-playable'] },
+      { mode: 'transcode', offered: true, reasons: [] },
+    ]} />);
+    expect(screen.getByRole('button', { name: 'Direct' }).title).toBe('This device may not play this: this device cannot decode the video.');
+    expect(screen.getByRole('button', { name: 'Transcode' }).title).toBe('');
+  });
+
   it('keeps the node\'s own heights until the item\'s qualities are known', () => {
     render(<PlayerOptions session={session('hd', null)} onApply={vi.fn()} onPlayVersion={vi.fn()} />);
     expect(screen.getByRole('button', { name: 'Original' })).toBeTruthy();

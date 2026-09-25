@@ -43,4 +43,15 @@ describe('the Maximum quality setting', () => {
     expect(store.get()).toEqual({});
     expect(selected('Automatic')).toBe(true);
   });
+
+  it('limits what is offered to this device until the viewer asks for everything', () => {
+    const store = show(() => undefined);
+    const offerAll = screen.getByLabelText(/Offer every quality and mode/) as HTMLInputElement;
+    expect(offerAll.checked).toBe(false);
+    fireEvent.click(offerAll);
+    expect(store.get()).toEqual({ offerAll: true });
+    expect(offerAll.checked).toBe(true);
+    fireEvent.click(offerAll);
+    expect(store.get()).toEqual({});
+  });
 });

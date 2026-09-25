@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactElement } from 'react';
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore, type ReactElement } from 'react';
 import { Navigate, NavLink, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom';
 import type { CatalogueApi, CatalogueMediaProfile, ManageApi, PlaybackFactsApi } from '@machafoundation/core';
 import type { MediaApi } from '@machafoundation/core';
@@ -335,6 +335,11 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
   const volumeStore = useMemo(() => new VolumeStore(clientId), [clientId]);
   // Per device, at core's key, so every client keeps the setting alike.
   const qualityPreferences = useMemo(() => new QualityPreferenceStore(), []);
+  // Tom, 2026-09-25: offer only what this device can play, with a setting to
+  // offer everything. Read live for the player's options, and at each start
+  // and each title page for the rest.
+  const offerAll = useSyncExternalStore(qualityPreferences.subscribe, qualityPreferences.getSnapshot).offerAll === true;
+  const offerAllNow = useCallback(() => qualityPreferences.get().offerAll === true, [qualityPreferences]);
   const endpointKey = effectiveEndpoints.join('\n');
   const endpointRegistry = useMemo(
     () => new EndpointRegistry(seedEndpoints({
@@ -519,15 +524,16 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
     facts: async (media: MediaSummary) => playbackFactsApi.facts({ itemId: media.id }),
     policyOverrides,
     qualityCeiling: deviceCeiling,
-  }), [deviceCeiling, playbackFactsApi, policyOverrides]);
+    offerAll: offerAllNow,
+  }), [deviceCeiling, offerAllNow, playbackFactsApi, policyOverrides]);
   // The qualities a detail page offers beside Play, from the same facts,
   // capabilities, policy and ceiling the runtime will start with, so a button
   // plays what it says.
   const loadVersions = useCallback(async (item: MediaSummary): Promise<PlaybackVersions> => playbackVersions(
     await playbackFactsApi.facts({ itemId: item.id }),
     await platform.capabilities(),
-    { overrides: policyOverrides, mediaIds: item.mediaIds, ceiling: deviceCeiling() },
-  ), [deviceCeiling, platform, playbackFactsApi, policyOverrides]);
+    { overrides: policyOverrides, mediaIds: item.mediaIds, ceiling: deviceCeiling(), offerAll: offerAllNow() },
+  ), [deviceCeiling, offerAllNow, platform, playbackFactsApi, policyOverrides]);
   // Every session core asks for is timed from the request, so the player's
   // first fragment closes a measurement of what that node costs to start.
   const measuredResolver = useMemo(() => measureStartCosts(playbackResolver), [playbackResolver]);
@@ -753,6 +759,7 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
     queuePosition={playback.queueState ? { index: playback.queueState.currentIndex, total: playback.queueState.items.length } : undefined}
     volume={playback.volume}
     onVolumeChange={playback.changeVolume}
+    offerAll={offerAll}
   /> : null;
 
   // Presentation only, and the same shape as the session splash below: hold
