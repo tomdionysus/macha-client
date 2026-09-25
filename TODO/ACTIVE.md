@@ -363,6 +363,18 @@ tar -czf /etc/macha/web.bak-$(date +%Y%m%d-%H%M%S).tar.gz -C /etc/macha web
 rsync -a --omit-dir-times --chown=1000:50 dist/ root@<node>:/etc/macha/web/
 ```
 
+**develop deployed to fi-1 and gbni-1, 2026-09-25 17:28 (local), on Tom's
+instruction ("deploy to all nodes"); es-1 did not answer (ssh timed out) and
+was not deployed.** Commit `8c09aa3`, bundle `index-BHladCbs.js`, 704,990
+bytes, `shasum` `eed559fd96f9`, built against core `ac2a8a9` (clean, dist
+newer than src). It carries quality selection, Maximum quality and the
+offer-everything setting, the modes core computes with the node's
+operations, the close on every pagehide, the busy-node wording and the
+0.61.0 torrent states. Backups `web.bak-20260925-172807`; additive rsync, 24
+files each; served on `127.0.0.1:7438` with a matching `shasum`, owned
+`1000:50`, `hls-Bt6kO1A0.js` and the previous `index-y5i3Gmjl.js` `200`, and
+on `macnessa`.
+
 **develop deployed to fi-1 and gbni-1, 2026-09-25 09:06 (local), on Tom's
 instruction ("deploy latest everywhere"); es-1 did not answer and was not
 deployed.** Bundle `index-y5i3Gmjl.js`, 691,103 bytes, `shasum`
