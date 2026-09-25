@@ -309,6 +309,16 @@ tar -czf /etc/macha/web.bak-$(date +%Y%m%d-%H%M%S).tar.gz -C /etc/macha web
 rsync -a --omit-dir-times --chown=1000:50 dist/ root@<node>:/etc/macha/web/
 ```
 
+**develop deployed to fi-1 and gbni-1, 2026-09-25 09:06 (local), on Tom's
+instruction ("deploy latest everywhere"); es-1 did not answer and was not
+deployed.** Bundle `index-y5i3Gmjl.js`, 691,103 bytes, `shasum`
+`0b0840848e8d`, built against core `a50ef64` (clean), which carries core
+`de86392`'s fix for sessions begun direct being refused on a switch into
+transcode (no container or stream named) and for a language the file lacks.
+Identical to the 02:2x deploy, so the nodes already had it. Backups
+`web.bak-20260925-090648`; served on `127.0.0.1:7438` with a matching `shasum`,
+`hls-Bt6kO1A0.js` `200`, and on `macnessa`.
+
 **develop deployed to gbni-1 only, 2026-09-25 02:02 (local), on Tom's
 instruction ("es-1 and gbni-1"); es-1 did not answer (ssh timed out, no
 health) and was not deployed.** Bundle `index-DajU39j8.js`, 688,067 bytes,
