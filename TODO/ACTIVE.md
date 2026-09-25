@@ -87,7 +87,13 @@ advancing 4 s in 4 s at 1920 wide.
    every quality and mode", kept as `offerAll` in core's store and passed to
    the runtime and the title page. The web states no `maxWidth`/`maxHeight`,
    since a browser cannot report a decode size limit honestly, so it is
-   limited by codec and container only.
+   limited by codec and container only. Waiting on core to put the playing
+   file's facts on the snapshot, so `offeredModes` gets the node's
+   `operations` (without them a remux the node refuses can be offered).
+   **Page-exit close:** Tom approved a close authorised by the signed stream
+   URL (`POST .../stream/{token}/close`, a CORS simple request), due in
+   server 0.60.0; core `6c919aa` already sends it. Once 0.60.0 is on both
+   nodes, rerun test B: a real reload with the session known, then a probe.
 2. **Retry the titles that would not play** (three media on fi-1:
    `4e1230739de9...`, `af0b9adfbfd3...`, `37e6afd411f2...`). Core `de86392`
    fixed the cause (a session begun direct named no container or stream, so
