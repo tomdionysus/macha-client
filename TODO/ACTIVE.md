@@ -43,17 +43,71 @@ advancing 4 s in 4 s at 1920 wide.
 
 1. **Quality selection** (Tom's current priority, with core and both RN
    clients). Design agreed and Tom's rulings in (section "Versions and
-   quality" below); core is building `qualityClass`, `playbackVersions`,
-   `playVersion` and the per-device setting. The web side: Play plus one
-   button per quality on the detail page, the same list in the player, a
-   Maximum quality setting, the screen measurement
-   (`src/platform/displayResolution.ts`, done). Waiting on core's commit.
+   quality" below). **Built 2026-09-25 on core `3a5dc56`, uncommitted,
+   seen live 11:54-12:00 EEST** (dev server, `tmdb:movie:185`, one
+   1792x1080 file): Play plus one button per quality on the detail page
+   (movies and episodes; the cap's reason under them), the same list in the
+   player's options (active from `instruction.quality`, a press is
+   `playVersion`), and Maximum quality in Settings, kept in core's
+   `QualityPreferenceStore` as `wifi`. `qualityCeiling` is given the browser
+   screen; Samsung and the Android web shell state none, so they stay
+   uncapped until the panel can be read. Suite 579, typecheck and build
+   clean, and each new test was mutation-checked. Live: the page offered
+   Play, 1080p, 720p; 720p played at 1194x720; the player list marked 720p
+   and switching to 1080p went direct at 1792x1080 from the same position;
+   Maximum 720p stored `{"wifi":720}` and the page gave its reason; plain Play
+   then played 1194x720. One Play failed first: fi-1 refused with 429
+   `resource_limit` (its one transcode slot held, holder not identified) and
+   gbni-1 answered 503 `service_recovering` during its 0.58.3 restart
+   (08:58Z). **Why fi-1 refused (traced 2026-09-25, 09:03-11:06Z):** the
+   slot was our own 720p session. (a) Server: a PATCH from transcode to
+   direct keeps the session's transcode slot while it streams, plus 5 min
+   (reproduced on fi-1; `reserve_resources` and
+   `release_transcode_entitlements_locked` in `src/playback.cpp`). Sent to the
+   server. (b) Client/core: a page reload does not delete the session. After
+   a reload, fi-1 refused a probe transcode for about 4.5 min until the idle
+   rule freed it. Keepalive cross-origin DELETE works from a live page. A
+   synthetic pagehide issues the DELETE 4 ms later, not synchronously, and
+   `coordinator.close` awaits five pending operations first. Core `7bf1de1`
+   now sends the DELETE synchronously in the handler (verified), and from a
+   live page it lands (204, slot freed). **On a real reload it still does not
+   land** (session `97b3d5be`, id known before the reload, fi-1 0.59.0,
+   11:31:52Z, probes refused). Likely cause: Chrome not completing the CORS
+   preflight of a keepalive DELETE after unload. Unproven; with core and the
+   server. The readyState-0 "stall" seen from about 11:01Z was the test tab
+   being hidden (Chrome defers media in hidden tabs), not a bug: bisecting to
+   `3a5dc56` stalled the same way, and both nodes serve fine. After that failure the title offered Play, not Resume, and
+   started at 0: **the resume position (~128 s) was lost on a failed start**,
+   cause not yet traced. Next: commit on Tom's word.
 2. **Retry the titles that would not play** (three media on fi-1:
    `4e1230739de9...`, `af0b9adfbfd3...`, `37e6afd411f2...`). Core `de86392`
    fixed the cause (a session begun direct named no container or stream, so
    a PATCH into transcode was refused) and a second (a language the file
-   lacks is refused outright by 0.58.0). Deployed; not yet retried. Any
-   refusal now shows its code on screen; send core the PATCH body verbatim.
+   lacks is refused outright by 0.58.0). **Retried 2026-09-25 11:02 EEST**
+   (test account, core `a50ef64`, fi-1 and gbni-1 alike, load 9.7): create
+   direct, then `preparePlaybackPatch` into transcode. `37e6afd411f2`
+   (`tmdb:movie:185`) now plays (PATCH accepted, manifest and first segment
+   200). `4e1230739de9` (`tmdb:episode:110090`, its only file) and
+   `af0b9adfbfd3` (`tmdb:movie:122`) fail differently: PATCH 503
+   `playback_unavailable` "read media: extent unavailable", and a direct
+   Range fetch dies mid-body. The PATCH shape is no longer the cause; those
+   bytes cannot be read. The server session confirmed it in both nodes'
+   journals ("extent unavailable") and is tracing the extent. Nodes were on
+   0.58.2 (fi-1 on 0.58.3 from 08:05Z), not 0.58.0. Status on both nodes
+   shows `nodes_known=2`, all extent hosts online, and es-1 not counted, so
+   "es-1's extent" is unproven. fi-1 answers on 10.35.1.10 as well as .50
+   (same `node_id`). Facts
+   still say `operations.direct: true` for both, so the chooser cannot prefer
+   `tmdb:movie:122`'s readable second file (`b3bcbf961043`, 206). Sent to
+   core and the server: the server to state a file is unreadable, core's
+   chooser to skip one.
+   **The server's trace (read-only) is wider:** on gbni-1, 18 of 23 sampled
+   files dated 2026-08-31 fail at offset 0 (plus one older), and everything
+   sampled from 2026-09-10 on reads. The bytes are in neither node's store,
+   the server keeps no record of holders beyond current membership (fi-1,
+   gbni-1), and where the bytes went is unproven. `operations.direct` is
+   hard-coded true, and facts read no bytes. A readability fact and a clean
+   failure at create are now Tom's decision, with the server session.
 3. **Catalogue management resumes** (Tom: "we'll resume catalogue management
    tomorrow"). Section "Identify and edit" below: step 1 is built; steps 2 and
    3 wait on Tom approving the server's proposals; a general catalogue
