@@ -12,7 +12,7 @@ import { TrackFacts } from './player/TrackFacts';
 import type { Platform } from '@machafoundation/core';
 import { platformTraits } from '../platform/traits';
 import type { PlaybackUpdate } from '@machafoundation/core';
-import { isSubtitleOnlyPlaybackUpdate, offeredModes, technicalProfileFromSession, type PlaybackCoordinatorSnapshot, type PlaybackPolicyOverrides } from '@machafoundation/core';
+import { isSubtitleOnlyPlaybackUpdate, offeredModes, technicalProfileFromSession, type OfferedMode, type PlaybackCoordinatorSnapshot, type PlaybackPolicyOverrides, type PlaybackSession } from '@machafoundation/core';
 import { PlaybackRuntime, type PlaybackRuntimeRequest, type PlaybackRuntimeSnapshot } from '@machafoundation/core';
 import { uiSettings } from '../settings';
 import { describePlaybackSession } from '@machafoundation/core';
@@ -802,14 +802,10 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
   }, [armControlsHide, canNext, canPrevious, controlsVisible, focusSamsungControls, interactionControlled, onMinimize, onNext, onPrevious, onStop, optionsVisible, playback.intent.paused, presentation, samsungControls, seekBy, setPaused, setScrubPosition, showControls, webControls]);
 
   const session = playback.session;
-  // Which modes this device can play the playing file in, so the options
-  // offer only those unless the viewer asked for everything.
-  const offered = useMemo(() => session && capabilities
-    ? offeredModes(technicalProfileFromSession(session), capabilities, {
-      overrides: (platform as { playbackPolicy?: PlaybackPolicyOverrides }).playbackPolicy,
-      offerAll,
-    })
-    : undefined, [capabilities, offerAll, platform, session]);
+  const offered = useMemo(
+    () => modesToOffer(runtimePlayback?.modes, session, capabilities, (platform as { playbackPolicy?: PlaybackPolicyOverrides }).playbackPolicy, offerAll),
+    [capabilities, offerAll, platform, runtimePlayback?.modes, session],
+  );
   const event = playback.event;
   const duration = firstUsableDurationMs(session?.durationMs, event.durationMs, media.durationMs);
   const displayedProgress = scrubValue ?? Math.min(duration, playback.intent.positionMs);
@@ -1117,6 +1113,25 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
       </div>
     </section>
   );
+}
+
+/**
+ * Which modes this device can play the playing file in, so the options offer
+ * only those unless the viewer asked for everything (Tom, 2026-09-25). Core's
+ * answer carries the node's operations and is preferred; until its facts
+ * arrive, the session's profile answers without them, which can offer a
+ * remux the node's build then refuses.
+ */
+export function modesToOffer(
+  fromCore: readonly OfferedMode[] | undefined,
+  session: PlaybackSession | undefined,
+  capabilities: PlaybackCapabilities | undefined,
+  overrides: PlaybackPolicyOverrides | undefined,
+  offerAll: boolean,
+): readonly OfferedMode[] | undefined {
+  if (fromCore) return fromCore;
+  if (!session || !capabilities) return undefined;
+  return offeredModes(technicalProfileFromSession(session), capabilities, { overrides, offerAll });
 }
 
 export function PlayerHost(props: Props) {

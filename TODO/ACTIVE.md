@@ -87,9 +87,9 @@ advancing 4 s in 4 s at 1920 wide.
    every quality and mode", kept as `offerAll` in core's store and passed to
    the runtime and the title page. The web states no `maxWidth`/`maxHeight`,
    since a browser cannot report a decode size limit honestly, so it is
-   limited by codec and container only. Waiting on core to put the playing
-   file's facts on the snapshot, so `offeredModes` gets the node's
-   `operations` (without them a remux the node refuses can be offered).
+   limited by codec and container only. The player takes core's
+   `snapshot.modes` (core `424f8a6`, computed with the node's `operations`)
+   and falls back to the session's profile until the facts arrive.
    **Page-exit close:** Tom approved a close authorised by the signed stream
    URL (`POST .../stream/{token}/close`, a CORS simple request), due in
    server 0.60.0; core `6c919aa` already sends it. Once 0.60.0 is on both
