@@ -90,10 +90,16 @@ advancing 4 s in 4 s at 1920 wide.
    limited by codec and container only. The player takes core's
    `snapshot.modes` (core `424f8a6`, computed with the node's `operations`)
    and falls back to the session's profile until the facts arrive.
-   **Page-exit close:** Tom approved a close authorised by the signed stream
-   URL (`POST .../stream/{token}/close`, a CORS simple request), due in
-   server 0.60.0; core `6c919aa` already sends it. Once 0.60.0 is on both
-   nodes, rerun test B: a real reload with the session known, then a probe.
+   **Page exit, closed 2026-09-25 12:54Z:** the leak was this client's.
+   Chrome put the playing page in the back-forward cache (`pagehide` with
+   `persisted: true`), and `usePlaybackRuntime` skipped the page-exit close
+   for a cached page. It now closes on every pagehide. Verified on server
+   0.60.0 and core `42cebd6`: after navigating away from a 720p transcode on
+   fi-1, the probe was free 3 s later. Going Back restores the page, which
+   closes nothing further and restarts playback on its route. The rebuild is
+   plain Play, so a picked quality is not carried over. Server 0.60.0's
+   signed-URL close answers 204 from a live page. A PATCH to direct now frees
+   the slot for a second viewer (checked 12:44Z).
 2. **Retry the titles that would not play** (three media on fi-1:
    `4e1230739de9...`, `af0b9adfbfd3...`, `37e6afd411f2...`). Core `de86392`
    fixed the cause (a session begun direct named no container or stream, so
