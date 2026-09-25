@@ -6,7 +6,9 @@ export type JobAction = 'pause' | 'resume' | 'retry' | 'remove';
 
 const ingestPauseableStates = new Set(['queued', 'scanning', 'importing']);
 const ingestResumableStates = new Set(['paused', 'blocked', 'failed']);
-const torrentPauseableStates = new Set(['queued', 'metadata', 'downloading', 'verifying', 'downloaded', 'importing']);
+// `verify_queued` (server 0.61.0): waiting for another torrent's check, as
+// libtorrent checks one at a time. Pause and cancel are allowed in it.
+const torrentPauseableStates = new Set(['queued', 'metadata', 'downloading', 'verify_queued', 'verifying', 'downloaded', 'importing']);
 const torrentResumableStates = new Set(['paused', 'blocked']);
 const terminalStates = new Set(['completed', 'cancelled', 'failed']);
 

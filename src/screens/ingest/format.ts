@@ -62,8 +62,13 @@ export function formatAge(value: number, now: number): string {
   return minutes ? `${hours}h ${minutes}m ago` : `${hours}h ago`;
 }
 
+/** States whose code does not read as words. */
+const STATE_LABELS: Record<string, string> = {
+  verify_queued: 'Waiting to verify',
+};
+
 export function stateLabel(state: string): string {
-  return codeWords(state);
+  return STATE_LABELS[state] ?? codeWords(state);
 }
 
 /**

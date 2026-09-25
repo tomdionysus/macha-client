@@ -55,7 +55,7 @@ function TorrentBody({ job, linkedIngest }: { job: TorrentJob; linkedIngest?: In
   // The headline is whichever stage is under way, named, so the big number is
   // never a finished stage's or a stage that has not started.
   const current = [
-    { stage: download, progress: downloadProgress, doing: 'Downloading', detail: `${formatBytes(job.bytes_completed)} of ${job.bytes_total > 0 ? formatBytes(job.bytes_total) : 'unknown size'}${remaining > 0 ? ` · ${formatBytes(remaining)} to go · ETA ${formatEta(job.eta_seconds)}` : ''}` },
+    { stage: download, progress: downloadProgress, ...downloadStageText(job, remaining) },
     { stage: importStage, progress: importProgress, doing: 'Copying into the library', detail: linkedIngest ? `${formatBytes(linkedIngest.bytes_completed)} of ${formatBytes(linkedIngest.bytes_total)} · ${linkedIngest.files_completed} of ${linkedIngest.files_total} files · ETA ${formatEta(linkedIngest.eta_seconds)}` : 'Starting' },
     { stage: catalogueStage, progress: catalogueProgress, doing: 'Cataloguing', detail: catalogue ? `${catalogueDone} of ${catalogue.total} files matched or settled` : '' },
   ].find((entry) => entry.stage.status !== 'done' && entry.stage.status !== 'issues');
@@ -139,6 +139,20 @@ function TorrentBody({ job, linkedIngest }: { job: TorrentJob; linkedIngest?: In
 }
 
 /** One torrent's own page. The list carries its sort in the address, and so does the way back. */
+/**
+ * What the first stage is doing, from the torrent's state. From server
+ * 0.61.0 a torrent checks the data it already has before downloading, one
+ * torrent at a time: `verify_queued` waits for another's check, and
+ * `verifying` is its own, with `eta_seconds` for the check. `progress` is
+ * valid pieces over the total throughout.
+ */
+export function downloadStageText(job: Pick<TorrentJob, 'state' | 'bytes_completed' | 'bytes_total' | 'eta_seconds'>, remaining: number): { doing: string; detail: string } {
+  const of = `${formatBytes(job.bytes_completed)} of ${job.bytes_total > 0 ? formatBytes(job.bytes_total) : 'unknown size'}`;
+  if (job.state === 'verify_queued') return { doing: 'Waiting to verify', detail: 'Waiting for another torrent\'s check to finish' };
+  if (job.state === 'verifying') return { doing: 'Verifying data already on disk', detail: `${of} verified · ETA ${formatEta(job.eta_seconds)}` };
+  return { doing: 'Downloading', detail: `${of}${remaining > 0 ? ` · ${formatBytes(remaining)} to go · ETA ${formatEta(job.eta_seconds)}` : ''}` };
+}
+
 export function TorrentDetailScreen({ api }: { api: AcquisitionApi }) {
   const { torrentId = '' } = useParams();
   const { search } = useLocation();

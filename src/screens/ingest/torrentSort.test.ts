@@ -75,6 +75,15 @@ describe('the order torrents are listed in', () => {
     expect(sorted(jobs, { key: 'status', direction: 'asc' })).toEqual(['going', 'held', 'stuck', 'done']);
   });
 
+  it('lists a torrent waiting for its check with the waiting work, after the checks that are running', () => {
+    const jobs = [
+      job({ id: 'waiting', state: 'queued' }),
+      job({ id: 'next-to-check', state: 'verify_queued' }),
+      job({ id: 'checking', state: 'verifying' }),
+    ];
+    expect(sorted(jobs, { key: 'status', direction: 'asc' })).toEqual(['checking', 'next-to-check', 'waiting']);
+  });
+
   it('sorts by the state the viewer is shown, not the raw torrent state', () => {
     const jobs = [job({ id: 'imported', state: 'completed', ingest_job_id: 'i' }), job({ id: 'going', state: 'downloading' })];
     const importing = (entry: TorrentJob) => (entry.id === 'imported' ? 'importing' : entry.state);

@@ -30,7 +30,7 @@ export const DEFAULT_TORRENT_SORT: TorrentSort = { key: 'added', direction: 'des
  */
 const STATUS_ORDER = [
   'downloading', 'metadata', 'verifying', 'downloaded', 'importing', 'scanning', 'cataloguing',
-  'queued', 'paused', 'blocked', 'failed', 'completed', 'cancelled',
+  'verify_queued', 'queued', 'paused', 'blocked', 'failed', 'completed', 'cancelled',
 ];
 
 function statusRank(state: string): number {
