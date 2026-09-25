@@ -1,6 +1,75 @@
 # Completed and tested
 
-Last updated: 2026-09-24, after the backlog was rationalised against the code
+Last updated: 2026-09-25, at a break for a clear: finished work moved here, the backlog rationalised
+
+## Playback against server 0.58.0, where the server chooses nothing — 2026-09-25
+
+Server 0.58.0 (briefly announced as 0.57.1) takes `media_id` only on session
+create and refuses `item_id`; it names no file, stream or container itself.
+Tom ruled the choice is the client's ("in Macha it's the client that makes the
+decision on what to play"), and that the server's old item-only ranking was a
+violation, not a fallback.
+
+- This client hands core every file's facts (`121c280`); core's chooser
+  (`284e52e`, `580473f`, `b94b468`, `0bce895`) names the file, streams and
+  container on every create.
+- **Found live, fixed in core `de86392`:** a session begun direct named no
+  container or stream, so the PATCH into transcode (the HEVC decode fallback,
+  or a viewer's mode change) was refused; and a language the file lacks is
+  refused outright by 0.58.0. Found from fi-1's journal: create direct, then
+  "seek fast-path skipped ... reason=preferences-changed", then no admission.
+- **Refusals say why** (`b0765e7`, `8d6c5da`): Tom, "That change could not be
+  made ... needs to die in a fire ... it's worse than 'something has gone
+  wrong'". `playbackRefusalText` words `choice_required` and
+  `choice_not_available` from `notice.refusal`, else the node's sentence,
+  else says the node gave no reason.
+- **Seen live:** on `macnessa` with bundle `index-DajU39j8.js`, a film
+  advanced 4 s in 4 s at 1920 wide, `readyState` 4. The three media that
+  failed on fi-1 have not been retried on the fixed build.
+- Checked for anything relying on a server pick: nothing builds a playback
+  request outside core; the Direct Play service worker proxies session URLs
+  only; the Samsung path uses core's URLs.
+
+## main onto published core 0.19.0, pushed — 2026-09-24
+
+Tom: "Go for it, core 0.19.0". Merge `26e8bcc`; `package.json` to `^0.19.0`,
+the lockfile's link entries removed, `test -L` failing (a real directory,
+gitHead `4e1746a`, the verified candidate); typecheck, suite 542 and build
+green against the registry copy and again from a fresh clone with no core tree
+beside it (`npm ci`); bundle `index-DKJODXg4.js`, identical to the build
+against the linked candidate. `develop` re-linked (`abf7c7b`). Client version
+left at 0.18.0 and the changelog section Unreleased: no bump or tag was asked
+for.
+
+## Principles and laws standardised on core's, and the documentation rationalised — 2026-09-24
+
+- **Laws.** Tom: standardise every Macha project on core's
+  `docs/principles-and-laws.md`. This repo's copy is byte-identical to core's
+  (`cmp` clean, including core's added sentence on choosing among an item's
+  files). Law 4, "Thou Shalt Not Shoot Thyself In The Foot", added as core
+  words it. No citation needed a new number; per Tom's ruling that
+  "attributions must be accurate to the canonical lawset", three citations
+  that quoted the bounded-work principle as "Law 2" now name the principle.
+- **`Idempotency-Key`** removed from current documents (Tom: "There's no
+  Idempotency-Key"); the `idempotency_key` query parameter is what exists.
+- **Documents checked against the code:** `README.md`, `docs/architecture.md`,
+  `docs/server-api.md` (the largest drift: a token-file auth model, fetched
+  artwork, missing acquisition, 0.56.0 codes, manage and users routes),
+  `docs/playback-handover.md`; the backlog cut from 3,458 lines to 2,840.
+- A TV-focus fault found on the way: the selection boxes lacked
+  `data-tv-focusable` (`ede5694`).
+
+## The paging test's timeouts were machine load, not the code — 2026-09-24
+
+`IngestScreen.test.tsx`, "a long torrent list shows fifty rows a page", timed
+out in 8 of 12 full runs (6.3 s against 5 s). Measured on a quiet machine:
+0.45 s alone, about 0.3 s of CPU (React render ~230 ms, whole-page text
+queries ~180 ms), nothing per row standing out. Its time tracked machine load
+(0.74 s at load 26 to 1.84 s at 55), and the load was the Server session's
+`cmake --build build -j8` (six to eleven `clang++`) on this shared 12-core
+machine, peaking above 100. Five back-to-back runs later passed 542/542 with
+load rising from 3 to 234, this test's slowest 2.3 s. The remedy (accept,
+raise `testTimeout`, or cut its cost) is Tom's and stays in ACTIVE.
 
 ## Retired from the backlog 2026-09-24
 

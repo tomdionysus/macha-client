@@ -1,11 +1,11 @@
 # Active tasks and concepts to explore
 
-Last updated: 2026-09-24, late evening, rationalised against the code, `git
-log` and published core 0.19.0. Read
-[2026-09-24-handover.md](2026-09-24-handover.md) for what is running, what is
-in flight with the sibling sessions, the day's rulings and the method that
-cost time; where this file and a dated document in this directory disagree,
-this file is current and the dated document is the record of its day.
+Last updated: 2026-09-25, at a break for a clear, rationalised against the
+code, `git log`, core `a50ef64` and server 0.58.0. Read
+[2026-09-25-handover.md](2026-09-25-handover.md) first, for what is running,
+what is in flight with the sibling sessions, Tom's rulings and the method;
+where this file and a dated document in this directory disagree, this file
+is current and the dated document is the record of its day.
 
 This is the working backlog. Add new work here. When an item is implemented and
 its stated verification is complete, remove it from this file and add a dated
@@ -19,181 +19,160 @@ are related. Core is addressed as the `Macha NPM Core` session.
 
 ## Start here
 
-**Where the repo is.** `main` resolves published core **0.19.0** and is
-pushed, 2026-09-24 20:50, on Tom's word ("Go for it, core 0.19.0"): merge
-`26e8bcc`, gate run against the registry copy (a real directory, gitHead
-`4e1746a`, no lockfile link), typecheck, suite 542 and build green, and again
-from a fresh clone with no core tree beside it (`npm ci`); bundle
-`index-DKJODXg4.js`. The client version is still **0.18.0** (`ce74408`, the
-last tag) and the changelog section is still Unreleased: no bump or tag was
-asked for. `develop` is linked to core's tree again (`abf7c7b`; core clean at
-`afa30d0`, 0.19.0 plus a record), **42 commits ahead of `origin/develop`**
-(`6e264bb` was the last push), and not pushed. Nothing is uncommitted: the
-evening's work is in `fe9c042` and `f64c15c`, and `CHANGELOG.md`'s Unreleased
-section covers everything since 0.18.0.
+**Read [2026-09-25-handover.md](2026-09-25-handover.md) first**: what is
+running, what is in flight with core, the server and both RN clients, and
+Tom's rulings of 2026-09-24/25 in his words.
 
-**The cluster**, read from here late on 2026-09-24: fi-1 and gbni-1 answer on
-server **0.55.1**. **es-1 is offline for the foreseeable future, and
-`ramaroja`, its public front, with it** (Tom, via core). Server 0.56.0 (codes
-on everything) is committed at macha `60ce47a` and not deployed; the server
-will say as each node takes it. Both live nodes serve `main`'s build (deploy
-section). Artwork caches for 30 days with an ETag (server 0.54.1). This
-machine sits at the fi-1 site.
+**Where the repo is, 2026-09-25 morning.** `main` is pushed and resolves
+published core **0.19.0** (`26e8bcc`, gate run against the registry copy and a
+fresh clone); client version still **0.18.0**, changelog still Unreleased (no
+bump or tag asked for). **`main` cannot start playback against server 0.58.0**
+(core 0.19.0 sends `item_id`, which 0.58.0 refuses): Tom accepted that; it
+needs the next core publish. `develop` is linked to core's tree (clean at
+`a50ef64`), **9 commits ahead of `origin/develop`** (`cc094dd` was the last
+push), nothing uncommitted. Suite **566**, typecheck clean, build clean.
 
-**What 2026-09-24 did** (`COMPLETED.md`, dated entries at the top; the
-changelog's Unreleased section): the search page; every viewer word moved
-from core into `src/text/viewerText.ts` on Tom's ruling; Import split into
-Torrents and Files, the torrent page redesigned, columns that hold still;
-Manage Unmatched in the torrent list's style; shared list parts and paging;
-the artwork P0's host choice and caching verified; the direct-play reclaim
-race fixed and run live; TV focus corrections ported; login, Music and Status
-touches; bulk torrent actions, 0.56.0 wording, log out onto core's session
-model, remembered nodes and the Reset association gate (built, owed a look:
-next section); `main` onto core 0.19.0 and deployed.
+**The cluster.** fi-1 and gbni-1 run server **0.58.0** (the release where the
+server chooses nothing: session create takes `media_id` only; macha code is at
+0.58.2). **es-1 does not answer** (ssh times out, no health) and `ramaroja` is
+offline with it. Both live nodes serve `develop`'s build `index-y5i3Gmjl.js`
+(deploy section), which plays against 0.58.0: seen live on `macnessa`, a film
+advancing 4 s in 4 s at 1920 wide.
 
 **Next, in order:**
 
-1. **The torrent paging test's timeout: cause found, remedy is Tom's.**
-   `IngestScreen.test.tsx`, "a long torrent list shows fifty rows a page",
-   failed in 8 of 12 full-suite runs on 2026-09-24 (timeout, 6.3 s against
-   5 s; commit `f951e58`; `2b0ec23` narrowed its Next lookup to the pager
-   and did not cure it). It does not cost ~2 s a re-render. Measured
-   2026-09-24 17:00, quiet machine: 0.45 s alone, CPU profile ~0.3 s of
-   work (React render ~230 ms, whole-page text queries ~180 ms), nothing
-   per row standing out. The run time follows machine load, not the code:
-   0.74 s at load 26, 1.29 s at 36, 1.84 s at 55 and 1.61 s at 135, all
-   green, 530/530 in 5 of 5 runs and in one run at 40 workers. The load was
-   the Server session's `cmake --build build -j8` (six to eleven `clang++`
-   processes) plus the other sessions on this 12-core machine. The load
-   average peaked above 100 during the failing runs and was ~95 over 15
-   minutes when this was measured. Yesterday's "timed alone" figures
-   (4.3 s total) are the same test at ten times today's cost, so they were
-   taken under that load too. The 6.3 s timeout itself was not reproduced
-   (it needs more load than was present). The 3-row sort tests scale the
-   same way, so this is every jsdom test's headroom, and the paging test is
-   simply the heaviest. In the release checks that evening, five back-to-back
-   runs passed 542/542 while the load rose from 3 to 234; this test's
-   slowest was 2.3 s. Open for Tom: accept it as is, raise the jsdom
-   suites' `testTimeout`, or cut the test's cost (table-scoped queries save
-   ~0.18 s).
-2. **The release, all Tom's:** the version bump (the README version test
-   holds it in step), the tag, and the merge commit named for it. One thing
-   to decide first: the Unreleased entry "Choosing a node moves the stream"
-   says **"Not releasable until the handover arrives"**, and that handover
-   is still the open P0 below.
-3. **One sign-in as Tom** settles most of the live checks owed on today's
-   work (next section): the bulk bar, Reset association by role, log out,
-   remembered nodes across a reload, and `main`'s deployed build opened in
-   a browser.
-4. **Server 0.56.0, once a node has it:** a look at Import, Unmatched and
-   Status, and Tom's eye on the wording (next section).
-5. The playback P0s as before: the handover with no lead (waiting on a
-   server-stated start cost), the seek freeze reading (the recorder waits
-   for one), the `readyState` 0 consequence.
+1. **Quality selection** (Tom's current priority, with core and both RN
+   clients). Design agreed and Tom's rulings in (section "Versions and
+   quality" below); core is building `qualityClass`, `playbackVersions`,
+   `playVersion` and the per-device setting. The web side: Play plus one
+   button per quality on the detail page, the same list in the player, a
+   Maximum quality setting, the screen measurement
+   (`src/platform/displayResolution.ts`, done). Waiting on core's commit.
+2. **Retry the titles that would not play** (three media on fi-1:
+   `4e1230739de9...`, `af0b9adfbfd3...`, `37e6afd411f2...`). Core `de86392`
+   fixed the cause (a session begun direct named no container or stream, so
+   a PATCH into transcode was refused) and a second (a language the file
+   lacks is refused outright by 0.58.0). Deployed; not yet retried. Any
+   refusal now shows its code on screen; send core the PATCH body verbatim.
+3. **Catalogue management resumes** (Tom: "we'll resume catalogue management
+   tomorrow"). Section "Identify and edit" below: step 1 is built; steps 2 and
+   3 wait on Tom approving the server's proposals; a general catalogue
+   editor is recorded for later.
+4. **One sign-in as Tom** settles the live checks owed (next section). His
+   browser is signed in on `macnessa`.
+5. **The paging-test remedy and the release** (both Tom's; below).
+6. The playback P0s as before.
 
-**What needs Tom, and nothing else does:** a television (the Samsung items,
-including the native-HLS produced-source wait, unit-tested only; and the
-TVs' saved endpoints, now that `ramaroja` is offline); any push, merge to
-`main`, version bump, tag, deploy or core publish; demoting or re-ranking a
-P0; and these open decisions from 2026-09-24: the paging-test remedy
-(item 1); whether the ~15 s artwork hang on a silently dead node (8-18 s
-window) matters; whether the player options panel should keep a sideways
-move between its columns (the TV focus correction stops it; Up/Down still
-reach everything); sized artwork variants' priority (the server's); and
-core's two questions, "Plan A" searched as "Plan" and "Season 0 Episode 1".
+**What needs Tom, and nothing else does:** a television (Samsung items; the
+TVs' saved endpoints now `ramaroja` is offline; reading a Samsung panel's
+resolution needs `webapis.productinfo`, not yet loaded); any push, merge,
+version bump, tag, deploy or core publish; demoting or re-ranking a P0; and
+the open decisions: the paging-test remedy (below); whether the release
+ships the node picker whose changelog entry says "Not releasable until the
+handover arrives"; the server's proposed changes for catalogue management
+(steps 2 and 3, and its multi-file fixes); the ~15 s artwork hang on a
+silently dead node; the player options panel's sideways move; sized artwork
+variants; and core's "Plan A" and "Season 0 Episode 1".
 
-**Two business P0s outrank the rest:** slow artwork (host choice and
-caching fixed and verified 2026-09-24; what remains is the server's slow
-first read and poster size), and scope-ratio titles playing small in a
-black window. The bars are burnt into the source and
-the fix is an ingest/server one. [Evidence](2026-09-16-video-fit-mode.md).
+**The paging test** (`IngestScreen.test.tsx`, "fifty rows a page"): its
+2026-09-24 timeouts were machine load from the Server session's C++ builds
+on this shared machine, not the code (0.45 s alone; the time tracks load;
+five runs green at load up to 234, slowest 2.3 s). Tom to choose: accept as
+is, raise the jsdom `testTimeout`, or cut its cost. Detail in `COMPLETED.md`.
+
+**Two business P0s outrank the rest:** slow artwork (host choice and caching
+fixed 2026-09-24; the server's slow first read and poster size remain), and
+scope-ratio titles playing small in a black window (burnt-in bars; the fix is
+an ingest/server one, [evidence](2026-09-16-video-fit-mode.md)).
 
 **The P0s, as they stand.** The scope title (the server's). A player at
-`readyState` 0 (instrumented, no mechanism yet). Seek misbehaviour. A
-handover with no lead. Failover from an https page onto an http node
-(core's). Each demotion below carries its reason; demoting is not
-dismissing.
+`readyState` 0 (instrumented, no mechanism). Seek misbehaviour. A handover
+with no lead. Failover from an https page onto an http node (core's).
 
-## Built 2026-09-24, owed a live look
+## Versions and quality (in progress with core, TV and phone)
 
-All committed and unit-tested, each test seen red under a mutation; what is
-owed is the look. Most of it needs a sign-in as Tom: the test account
-deliberately lacks `importer` and `manager`, and the dev tab is signed out.
+Tom, 2026-09-24/25, in his words where given:
+- "in Macha it's the client that makes the decision on what to play, it's the
+  client that should match the available media to the client capabilities."
+  There is no server pick among an item's files, not even as a fallback;
+  server 0.58.0 refuses a create without `media_id`. Done: this client hands
+  core every file's facts (`121c280`); core's chooser names the file.
+- "different buttons for 'play' on media depending on available quality,
+  which trigger specific files or transcode options. The generic play button
+  stays, and means 'make the decision for me'." TV and phone do the same.
+- "a 4K movie can be 4K, 2K, 1080p, 720p but a 1080p can only be 1080p or
+  720p ... it's always possible to transcode down unless a specific file
+  exists to direct, but upscaling isn't offered."
+- Below 720p: "display the 480p class anyway" (not Play only).
+- "cap at the screen resolution for automatic play", with the reason shown
+  and a Settings override. The phone has Wi-Fi and mobile-data ceilings,
+  mobile lower, reason shown, overridable.
 
-- [ ] **Bulk actions on torrents** (`fe9c042`). Selection (row boxes, a page
-      box, pruning of ids that leave the list) and the bulk bar are shared
-      parts in `ListParts` (`useListSelection`, `SelectPageBox`,
-      `SelectRowBox`, `BulkActions`, `runBulkOperation`), and Unmatched moved
-      onto them. The torrent bar offers Pause and Resume (each enabled only
-      when a ticked torrent can take it, and applied only to those) and
-      Remove, which always asks and cancels any still running first.
-      `useAcquisition.actMany` shares the single-job dispatch with `act` and
-      says how many the server refused. Owed: a look on the live page, and
-      whether the bar's sticky `top: 132px` (Unmatched's) sits right under
-      Import's header.
-- [ ] **Server 0.56.0's codes, worded here** (`fe9c042`, against core
-      `a5b08f0`, in 0.19.0). Checked: nothing breaks when 0.56.0 lands; the
-      one JSON body this client parses itself, the subtitle manifest, ignores
-      unknown keys. `viewerText.ts` words job error codes (`jobErrorText`:
-      Import list, torrent page, file-import rows), catalogue results
-      (`hintResultLabel`: Unmatched list and page), Status diagnostics
-      (`diagnosticErrorText`: UPnP, external IP, startup, node connectivity),
-      `placement_failed` by reason (in `viewerErrorText`), and the Settings
-      server card (`serverStatusText`, from core's new `code`/`detail`, which
-      replaced `ServerStatus.message`). The rule: a known code gets this
-      client's sentence; a generic one (`torrent_error`, `filesystem_error`,
-      `import_failed`, `torrent_failed`, `ingest_failed`) also gets the
-      server's sentence after it; an unknown code, or none from a pre-0.56.0
-      node, shows the server's sentence. One `codeWords` backs `stateLabel`.
-      Owed: Import, Unmatched and Status against a node on 0.56.0 (the
-      server will say when), and Tom's eye on the wording.
-- [ ] **Remembered endpoints survive a reload.** Found by the Android TV
-      session and seen live here: the list held two URLs 20 s into a load and
-      was null by 114 s, because `App.tsx` seeded it as `'environment'` and
-      core's health cycle keeps only `'discovered'`. It now seeds through
-      core's `seedEndpoints` (core `b47773d`, in 0.19.0), and core keeps
-      remembered nodes that have not answered yet. Owed: seen surviving a
-      reload live.
-- [ ] **Reset association only with `manager`.** Status offered it to any
-      account that can view status (seen as `webclient`, media_viewer +
-      view_status): it was gated on the `managementAvailable` configuration
-      flag, not a role. The server asks `manager` of every change under
-      `/api/v1/manage` (`service.cpp`), so Status now gets the manage API
-      only with `manager`. Owed: seen with and without the role.
-- [ ] **Log out ends the session on the server** (`f64c15c`, to Tom's
-      ruling recorded under the session-model P1 below). Log out stops playback and
-      waits for it (`playback.stop` returns the runtime's promise), then
-      calls `useSession().signOut`, which is core's `signOut()` (clears local
-      state first, then revokes) followed by `start(registry)`. It always
-      starts again: this client always needs a session afterwards (every
-      screen reads through one, and the anonymous account's roles decide
-      between browsing and the login wall), which is the "only when needed"
-      half of the ruling. A revoke that fails still leaves this device signed
-      out, and an app-wide notice says the session stays valid at the server.
-      `AccountMenu` no longer takes the users API. Owed: one live sign-out,
-      confirming a DELETE with the old token and no request carrying it
-      afterwards.
-- [ ] **A good session kept when no node answers** (core `9654e1e`). The dev
-      tab's `webclient` session ended mid-load and a reload landed on
-      `/login`. Core's reading: with no node answering, validation returned
-      the same as a refusal, the manager minted anonymously, the cluster
-      refused, and a good token went unused. Now "nobody answered" keeps the
-      cached session. Not proven to be what happened here; the same sign-in
-      and reload as above is the check.
-- [ ] **Decode fallback** (core `e840d72`, Tom's ruling): a copied stream the
-      player cannot decode gets a transcode on the same node instead of a
-      failure screen, once per playback and never against a mode the viewer
-      chose. Worded here: the `decode-fallback` notice ("This device could
-      not play the original streams, so they are being converted.") and the
-      `player-could-not-decode` reason in the player options. Not seen live;
-      it needs a title the browser cannot decode.
-- [ ] **By hand:** the unmatched table without a horizontal scrollbar
-      (`2b0ec23`: headers clip to their column; the likely cause was the last
-      header running past the table edge); the player's text after the
-      viewer-text move (stream-status lines, clock, notices); and the
-      fullscreen cursor (`5dd07c7`, the P1 below).
-- [ ] **`main`'s deployed build opened in a browser** on fi-1 and gbni-1
-      (deploy section).
+Core's design (its message 2026-09-25): `qualityClass(width, height)` by the
+higher of either axis with 10% tolerance (1920x800 is 1080; "2K" is 1440);
+`playbackVersions(files, capabilities, { overrides?, maxQuality? })` giving
+`{ files, steps }`, steps from the best file's class downwards, a class
+without its own file being a capped transcode of the lowest file above it;
+`PlaybackRuntime.play({ media, version })` and `coordinator.playVersion(step)`
+as a viewer choice never overridden; `snapshot.versions`; a per-device
+`qualityPreference`. Classes below 720 and the display input follow Tom's two
+answers; core is confirming them with him. Web: `displayResolution.ts` done
+(browser: CSS size x devicePixelRatio, landscape; Samsung: unknown, so
+uncapped, until the panel can be read); the rest waits on core's commit.
+
+## Identify and edit (catalogue management; resume here)
+
+Tom: one interface for matching an unmatched file and editing metadata, with
+three paths (a candidate, a search with any terms, manual entry), parents
+linked for episodes and tracks, artwork with a choice; files as alternate
+versions of an item; and later a general editor over the whole catalogue.
+Core handles all API interaction (Tom). The server's and core's answers, and
+the gaps, are summarised in the handover.
+
+- **Step 1, built** (client only, through core; `8b8907e`, `dd95f96`):
+  the unmatched file page in `src/screens/identify/` with three tabs
+  (Candidates with Create or Review via core's `manualFromCandidate`, Search
+  the catalogue with each match's picture and "Add as another version",
+  Enter manually), all applied through core's `identifyUnmatched`; a Files
+  card on the metadata editor listing each file's facts, with Add a file;
+  shared fields; editor artwork upload per role. Not seen live.
+- **Step 2, waits on Tom approving the server's proposal:** manual entry with
+  parent ids (ends duplicate series and artists, which today get `manual:`
+  ids by name beside the scanner's `tmdb:` ones), `PUT` validating parents
+  and unable to unbind files by omission, errors as 400/404 not 503, the
+  lock set on hand edits, a search kind filter.
+- **Step 3, waits on Tom:** provider search with free terms returning a list,
+  match to a provider result (the server building the hierarchy, reusing
+  what exists), artwork options with the server fetching the chosen one,
+  richer candidates with embedded art.
+- **Open design questions for Tom:** one address or both (I proposed both);
+  whether a candidate applies directly or is reviewed first (built: complete
+  ones get Create, others Review); the lock on hand edits by default.
+- **Later:** the general catalogue editor (P2 below).
+
+## Built 2026-09-24/25, owed a live look
+
+All committed and unit-tested, each test seen red under a mutation. Most
+needs a sign-in as Tom (the test account lacks `importer` and `manager`).
+
+- [ ] **Bulk actions on torrents** (`fe9c042`), and whether the bar's sticky
+      `top: 132px` sits under Import's header.
+- [ ] **Refresh button on the torrent list** (`660f6c6`).
+- [ ] **Server codes worded here** (`fe9c042`): Import, Unmatched and Status
+      against a node now on 0.58.0, and Tom's eye on the wording.
+- [ ] **Refused playback changes say why** (`b0765e7`, `8d6c5da`): "That
+      change could not be made" is gone (Tom); a refusal is worded from
+      `notice.refusal`.
+- [ ] **Remembered endpoints survive a reload** (`seedEndpoints`).
+- [ ] **Reset association only with `manager`.**
+- [ ] **Log out ends the session on the server** (`f64c15c`): a DELETE with
+      the old token and no request carrying it afterwards.
+- [ ] **A good session kept when no node answers** (core `9654e1e`).
+- [ ] **Decode fallback** wording (needs a title the browser cannot decode).
+- [ ] **Artist, album and track under a track's artwork** (`1c81a91`).
+- [ ] **Identify tabs, Add a file, editor upload** (above).
+- [ ] **By hand:** the unmatched table without a horizontal scrollbar; the
+      player's text after the viewer-text move; the fullscreen cursor.
 
 ## How the test cluster behaves, and how to read it
 
@@ -2430,7 +2409,7 @@ core wrote that, and every node in the field sends `resource_limit` bare.
 
 **Tom asked for this through the `Macha Server` session, 2026-09-21. The
 server shipped it in 0.51.0 (`f648418`, 2026-09-22), and both live nodes run
-0.55.1.** Contract feedback was sent the night of 2026-09-21.
+0.58.0 (2026-09-25).** Contract feedback was sent the night of 2026-09-21.
 
 **The contract.** `POST /api/v1/torrents/jobs` takes an optional `node_id`
 (32 hex characters) beside `magnet` or `acquisition_ref`. Omitted or null
