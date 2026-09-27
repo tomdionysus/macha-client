@@ -241,6 +241,7 @@ const PLACEMENT_REASONS: Record<string, string> = {
   node_did_not_start: 'That node did not start the torrent.',
   missing_uri: 'There was no magnet link to pass on.',
   add_failed: 'That node could not add the torrent.',
+  node_not_torrent_capable: 'That node cannot run torrents.',
 };
 
 /**

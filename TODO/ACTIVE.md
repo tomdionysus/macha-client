@@ -169,9 +169,10 @@ with no lead. Failover from an https page onto an http node (core's).
 Built on core `201700f`: node selector and remove-after on the add form,
 intents in the status column and on the torrent page, "Not yet claimed",
 the pinned node and removal time, polling at `refresh_interval_ms`, and
-null-safe live figures. Seen live (the form only; nothing added). Not yet
-built: re-pinning an unclaimed job (`PATCH {node_id}`), changing
-remove-after on an existing job, and a stale-source notice from `sources`.
+null-safe live figures. Seen live (the form only; nothing added). Then, on
+Tom's yes: the torrent page's "Download on" (unclaimed only) and "Remove
+after completion", by `PATCH`, with a claimed-first refusal worded, and a
+notice on the lists for a source node out of reach or never reached.
 The notes below are the design as settled.
 
 Torrents belong to the cluster: added once, claimed by any torrent-capable

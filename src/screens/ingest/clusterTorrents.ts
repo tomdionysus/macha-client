@@ -1,4 +1,5 @@
-import type { TorrentJob, TorrentNode } from '@machafoundation/core';
+import type { AcquisitionSource, TorrentJob, TorrentNode } from '@machafoundation/core';
+import { formatAge } from './format';
 
 /**
  * Server 0.64.0: torrents belong to the cluster. An action is intent: the
@@ -61,4 +62,19 @@ export function torrentNodeLabel(node: Pick<TorrentNode, 'host' | 'node_id' | 'a
   if (node.accepting) return `${name} (${node.active_jobs} of ${node.max_active} running)`;
   const why = node.not_accepting_reason ? NOT_ACCEPTING[node.not_accepting_reason] ?? node.not_accepting_reason.replace(/_/g, ' ') : 'not taking torrents';
   return `${name} (${why})`;
+}
+
+/**
+ * What to say about the nodes a list could not hear from (server 0.64.0,
+ * `sources`). A node out of reach still has its jobs listed, as they were at
+ * its last answer, which may be stale; a node never reached has none listed.
+ * Nodes are named by host where the torrent node list knows them.
+ */
+export function staleSourceNotes(sources: readonly AcquisitionSource[], hosts: ReadonlyMap<string, string>, now: number): string[] {
+  return sources.filter((source) => !source.reachable).map((source) => {
+    const name = hosts.get(source.node_id) ?? `Node ${source.node_id.slice(0, 8)}`;
+    return source.as_of_unix_ms === null
+      ? `${name} has not answered, so its jobs are missing from this list.`
+      : `${name} is out of reach, so its jobs are shown as they were ${formatAge(source.as_of_unix_ms, now)}.`;
+  });
 }

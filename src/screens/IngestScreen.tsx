@@ -2,7 +2,7 @@ import { useMemo, useState, type ChangeEvent, type FormEvent, type MouseEvent } 
 import { Link, useNavigate } from 'react-router-dom';
 import { routes, torrentHeldBy, type AcquisitionApi, type IngestJob, type TorrentJob } from '@machafoundation/core';
 import { JobControls, Progress } from './ingest/JobControls';
-import { intentNote, REMOVE_AFTER_CHOICES, removeAfterDefaultLabel, torrentNodeLabel } from './ingest/clusterTorrents';
+import { intentNote, REMOVE_AFTER_CHOICES, staleSourceNotes, removeAfterDefaultLabel, torrentNodeLabel } from './ingest/clusterTorrents';
 import { useAsync } from '../hooks/useAsync';
 import { formatAge, formatBytes, formatCount, formatEta, formatPercent, formatRate, formatRatio, formatTimestamp, percent, stateLabel } from './ingest/format';
 import { canPause, canResume, canRetryImport, displayStateOf, jobKey, linkedIngestOf } from './ingest/jobs';
@@ -140,6 +140,11 @@ export function IngestScreen({ api, section }: Props) {
   const staging = snapshot?.ingestStatus.staging;
   const now = Date.now();
   const refreshIntervalMs = snapshot?.refreshIntervalMs ?? 5_000;
+  const staleNotes = staleSourceNotes(
+    (section === 'torrents' ? snapshot?.torrentSources : snapshot?.ingestSources) ?? [],
+    new Map(torrentNodes.value?.nodes.map((node) => [node.node_id, node.host]) ?? []),
+    now,
+  );
 
   /** The whole row opens the torrent, except where a control inside it was the target. */
   const openRow = (event: MouseEvent<HTMLTableRowElement>, job: TorrentJob) => {
@@ -209,6 +214,7 @@ export function IngestScreen({ api, section }: Props) {
 
       {error && <p className="ingest-page-error" role="alert">{error}{heldBy && <> <Link data-tv-focusable="true" to={torrentPath(heldBy)}>Open it</Link></>}</p>}
       {notice && <p className="ingest-page-notice">{notice}</p>}
+      {staleNotes.map((note) => <p key={note} className="ingest-page-notice ingest-stale-source">{note}</p>)}
       {loading && !snapshot && <p className="ingest-loading">Loading import state…</p>}
 
       {section === 'torrents' && (

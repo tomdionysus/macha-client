@@ -107,3 +107,9 @@
 @media (max-width: 900px) {
   .torrent-stages { grid-template-columns: 1fr; }
 }
+
+/* Where a cluster torrent downloads and when it is removed (server 0.64.0). */
+.torrent-placement { display: flex; flex-wrap: wrap; gap: .8rem 1.4rem; margin: .4rem 0 1rem; }
+.torrent-placement label { display: flex; flex-direction: column; gap: .3rem; font-size: .78rem; color: var(--text-faint); text-transform: uppercase; letter-spacing: .06em; }
+.torrent-placement select { max-width: 20rem; appearance: none; padding: .45rem 1.7rem .45rem .6rem; background: #19191c url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23b8b8be' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right .55rem center; border: 1px solid #3a3a40; border-radius: .45rem; color: #d7d7da; font-size: .85rem; text-transform: none; letter-spacing: normal; }
+.torrent-placement select:focus { outline: 1px solid var(--focus); border-color: var(--focus); }

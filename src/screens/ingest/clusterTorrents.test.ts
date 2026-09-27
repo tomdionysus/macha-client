@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { intentNote, removeAfterDefaultLabel, torrentNodeLabel } from './clusterTorrents';
+import { intentNote, removeAfterDefaultLabel, staleSourceNotes, torrentNodeLabel } from './clusterTorrents';
 
 const now = 1_000_000;
 
@@ -34,5 +34,22 @@ describe('the add form\'s choices', () => {
   it('names a node by its host, with its load or why it is not taking torrents', () => {
     expect(torrentNodeLabel({ node_id: 'n', host: 'gbni-1', accepting: true, not_accepting_reason: null, active_jobs: 1, max_active: 4 })).toBe('gbni-1 (1 of 4 running)');
     expect(torrentNodeLabel({ node_id: 'n', host: 'gbni-1', accepting: false, not_accepting_reason: 'staging_full', active_jobs: 4, max_active: 4 })).toBe('gbni-1 (staging full)');
+  });
+});
+
+describe('a list some nodes could not answer for', () => {
+  const hosts = new Map([['gbni', 'gbni-1']]);
+  it('says nothing of the nodes that answered', () => {
+    expect(staleSourceNotes([{ node_id: 'gbni', local: true, reachable: true, as_of_unix_ms: now }], hosts, now)).toEqual([]);
+  });
+
+  it('says a node out of reach has its jobs shown as they last were, and one never reached has none', () => {
+    expect(staleSourceNotes([
+      { node_id: 'gbni', local: false, reachable: false, as_of_unix_ms: now - 300_000 },
+      { node_id: '855716bd8bb0ad12', local: false, reachable: false, as_of_unix_ms: null },
+    ], hosts, now)).toEqual([
+      'gbni-1 is out of reach, so its jobs are shown as they were 5m ago.',
+      'Node 855716bd has not answered, so its jobs are missing from this list.',
+    ]);
   });
 });

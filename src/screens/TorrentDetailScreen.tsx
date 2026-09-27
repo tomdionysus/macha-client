@@ -3,6 +3,8 @@ import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { routes, type AcquisitionApi, type IngestJob, type TorrentJob } from '@machafoundation/core';
 import { JobControls, Progress } from './ingest/JobControls';
 import { intentNote } from './ingest/clusterTorrents';
+import { placementRefusalText, TorrentPlacement } from './ingest/TorrentPlacement';
+import { useAsync } from '../hooks/useAsync';
 import { formatAge, formatBytes, formatCount, formatEta, formatPercent, formatRate, formatRatio, formatTimestamp, percent, stateLabel } from './ingest/format';
 import { jobErrorText } from '../text/viewerText';
 import { MetricTile } from '../components/MetricTile';
@@ -162,7 +164,8 @@ export function TorrentDetailScreen({ api }: { api: AcquisitionApi }) {
   const { torrentId = '' } = useParams();
   const { search } = useLocation();
   const navigate = useNavigate();
-  const { snapshot, loading, error, busyByJob, confirmRemove, setConfirmRemove, act } = useAcquisition(api);
+  const { snapshot, loading, error, setError, refresh, busyByJob, confirmRemove, setConfirmRemove, act } = useAcquisition(api);
+  const torrentNodes = useAsync(() => api.torrentNodes(), [api]);
   const back = `${routes.ingestTorrents}${search}`;
   const job = snapshot?.torrentJobs.find((candidate) => candidate.id === torrentId);
   const linked = job ? linkedIngestOf(job, snapshot?.ingestJobs) : undefined;
@@ -210,6 +213,13 @@ export function TorrentDetailScreen({ api }: { api: AcquisitionApi }) {
       {error && <p className="ingest-page-error" role="alert">{error}</p>}
       {failure && <p className="ingest-job-error">{failure}</p>}
       {lifecycle && <p className="ingest-current">{lifecycle}</p>}
+      <TorrentPlacement
+        api={api}
+        job={job}
+        nodes={torrentNodes.value}
+        onChanged={() => { setError(undefined); void refresh(); }}
+        onError={(reason) => setError(placementRefusalText(reason))}
+      />
       <TorrentBody job={job} linkedIngest={linked} />
     </section>
   );
