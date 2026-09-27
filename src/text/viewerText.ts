@@ -9,6 +9,7 @@ import {
   SESSION_PROVENANCE_UNKNOWN_CODE,
   playbackFailureCode,
   playbackFailureDetail,
+  qualityLabel,
   startupPhase,
   type CatalogueHintResult,
   type ClusterStartupStatus,
@@ -19,7 +20,6 @@ import {
   type PlaybackRefusal,
   type PlaybackStatusDescription,
   type QualityCeiling,
-  type QualityClass,
   type SearchCategoryKey,
   type StartupSubsystem,
   type TorrentJobErrorCode,
@@ -469,17 +469,6 @@ export function alphabetIndexKeyText(key: string): string {
 
 export function alphabetIndexKeyDescription(key: string): string {
   return key === 'other' ? 'Titles beginning with a number or symbol' : `Titles beginning with ${key}`;
-}
-
-/**
- * A quality as a viewer names it. Tom, 2026-09-25: "a 4K movie can be 4K,
- * 2K, 1080p, 720p", so the two largest classes go by their marketing names
- * and the rest by their height.
- */
-export function qualityLabel(quality: QualityClass): string {
-  if (quality === 2160) return '4K';
-  if (quality === 1440) return '2K';
-  return `${quality}p`;
 }
 
 /**

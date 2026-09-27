@@ -1,3 +1,4 @@
+import { qualityLabel } from '@machafoundation/core';
 import type {
   OfferedMode,
   PlaybackDecisionReason,
@@ -13,7 +14,6 @@ import type { PlaybackCapabilities, PlaybackMode } from '@machafoundation/core';
 import { useEffect, useRef } from 'react';
 import type { PlayerNodeChoice } from './nodeChoices';
 import { modeRequest } from './modeTransforms';
-import { qualityLabel } from '../../text/viewerText';
 
 function streamLabel(stream: PlaybackStreamInfo, fallback: string): string {
   const parts = [stream.language ? stream.language.toUpperCase() : fallback, stream.codec.toUpperCase()];

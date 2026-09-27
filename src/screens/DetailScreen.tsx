@@ -1,7 +1,7 @@
 import type { MediaApi } from '@machafoundation/core';
 import type { CatalogueMediaProfile } from '@machafoundation/core';
 import { PlayIcon, RestartIcon } from '../components/PlaybackIcons';
-import type { MediaDetails, MediaSummary, PlaybackProgress, PlaybackVersions, VersionStep } from '@machafoundation/core';
+import { fileSummaries, qualityLabel, type MediaDetails, type MediaSummary, type PlaybackProgress, type PlaybackVersions, type VersionStep } from '@machafoundation/core';
 import { useAsync } from '../hooks/useAsync';
 import { useRefreshableAsync } from '../hooks/useRefreshableAsync';
 import { ErrorMessage, Loading } from '../components/Status';
@@ -10,10 +10,9 @@ import { requestTvDefaultFocus } from '../hooks/useTvNavigation';
 import { buildPlatformTraits } from '../platform/traits';
 import { useEffect } from 'react';
 import { EditButton } from '../components/EditButton';
-import { episodeCode, qualityLabel, qualityLimitText } from '../text/viewerText';
+import { episodeCode, qualityLimitText } from '../text/viewerText';
 import { MediaPageTitle } from '../components/MediaPageTitle';
 import { MediaLine } from '../components/MediaLine';
-import { fileLines } from '../text/mediaLines';
 
 interface Props {
   api: MediaApi;
@@ -90,7 +89,12 @@ export function DetailScreen({ api, itemId, onBack, onPlay, onPlayFromStart, loa
       <p className="eyebrow">{media.kind}{media.year ? ` · ${media.year}` : ''}</p>
       <MediaPageTitle refreshing={details.refreshing} onRefresh={details.refresh}>{media.title}</MediaPageTitle>
       {media.kind === 'episode' && episodeCode(media) && <p className="subtitle">{episodeCode(media)}</p>}
-      {profiles.value && fileLines(profiles.value).map((line) => <MediaLine key={line} className="media-profile-summary" line={line} />)}
+      {/* One line per distinct file; core combines files whose summaries read
+          the same (Tom, 2026-09-27).
+          TODO: an entry standing for more than one media id is very likely the
+          same media stored twice. Report it to the server once it has a route
+          for flagging duplicates, rather than only showing one line here. */}
+      {profiles.value && fileSummaries(profiles.value).map(({ summary, mediaIds }) => <MediaLine key={mediaIds[0]} className="media-profile-summary" parts={summary.parts} />)}
       {media.synopsis && <p className="synopsis">{media.synopsis}</p>}
       {playable && (
         <div className="play-actions detail-play-controls" aria-label="Playback controls">

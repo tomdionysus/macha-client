@@ -30,7 +30,7 @@ describe('the facts under a track\'s artwork', () => {
   });
 
   it('ends with the playing file\'s format line, which wraps only between its fields', () => {
-    const { container } = render(<TrackFacts track={track({ trackNumber: 4 })} format="6:43 · FLAC · 16-bit · 44.1 kHz · Stereo · 926 kbps" />);
+    const { container } = render(<TrackFacts track={track({ trackNumber: 4 })} format={['6:43', 'FLAC', '16-bit', '44.1 kHz', 'Stereo', '926 kbps']} />);
     const line = container.querySelector('.audio-player-format');
     expect(line?.textContent).toBe('6:43 · FLAC · 16-bit · 44.1 kHz · Stereo · 926 kbps');
     expect([...container.querySelectorAll('.media-line-field')].map((field) => field.textContent)).toEqual(['6:43', 'FLAC', '16-bit', '44.1 kHz', 'Stereo', '926 kbps']);
@@ -38,7 +38,7 @@ describe('the facts under a track\'s artwork', () => {
 
   it('shows the format line alone for a track that carries nothing else', () => {
     expect(lines(track({}))).toEqual([]);
-    const { container } = render(<TrackFacts track={track({})} format="0:45 · MP3" />);
+    const { container } = render(<TrackFacts track={track({})} format={['0:45', 'MP3']} />);
     expect(container.querySelector('.audio-player-format')?.textContent).toBe('0:45 · MP3');
   });
 });

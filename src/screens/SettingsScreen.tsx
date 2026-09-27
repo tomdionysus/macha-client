@@ -1,7 +1,7 @@
 import { useState, useSyncExternalStore } from 'react';
 import { Link } from 'react-router-dom';
 import type { MediaApi } from '@machafoundation/core';
-import type { QualityCeiling, QualityClass, QualityPreference, QualityPreferenceStore, ServerApi, ServerStatus } from '@machafoundation/core';
+import { qualityLabel, type QualityCeiling, type QualityClass, type QualityPreference, type QualityPreferenceStore, type ServerApi, type ServerStatus } from '@machafoundation/core';
 import { machaLogoUrl as logoUrl } from '../uiAssets';
 import { useAsync } from '../hooks/useAsync';
 import { routes } from '@machafoundation/core';
@@ -9,7 +9,7 @@ import { clientVersion } from '../version';
 import { ConnectionForm } from '../components/ConnectionForm';
 import { failureTrailEnabled, setFailureTrailEnabled } from '../diagnostics/failureTrailSetting';
 import { presentedTime } from '../diagnostics/timestamps';
-import { qualityLabel, serverStatusText, viewerErrorText } from '../text/viewerText';
+import { serverStatusText, viewerErrorText } from '../text/viewerText';
 
 interface Props {
   api: MediaApi;

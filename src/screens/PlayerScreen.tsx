@@ -10,11 +10,10 @@ import { usePointerIdle } from '../hooks/usePointerIdle';
 import { cardSubtitle, episodeCode, playbackNoticeText, playbackTimeText, streamStatusText } from '../text/viewerText';
 import { TrackFacts } from './player/TrackFacts';
 import { useAsync } from '../hooks/useAsync';
-import { mediaProfileSummary } from '../text/mediaLines';
 import type { Platform } from '@machafoundation/core';
 import { platformTraits } from '../platform/traits';
 import type { PlaybackUpdate } from '@machafoundation/core';
-import { isSubtitleOnlyPlaybackUpdate, offeredModes, technicalProfileFromSession, type OfferedMode, type PlaybackCoordinatorSnapshot, type PlaybackPolicyOverrides, type PlaybackSession } from '@machafoundation/core';
+import { isSubtitleOnlyPlaybackUpdate, offeredModes, technicalSummary, technicalProfileFromSession, type OfferedMode, type PlaybackCoordinatorSnapshot, type PlaybackPolicyOverrides, type PlaybackSession } from '@machafoundation/core';
 import { PlaybackRuntime, type PlaybackRuntimeRequest, type PlaybackRuntimeSnapshot } from '@machafoundation/core';
 import { uiSettings } from '../settings';
 import { describePlaybackSession } from '@machafoundation/core';
@@ -840,7 +839,7 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
     async (signal) => {
       if (!playingMediaId?.startsWith('macha:') || !api.mediaProfile) return undefined;
       const profile = await api.mediaProfile(playingMediaId, signal);
-      return profile ? mediaProfileSummary(profile) : undefined;
+      return profile ? technicalSummary(profile).parts : undefined;
     },
     [api, playingMediaId],
   );

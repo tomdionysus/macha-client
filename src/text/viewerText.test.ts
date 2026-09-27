@@ -7,7 +7,7 @@ import {
   jobErrorText,
   serverStatusText,
   albumLabel, alphabetIndexKeyText, cardSubtitle, episodeCode, episodeLabel, playbackFailureCodeText, playbackNoticeText,
-  playbackTimeText, qualityLabel, qualityLimitText, SERVER_UNREACHABLE_TEXT, sortChoiceLabel, streamStatusText, trackNumberLabel, viewerErrorText,
+  playbackTimeText, qualityLimitText, SERVER_UNREACHABLE_TEXT, sortChoiceLabel, streamStatusText, trackNumberLabel, viewerErrorText,
 } from './viewerText';
 
 const item = (overrides: Partial<MediaSummary>) => ({ id: 'i', kind: 'movie', title: 'T', mediaIds: [], ...overrides }) as MediaSummary;
@@ -184,10 +184,6 @@ describe('a refused playback change says why (Tom: no more "That change could no
 });
 
 describe('quality wording', () => {
-  it('names the two largest classes as Tom does and the rest by height', () => {
-    expect([2160, 1440, 1080, 720, 480].map((quality) => qualityLabel(quality as 2160))).toEqual(['4K', '2K', '1080p', '720p', '480p']);
-  });
-
   it('gives each cap on Play its own reason', () => {
     expect(qualityLimitText({ quality: 1080, reason: 'ceiling-display' })).toBe('Play chooses up to 1080p, the most this screen shows. Pick a quality to play another.');
     expect(qualityLimitText({ quality: 720, reason: 'ceiling-preference' })).toBe('Play chooses up to 720p, as set in Settings. Pick a quality to play another.');
