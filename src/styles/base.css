@@ -481,8 +481,6 @@ h2 { font-size: clamp(1.2rem, 2vw, 1.75rem); letter-spacing: -.01em; margin: 1.1
 .eyebrow { color: var(--text-dim); text-transform: uppercase; letter-spacing: .12em; font-size: .78rem; }
 .subtitle { color: var(--text-dim); font-size: 1.1rem; }
 .media-profile-summary { color: var(--text-dim); font-size: .95rem; letter-spacing: .025em; }
-.media-file-pills { display: flex; flex-wrap: wrap; gap: .4rem; margin: .35rem 0 .6rem; }
-.media-file-pill { padding: .18rem .65rem; border: 1px solid #48484f; border-radius: 1rem; background: #080809a8; color: #c9c9ce; font-size: .8rem; letter-spacing: .02em; }
 .synopsis { max-width: 70ch; line-height: 1.65; font-size: clamp(1rem, 1.35vw, 1.25rem); color: #d1d1d5; }
 .primary-button, .secondary-button, .settings button {
   border: 0;

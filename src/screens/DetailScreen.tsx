@@ -1,7 +1,7 @@
 import type { MediaApi } from '@machafoundation/core';
 import type { CatalogueMediaProfile } from '@machafoundation/core';
 import { PlayIcon, RestartIcon } from '../components/PlaybackIcons';
-import type { MediaDetails, MediaSummary, PlaybackMode, PlaybackProgress, PlaybackVersions, VersionFile, VersionStep } from '@machafoundation/core';
+import type { MediaDetails, MediaSummary, PlaybackProgress, PlaybackVersions, VersionStep } from '@machafoundation/core';
 import { useAsync } from '../hooks/useAsync';
 import { useRefreshableAsync } from '../hooks/useRefreshableAsync';
 import { ErrorMessage, Loading } from '../components/Status';
@@ -36,23 +36,6 @@ function hasPicture(media: MediaSummary): boolean {
   return media.kind === 'movie' || media.kind === 'episode';
 }
 
-const MODE_NAMES: Record<PlaybackMode, string> = { direct: 'Direct', remux: 'Remux', transcode: 'Transcode' };
-
-/**
- * An item's files, grouped by how this device would play each, as
- * "Direct: 4K, 1080p". Tom, 2026-09-27: a title with several files shows
- * them below its title, beside the quality buttons, naming each differing
- * quality once (no count of files sharing one). Nothing for a title with one
- * file, where the buttons already say it all.
- */
-export function fileSummary(files: readonly VersionFile[]): string[] {
-  if (files.length < 2) return [];
-  return (['direct', 'remux', 'transcode'] as const).flatMap((mode) => {
-    const qualities = [...new Set(files.filter((file) => file.instruction.mode === mode).map((file) => file.quality))].sort((a, b) => b - a);
-    return qualities.length > 0 ? [`${MODE_NAMES[mode]}: ${qualities.map(qualityLabel).join(', ')}`] : [];
-  });
-}
-
 function canResume(media: MediaSummary, progress?: PlaybackProgress): boolean {
   return (media.kind === 'movie' || media.kind === 'episode')
     && Boolean(progress && progress.positionMs > 0 && progress.durationMs > 0);
@@ -84,19 +67,28 @@ export function mediaProfileSummary(profile: CatalogueMediaProfile): string {
 
 export function DetailScreen({ api, itemId, onBack, onPlay, onPlayFromStart, loadVersions, onPlayVersion, progress, onEdit, onMediaProfile }: Props) {
   const details = useRefreshableAsync(() => api.details(itemId), [api, itemId]);
-  const immutableMediaId = details.value?.mediaIds.find((mediaId) => mediaId.startsWith('macha:'));
-  const profile = useAsync(
-    (signal) => immutableMediaId && api.mediaProfile ? api.mediaProfile(immutableMediaId, signal) : Promise.resolve(undefined),
-    [api, immutableMediaId],
+  // Every file's own profile, one line each (Tom, 2026-09-27: a title with
+  // several files shows each file's format). A file whose profile cannot be
+  // read is left out rather than failing the others. Keyed on the ids, not
+  // the details object, so a background refresh does not ask again.
+  const immutableMediaIds = details.value?.mediaIds.filter((mediaId) => mediaId.startsWith('macha:')) ?? [];
+  const profiles = useAsync(
+    async (signal) => api.mediaProfile
+      ? (await Promise.all(immutableMediaIds.map((mediaId) => api.mediaProfile!(mediaId, signal).catch(() => undefined))))
+        .filter((profile): profile is CatalogueMediaProfile => profile !== undefined)
+      : [],
+    [api, immutableMediaIds.join(' ')],
   );
+  // The first file's profile readies playback, as before there were several.
+  const firstProfile = profiles.value?.[0];
   const backdrop = useArtworkUrl(api, details.value?.artwork?.backdrop ?? details.value?.artwork?.poster ?? details.value?.artwork?.thumbnail);
   const poster = useArtworkUrl(api, details.value?.kind === 'movie' ? details.value.artwork?.poster : undefined);
   useEffect(() => {
     if (details.value && (details.value.kind === 'movie' || details.value.kind === 'episode' || details.value.kind === 'track')) requestTvDefaultFocus();
   }, [details.value]);
   useEffect(() => {
-    if (profile.value) onMediaProfile?.(profile.value);
-  }, [onMediaProfile, profile.value]);
+    if (firstProfile) onMediaProfile?.(firstProfile);
+  }, [onMediaProfile, firstProfile]);
   // Tom, 2026-09-25: Play stays and means "make the decision for me"; beside
   // it, one button per quality the item can be played at. Keyed on the
   // item, not the details object, so a background refresh does not ask again.
@@ -120,12 +112,7 @@ export function DetailScreen({ api, itemId, onBack, onPlay, onPlayFromStart, loa
       <p className="eyebrow">{media.kind}{media.year ? ` · ${media.year}` : ''}</p>
       <MediaPageTitle refreshing={details.refreshing} onRefresh={details.refresh}>{media.title}</MediaPageTitle>
       {media.kind === 'episode' && episodeCode(media) && <p className="subtitle">{episodeCode(media)}</p>}
-      {versions.value && fileSummary(versions.value.files).length > 0 && (
-        <p className="media-file-pills" aria-label="Files">
-          {fileSummary(versions.value.files).map((line) => <span key={line} className="media-file-pill">{line}</span>)}
-        </p>
-      )}
-      {profile.value && <p className="media-profile-summary">{mediaProfileSummary(profile.value)}</p>}
+      {profiles.value?.map((each) => <p key={each.media_id} className="media-profile-summary">{mediaProfileSummary(each)}</p>)}
       {media.synopsis && <p className="synopsis">{media.synopsis}</p>}
       {playable && (
         <div className="play-actions detail-play-controls" aria-label="Playback controls">

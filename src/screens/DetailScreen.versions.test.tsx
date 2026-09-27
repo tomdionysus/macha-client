@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import type { MediaApi, MediaDetails, PlaybackMode, PlaybackVersions, VersionFile, VersionStep } from '@machafoundation/core';
-import { DetailScreen, fileSummary } from './DetailScreen';
+import type { CatalogueMediaProfile, MediaApi, MediaDetails, PlaybackVersions, VersionStep } from '@machafoundation/core';
+import { DetailScreen } from './DetailScreen';
 
 const step = (quality: VersionStep['quality'], source: VersionStep['source']): VersionStep => ({
   quality,
@@ -62,33 +62,40 @@ describe('the detail page\'s quality buttons', () => {
   });
 });
 
-const file = (quality: VersionFile['quality'], mode: PlaybackMode, index: number): VersionFile => ({
-  mediaId: `macha:${index}`, quality, index,
-  instruction: { mode, video: mode === 'transcode' ? 'transcode' : 'copy', audio: 'copy', reasons: [], assumed: [] },
+const profileOf = (mediaId: string, width: number, height: number, video: string, audio: string, bitrate: number): CatalogueMediaProfile => ({
+  schema_version: 1, media_id: mediaId, format: 'matroska,webm', duration_ms: 9_060_000, bitrate,
+  streams: [
+    { index: 0, type: 'video', codec: video, profile: 'Main', language: 'und', width, height, channels: 0, sample_rate: 0, bit_depth: 10, default: true, forced: false, bitrate: 0, attached_picture: false },
+    { index: 1, type: 'audio', codec: audio, profile: '', language: 'eng', width: 0, height: 0, channels: 8, sample_rate: 48_000, bit_depth: 0, default: true, forced: false, bitrate: 0, attached_picture: false },
+  ],
 });
 
-describe('a title\'s files, below its title', () => {
-  it('groups the files by how this device plays them, largest first', () => {
-    expect(fileSummary([file(1080, 'direct', 0), file(2160, 'direct', 1), file(720, 'transcode', 2), file(1080, 'remux', 3)]))
-      .toEqual(['Direct: 4K, 1080p', 'Remux: 1080p', 'Transcode: 720p']);
+describe('a title\'s files, one line each', () => {
+  it('shows each file\'s format on its own line, and readies playback from the first', async () => {
+    const twoFiles = { ...film, mediaIds: ['macha:uhd', 'macha:hd'] } as MediaDetails;
+    const profiles: Record<string, CatalogueMediaProfile> = {
+      'macha:uhd': profileOf('macha:uhd', 3840, 2160, 'hevc', 'truehd', 47_400_000),
+      'macha:hd': profileOf('macha:hd', 1920, 1080, 'h264', 'aac', 8_000_000),
+    };
+    const api = { details: vi.fn(async () => twoFiles), mediaProfile: vi.fn(async (id: string) => profiles[id]) } as unknown as MediaApi;
+    const onMediaProfile = vi.fn();
+    const { container } = render(<DetailScreen api={api} itemId="film" onBack={vi.fn()} onPlay={vi.fn()} onPlayFromStart={vi.fn()} onMediaProfile={onMediaProfile} />);
+    await screen.findByText(/3840×2160/);
+    expect([...container.querySelectorAll('.media-profile-summary')].map((line) => line.textContent)).toEqual([
+      '2h 31m · 3840×2160 · HEVC · TRUEHD · 47.4 Mbps',
+      '2h 31m · 1920×1080 · H.264 · AAC · 8.0 Mbps',
+    ]);
+    expect(onMediaProfile).toHaveBeenCalledWith(profiles['macha:uhd']);
   });
 
-  it('names each differing quality once, however many files share it', () => {
-    expect(fileSummary([file(1080, 'direct', 0), file(1080, 'direct', 1), file(2160, 'direct', 2)])).toEqual(['Direct: 4K, 1080p']);
-  });
-
-  it('says nothing for a title with one file', () => {
-    expect(fileSummary([file(1080, 'direct', 0)])).toEqual([]);
-  });
-
-  it('shows the groups as pills on the page for a title with several files', async () => {
-    show(film, { ...fourK, files: [file(2160, 'direct', 0), file(1080, 'direct', 1)] });
-    expect((await screen.findByLabelText('Files')).textContent).toBe('Direct: 4K, 1080p');
-  });
-
-  it('shows no pills for a title with one file', async () => {
-    show(film, { ...fourK, files: [file(2160, 'direct', 0)] });
-    await screen.findByTitle('Play at 4K');
-    expect(screen.queryByLabelText('Files')).toBeNull();
+  it('leaves out a file whose profile cannot be read, and shows the rest', async () => {
+    const twoFiles = { ...film, mediaIds: ['macha:gone', 'macha:hd'] } as MediaDetails;
+    const api = {
+      details: vi.fn(async () => twoFiles),
+      mediaProfile: vi.fn(async (id: string) => { if (id === 'macha:gone') throw new Error('not found'); return profileOf(id, 1920, 1080, 'h264', 'aac', 8_000_000); }),
+    } as unknown as MediaApi;
+    const { container } = render(<DetailScreen api={api} itemId="film" onBack={vi.fn()} onPlay={vi.fn()} onPlayFromStart={vi.fn()} />);
+    await screen.findByText(/1920×1080/);
+    expect(container.querySelectorAll('.media-profile-summary')).toHaveLength(1);
   });
 });
