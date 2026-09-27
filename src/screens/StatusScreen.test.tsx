@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { EndpointCandidate } from '@machafoundation/core';
 import type { ClusterNodeStatus, ClusterStatusSnapshot } from '@machafoundation/core';
 import type { IdentityAssociationResetResult, ManageApi } from '@machafoundation/core';
-import { acceptNodeIdentityAssociationReset, clientEndpointHealth, conditionStatedPerNode, identityResetAcceptanceMessage, nodeInboundCapable, nodeNotYetReady, nodeStatusLabel, StatusHeader, statusSectionVisibility, systemMemoryBytes, TELEMETRY_AGEING_MS, TELEMETRY_STALE_MS, telemetryAge, withoutRetiredNodeIdentity } from './StatusScreen';
+import { acceptNodeIdentityAssociationReset, availableOfTotal, usedOfTotal, clientEndpointHealth, conditionStatedPerNode, identityResetAcceptanceMessage, nodeInboundCapable, nodeNotYetReady, nodeStatusLabel, StatusHeader, statusSectionVisibility, systemMemoryBytes, TELEMETRY_AGEING_MS, TELEMETRY_STALE_MS, telemetryAge, withoutRetiredNodeIdentity } from './StatusScreen';
 
 function candidate(health: EndpointCandidate['health'], ready = true): EndpointCandidate {
   return {
@@ -230,3 +230,14 @@ describe('machine memory reported separately from the node process footprint', (
     expect(systemMemoryBytes({})).toBeUndefined();
   });
 });
+
+describe('the storage and cache tiles (Tom, 2026-09-27)', () => {
+  it('state what is used of the whole, then what is available of the whole', () => {
+    const known = { capacity_bytes: 8 * 1024 ** 4, used_bytes: 2 * 1024 ** 4, free_bytes: 6 * 1024 ** 4 };
+    const online = { capacity_bytes: 8 * 1024 ** 4, used_bytes: 2 * 1024 ** 4, free_bytes: 5 * 1024 ** 4 };
+    expect(usedOfTotal(known)).toBe('2.00 TB / 8.00 TB');
+    expect(availableOfTotal(online, known)).toBe('5.00 TB / 8.00 TB Available');
+  });
+
+});
+
