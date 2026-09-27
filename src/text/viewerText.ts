@@ -1,7 +1,7 @@
 import {
+  acquisitionError,
   CHOICE_NOT_AVAILABLE_CODE,
   CHOICE_REQUIRED_CODE,
-  MachaAcquisitionApiError,
   MachaPlaybackError,
   MachaConnectionError,
   NOT_PLAYABLE_CODE,
@@ -250,22 +250,10 @@ const PLACEMENT_REASONS: Record<string, string> = {
 const TORRENT_ALREADY_ADDED_CODE = 'torrent_already_added';
 
 /**
- * The acquisition refusal inside whatever carried it. The cluster router
- * wraps every mutation failure in an endpoint error with the node's own as
- * its cause, so the refusal is rarely what was caught.
+ * A torrent another node would not take: by its reason, or the peer's own
+ * code where that is a job's. Read through core's `acquisitionError`, since
+ * the cluster router wraps the node's refusal as the cause of its own.
  */
-function acquisitionError(error: unknown): MachaAcquisitionApiError | undefined {
-  const seen = new Set<unknown>();
-  let current = error;
-  while (current && typeof current === 'object' && !seen.has(current)) {
-    if (current instanceof MachaAcquisitionApiError) return current;
-    seen.add(current);
-    current = (current as { cause?: unknown }).cause;
-  }
-  return undefined;
-}
-
-/** A torrent another node would not take: by its reason, or the peer's own code where that is a job's. */
 function placementText(caught: unknown): string | undefined {
   const error = acquisitionError(caught);
   if (!error) return undefined;
