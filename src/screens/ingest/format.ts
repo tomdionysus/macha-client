@@ -39,9 +39,9 @@ export function formatEta(value: number | null): string {
   return minutes ? `${hours}h ${minutes}m` : `${hours}h`;
 }
 
-export function percent(progress: number | null, completed: number, total: number): number | null {
+export function percent(progress: number | null, completed: number | null, total: number | null): number | null {
   if (progress !== null && Number.isFinite(progress)) return Math.max(0, Math.min(100, progress * 100));
-  if (total > 0) return Math.max(0, Math.min(100, (completed / total) * 100));
+  if (total !== null && completed !== null && total > 0) return Math.max(0, Math.min(100, (completed / total) * 100));
   return null;
 }
 
@@ -89,7 +89,7 @@ export function stateLabel(state: string): string {
  * uploaded the same amount has served its peers a full ratio of what it holds.
  */
 export function ratioOf(job: TorrentJob): number | null {
-  return job.bytes_completed > 0 ? job.uploaded_total / job.bytes_completed : null;
+  return job.bytes_completed !== null && job.bytes_completed > 0 && job.uploaded_total !== null ? job.uploaded_total / job.bytes_completed : null;
 }
 
 export function formatRatio(job: TorrentJob): string {

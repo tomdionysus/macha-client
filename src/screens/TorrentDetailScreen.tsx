@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { routes, type AcquisitionApi, type IngestJob, type TorrentJob } from '@machafoundation/core';
 import { JobControls, Progress } from './ingest/JobControls';
+import { intentNote } from './ingest/clusterTorrents';
 import { formatAge, formatBytes, formatCount, formatEta, formatPercent, formatRate, formatRatio, formatTimestamp, percent, stateLabel } from './ingest/format';
 import { jobErrorText } from '../text/viewerText';
 import { MetricTile } from '../components/MetricTile';
@@ -46,7 +47,8 @@ function TorrentBody({ job, linkedIngest }: { job: TorrentJob; linkedIngest?: In
   // bytes, progress and rate in the torrent's own fields. So the download's
   // figures are only read while the download is what is running.
   const downloadProgress = downloaded ? 100 : percent(job.progress, job.bytes_completed, job.bytes_total);
-  const remaining = downloaded ? 0 : Math.max(0, job.bytes_total - job.bytes_completed);
+  // Unknown while the owning node is out of view (server 0.64.0): nothing is said to remain.
+  const remaining = downloaded || job.bytes_total === null || job.bytes_completed === null ? 0 : Math.max(0, job.bytes_total - job.bytes_completed);
   const catalogue = job.catalogue;
   const catalogueDone = catalogue ? catalogue.catalogued + catalogue.no_match + catalogue.failed : 0;
   const importProgress = importStage.status === 'done' ? 100 : linkedIngest ? percent(linkedIngest.progress, linkedIngest.bytes_completed, linkedIngest.bytes_total) : null;
@@ -128,7 +130,10 @@ function TorrentBody({ job, linkedIngest }: { job: TorrentJob; linkedIngest?: In
       <DetailCard id="torrent-identity-heading" title="Torrent">
         <Facts rows={[
           ['Info hash', <code>{job.info_hash || 'Not yet known'}</code>],
-          ...(job.node_id ? [['Node', <code>{job.node_id}</code>] as const] : []),
+          // From 0.64.0 a torrent is the cluster's until a node claims it.
+          ['Node', job.node_id ? <code>{job.node_id}</code> : 'Not yet claimed by a node'],
+          ...(job.pinned_node_id ? [['Pinned to', <code>{job.pinned_node_id}</code>] as const] : []),
+          ...(job.remove_at_unix_ms ? [['Removed at', formatTimestamp(job.remove_at_unix_ms)] as const] : []),
           ['Added', formatTimestamp(job.created_unix_ms)],
           ['Job', <code>{job.id}</code>],
           ...(linkedIngest ? [['Import job', <code>{linkedIngest.id}</code>] as const] : []),
@@ -147,7 +152,7 @@ function TorrentBody({ job, linkedIngest }: { job: TorrentJob; linkedIngest?: In
  * valid pieces over the total throughout.
  */
 export function downloadStageText(job: Pick<TorrentJob, 'state' | 'bytes_completed' | 'bytes_total' | 'eta_seconds'>, remaining: number): { doing: string; detail: string } {
-  const of = `${formatBytes(job.bytes_completed)} of ${job.bytes_total > 0 ? formatBytes(job.bytes_total) : 'unknown size'}`;
+  const of = `${formatBytes(job.bytes_completed)} of ${job.bytes_total !== null && job.bytes_total > 0 ? formatBytes(job.bytes_total) : 'unknown size'}`;
   if (job.state === 'verify_queued') return { doing: 'Waiting to verify', detail: 'Waiting for another torrent\'s check to finish' };
   if (job.state === 'verifying') return { doing: 'Verifying data already on disk', detail: `${of} verified · ETA ${formatEta(job.eta_seconds)}` };
   return { doing: 'Downloading', detail: `${of}${remaining > 0 ? ` · ${formatBytes(remaining)} to go · ETA ${formatEta(job.eta_seconds)}` : ''}` };
@@ -180,7 +185,7 @@ export function TorrentDetailScreen({ api }: { api: AcquisitionApi }) {
     <section className="ingest-screen detail-screen">
       <Link className="back-button" to={back} data-tv-focusable="true">← Torrents</Link>
       <DetailHeader
-        kicker={stateLabel(state)}
+        kicker={intentNote(job, Date.now(), snapshot?.refreshIntervalMs ?? 5_000) ?? stateLabel(state)}
         kickerClass={`state-${state}`}
         title={name}
         actions={(

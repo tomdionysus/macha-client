@@ -182,6 +182,7 @@ const JOB_ERRORS: Record<TorrentJobErrorCode, string> = {
   torrent_failed: 'The download failed.',
   duplicate_torrent: 'Another job already held this torrent, so this one was stopped. Remove it and add the torrent again if it is still wanted.',
   torrent_fault: 'The download engine failed on this torrent. Remove it and add the torrent again.',
+  adopt_failed: 'No node could take this torrent over. Remove it and add the torrent again.',
 };
 const GENERIC_JOB_ERRORS = new Set(['filesystem_error', 'import_failed', 'torrent_error', 'torrent_failed', 'ingest_failed']);
 
@@ -201,6 +202,7 @@ const HINT_RESULTS: Record<CatalogueHintResult, string> = {
   media_not_live: 'Not live yet',
   manual_existing_item: 'Matched by hand',
   manual_metadata: 'Entered by hand',
+  path_not_yet_visible: 'Not visible yet; tried again with the next batch',
 };
 
 /** A snake_case code as words, for one this client has no sentence for: "no_match" reads "No match". */

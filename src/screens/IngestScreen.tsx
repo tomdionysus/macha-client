@@ -2,6 +2,8 @@ import { useMemo, useState, type ChangeEvent, type FormEvent, type MouseEvent } 
 import { Link, useNavigate } from 'react-router-dom';
 import { routes, torrentHeldBy, type AcquisitionApi, type IngestJob, type TorrentJob } from '@machafoundation/core';
 import { JobControls, Progress } from './ingest/JobControls';
+import { intentNote, REMOVE_AFTER_CHOICES, removeAfterDefaultLabel, torrentNodeLabel } from './ingest/clusterTorrents';
+import { useAsync } from '../hooks/useAsync';
 import { formatAge, formatBytes, formatCount, formatEta, formatPercent, formatRate, formatRatio, formatTimestamp, percent, stateLabel } from './ingest/format';
 import { canPause, canResume, canRetryImport, displayStateOf, jobKey, linkedIngestOf } from './ingest/jobs';
 import { DEFAULT_TORRENT_SORT, sortTorrents, TORRENT_SORT_KEYS } from './ingest/torrentSort';
@@ -38,6 +40,12 @@ export function IngestScreen({ api, section }: Props) {
   // The job already holding a torrent the viewer tried to add again (server
   // 0.63.0 refuses a second job for it), to offer a way straight to it.
   const [heldBy, setHeldBy] = useState<string | undefined>(undefined);
+  // Server 0.64.0: a torrent is added to the cluster, to download on any
+  // capable node or on one the viewer pins, and can be removed a while after
+  // it completes. '' is "any node" and "the cluster default".
+  const torrentNodes = useAsync(() => section === 'torrents' ? api.torrentNodes() : Promise.resolve(undefined), [api, section]);
+  const [nodeChoice, setNodeChoice] = useState('');
+  const [removeAfter, setRemoveAfter] = useState('');
   const { sort, setSort, sortBy, page, setPage, search } = useListSort(TORRENT_SORT_KEYS, DEFAULT_TORRENT_SORT);
 
   const filesystemJobs = useMemo(
@@ -94,7 +102,10 @@ export function IngestScreen({ api, section }: Props) {
         setPath('');
         setNotice(`Import queued: ${value}`);
       } else {
-        await api.submitMagnet(value);
+        await api.submitMagnet(value, {
+          ...(nodeChoice ? { nodeId: nodeChoice } : {}),
+          ...(removeAfter !== '' ? { removeAfterMs: Number(removeAfter) } : {}),
+        });
         setMagnet('');
         setNotice('Torrent queued.');
       }
@@ -120,10 +131,15 @@ export function IngestScreen({ api, section }: Props) {
   };
 
   const ingestEnabled = snapshot?.ingestStatus.enabled ?? false;
-  const torrentEnabled = snapshot?.torrentStatus.enabled ?? false;
-  const torrentBuilt = snapshot?.torrentStatus.build_available ?? false;
+  // A node without torrents still takes adds from 0.64.0, for the cluster's
+  // capable nodes to claim, so the form is open when either this node takes
+  // torrents or the cluster lists a node that does.
+  const clusterTakesTorrents = (torrentNodes.value?.nodes.length ?? 0) > 0;
+  const torrentEnabled = (snapshot?.torrentStatus.enabled ?? false) || clusterTakesTorrents;
+  const torrentBuilt = (snapshot?.torrentStatus.build_available ?? false) || clusterTakesTorrents;
   const staging = snapshot?.ingestStatus.staging;
   const now = Date.now();
+  const refreshIntervalMs = snapshot?.refreshIntervalMs ?? 5_000;
 
   /** The whole row opens the torrent, except where a control inside it was the target. */
   const openRow = (event: MouseEvent<HTMLTableRowElement>, job: TorrentJob) => {
@@ -153,6 +169,18 @@ export function IngestScreen({ api, section }: Props) {
               placeholder="magnet:?xt=urn:btih:…"
               disabled={!torrentEnabled || submitting === 'magnet'}
             />
+            {clusterTakesTorrents && (
+              <select aria-label="Download on" data-tv-focusable="true" value={nodeChoice} onChange={(event) => setNodeChoice(event.target.value)} disabled={submitting === 'magnet'}>
+                <option value="">Any node</option>
+                {torrentNodes.value?.nodes.map((node) => <option key={node.node_id} value={node.node_id}>{torrentNodeLabel(node)}</option>)}
+              </select>
+            )}
+            {clusterTakesTorrents && (
+              <select aria-label="Remove after completion" data-tv-focusable="true" value={removeAfter} onChange={(event) => setRemoveAfter(event.target.value)} disabled={submitting === 'magnet'}>
+                <option value="">{removeAfterDefaultLabel(torrentNodes.value?.defaultRemoveAfterMs)}</option>
+                {REMOVE_AFTER_CHOICES.map((choice) => <option key={choice.ms} value={String(choice.ms)}>{`Remove ${choice.label.charAt(0).toLowerCase()}${choice.label.slice(1)}`}</option>)}
+              </select>
+            )}
             <button className="primary-button" data-tv-focusable="true" type="submit" disabled={!torrentEnabled || !magnet.trim() || Boolean(submitting)}>
               {submitting === 'magnet' ? 'Adding…' : 'Add torrent'}
             </button>
@@ -230,12 +258,12 @@ export function IngestScreen({ api, section }: Props) {
                       <td className="col-name">
                         <Link to={torrentPath(job.id, search)} data-tv-focusable="true" title={name}>{name}</Link>
                       </td>
-                      <td className="col-size">{job.bytes_total > 0 ? formatBytes(job.bytes_total) : '—'}</td>
+                      <td className="col-size">{job.bytes_total !== null && job.bytes_total > 0 ? formatBytes(job.bytes_total) : '—'}</td>
                       <td className="col-progress">
                         <Progress value={progress} />
                         <span>{formatPercent(progress)}</span>
                       </td>
-                      <td className={`col-status${failure ? ' has-error' : ''}`} title={failure}>{stateLabel(state)}</td>
+                      <td className={`col-status${failure ? ' has-error' : ''}`} title={failure}>{intentNote(job, now, refreshIntervalMs) ?? stateLabel(state)}</td>
                       <td className="col-rate">{formatRate(job.download_rate)}</td>
                       <td className="col-rate col-optional">{formatRate(job.upload_rate)}</td>
                       <td className="col-eta">{formatEta(job.eta_seconds)}</td>

@@ -43,11 +43,11 @@ function sortValue(job: TorrentJob, key: TorrentSortKey, state: string): number 
   switch (key) {
     case 'added': return job.created_unix_ms || undefined;
     case 'name': return job.name || undefined;
-    case 'size': return job.bytes_total > 0 ? job.bytes_total : undefined;
+    case 'size': return job.bytes_total !== null && job.bytes_total > 0 ? job.bytes_total : undefined;
     case 'progress': return percent(job.progress, job.bytes_completed, job.bytes_total) ?? undefined;
     case 'status': return statusRank(state);
-    case 'down': return job.download_rate;
-    case 'up': return job.upload_rate;
+    case 'down': return job.download_rate ?? undefined;
+    case 'up': return job.upload_rate ?? undefined;
     case 'eta': return job.eta_seconds !== null && job.eta_seconds >= 0 && Number.isFinite(job.eta_seconds) ? job.eta_seconds : undefined;
     case 'ratio': return ratioOf(job) ?? undefined;
   }
