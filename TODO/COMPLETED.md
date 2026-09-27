@@ -127,9 +127,10 @@ verified by `shasum` on `127.0.0.1:7438` and on `macnessa`, the `hls` chunk
 and the previous bundle still `200`. es-1 down throughout.
 `index-BHladCbs.js` (09-25 17:28), `index-CFMMhNaI.js` (09-27 17:30),
 `index-gmwnlN3H.js` (18:09), `index-BV1CkG1Z.js` (20:30),
-**`index-DrAa1jr2.js` (20:53, `a50cdf1`, core `c41c819` = the 0.20.0
-candidate code `29fa878`, `shasum` `f28144a2cb75`, backups
-`web.bak-20260927-205359`)**. Full records in `ACTIVE.md`'s deploy section.
+`index-DrAa1jr2.js` (20:53), `index-BltD7CmH.js` (21:18, S04E08),
+**`index-DT7YOjdl.js` (21:24, `4ac6ef0`, core `482bbb1` = the 0.20.0
+candidate code `ae82922`, `shasum` `c96c289bf82d`, backups
+`web.bak-20260927-212437`)**. Full records in `ACTIVE.md`'s deploy section.
 
 ## Playback against server 0.58.0, where the server chooses nothing — 2026-09-25
 

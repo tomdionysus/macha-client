@@ -1,7 +1,7 @@
 # Active tasks and concepts to explore
 
 Last updated: 2026-09-27, at a break for a clear, rationalised against the
-code, `git log`, core `c41c819` (the 0.20.0 candidate code `29fa878`) and
+code, `git log`, core `482bbb1` (the 0.20.0 candidate code `ae82922`) and
 server 0.64.1. Read [2026-09-27-handover.md](2026-09-27-handover.md) first,
 for what is running, what is in flight with the sibling sessions, Tom's
 rulings and the method; where this file and a dated document in this
@@ -26,11 +26,11 @@ are related. Core is addressed as the `Macha Client Core` session.
 release").** Core 0.20.0 is prepared and waits on Tom; this client's part
 follows it. Steps, in order, each push only on Tom's word:
 
-1. **Push `develop`** (Core asked for it before the cut; 46 commits ahead
+1. **Push `develop`** (Core asked for it before the cut; 48 commits ahead
    of `origin/develop`, last pushed `cc094dd`). Needs Tom's yes.
 2. **Core cuts 0.20.0 and Tom publishes it** (core's session does this;
-   the candidate is core `29fa878`, and this client passed against it:
-   typecheck, build, 623 tests).
+   the candidate is core `ae82922`, and this client answered GO against
+   it: typecheck, build, 623 tests).
 3. **When Core says it is on npm, move `main` onto it** by the gate in
    "Core is linked during development" below: merge `develop` into `main`;
    `package.json` to `"@machafoundation/core": "^0.20.0"`; remove the
@@ -53,13 +53,13 @@ follows it. Steps, in order, each push only on Tom's word:
 **Where the repo is.** `main` is `26e8bcc`, pushed, resolving published core
 **0.19.0**; it cannot start playback against server 0.58.0 and later (core
 0.19.0 sends `item_id`), which Tom accepted until the next core publish.
-`develop` is linked to core's tree (clean at `c41c819`), 46 commits ahead of
+`develop` is linked to core's tree (clean at `482bbb1`), 48 commits ahead of
 `origin/develop`, nothing uncommitted. Suite **623**, typecheck and build
 clean.
 
 **The cluster.** fi-1 (10.35.1.50, also .10) and gbni-1 (10.44.1.50,
 `macnessa`) run server **0.64.1**; es-1 and `ramaroja` have been down since
-2026-09-24. Both live nodes serve `develop`'s `index-DrAa1jr2.js` (deploy
+2026-09-24. Both live nodes serve `develop`'s `index-DT7YOjdl.js` (deploy
 section). fi-1 runs no torrents; gbni-1 is the only torrent node.
 
 **Then, in order:**
@@ -318,17 +318,18 @@ tar -czf /etc/macha/web.bak-$(date +%Y%m%d-%H%M%S).tar.gz -C /etc/macha web
 rsync -a --omit-dir-times --chown=1000:50 dist/ root@<node>:/etc/macha/web/
 ```
 
-**Latest: develop on fi-1 and gbni-1, 2026-09-27 20:53 (local), on Tom's
-"Deploy now please"; es-1 not tried (down since 2026-09-24).** Commit
-`a50cdf1`, bundle `index-DrAa1jr2.js`, 719,278 bytes, `shasum`
-`f28144a2cb75`, built against core `c41c819` (the 0.20.0 candidate code
-`29fa878`; clean, dist current). Suite 623 green alone; a full run at load
-323 to 572 had Import-page tests time out (see Start here). Backups
-`web.bak-20260927-205359`; additive, 24 files each; served on
-`127.0.0.1:7438` with a matching `shasum`, `hls-Bt6kO1A0.js` and the
-previous `index-BV1CkG1Z.js` `200`, and on `macnessa`. Earlier deploys are
-summarised in `COMPLETED.md` ("Client deploys"), with their backups on each
-node under `/etc/macha/web.bak-*`.
+**Latest: develop on fi-1 and gbni-1, 2026-09-27 21:24 (local), on Tom's
+"Deploy to everywhere"; es-1 did not answer (ssh timed out, down since
+2026-09-24).** Commit `4ac6ef0`, bundle `index-DT7YOjdl.js`, 719,182 bytes,
+`shasum` `c96c289bf82d`, built against core `482bbb1` (the 0.20.0
+candidate code `ae82922`; clean; dist hash `f7fd989fe6e8`). Suite 623 in a
+full run; the run before had three Import-page timeouts at load 180 to 230
+(see Start here). Backups `web.bak-20260927-212437` (and
+`web.bak-20260927-211808` for `index-BltD7CmH.js` on core `c41c819`, ten
+minutes earlier); additive, 24 files each; served on `127.0.0.1:7438` with
+a matching `shasum`, `hls-Bt6kO1A0.js` and the previous bundle `200`, and on
+`macnessa`. Earlier deploys are summarised in `COMPLETED.md` ("Client
+deploys"), with their backups on each node under `/etc/macha/web.bak-*`.
 
 **Deploy additively — no `--delete`.** The hashed assets of the previous build
 stay, so a session still running it does not 404 on a lazily-loaded chunk. The
