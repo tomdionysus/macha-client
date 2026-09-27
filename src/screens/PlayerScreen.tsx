@@ -13,7 +13,7 @@ import { useAsync } from '../hooks/useAsync';
 import type { Platform } from '@machafoundation/core';
 import { platformTraits } from '../platform/traits';
 import type { PlaybackUpdate } from '@machafoundation/core';
-import { isSubtitleOnlyPlaybackUpdate, offeredModes, technicalSummary, technicalProfileFromSession, type OfferedMode, type PlaybackCoordinatorSnapshot, type PlaybackPolicyOverrides, type PlaybackSession } from '@machafoundation/core';
+import { isSubtitleOnlyPlaybackUpdate, offeredModes, progressFor, technicalSummary, technicalProfileFromSession, type OfferedMode, type PlaybackCoordinatorSnapshot, type PlaybackPolicyOverrides, type PlaybackSession } from '@machafoundation/core';
 import { PlaybackRuntime, type PlaybackRuntimeRequest, type PlaybackRuntimeSnapshot } from '@machafoundation/core';
 import { uiSettings } from '../settings';
 import { describePlaybackSession } from '@machafoundation/core';
@@ -280,6 +280,9 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
   /** True while the control bar is up only because a transport seek revealed it. */
   const seekRevealedControlsRef = useRef(false);
   const lastEventByMediaRef = useRef(new Map<string, PlaybackEvent>());
+  // How the title was last seen playing, for the save on the way out, when
+  // the snapshot may already be gone.
+  const lastPlayingRef = useRef<PlaybackCoordinatorSnapshot | undefined>(undefined);
   const log = useMemo(() => createClientLogger('playback.screen', { mediaId: media.id }), [media.id]);
   const traits = platformTraits(platform);
   const webControls = traits.hasPointerControls;
@@ -355,28 +358,18 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
     }
     if (shouldTrackProgress(media) && (event.ended || now - lastReportRef.current >= 10_000)) {
       lastReportRef.current = now;
-      onProgress({
-        mediaId: media.id,
-        positionMs: event.positionMs,
-        durationMs: event.durationMs,
-        updatedAt: now,
-        media,
-      });
+      // The title, the file and how it was playing (Tom, 2026-09-27).
+      lastPlayingRef.current = runtimePlayback;
+      onProgress(progressFor(media, event.positionMs, event.durationMs, runtimePlayback));
     }
-  }, [media, onPosition, onProgress, playback.event]);
+  }, [media, onPosition, onProgress, playback.event, runtimePlayback]);
 
   useEffect(() => () => {
     if (!shouldTrackProgress(media)) return;
     const event = lastEventByMediaRef.current.get(media.id);
     lastEventByMediaRef.current.delete(media.id);
     if (!event?.durationMs) return;
-    onProgress({
-      mediaId: media.id,
-      positionMs: event.positionMs,
-      durationMs: event.durationMs,
-      updatedAt: Date.now(),
-      media,
-    });
+    onProgress(progressFor(media, event.positionMs, event.durationMs, lastPlayingRef.current));
   }, [media, onProgress]);
 
   useEffect(() => {
