@@ -397,6 +397,15 @@ tar -czf /etc/macha/web.bak-$(date +%Y%m%d-%H%M%S).tar.gz -C /etc/macha web
 rsync -a --omit-dir-times --chown=1000:50 dist/ root@<node>:/etc/macha/web/
 ```
 
+**develop deployed to fi-1 and gbni-1, 2026-09-27 18:09 (local), on Tom's
+"Yes"; es-1 not tried (down all day).** Commit `bd68eb7`, bundle
+`index-gmwnlN3H.js`, 718,372 bytes, `shasum` `555e42cfdaea`, core `e964514`
+(clean), suite 621: torrent availability from the cluster's node list, so
+fi-1's own status no longer says the server was built without libtorrent.
+Backups `web.bak-20260927-180918`; additive, 24 files each; served on
+`127.0.0.1:7438` with a matching `shasum`, `hls-Bt6kO1A0.js` and the
+previous `index-CFMMhNaI.js` `200`, and on `macnessa`.
+
 **develop deployed to fi-1 and gbni-1, 2026-09-27 17:30 (local), on Tom's
 instruction ("Yes deploy now please"); es-1 did not answer (ssh timed out)
 and was not deployed.** Commit `61e3389`, bundle `index-CFMMhNaI.js`,
