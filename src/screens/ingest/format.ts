@@ -8,7 +8,12 @@ export function fileName(path: string): string {
   return slash >= 0 ? path.slice(slash + 1) : path;
 }
 
-export function formatBytes(value: number): string {
+/**
+ * From server 0.64.0 a job whose node is not in view reports its live
+ * figures as null: unknown, which reads "—", not "0 B".
+ */
+export function formatBytes(value: number | null): string {
+  if (value === null) return '—';
   if (!Number.isFinite(value) || value <= 0) return '0 B';
   const units = ['B', 'KB', 'MB', 'GB', 'TB'];
   let amount = value;
@@ -21,8 +26,8 @@ export function formatBytes(value: number): string {
   return `${amount.toFixed(decimals)} ${units[index]}`;
 }
 
-export function formatRate(value: number): string {
-  return value > 0 ? `${formatBytes(value)}/s` : '—';
+export function formatRate(value: number | null): string {
+  return value !== null && value > 0 ? `${formatBytes(value)}/s` : '—';
 }
 
 export function formatEta(value: number | null): string {
@@ -65,7 +70,14 @@ export function formatAge(value: number, now: number): string {
 /** States whose code does not read as words. */
 const STATE_LABELS: Record<string, string> = {
   verify_queued: 'Waiting to verify',
+  // Server 0.64.0: added to the cluster, not yet claimed by a node.
+  awaiting_node: 'Waiting for a node',
 };
+
+/** A count the server may not know (null from 0.64.0), as "—". */
+export function formatCount(value: number | null): string {
+  return value === null ? '—' : String(value);
+}
 
 export function stateLabel(state: string): string {
   return STATE_LABELS[state] ?? codeWords(state);

@@ -8,7 +8,9 @@ const ingestPauseableStates = new Set(['queued', 'scanning', 'importing']);
 const ingestResumableStates = new Set(['paused', 'blocked', 'failed']);
 // `verify_queued` (server 0.61.0): waiting for another torrent's check, as
 // libtorrent checks one at a time. Pause and cancel are allowed in it.
-const torrentPauseableStates = new Set(['queued', 'metadata', 'downloading', 'verify_queued', 'verifying', 'downloaded', 'importing']);
+// `awaiting_node` (server 0.64.0): in the cluster, not yet claimed. Actions
+// are intent there too, applied once a node claims it.
+const torrentPauseableStates = new Set(['awaiting_node', 'queued', 'metadata', 'downloading', 'verify_queued', 'verifying', 'downloaded', 'importing']);
 const torrentResumableStates = new Set(['paused', 'blocked']);
 const terminalStates = new Set(['completed', 'cancelled', 'failed']);
 

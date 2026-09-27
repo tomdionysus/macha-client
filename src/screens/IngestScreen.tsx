@@ -2,7 +2,7 @@ import { useMemo, useState, type ChangeEvent, type FormEvent, type MouseEvent } 
 import { Link, useNavigate } from 'react-router-dom';
 import { routes, torrentHeldBy, type AcquisitionApi, type IngestJob, type TorrentJob } from '@machafoundation/core';
 import { JobControls, Progress } from './ingest/JobControls';
-import { formatAge, formatBytes, formatEta, formatPercent, formatRate, formatRatio, formatTimestamp, percent, stateLabel } from './ingest/format';
+import { formatAge, formatBytes, formatCount, formatEta, formatPercent, formatRate, formatRatio, formatTimestamp, percent, stateLabel } from './ingest/format';
 import { canPause, canResume, canRetryImport, displayStateOf, jobKey, linkedIngestOf } from './ingest/jobs';
 import { DEFAULT_TORRENT_SORT, sortTorrents, TORRENT_SORT_KEYS } from './ingest/torrentSort';
 import { SortControl, SortHeader, useListSort } from '../components/ListSortControls';
@@ -239,8 +239,8 @@ export function IngestScreen({ api, section }: Props) {
                       <td className="col-rate">{formatRate(job.download_rate)}</td>
                       <td className="col-rate col-optional">{formatRate(job.upload_rate)}</td>
                       <td className="col-eta">{formatEta(job.eta_seconds)}</td>
-                      <td className="col-peers col-optional">{job.seeds}</td>
-                      <td className="col-peers col-optional">{job.peers}</td>
+                      <td className="col-peers col-optional">{formatCount(job.seeds)}</td>
+                      <td className="col-peers col-optional">{formatCount(job.peers)}</td>
                       <td className="col-ratio col-optional">{formatRatio(job)}</td>
                       <td className="col-added col-optional" title={formatTimestamp(job.created_unix_ms)}>{formatAge(job.created_unix_ms, now)}</td>
                       <td className="col-actions">

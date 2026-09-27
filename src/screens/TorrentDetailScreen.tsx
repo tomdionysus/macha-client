@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { routes, type AcquisitionApi, type IngestJob, type TorrentJob } from '@machafoundation/core';
 import { JobControls, Progress } from './ingest/JobControls';
-import { formatAge, formatBytes, formatEta, formatPercent, formatRate, formatRatio, formatTimestamp, percent, stateLabel } from './ingest/format';
+import { formatAge, formatBytes, formatCount, formatEta, formatPercent, formatRate, formatRatio, formatTimestamp, percent, stateLabel } from './ingest/format';
 import { jobErrorText } from '../text/viewerText';
 import { MetricTile } from '../components/MetricTile';
 import { DetailCard, DetailHeader, Facts } from '../components/ListParts';
@@ -72,7 +72,7 @@ function TorrentBody({ job, linkedIngest }: { job: TorrentJob; linkedIngest?: In
       </section>
 
       <div className="metric-grid torrent-metrics">
-        <MetricTile label="Download" value={downloaded ? 'Complete' : formatRate(job.download_rate)} detail={`${job.seeds} seeds · ${job.peers} peers`} />
+        <MetricTile label="Download" value={downloaded ? 'Complete' : formatRate(job.download_rate)} detail={`${formatCount(job.seeds)} seeds · ${formatCount(job.peers)} peers`} />
         <MetricTile label="Upload" value={formatRate(job.upload_rate)} detail={`${formatBytes(job.uploaded_total)} sent`} />
         <MetricTile label="Ratio" value={formatRatio(job)} detail="Sent against what this node holds" />
         <MetricTile label="Added" value={formatAge(job.created_unix_ms, now)} detail={`Last change ${formatAge(job.updated_unix_ms, now)}`} />
