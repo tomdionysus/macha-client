@@ -1,11 +1,12 @@
 # Active tasks and concepts to explore
 
-Last updated: 2026-09-25, at a break for a clear, rationalised against the
-code, `git log`, core `a50ef64` and server 0.58.0. Read
-[2026-09-25-handover.md](2026-09-25-handover.md) first, for what is running,
-what is in flight with the sibling sessions, Tom's rulings and the method;
-where this file and a dated document in this directory disagree, this file
-is current and the dated document is the record of its day.
+Last updated: 2026-09-27, at a break for a clear, rationalised against the
+code, `git log`, core `c41c819` (the 0.20.0 candidate code `29fa878`) and
+server 0.64.1. Read [2026-09-27-handover.md](2026-09-27-handover.md) first,
+for what is running, what is in flight with the sibling sessions, Tom's
+rulings and the method; where this file and a dated document in this
+directory disagree, this file is current and the dated document is the
+record of its day.
 
 This is the working backlog. Add new work here. When an item is implemented and
 its stated verification is complete, remove it from this file and add a dated
@@ -15,150 +16,84 @@ remain the detailed plans and verification records; this file is the index.
 Scope: this repo is macha-client only — the UI/playback client. Server-side
 backlogs (`macha`'s own `TODO/ACTIVE.md`) and core's are different repos'
 concerns and are not duplicated here, even when a client bug and a server bug
-are related. Core is addressed as the `Macha NPM Core` session.
+are related. Core is addressed as the `Macha Client Core` session.
 
 ## Start here
 
-**Read [2026-09-25-handover.md](2026-09-25-handover.md) first**: what is
-running, what is in flight with core, the server and both RN clients, and
-Tom's rulings of 2026-09-24/25 in his words.
+**Read [2026-09-27-handover.md](2026-09-27-handover.md) first.**
 
-**Where the repo is, 2026-09-25 morning.** `main` is pushed and resolves
-published core **0.19.0** (`26e8bcc`, gate run against the registry copy and a
-fresh clone); client version still **0.18.0**, changelog still Unreleased (no
-bump or tag asked for). **`main` cannot start playback against server 0.58.0**
-(core 0.19.0 sends `item_id`, which 0.58.0 refuses): Tom accepted that; it
-needs the next core publish. `develop` is linked to core's tree (clean at
-`a50ef64`), **9 commits ahead of `origin/develop`** (`cc094dd` was the last
-push), nothing uncommitted. Suite **566**, typecheck clean, build clean.
+**First thing: the release (Tom, 2026-09-27: "first thing we'll do is the
+release").** Core 0.20.0 is prepared and waits on Tom; this client's part
+follows it. Steps, in order, each push only on Tom's word:
 
-**The cluster.** fi-1 and gbni-1 run server **0.58.0** (the release where the
-server chooses nothing: session create takes `media_id` only; macha code is at
-0.58.2). **es-1 does not answer** (ssh times out, no health) and `ramaroja` is
-offline with it. Both live nodes serve `develop`'s build `index-y5i3Gmjl.js`
-(deploy section), which plays against 0.58.0: seen live on `macnessa`, a film
-advancing 4 s in 4 s at 1920 wide.
+1. **Push `develop`** (Core asked for it before the cut; 46 commits ahead
+   of `origin/develop`, last pushed `cc094dd`). Needs Tom's yes.
+2. **Core cuts 0.20.0 and Tom publishes it** (core's session does this;
+   the candidate is core `29fa878`, and this client passed against it:
+   typecheck, build, 623 tests).
+3. **When Core says it is on npm, move `main` onto it** by the gate in
+   "Core is linked during development" below: merge `develop` into `main`;
+   `package.json` to `"@machafoundation/core": "^0.20.0"`; remove the
+   lockfile's `"link": true` and `../macha-ts` entries; `npm install`;
+   `test -L node_modules/@machafoundation/core` must fail; `rm -rf
+   node_modules/.vite`; `npm run typecheck`, `npm test`, `npm run build`
+   against the registry copy (and ideally a fresh clone with `npm ci`).
+   Then commit, push `main` (Tom's word), return to `develop` and restore
+   `file:../macha-ts` with `npm install`.
+4. **The web client's own release is Tom's question.** Version is still
+   0.18.0, and `CHANGELOG.md`'s Unreleased section stops before 25-27
+   September: quality selection and the device limit, the page-exit close,
+   media lines, Continue Watching resume state, the torrent work for server
+   0.61.0 to 0.64.1, and Status's storage lines are not in it (see
+   `COMPLETED.md` for each, with commits). Write them before any bump or
+   tag. Two old questions ride with it: whether the node picker whose entry
+   says "Not releasable until the handover arrives" ships, and the paging
+   test (below).
 
-**Next, in order:**
+**Where the repo is.** `main` is `26e8bcc`, pushed, resolving published core
+**0.19.0**; it cannot start playback against server 0.58.0 and later (core
+0.19.0 sends `item_id`), which Tom accepted until the next core publish.
+`develop` is linked to core's tree (clean at `c41c819`), 46 commits ahead of
+`origin/develop`, nothing uncommitted. Suite **623**, typecheck and build
+clean.
 
-1. **Quality selection** (Tom's current priority, with core and both RN
-   clients). Design agreed and Tom's rulings in (section "Versions and
-   quality" below). **Built 2026-09-25 on core `3a5dc56`, uncommitted,
-   seen live 11:54-12:00 EEST** (dev server, `tmdb:movie:185`, one
-   1792x1080 file): Play plus one button per quality on the detail page
-   (movies and episodes; the cap's reason under them), the same list in the
-   player's options (active from `instruction.quality`, a press is
-   `playVersion`), and Maximum quality in Settings, kept in core's
-   `QualityPreferenceStore` as `wifi`. `qualityCeiling` is given the browser
-   screen; Samsung and the Android web shell state none, so they stay
-   uncapped until the panel can be read. Suite 579, typecheck and build
-   clean, and each new test was mutation-checked. Live: the page offered
-   Play, 1080p, 720p; 720p played at 1194x720; the player list marked 720p
-   and switching to 1080p went direct at 1792x1080 from the same position;
-   Maximum 720p stored `{"wifi":720}` and the page gave its reason; plain Play
-   then played 1194x720. One Play failed first: fi-1 refused with 429
-   `resource_limit` (its one transcode slot held, holder not identified) and
-   gbni-1 answered 503 `service_recovering` during its 0.58.3 restart
-   (08:58Z). **Why fi-1 refused (traced 2026-09-25, 09:03-11:06Z):** the
-   slot was our own 720p session. (a) Server: a PATCH from transcode to
-   direct keeps the session's transcode slot while it streams, plus 5 min
-   (reproduced on fi-1; `reserve_resources` and
-   `release_transcode_entitlements_locked` in `src/playback.cpp`). Sent to the
-   server. (b) Client/core: a page reload does not delete the session. After
-   a reload, fi-1 refused a probe transcode for about 4.5 min until the idle
-   rule freed it. Keepalive cross-origin DELETE works from a live page. A
-   synthetic pagehide issues the DELETE 4 ms later, not synchronously, and
-   `coordinator.close` awaits five pending operations first. Core `7bf1de1`
-   now sends the DELETE synchronously in the handler (verified), and from a
-   live page it lands (204, slot freed). **On a real reload it still does not
-   land** (session `97b3d5be`, id known before the reload, fi-1 0.59.0,
-   11:31:52Z, probes refused). Likely cause: Chrome not completing the CORS
-   preflight of a keepalive DELETE after unload. Unproven; with core and the
-   server. The readyState-0 "stall" seen from about 11:01Z was the test tab
-   being hidden (Chrome defers media in hidden tabs), not a bug: bisecting to
-   `3a5dc56` stalled the same way, and both nodes serve fine. After that failure the title offered Play, not Resume, and
-   started at 0: **the resume position (~128 s) was lost on a failed start**,
-   cause not yet traced (core `d93c9d8` names one; recheck with a visible
-   tab). Committed `40b453d`. **Device limit (Tom: "limit to the device
-   capabilities for direct on all clients - but, all clients should also have
-   a setting to disable this"), built on core `edfce82`:** the player's modes
-   come from `offeredModes` (an unplayable mode is hidden, or with the setting
-   on it is shown with the device's objection on hover); Settings has "Offer
-   every quality and mode", kept as `offerAll` in core's store and passed to
-   the runtime and the title page. The web states no `maxWidth`/`maxHeight`,
-   since a browser cannot report a decode size limit honestly, so it is
-   limited by codec and container only. The player takes core's
-   `snapshot.modes` (core `424f8a6`, computed with the node's `operations`)
-   and falls back to the session's profile until the facts arrive.
-   **Page exit, closed 2026-09-25 12:54Z:** the leak was this client's.
-   Chrome put the playing page in the back-forward cache (`pagehide` with
-   `persisted: true`), and `usePlaybackRuntime` skipped the page-exit close
-   for a cached page. It now closes on every pagehide. Verified on server
-   0.60.0 and core `42cebd6`: after navigating away from a 720p transcode on
-   fi-1, the probe was free 3 s later. Going Back restores the page, which
-   closes nothing further and restarts playback on its route. The rebuild is
-   plain Play, so a picked quality is not carried over. Server 0.60.0's
-   signed-URL close answers 204 from a live page. A PATCH to direct now frees
-   the slot for a second viewer (checked 12:44Z).
-2. **Retry the titles that would not play** (three media on fi-1:
-   `4e1230739de9...`, `af0b9adfbfd3...`, `37e6afd411f2...`). Core `de86392`
-   fixed the cause (a session begun direct named no container or stream, so
-   a PATCH into transcode was refused) and a second (a language the file
-   lacks is refused outright by 0.58.0). **Retried 2026-09-25 11:02 EEST**
-   (test account, core `a50ef64`, fi-1 and gbni-1 alike, load 9.7): create
-   direct, then `preparePlaybackPatch` into transcode. `37e6afd411f2`
-   (`tmdb:movie:185`) now plays (PATCH accepted, manifest and first segment
-   200). `4e1230739de9` (`tmdb:episode:110090`, its only file) and
-   `af0b9adfbfd3` (`tmdb:movie:122`) fail differently: PATCH 503
-   `playback_unavailable` "read media: extent unavailable", and a direct
-   Range fetch dies mid-body. The PATCH shape is no longer the cause; those
-   bytes cannot be read. The server session confirmed it in both nodes'
-   journals ("extent unavailable") and is tracing the extent. Nodes were on
-   0.58.2 (fi-1 on 0.58.3 from 08:05Z), not 0.58.0. Status on both nodes
-   shows `nodes_known=2`, all extent hosts online, and es-1 not counted, so
-   "es-1's extent" is unproven. fi-1 answers on 10.35.1.10 as well as .50
-   (same `node_id`). Facts
-   still say `operations.direct: true` for both, so the chooser cannot prefer
-   `tmdb:movie:122`'s readable second file (`b3bcbf961043`, 206). Sent to
-   core and the server: the server to state a file is unreadable, core's
-   chooser to skip one.
-   **The server's trace (read-only) is wider:** on gbni-1, 18 of 23 sampled
-   files dated 2026-08-31 fail at offset 0 (plus one older), and everything
-   sampled from 2026-09-10 on reads. The bytes are in neither node's store,
-   the server keeps no record of holders beyond current membership (fi-1,
-   gbni-1), and where the bytes went is unproven. `operations.direct` is
-   hard-coded true, and facts read no bytes. A readability fact and a clean
-   failure at create are now Tom's decision, with the server session.
-3. **Catalogue management resumes** (Tom: "we'll resume catalogue management
-   tomorrow"). Section "Identify and edit" below: step 1 is built; steps 2 and
-   3 wait on Tom approving the server's proposals; a general catalogue
-   editor is recorded for later.
-4. **One sign-in as Tom** settles the live checks owed (next section). His
-   browser is signed in on `macnessa`.
-5. **The paging-test remedy and the release** (both Tom's; below).
-6. The playback P0s as before.
+**The cluster.** fi-1 (10.35.1.50, also .10) and gbni-1 (10.44.1.50,
+`macnessa`) run server **0.64.1**; es-1 and `ramaroja` have been down since
+2026-09-24. Both live nodes serve `develop`'s `index-DrAa1jr2.js` (deploy
+section). fi-1 runs no torrents; gbni-1 is the only torrent node.
 
-**What needs Tom, and nothing else does:** a television (Samsung items; the
-TVs' saved endpoints now `ramaroja` is offline; reading a Samsung panel's
-resolution needs `webapis.productinfo`, not yet loaded); any push, merge,
-version bump, tag, deploy or core publish; demoting or re-ranking a P0; and
-the open decisions: the paging-test remedy (below); whether the release
-ships the node picker whose changelog entry says "Not releasable until the
-handover arrives"; the server's proposed changes for catalogue management
-(steps 2 and 3, and its multi-file fixes); the ~15 s artwork hang on a
-silently dead node; the player options panel's sideways move; sized artwork
-variants; and core's "Plan A" and "Season 0 Episode 1".
+**Then, in order:**
 
-**The paging test** (`IngestScreen.test.tsx`, "fifty rows a page"): its
-2026-09-24 timeouts were machine load from the Server session's C++ builds
-on this shared machine, not the code (0.45 s alone; the time tracks load;
-five runs green at load up to 234, slowest 2.3 s). Tom to choose: accept as
-is, raise the jsdom `testTimeout`, or cut its cost. Detail in `COMPLETED.md`.
+1. **Catalogue management** (section "Identify and edit"): step 1 built and
+   owed a live look; steps 2 and 3 wait on Tom approving the server's
+   proposals. The trailer filed as one of The Martian's files (TV's
+   finding) is a case for it.
+2. **Owed live looks** (section below), mostly needing a sign-in as Tom.
+3. **The playback P0s** as before.
+
+**Open decisions that are Tom's alone:** any push, merge, version bump, tag,
+deploy or core publish; the episode mark (the TV now shows "S04E08" "in all
+cases" by Tom's ruling there; the web's `episodeLabel` still reads "Season 1
+Episode 4" in search and Continue Watching, so ask whether "in all cases"
+covers every client); the server's catalogue proposals and multi-file
+fixes; the artwork lost with es-1 and the replication capacity (with the
+server); the paging-test remedy; the ~15 s artwork hang on a silently dead
+node; the player options panel's sideways move; sized artwork variants;
+core's "Plan A" and "Season 0 Episode 1". A television is needed for the
+Samsung items and the TVs' saved endpoints; reading a Samsung panel's
+resolution needs `webapis.productinfo`, not yet loaded.
+
+**The paging test and its neighbours** (`IngestScreen.test.tsx`): they time
+out at vitest's 5 s limit when the Server session's C++ builds push this
+machine's load past 300 (27 September: load 323 to 572; every one passed
+alone and in a rerun). Not the code. Tom to choose: accept, raise
+`testTimeout`, or cut their cost. Record the load with any failure.
 
 **Two business P0s outrank the rest:** slow artwork (host choice and caching
-fixed 2026-09-24; the server's slow first read and poster size remain), and
-scope-ratio titles playing small in a black window (burnt-in bars; the fix is
-an ingest/server one, [evidence](2026-09-16-video-fit-mode.md)).
+fixed 2026-09-24; the server's slow first read and poster size remain, and
+now the posters lost with es-1), and scope-ratio titles playing small in a
+black window (burnt-in bars; the fix is an ingest/server one,
+[evidence](2026-09-16-video-fit-mode.md)).
 
 **The P0s, as they stand.** The scope title (the server's). A player at
 `readyState` 0 (instrumented, no mechanism). Seek misbehaviour. A handover
@@ -208,71 +143,6 @@ no posters in that listing, so movies were the whole sample.
   failed, the capability path not yet handing over to the next artwork after
   the authenticated fetch's 404. Pick it up only if Tom asks.
 
-## Cluster torrents, server 0.64.0 (live; web built `9f57f73`, not deployed)
-
-Built on core `201700f`: node selector and remove-after on the add form,
-intents in the status column and on the torrent page, "Not yet claimed",
-the pinned node and removal time, polling at `refresh_interval_ms`, and
-null-safe live figures. Seen live (the form only; nothing added). Then, on
-Tom's yes: the torrent page's "Download on" (unclaimed only) and "Remove
-after completion", by `PATCH`, with a claimed-first refusal worded, and a
-notice on the lists for a source node out of reach or never reached.
-The notes below are the design as settled.
-
-Torrents belong to the cluster: added once, claimed by any torrent-capable
-node or a pinned one. The server settled the web's nine review points
-(2026-09-27). Web work once it is built, through core:
-- Add form: a node selector from `GET /api/v1/torrents/nodes` (only capable
-  nodes; `accepting` and `not_accepting_reason`: slots_full, staging_full or
-  draining), defaulting to any node, with names joined from status nodes.
-  Remove after completion: off, or 0 s to 24 h. Say what the default is from
-  `default_remove_after_ms` (null means off).
-- Unclaimed jobs: `phase`/`state` `awaiting_node`, `node_id` null, and
-  `pinned_node_id`; re-pin or unpin by `PATCH {node_id}` while awaiting.
-- Actions are intent: show pending until `desired_applied`, and say why
-  when `desired_blocked_reason` is set (owner_unreachable,
-  pinned_node_unavailable, no_capable_node). Not applied after
-  2 x `refresh_interval_ms` with no reason also means stuck. Add and action
-  202s carry the full job; show it at once.
-- Poll at `refresh_interval_ms` (5000), not 1.5 s. Show unknown live fields
-  as unknown, not "0 B".
-- Ingest `sources`: `reachable: false` means that node's jobs are listed
-  from its last poll (`as_of_unix_ms`) and may be stale; null means never
-  reached.
-- 503 `metadata_unavailable` (`scope: cluster`) on adds, PATCH and actions
-  on unclaimed jobs; actions on claimed jobs still work.
-
-## Versions and quality (in progress with core, TV and phone)
-
-Tom, 2026-09-24/25, in his words where given:
-- "in Macha it's the client that makes the decision on what to play, it's the
-  client that should match the available media to the client capabilities."
-  There is no server pick among an item's files, not even as a fallback;
-  server 0.58.0 refuses a create without `media_id`. Done: this client hands
-  core every file's facts (`121c280`); core's chooser names the file.
-- "different buttons for 'play' on media depending on available quality,
-  which trigger specific files or transcode options. The generic play button
-  stays, and means 'make the decision for me'." TV and phone do the same.
-- "a 4K movie can be 4K, 2K, 1080p, 720p but a 1080p can only be 1080p or
-  720p ... it's always possible to transcode down unless a specific file
-  exists to direct, but upscaling isn't offered."
-- Below 720p: "display the 480p class anyway" (not Play only).
-- "cap at the screen resolution for automatic play", with the reason shown
-  and a Settings override. The phone has Wi-Fi and mobile-data ceilings,
-  mobile lower, reason shown, overridable.
-
-Core's design (its message 2026-09-25): `qualityClass(width, height)` by the
-higher of either axis with 10% tolerance (1920x800 is 1080; "2K" is 1440);
-`playbackVersions(files, capabilities, { overrides?, maxQuality? })` giving
-`{ files, steps }`, steps from the best file's class downwards, a class
-without its own file being a capped transcode of the lowest file above it;
-`PlaybackRuntime.play({ media, version })` and `coordinator.playVersion(step)`
-as a viewer choice never overridden; `snapshot.versions`; a per-device
-`qualityPreference`. Classes below 720 and the display input follow Tom's two
-answers; core is confirming them with him. Web: `displayResolution.ts` done
-(browser: CSS size x devicePixelRatio, landscape; Samsung: unknown, so
-uncapped, until the panel can be read); the rest waits on core's commit.
-
 ## Identify and edit (catalogue management; resume here)
 
 Tom: one interface for matching an unmatched file and editing metadata, with
@@ -303,7 +173,7 @@ the gaps, are summarised in the handover.
   ones get Create, others Review); the lock on hand edits by default.
 - **Later:** the general catalogue editor (P2 below).
 
-## Built 2026-09-24/25, owed a live look
+## Built 2026-09-24 to 27, owed a live look
 
 All committed and unit-tested, each test seen red under a mutation. Most
 needs a sign-in as Tom (the test account lacks `importer` and `manager`).
@@ -326,6 +196,16 @@ needs a sign-in as Tom (the test account lacks `importer` and `manager`).
 - [ ] **Identify tabs, Add a file, editor upload** (above).
 - [ ] **By hand:** the unmatched table without a horizontal scrollbar; the
       player's text after the viewer-text move; the fullscreen cursor.
+- [ ] **Continue Watching saves** the file and resume state as a title
+      plays (`61e3389`; needs a visible tab), and resumes with them.
+- [ ] **Cluster torrents with a real add** (`9f57f73`, `3d9a548`):
+      "Pausing…" until applied, "Not yet claimed", a re-pin, a removal time
+      taking effect.
+- [ ] **Verify states on a partly downloaded torrent** (`8c09aa3`): "Waiting
+      to verify" and "Verifying data already on disk" with its ETA.
+- [ ] **The track line beside the artwork on a narrow or portrait screen**
+      (`8535bca`), and a paused torrent's headline, which says "Downloading
+      20.6%" (seen, not changed).
 
 ## How the test cluster behaves, and how to read it
 
@@ -441,73 +321,17 @@ tar -czf /etc/macha/web.bak-$(date +%Y%m%d-%H%M%S).tar.gz -C /etc/macha web
 rsync -a --omit-dir-times --chown=1000:50 dist/ root@<node>:/etc/macha/web/
 ```
 
-**develop deployed to fi-1 and gbni-1, 2026-09-27 20:30 (local), on Tom's
-word; es-1 not tried.** Commit `f25319a`, bundle `index-BV1CkG1Z.js`,
-719,007 bytes, `shasum` `8c50d0859725`, core `75ba254` (the 0.20.0
-candidate's code `7a79d49`; clean, dist current), suite 623. Adds: staging
-per node in the torrent node list (header figure removed), storage and
-cache tiles as used / total then available / total, and a Version line on
-each node card. Backups `web.bak-20260927-203054`; additive, 24 files
-each; served on `127.0.0.1:7438` with a matching `shasum`,
-`hls-Bt6kO1A0.js` and the previous `index-gmwnlN3H.js` `200`, and on
-`macnessa`.
-
-**develop deployed to fi-1 and gbni-1, 2026-09-27 18:09 (local), on Tom's
-"Yes"; es-1 not tried (down all day).** Commit `bd68eb7`, bundle
-`index-gmwnlN3H.js`, 718,372 bytes, `shasum` `555e42cfdaea`, core `e964514`
-(clean), suite 621: torrent availability from the cluster's node list, so
-fi-1's own status no longer says the server was built without libtorrent.
-Backups `web.bak-20260927-180918`; additive, 24 files each; served on
+**Latest: develop on fi-1 and gbni-1, 2026-09-27 20:53 (local), on Tom's
+"Deploy now please"; es-1 not tried (down since 2026-09-24).** Commit
+`a50cdf1`, bundle `index-DrAa1jr2.js`, 719,278 bytes, `shasum`
+`f28144a2cb75`, built against core `c41c819` (the 0.20.0 candidate code
+`29fa878`; clean, dist current). Suite 623 green alone; a full run at load
+323 to 572 had Import-page tests time out (see Start here). Backups
+`web.bak-20260927-205359`; additive, 24 files each; served on
 `127.0.0.1:7438` with a matching `shasum`, `hls-Bt6kO1A0.js` and the
-previous `index-CFMMhNaI.js` `200`, and on `macnessa`.
-
-**develop deployed to fi-1 and gbni-1, 2026-09-27 17:30 (local), on Tom's
-instruction ("Yes deploy now please"); es-1 did not answer (ssh timed out)
-and was not deployed.** Commit `61e3389`, bundle `index-CFMMhNaI.js`,
-718,190 bytes, `shasum` `37023126745f`, built against core `e964514`
-(clean, dist current), suite 618. Carries everything since `8c09aa3`: the
-0.63.0 torrent refusals and the router-unwrapped placement wording, the
-per-file media lines and the track line from core's technical summaries,
-the track details beside the artwork, cluster torrents on 0.64.0 (node
-selector, remove-after, intents, re-pin, stale sources) and Continue
-Watching's item and file ids with resume state. Backups
-`web.bak-20260927-173002`; additive rsync, 24 files each; served on
-`127.0.0.1:7438` with a matching `shasum`, owned `1000:50`,
-`hls-Bt6kO1A0.js` and the previous `index-BHladCbs.js` `200`, and on
-`macnessa`.
-
-**develop deployed to fi-1 and gbni-1, 2026-09-25 17:28 (local), on Tom's
-instruction ("deploy to all nodes"); es-1 did not answer (ssh timed out) and
-was not deployed.** Commit `8c09aa3`, bundle `index-BHladCbs.js`, 704,990
-bytes, `shasum` `eed559fd96f9`, built against core `ac2a8a9` (clean, dist
-newer than src). It carries quality selection, Maximum quality and the
-offer-everything setting, the modes core computes with the node's
-operations, the close on every pagehide, the busy-node wording and the
-0.61.0 torrent states. Backups `web.bak-20260925-172807`; additive rsync, 24
-files each; served on `127.0.0.1:7438` with a matching `shasum`, owned
-`1000:50`, `hls-Bt6kO1A0.js` and the previous `index-y5i3Gmjl.js` `200`, and
-on `macnessa`.
-
-**develop deployed to fi-1 and gbni-1, 2026-09-25 09:06 (local), on Tom's
-instruction ("deploy latest everywhere"); es-1 did not answer and was not
-deployed.** Bundle `index-y5i3Gmjl.js`, 691,103 bytes, `shasum`
-`0b0840848e8d`, built against core `a50ef64` (clean), which carries core
-`de86392`'s fix for sessions begun direct being refused on a switch into
-transcode (no container or stream named) and for a language the file lacks.
-Identical to the 02:2x deploy, so the nodes already had it. Backups
-`web.bak-20260925-090648`; served on `127.0.0.1:7438` with a matching `shasum`,
-`hls-Bt6kO1A0.js` `200`, and on `macnessa`.
-
-**develop deployed to gbni-1 only, 2026-09-25 02:02 (local), on Tom's
-instruction ("es-1 and gbni-1"); es-1 did not answer (ssh timed out, no
-health) and was not deployed.** Bundle `index-DajU39j8.js`, 688,067 bytes,
-`shasum` `84fb9962152b`, built against core `0cbf584` (0bce895 in behaviour),
-which sends `media_id` and never `item_id`: server 0.58.0 (the media_id-only
-release, briefly called 0.57.1) refuses `item_id`, so every build before this
-one cannot start playback against it. Backup `web.bak-20260925-020200`;
-additive rsync, 24 files; served on `127.0.0.1:7438` with a matching `shasum`,
-`hls-Bt6kO1A0.js` `200`, and on `macnessa`. **fi-1 still runs
-`index-BJKj6lvr.js`, which sends `item_id`.**
+previous `index-BV1CkG1Z.js` `200`, and on `macnessa`. Earlier deploys are
+summarised in `COMPLETED.md` ("Client deploys"), with their backups on each
+node under `/etc/macha/web.bak-*`.
 
 **Deploy additively — no `--delete`.** The hashed assets of the previous build
 stay, so a session still running it does not 404 on a lazily-loaded chunk. The
@@ -518,63 +342,6 @@ page. Prune deliberately, later, not as part of the deploy.
 Assets are gzipped by the server on demand (593 KB of JS goes out as 172 KB).
 There are no precompressed `.gz` siblings in `dist/`, which the server would
 prefer; generating them is a build change nobody has asked for yet.
-
-**Latest: `main`'s build on fi-1 and gbni-1, 2026-09-24 20:51 (local), on
-Tom's instruction; es-1 offline and untouched.** Bundle `index-DKJODXg4.js`,
-676,409 bytes, `shasum` `779412b5f4a7`, the same bundle `main` builds against
-published core 0.19.0 (built here from `develop` against core's linked
-tree, clean at `afa30d0`, which produced the identical hash). Backups at
-`/etc/macha/web.bak-20260924-205123.tar.gz` on both; rsync additive, 24
-files, 1,849,144 bytes each. Verified served on both via
-`http://127.0.0.1:7438/`: index names the bundle, `200` at full size with a
-matching `shasum`, owned `1000:50`; `hls-Bt6kO1A0.js` and the previous
-`index-8e3uI4_9.js` still `200`. `macnessa.macha.network` serves it too.
-**Not yet opened in a browser on either node.**
-
-**Earlier deploys**, each additive with a backup first and verified served on
-`http://127.0.0.1:7438/`. The full records are in `COMPLETED.md`, "Client
-deploys to the nodes, 2026-09-20 to 2026-09-24":
-
-- 2026-09-24 18:03 (local): the then uncommitted `develop` tree against
-  linked core `47812f7`, `index-8e3uI4_9.js`, fi-1 and gbni-1.
-- 2026-09-21 22:53 UTC: 0.18.0 from `main` against registry core 0.18.0,
-  `index-CKNh5Q9D.js`, all three nodes; the first deployed artefact not
-  built against a linked tree. Its foregrounded browser check, 2026-09-23
-  14:30-14:33 UTC, closed it.
-- 2026-09-21 14:37: `develop` against linked core `648474d`,
-  `index-NDVfpduh.js`, all three nodes, on Tom's instruction ("they are NOT
-  production").
-- 2026-09-20: 0.17.2 (`3476e34`), `index-BGrNH6KR.js`, all three nodes;
-  gbni-1's first.
-
-Two checks from those that belong to every deploy. **Both bundles should
-reference the same lazy `hls-*.js` chunk, or the old one must still be
-served**, so a viewer running the old page is not broken by the swap; check it
-rather than assuming it. And write ownership `1000:50` and verify it
-numerically with `stat`: the nodes happen to *name* uid 1000 `tom` and gid 50
-`staff`, which reads like a mistake and is not one. **A browser check needs a
-foregrounded tab** (`document.visibilityState` read as `visible`); the 0.18.0
-check first lost 101 s to a frozen background tab.
-
-**`gbni-1` had never served the client, and turning it on cost a restart.** It
-had no `web:` block at all, so `/` answered `401` — the request fell past an
-unmounted static handler to the API. There is no reload path for it: the server
-session read the source and `Service::web_` is built once in the `Service`
-constructor (`src/service.cpp:101`) and never reassigned, while
-`reload_config()` covers logging, the local node, the scanner, hydration,
-ingest, torrent and streaming limits and not `web`. **A `SIGHUP` will accept the
-new block, log a success line, and still not serve anything** — so do not read
-that line as a deploy. The block was appended at the end of `macha.yaml` (backup
-`macha.yaml.bak-20260920-201332-web`) and the service restarted: API listening,
-ingest, torrent, the FUSE mount and both peer connections back inside 5 s,
-metadata `writable 3/3`.
-
-**`gbni-1` is `macnessa.macha.network`.** Its `api.advertised_endpoint` of
-`https://macnessa.macha.network` is correct and must be left alone: blanking it
-would advertise a bare `http` LAN address to the cluster, which an https client
-cannot reach. (It was on server 0.43.0 when the client landed on it, 2026-09-20;
-the version skew that followed was closed within the hour and never
-exercised.)
 
 **A server upgrade does not take the web root with it.** The install tarball
 writes only `/usr`, so `/etc/macha/web` survives, and all three nodes served
@@ -2564,6 +2331,14 @@ Android, which has a D-pad and no acceleration either.
   about the keyboard/D-pad path only.
 
 ## P1 — Three different 429s, and what each one does here
+
+**Update 2026-09-27.** From server 0.60.0 a PATCH out of transcode releases
+the slot, so a PATCH back into transcode can meet `429 resource_limit`
+(scope `request`). Core `c8099f1` keeps playback on what the node still
+serves and reports that; this client words it "This node is already
+converting as much as it can for other viewers. Try again shortly."
+(`b34e5be`). The "chosen mode silently not applied" case in the failover
+UAT above is covered by that wording. The table below predates it.
 
 Observed live 2026-09-07 while measuring transcode latency: `POST
 /api/v1/playback/sessions` answered `429` on gbni-2 while an earlier session

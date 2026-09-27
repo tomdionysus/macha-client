@@ -1,6 +1,127 @@
 # Completed and tested
 
-Last updated: 2026-09-25, at a break for a clear: finished work moved here, the backlog rationalised
+Last updated: 2026-09-27, at a break for a clear: finished work moved here, the backlog rationalised
+
+## Quality selection: a Play button per quality, and a Maximum quality — 2026-09-25
+
+Tom: "different buttons for 'play' on media depending on available quality
+... The generic play button stays, and means 'make the decision for me'";
+"a 1080p can only be 1080p or 720p", no upscaling; below 720p "display the
+480p class anyway"; "cap at the screen resolution for automatic play", with
+the reason shown and a Settings override.
+
+- Built on core's versions API (`40b453d`): Play plus 4K / 2K / 1080p /
+  720p (or the best file's own class below 720p) on movie and episode pages,
+  through `versionPreferences`; the cap's reason under them
+  (`qualityLimitText`); the same list in the player's options, marked from
+  `instruction.quality`, switching by `playVersion`; Maximum quality in
+  Settings, kept in core's `QualityPreferenceStore` as `wifi`. The ceiling
+  is the browser screen (`displayResolution.ts`); Samsung and the Android web
+  shell state none, so stay uncapped until the panel can be read.
+- **Device limit** (Tom: "limit to the device capabilities for direct on all
+  clients - but, all clients should also have a setting to disable this";
+  `1730925`, `0768f12`): the player's modes come from core's
+  `snapshot.modes` (with the node's `operations`); an unplayable mode is
+  hidden, or shown with the device's objection when Settings' "Offer every
+  quality and mode" is on. The web states no `maxWidth`/`maxHeight`: a
+  browser cannot report a decode size limit honestly.
+- **Seen live** (dev client, `tmdb:movie:185`): 720p played at 1194x720,
+  a switch to 1080p went direct at 1792x1080 from the same position, a
+  720p Maximum capped Play with its reason, and after core `42cebd6` a
+  1080p direct start lists "1080p* | 720p".
+
+## A page exit frees the node's transcode slot — 2026-09-25
+
+fi-1 refused a transcode with no other viewer on it. Two faults: (a) the
+server kept a session's transcode slot after a PATCH to direct (fixed in
+server 0.60.0: a PATCH out of transcode releases it; checked 12:44Z, a
+second viewer's transcode admitted); (b) this client skipped the page-exit
+close when Chrome put the playing page in the back-forward cache
+(`pagehide` with `persisted: true`). **Fixed in `9a05438`: close on every
+pagehide.** Verified on server 0.60.0 and core `42cebd6`: navigating away
+from a 720p transcode on fi-1 freed the slot within 3 s where it had been
+held about 5 min. Back restores the page and restarts playback on its
+route (plain Play, so a picked quality is not carried over). The CORS
+preflight explanation was never proven; core's signed-URL close (server
+0.60.0) is sent beside the DELETE and answers 204. A switch back into
+transcode refused for room reads "This node is already converting as much
+as it can for other viewers. Try again shortly." (`b34e5be`).
+
+## Media info the same on every client — 2026-09-27
+
+Tom: "Copy the web style, formatted for the device screen. For music - yes
+... We need all the UIs to match, within the confines of their devices";
+"Format, codec, bitrate etc details are non i18n and technical. They are
+core's responsibility, but should be supplied to clients in a structured
+object. The client should still 'format' them, in terms of layout"; "If the
+files have the same resolution, codec, length and bitrate combine them";
+"sort by descending resolution and add a (4K), (2K), (1080p) etc after the
+physical resolution. Also add a channel count after the audio codec".
+
+- A title page shows one line per file under the title, from core's
+  `fileSummaries` (combined, highest resolution first), e.g. "2h 31m ·
+  3840×2160 (4K) · HEVC · TRUEHD · 7.1 · 47.4 Mbps" (`cfbd6bf`, `ddb31c8`,
+  `d8d8e82`, `a50cdf1`). The duplicate-report TODO lives in core beside
+  `fileSummaries`.
+- A track reads "9:32 · FLAC · 24-bit · 44.1 kHz · Stereo · 1,504 kbps";
+  in the player it sits beside the artwork on a landscape screen at least
+  760 px wide, under it otherwise (`8535bca`). `MediaLine` wraps only
+  between fields.
+- The phone matches (its pills and MEDIA section gone); the TV matches on
+  .133. Seen live on the web: a two-file title's lines, and the track line
+  beside the artwork.
+
+## Continue Watching keeps the title, the file and how it played — 2026-09-27
+
+Tom (via the TV): store "both the item id AND the media ID", the mode,
+resolution and subtitle settings "and all other data needed to resume as if
+you'd never left". Core `89a9d0c`: `itemId`, `fileMediaId`, `resume`.
+The player saves through `progressFor` with the snapshot; a start from the
+title page, Continue Watching or a reload resumes with `resumePreferences`,
+except from the beginning or at a picked quality (`61e3389`). Existing
+entries were rewritten by core to `itemId`, positions intact (checked). The
+save itself was not seen live (hidden test tab, no media events).
+
+## Torrents across server 0.61.0 to 0.64.1 — 2026-09-26/27
+
+- 0.61.0: `verify_queued` reads "Waiting to verify", pausable, sorted with
+  the waiting; the torrent page's first stage says "Verifying data already
+  on disk" with the check's ETA (`8c09aa3`).
+- 0.63.0: a second add of a held torrent reads "That torrent is already in
+  the list ..." with an "Open it" link (`torrentHeldBy`); the new fault codes
+  are worded (`2271cf6`). **Found on the way:** behind the cluster router
+  the placement wording ("That node refused the torrent.") had never
+  matched in production; refusals are now found in the cause chain (core's
+  `acquisitionError`, `d71167c`).
+- 0.64.0, torrents belong to the cluster (`84dc3cc`, `9f57f73`, `3d9a548`,
+  `bd68eb7`, `99ba09f`): "Download on" (any node or a pinned one, each with
+  its load and its own staging room, "12.0 GB free of 100 GB") and "Remove
+  after completion" on add; the same two on a torrent's page (the node only
+  until one claims it); intents shown as "Pausing…" until applied, with the
+  blocked reason; "Not yet claimed by a node"; stale-source notices;
+  polling at the server's `refresh_interval_ms`; unknown live figures as
+  "—". Availability comes from `/torrents/nodes`, not the answering node's
+  `/torrents/status` (fi-1 runs no torrents, which had shown "built without
+  libtorrent-rasterbar"). The page's single staging figure is gone.
+- Seen live: the add form and the placement controls on a claimed torrent;
+  nothing added (a real download).
+
+## Status: storage and cache, and node versions — 2026-09-27
+
+Tom: "<known used>/<total>, next line is <available storage>/<total
+storage> Available", the same for cache, and the server version in the node
+cards (`f25319a`).
+
+## Client deploys, 2026-09-25 to 2026-09-27
+
+fi-1 and gbni-1, each on Tom's word, each additive with a backup first and
+verified by `shasum` on `127.0.0.1:7438` and on `macnessa`, the `hls` chunk
+and the previous bundle still `200`. es-1 down throughout.
+`index-BHladCbs.js` (09-25 17:28), `index-CFMMhNaI.js` (09-27 17:30),
+`index-gmwnlN3H.js` (18:09), `index-BV1CkG1Z.js` (20:30),
+**`index-DrAa1jr2.js` (20:53, `a50cdf1`, core `c41c819` = the 0.20.0
+candidate code `29fa878`, `shasum` `f28144a2cb75`, backups
+`web.bak-20260927-205359`)**. Full records in `ACTIVE.md`'s deploy section.
 
 ## Playback against server 0.58.0, where the server chooses nothing — 2026-09-25
 
