@@ -50,10 +50,14 @@ export function episodeCode(item: Pick<MediaSummary, 'seasonNumber' | 'episodeNu
  * "Season 1 Episode 4", or "Episode 4" with no season. Tom's ruling for an
  * episode shown away from its season: search and Continue Watching.
  */
+/**
+ * An episode's mark where it is shown away from its season (search,
+ * Continue Watching), taking the season from its context where the item
+ * lacks one. Tom, 2026-09-27: "S04E08 in all cases", on every client; this
+ * read "Season 4 Episode 8" before.
+ */
 export function episodeLabel(item: Pick<MediaSummary, 'seasonNumber' | 'episodeNumber' | 'playbackContext'>): string | undefined {
-  if (item.episodeNumber === undefined) return undefined;
-  const season = item.playbackContext?.season.seasonNumber ?? item.seasonNumber;
-  return season === undefined ? `Episode ${item.episodeNumber}` : `Season ${season} Episode ${item.episodeNumber}`;
+  return episodeCode({ episodeNumber: item.episodeNumber, seasonNumber: item.playbackContext?.season.seasonNumber ?? item.seasonNumber });
 }
 
 export function seasonLabel(seasonNumber: number | undefined): string | undefined {

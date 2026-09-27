@@ -72,10 +72,7 @@ section). fi-1 runs no torrents; gbni-1 is the only torrent node.
 3. **The playback P0s** as before.
 
 **Open decisions that are Tom's alone:** any push, merge, version bump, tag,
-deploy or core publish; the episode mark (the TV now shows "S04E08" "in all
-cases" by Tom's ruling there; the web's `episodeLabel` still reads "Season 1
-Episode 4" in search and Continue Watching, so ask whether "in all cases"
-covers every client); the server's catalogue proposals and multi-file
+deploy or core publish; the server's catalogue proposals and multi-file
 fixes; the artwork lost with es-1 and the replication capacity (with the
 server); the paging-test remedy; the ~15 s artwork hang on a silently dead
 node; the player options panel's sideways move; sized artwork variants;

@@ -106,6 +106,14 @@ save itself was not seen live (hidden test tab, no media events).
 - Seen live: the add form and the placement controls on a claimed torrent;
   nothing added (a real download).
 
+## Episodes read S04E08 everywhere — 2026-09-27
+
+Tom (on the TV): "it should be S04E08 in all cases"; then "The ruling about
+SxxEyy covers all clients." Search and Continue Watching read "S04E08" where
+they read "Season 4 Episode 8", taking the season from the episode's context
+where the item lacks one, and the season page's rail reads "S04E08 · Title"
+where it read "8. Title". "Episode 8" with no season number, as before.
+
 ## Status: storage and cache, and node versions — 2026-09-27
 
 Tom: "<known used>/<total>, next line is <available storage>/<total

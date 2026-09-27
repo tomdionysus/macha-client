@@ -1,6 +1,7 @@
 import { useRef, type MouseEvent, type PointerEvent, type WheelEvent } from 'react';
 import type { MediaApi } from '@machafoundation/core';
 import { LazyArtwork } from './LazyArtwork';
+import { episodeCode } from '../text/viewerText';
 import { PlayIcon, RestartIcon } from './PlaybackIcons';
 import type { Episode, PlaybackProgress } from '@machafoundation/core';
 
@@ -82,7 +83,7 @@ function EpisodeCard({ api, episode, progress, playbackEpisode, queue, queueInde
       </div>
       <div className="episode-copy">
         <div className="episode-heading">
-          <strong>{episode.episodeNumber}. {episode.title}</strong>
+          <strong>{episodeCode(episode) ? `${episodeCode(episode)} · ` : ''}{episode.title}</strong>
           <span>{displayDate(episode.releaseDate)}</span>
         </div>
         <p>{episode.synopsis || 'No description available.'}</p>

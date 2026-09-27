@@ -15,7 +15,9 @@ const item = (overrides: Partial<MediaSummary>) => ({ id: 'i', kind: 'movie', ti
 describe('media wording, now this client\'s', () => {
   it('names an episode compactly inside its season, and in full away from it', () => {
     expect(episodeCode(item({ kind: 'episode', seasonNumber: 1, episodeNumber: 4 }))).toBe('S01E04');
-    expect(episodeLabel(item({ kind: 'episode', seasonNumber: 1, episodeNumber: 4 }))).toBe('Season 1 Episode 4');
+    // Tom, 2026-09-27: "S04E08 in all cases", on every client.
+    expect(episodeLabel(item({ kind: 'episode', seasonNumber: 1, episodeNumber: 4 }))).toBe('S01E04');
+    expect(episodeLabel(item({ kind: 'episode', episodeNumber: 4, playbackContext: { series: { id: 's', title: 'S' }, season: { id: 'x', title: 'Season 4', seasonNumber: 4 } } }))).toBe('S04E04');
     expect(episodeLabel(item({ kind: 'episode', episodeNumber: 4 }))).toBe('Episode 4');
   });
 
