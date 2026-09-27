@@ -1,6 +1,6 @@
 import { useMemo, useState, type ChangeEvent, type FormEvent, type MouseEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { routes, type AcquisitionApi, type IngestJob, type TorrentJob } from '@machafoundation/core';
+import { routes, torrentHeldBy, type AcquisitionApi, type IngestJob, type TorrentJob } from '@machafoundation/core';
 import { JobControls, Progress } from './ingest/JobControls';
 import { formatAge, formatBytes, formatEta, formatPercent, formatRate, formatRatio, formatTimestamp, percent, stateLabel } from './ingest/format';
 import { canPause, canResume, canRetryImport, displayStateOf, jobKey, linkedIngestOf } from './ingest/jobs';
@@ -35,6 +35,9 @@ export function IngestScreen({ api, section }: Props) {
   const [submitting, setSubmitting] = useState<'path' | 'magnet'>();
   const [refreshing, setRefreshing] = useState(false);
   const navigate = useNavigate();
+  // The job already holding a torrent the viewer tried to add again (server
+  // 0.63.0 refuses a second job for it), to offer a way straight to it.
+  const [heldBy, setHeldBy] = useState<string | undefined>(undefined);
   const { sort, setSort, sortBy, page, setPage, search } = useListSort(TORRENT_SORT_KEYS, DEFAULT_TORRENT_SORT);
 
   const filesystemJobs = useMemo(
@@ -83,6 +86,7 @@ export function IngestScreen({ api, section }: Props) {
     }
     setSubmitting(kind);
     setError(undefined);
+    setHeldBy(undefined);
     setNotice(undefined);
     try {
       if (kind === 'path') {
@@ -97,6 +101,7 @@ export function IngestScreen({ api, section }: Props) {
       await refresh();
     } catch (reason: unknown) {
       setError(viewerErrorText(reason));
+      setHeldBy(torrentHeldBy(reason)?.id);
     } finally {
       setSubmitting(undefined);
     }
@@ -174,7 +179,7 @@ export function IngestScreen({ api, section }: Props) {
       {section === 'torrents' && snapshot && torrentBuilt && !torrentEnabled && <p className="ingest-disabled-note">Torrent acquisition is disabled in server configuration.</p>}
       {section === 'files' && snapshot && !ingestEnabled && <p className="ingest-disabled-note">Filesystem import is disabled in server configuration.</p>}
 
-      {error && <p className="ingest-page-error" role="alert">{error}</p>}
+      {error && <p className="ingest-page-error" role="alert">{error}{heldBy && <> <Link data-tv-focusable="true" to={torrentPath(heldBy)}>Open it</Link></>}</p>}
       {notice && <p className="ingest-page-notice">{notice}</p>}
       {loading && !snapshot && <p className="ingest-loading">Loading import state…</p>}
 

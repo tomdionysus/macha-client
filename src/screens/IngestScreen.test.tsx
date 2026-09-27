@@ -2,7 +2,7 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { describe, expect, it, vi } from 'vitest';
-import type { AcquisitionApi, AcquisitionSnapshot, IngestJob, TorrentJob } from '@machafoundation/core';
+import { endpointFailure, MachaAcquisitionApiError, type AcquisitionApi, type AcquisitionSnapshot, type IngestJob, type TorrentJob } from '@machafoundation/core';
 import { IngestScreen } from './IngestScreen';
 import { TorrentDetailScreen } from './TorrentDetailScreen';
 
@@ -342,5 +342,20 @@ describe('refreshing the torrent list', () => {
     const value = snapshot([torrentJob()]);
     renderAt('/ingest/torrents', value, fakeApi(value, { snapshot: () => new Promise<AcquisitionSnapshot>(() => undefined) }));
     expect(await screen.findByRole('button', { name: 'Refresh torrents in progress' })).toBeTruthy();
+  });
+});
+
+describe('adding a torrent the node already holds (server 0.63.0)', () => {
+  it('says so and offers the job that holds it, through the router\'s wrapping', async () => {
+    const refusal = new MachaAcquisitionApiError('m', 409, 'torrent_already_added', 'job tor-1 already holds this torrent', undefined, { id: 'tor-1', nodeId: 'n1' });
+    const api = fakeApi(snapshot([torrentJob()]), { submitMagnet: () => Promise.reject(endpointFailure('e', 'http://node', refusal)) });
+    renderAt('/ingest/torrents', snapshot([torrentJob()]), api);
+    await screen.findByText('Some.Release.2024.1080p');
+    fireEvent.change(screen.getByLabelText('Magnet link'), { target: { value: 'magnet:?xt=urn:btih:c2a1f0e9b8d7c6b5a4938271605f4e3d2c1b0a99' } });
+    fireEvent.click(screen.getByText('Add torrent'));
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toContain('That torrent is already in the list. To download it again, remove its job first.');
+    fireEvent.click(within(alert).getByText('Open it'));
+    expect(await screen.findByTestId('where')).toHaveProperty('textContent', expect.stringContaining('/ingest/torrents/tor-1'));
   });
 });

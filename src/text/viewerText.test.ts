@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { MachaAcquisitionApiError, MachaConnectionError, MachaPlaybackError, NOT_PLAYABLE_CODE, SESSION_PROVENANCE_UNKNOWN_CODE, type MediaSummary, type PlaybackNotice, type PlaybackStatusDescription, type PlaybackStreamInfo } from '@machafoundation/core';
+import { endpointFailure, MachaAcquisitionApiError, MachaConnectionError, MachaPlaybackError, NOT_PLAYABLE_CODE, SESSION_PROVENANCE_UNKNOWN_CODE, type MediaSummary, type PlaybackNotice, type PlaybackStatusDescription, type PlaybackStreamInfo } from '@machafoundation/core';
 import {
   playbackRefusalText,
   diagnosticErrorText,
@@ -207,5 +207,19 @@ describe('adding a torrent a node already holds (server 0.63.0)', () => {
   it('says it is already in the list, and how to add it again, without the job id', () => {
     const error = new MachaAcquisitionApiError('Macha acquisition request failed: job 3f2a already holds this torrent', 409, 'torrent_already_added', 'job 3f2a already holds this torrent');
     expect(viewerErrorText(error)).toBe('That torrent is already in the list. To download it again, remove its job first.');
+  });
+});
+
+describe('an acquisition refusal that reached us through the cluster router', () => {
+  it('is worded from the node\'s own refusal inside the wrapping', () => {
+    const placement = endpointFailure('e', 'http://node', new MachaAcquisitionApiError('m', 409, 'placement_failed', 'server sentence', 'node_refused'));
+    expect(viewerErrorText(placement)).toBe('That node refused the torrent.');
+    const held = endpointFailure('e', 'http://node', new MachaAcquisitionApiError('m', 409, 'torrent_already_added', 'job x already holds this torrent'));
+    expect(viewerErrorText(held)).toBe('That torrent is already in the list. To download it again, remove its job first.');
+  });
+
+  it('words the two torrent faults of server 0.63.0', () => {
+    expect(jobErrorText({ error_code: 'duplicate_torrent', error: 'x' })).toMatch(/^Another job already held this torrent/);
+    expect(jobErrorText({ error_code: 'torrent_fault', error: 'x' })).toBe('The download engine failed on this torrent. Remove it and add the torrent again.');
   });
 });

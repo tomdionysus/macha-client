@@ -180,6 +180,8 @@ const JOB_ERRORS: Record<TorrentJobErrorCode, string> = {
   ingest_submit_failed: 'It could not be handed over for import.',
   ingest_failed: 'Its import failed.',
   torrent_failed: 'The download failed.',
+  duplicate_torrent: 'Another job already held this torrent, so this one was stopped. Remove it and add the torrent again if it is still wanted.',
+  torrent_fault: 'The download engine failed on this torrent. Remove it and add the torrent again.',
 };
 const GENERIC_JOB_ERRORS = new Set(['filesystem_error', 'import_failed', 'torrent_error', 'torrent_failed', 'ingest_failed']);
 
@@ -247,9 +249,26 @@ const PLACEMENT_REASONS: Record<string, string> = {
  */
 const TORRENT_ALREADY_ADDED_CODE = 'torrent_already_added';
 
+/**
+ * The acquisition refusal inside whatever carried it. The cluster router
+ * wraps every mutation failure in an endpoint error with the node's own as
+ * its cause, so the refusal is rarely what was caught.
+ */
+function acquisitionError(error: unknown): MachaAcquisitionApiError | undefined {
+  const seen = new Set<unknown>();
+  let current = error;
+  while (current && typeof current === 'object' && !seen.has(current)) {
+    if (current instanceof MachaAcquisitionApiError) return current;
+    seen.add(current);
+    current = (current as { cause?: unknown }).cause;
+  }
+  return undefined;
+}
+
 /** A torrent another node would not take: by its reason, or the peer's own code where that is a job's. */
-function placementText(error: unknown): string | undefined {
-  if (!(error instanceof MachaAcquisitionApiError)) return undefined;
+function placementText(caught: unknown): string | undefined {
+  const error = acquisitionError(caught);
+  if (!error) return undefined;
   if (error.code === TORRENT_ALREADY_ADDED_CODE) return 'That torrent is already in the list. To download it again, remove its job first.';
   if (error.code !== 'placement_failed' || !error.reason) return undefined;
   return PLACEMENT_REASONS[error.reason] ?? JOB_ERRORS[error.reason as TorrentJobErrorCode];
