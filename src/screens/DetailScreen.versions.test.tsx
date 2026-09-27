@@ -82,8 +82,10 @@ describe('a title\'s files, one line each', () => {
     const { container } = render(<DetailScreen api={api} itemId="film" onBack={vi.fn()} onPlay={vi.fn()} onPlayFromStart={vi.fn()} onMediaProfile={onMediaProfile} />);
     await screen.findByText(/3840×2160/);
     expect([...container.querySelectorAll('.media-profile-summary')].map((line) => line.textContent)).toEqual([
-      '2h 31m · 3840×2160 · HEVC · TRUEHD · 47.4 Mbps',
-      '2h 31m · 1920×1080 · H.264 · AAC · 8.0 Mbps',
+      // Tom, 2026-09-27: highest resolution first, its class after it, and
+      // the channel count after the audio codec. Core's parts, laid out as given.
+      '2h 31m · 3840×2160 (4K) · HEVC · TRUEHD · 7.1 · 47.4 Mbps',
+      '2h 31m · 1920×1080 (1080p) · H.264 · AAC · 7.1 · 8.0 Mbps',
     ]);
     expect(onMediaProfile).toHaveBeenCalledWith(profiles['macha:uhd']);
   });
@@ -113,8 +115,10 @@ describe('files that are the same', () => {
     const { container } = render(<DetailScreen api={api} itemId="film" onBack={vi.fn()} onPlay={vi.fn()} onPlayFromStart={vi.fn()} />);
     await screen.findByText(/3840×2160/);
     expect([...container.querySelectorAll('.media-profile-summary')].map((line) => line.textContent)).toEqual([
-      '2h 31m · 1920×1080 · H.264 · AAC · 8.0 Mbps',
-      '2h 31m · 3840×2160 · HEVC · TRUEHD · 47.4 Mbps',
+      // Tom, 2026-09-27: highest resolution first, its class after it, and
+      // the channel count after the audio codec. Core's parts, laid out as given.
+      '2h 31m · 3840×2160 (4K) · HEVC · TRUEHD · 7.1 · 47.4 Mbps',
+      '2h 31m · 1920×1080 (1080p) · H.264 · AAC · 7.1 · 8.0 Mbps',
     ]);
   });
 });
