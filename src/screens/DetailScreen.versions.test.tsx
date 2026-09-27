@@ -73,8 +73,8 @@ describe('a title\'s files, below its title', () => {
       .toEqual(['Direct: 4K, 1080p', 'Remux: 1080p', 'Transcode: 720p']);
   });
 
-  it('counts files that share a quality rather than hiding the second', () => {
-    expect(fileSummary([file(1080, 'direct', 0), file(1080, 'direct', 1), file(2160, 'direct', 2)])).toEqual(['Direct: 4K, 1080p ×2']);
+  it('names each differing quality once, however many files share it', () => {
+    expect(fileSummary([file(1080, 'direct', 0), file(1080, 'direct', 1), file(2160, 'direct', 2)])).toEqual(['Direct: 4K, 1080p']);
   });
 
   it('says nothing for a title with one file', () => {
