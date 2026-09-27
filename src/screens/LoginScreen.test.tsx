@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { useEffect, useRef } from 'react';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { MachaConnectionError, routes } from '@machafoundation/core';
 import { SERVER_UNREACHABLE_TEXT } from '../text/viewerText';
 import { LoginScreen } from './LoginScreen';
+import { settle } from '../test/settle';
 
 /** Where the screen asked to go, in order. */
 let navigated: string[] = [];
@@ -65,8 +66,10 @@ describe('LoginScreen', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Log in' }));
 
     // Trimmed, because a username typed on a remote picks up spaces.
-    await waitFor(() => expect(onSignIn).toHaveBeenCalledWith('alice', 'hunter2'));
-    await waitFor(() => expect(onSignedIn).toHaveBeenCalled());
+    await settle();
+    expect(onSignIn).toHaveBeenCalledWith('alice', 'hunter2');
+    await settle();
+    expect(onSignedIn).toHaveBeenCalled();
   });
 
   it('says a refusal in words a viewer can act on, and clears the password', async () => {
@@ -81,8 +84,9 @@ describe('LoginScreen', () => {
     fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'wrong' } });
     fireEvent.click(screen.getByRole('button', { name: 'Log in' }));
 
-    await waitFor(() => expect(screen.getByRole('alert').textContent)
-      .toBe('That username and password were not recognised. Please try again.'));
+    await settle();
+    expect(screen.getByRole('alert').textContent)
+      .toBe('That username and password were not recognised. Please try again.');
     expect((screen.getByLabelText('Password') as HTMLInputElement).value).toBe('');
   });
 
@@ -95,7 +99,8 @@ describe('LoginScreen', () => {
     fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'hunter2' } });
     fireEvent.click(screen.getByRole('button', { name: 'Log in' }));
 
-    await waitFor(() => expect(screen.getByRole('alert').textContent).toBe(SERVER_UNREACHABLE_TEXT));
+    await settle();
+    expect(screen.getByRole('alert').textContent).toBe(SERVER_UNREACHABLE_TEXT);
   });
 
   it('shows the server\'s own sentence for anything else it refused in words', async () => {
@@ -105,7 +110,8 @@ describe('LoginScreen', () => {
     fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'hunter2' } });
     fireEvent.click(screen.getByRole('button', { name: 'Log in' }));
 
-    await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('This account is locked.'));
+    await settle();
+    expect(screen.getByRole('alert').textContent).toBe('This account is locked.');
   });
 
   it('waits for the new roles before navigating, so it cannot bounce back here', async () => {
@@ -113,18 +119,20 @@ describe('LoginScreen', () => {
     // judged against the session just replaced, which on a cluster whose
     // anonymous account holds nothing means landing back on this screen with
     // no sign anything happened.
-    const order: string[] = [];
-    const onSignedIn = vi.fn(() => {
-      order.push('refresh-started');
-      return new Promise<void>((resolve) => setTimeout(() => { order.push('roles-known'); resolve(); }, 20));
-    });
+    let rolesKnown: (() => void) | undefined;
+    const onSignedIn = vi.fn(() => new Promise<void>((resolve) => { rolesKnown = resolve; }));
     renderLogin({ guestAllowed: false, onSignedIn });
     fireEvent.change(screen.getByLabelText('Username'), { target: { value: 'alice' } });
     fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'hunter2' } });
     fireEvent.click(screen.getByRole('button', { name: 'Log in' }));
 
-    await waitFor(() => expect(navigated).toHaveLength(1));
-    expect(order).toEqual(['refresh-started', 'roles-known']);
+    await settle();
+    expect(onSignedIn).toHaveBeenCalledTimes(1);
+    expect(navigated).toEqual([]);
+
+    rolesKnown?.();
+    await settle();
+    expect(navigated).toHaveLength(1);
   });
 });
 
@@ -135,7 +143,8 @@ describe('LoginScreen return destination', () => {
     fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'hunter2' } });
     fireEvent.click(screen.getByRole('button', { name: 'Log in' }));
 
-    await waitFor(() => expect(navigated).toEqual(['/movies']));
+    await settle();
+    expect(navigated).toEqual(['/movies']);
   });
 
   it('falls back to Home when nothing recorded where they came from', async () => {
@@ -144,7 +153,8 @@ describe('LoginScreen return destination', () => {
     fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'hunter2' } });
     fireEvent.click(screen.getByRole('button', { name: 'Log in' }));
 
-    await waitFor(() => expect(navigated).toEqual([routes.home]));
+    await settle();
+    expect(navigated).toEqual([routes.home]);
   });
 
   it('refuses to send them back to the login screen itself', async () => {
@@ -155,6 +165,7 @@ describe('LoginScreen return destination', () => {
     fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'hunter2' } });
     fireEvent.click(screen.getByRole('button', { name: 'Log in' }));
 
-    await waitFor(() => expect(navigated).toEqual([routes.home]));
+    await settle();
+    expect(navigated).toEqual([routes.home]);
   });
 });

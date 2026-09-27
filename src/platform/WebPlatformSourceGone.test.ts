@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { PlaybackSource } from '@machafoundation/core';
+import { settle } from '../test/settle';
 
 /**
  * The read-ahead worker is the only way a Direct Play source reports a status,
@@ -118,7 +119,8 @@ describe('a source the node no longer has must not take the presentation with it
     // a viewer watching nothing with no message.
     const { video, failures } = await playingPlayer();
     emit(video, 'error');
-    await vi.waitFor(() => expect(failures).toHaveLength(1));
+    await settle();
+    expect(failures).toHaveLength(1);
 
     expect(failures).toHaveLength(1);
     expect(failures[0].kind).toBe('unsupported');
@@ -135,7 +137,8 @@ describe('a source the node no longer has must not take the presentation with it
     workerSourceStatus = 404;
     const { video, failures } = await playingPlayer();
     emit(video, 'error');
-    await vi.waitFor(() => expect(failures.length).toBeGreaterThan(0));
+    await settle();
+    expect(failures.length).toBeGreaterThan(0);
 
     expect(failures.map((failure) => failure.kind)).toContain('not-found');
     expect(failures.map((failure) => failure.kind)).not.toContain('unsupported');

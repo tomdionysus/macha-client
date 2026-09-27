@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
-import { renderHook, waitFor } from '@testing-library/react';
+import { renderHook } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { CurrentSession, UsersApi } from '@machafoundation/core';
 import { useCurrentSession } from './useCurrentSession';
+import { settle } from '../test/settle';
 
 /**
  * One API object per test, built outside the render callback.
@@ -27,7 +28,8 @@ describe('useCurrentSession', () => {
     const users = api(() => Promise.resolve(session));
     const { result } = renderHook(() => useCurrentSession(users, true));
 
-    await waitFor(() => expect(result.current.known).toBe(true));
+    await settle();
+    expect(result.current.known).toBe(true);
     expect(result.current.session?.roles).toEqual(['media_viewer', 'manage_users']);
   });
 
@@ -47,7 +49,8 @@ describe('useCurrentSession', () => {
     const users = api(() => Promise.resolve(stated));
     const { result } = renderHook(() => useCurrentSession(users, true));
 
-    await waitFor(() => expect(result.current.known).toBe(true));
+    await settle();
+    expect(result.current.known).toBe(true);
     expect(result.current.session?.roles).toEqual(['anonymous']);
   });
 
@@ -55,7 +58,8 @@ describe('useCurrentSession', () => {
     const users = api(() => Promise.reject(new Error('nope')));
     const { result } = renderHook(() => useCurrentSession(users, true));
 
-    await waitFor(() => expect(result.current.known).toBe(false));
+    await settle();
+    expect(result.current.known).toBe(false);
     expect(result.current.session).toBeUndefined();
   });
 

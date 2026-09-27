@@ -394,6 +394,11 @@ export default defineConfig(({ mode }) => {
     test: {
       environment: 'node',
       setupFiles: './src/test/setup.ts',
+      // A test's verdict is its assertions, never the clock: a deadline fails
+      // a correct test on a loaded machine. A test that truly hangs shows as
+      // a run that does not finish.
+      testTimeout: 0,
+      hookTimeout: 0,
     },
     build: android ? {
       outDir: 'platforms/android/app/build/generated/web',

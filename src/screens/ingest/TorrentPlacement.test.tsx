@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { endpointFailure, MachaAcquisitionApiError, type AcquisitionApi, type TorrentNodes } from '@machafoundation/core';
 import { placementRefusalText, TorrentPlacement } from './TorrentPlacement';
+import { settle } from '../../test/settle';
 
 const nodes: TorrentNodes = { nodes: [{ node_id: 'gbni', host: 'gbni-1', local: false, reachable: true, as_of_unix_ms: 1, max_active: 4, active_jobs: 1, accepting: true, not_accepting_reason: null, staging: { limit_bytes: 1, disk_bytes: 1, reserved_bytes: 0, free_bytes: 1 } }] };
 
@@ -17,10 +18,13 @@ describe('changing where a cluster torrent downloads (server 0.64.0)', () => {
   it('offers the node only while no node has claimed it, and pins or unpins it', async () => {
     const { updateTorrent, onChanged } = show({ node_id: null, pinned_node_id: null });
     fireEvent.change(screen.getByLabelText('Download on'), { target: { value: 'gbni' } });
-    await waitFor(() => expect(updateTorrent).toHaveBeenCalledWith('t1', { nodeId: 'gbni' }));
-    await waitFor(() => expect(onChanged).toHaveBeenCalled());
+    await settle();
+    expect(updateTorrent).toHaveBeenCalledWith('t1', { nodeId: 'gbni' });
+    await settle();
+    expect(onChanged).toHaveBeenCalled();
     fireEvent.change(screen.getByLabelText('Download on'), { target: { value: '' } });
-    await waitFor(() => expect(updateTorrent).toHaveBeenLastCalledWith('t1', { nodeId: null }));
+    await settle();
+    expect(updateTorrent).toHaveBeenLastCalledWith('t1', { nodeId: null });
   });
 
   it('offers no node once a node has claimed it', () => {
@@ -33,9 +37,11 @@ describe('changing where a cluster torrent downloads (server 0.64.0)', () => {
     const remove = screen.getByLabelText('Remove after completion') as HTMLSelectElement;
     expect(remove.value).toBe('');
     fireEvent.change(remove, { target: { value: '3600000' } });
-    await waitFor(() => expect(updateTorrent).toHaveBeenCalledWith('t1', { removeAfterMs: 3_600_000 }));
+    await settle();
+    expect(updateTorrent).toHaveBeenCalledWith('t1', { removeAfterMs: 3_600_000 });
     fireEvent.change(remove, { target: { value: '' } });
-    await waitFor(() => expect(updateTorrent).toHaveBeenLastCalledWith('t1', { removeAfterMs: null }));
+    await settle();
+    expect(updateTorrent).toHaveBeenLastCalledWith('t1', { removeAfterMs: null });
   });
 
   it('shows a removal time set elsewhere that is not one of its choices', () => {

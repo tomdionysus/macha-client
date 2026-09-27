@@ -17,10 +17,11 @@ Developed with substantial use of AI-assisted implementation.
 
 | Repository | What it is |
 | --- | --- |
-| `macha` | The server. C++, clustered; any node can answer for the catalogue and serve or transform media. |
-| `macha-ts` → **`@machafoundation/core`** | The shared TypeScript core, consumed here from npm. |
-| `macha-client` | **This repo.** The DOM client: web browsers, Samsung Tizen, Android TV. |
-| React Native clients | Phone and TV apps sharing `@machafoundation/core` but not this UI. |
+| [`macha`](https://github.com/tomdionysus/macha) | The server. C++, clustered; any node can answer for the catalogue and serve or transform media. |
+| [`macha-ts`](https://github.com/tomdionysus/macha-core-npm) → **[`@machafoundation/core`](https://www.npmjs.com/package/@machafoundation/core)** | The shared TypeScript core, consumed here from npm. |
+| [`macha-client`](https://github.com/tomdionysus/macha-client) | **This repo.** The DOM client: web browsers, Samsung Tizen, Android TV. |
+| [`macha-client-rn`](https://github.com/tomdionysus/macha-client-rn) | The React Native phone client (iOS and Android), playing on the platform's own pipeline. Shares `@machafoundation/core` but not this UI. |
+| [`macha-client-rn-tv`](https://github.com/tomdionysus/macha-client-rn-android-tv) | The React Native Android TV client: leanback, D-pad only, reproducing this client's TV interface. Shares `@machafoundation/core` but not this UI. |
 
 **`@machafoundation/core` owns everything that is not presentation:** the HTTP
 API layer, the cluster endpoint registry and health monitoring, the sign-in

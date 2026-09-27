@@ -1,9 +1,13 @@
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const workerSource = readFileSync(new URL('../public/macha-direct-play-sw.js', import.meta.url), 'utf8');
-const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+// The worker judges quiet and schedules read-ahead by its clock and timers.
+// On fake time the test decides how much time passes, so an outcome never
+// depends on how fast the machine ran; waiting advances that time and lets
+// every promise it releases run.
+const wait = (ms: number) => vi.advanceTimersByTimeAsync(ms);
 
 type FetchOptions = RequestInit & { headers?: HeadersInit; signal?: AbortSignal };
 type WorkerListener = (event: any) => void;
@@ -128,8 +132,10 @@ function createHarness(fetchImpl: (url: string, options?: FetchOptions) => Promi
 describe('Direct Play read-ahead Service Worker', () => {
   const releases: Array<() => void> = [];
 
+  beforeEach(() => { vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance'] }); });
   afterEach(() => {
     while (releases.length > 0) releases.pop()?.();
+    vi.useRealTimers();
   });
 
   it('starts self-described proxy demand without waiting for a configure message', async () => {

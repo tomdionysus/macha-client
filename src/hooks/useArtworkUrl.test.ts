@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
-import { renderHook, waitFor } from '@testing-library/react';
+import { renderHook } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { MediaApi } from '@machafoundation/core';
 import { useArtworkUrl } from './useArtworkUrl';
+import { settle } from '../test/settle';
 
 function fakeApi(artwork: MediaApi['artwork']): MediaApi {
   return { artwork } as unknown as MediaApi;
@@ -30,10 +31,16 @@ describe('useArtworkUrl', () => {
     try {
       const blob = new Blob(['bytes'], { type: 'image/jpeg' });
       const artworkFetch = vi.fn(() => Promise.resolve(blob));
-      const { result, unmount } = renderHook(() => useArtworkUrl(fakeApi(artworkFetch), { id: 'legacy', mimeType: 'image/jpeg' }));
+      // Built once, outside the render: a new api each render is a new effect
+      // dependency, so the hook would fetch, set, re-render and fetch again
+      // for ever, and the URL would only be there between two of those.
+      const api = fakeApi(artworkFetch);
+      const ref = { id: 'legacy', mimeType: 'image/jpeg' };
+      const { result, unmount } = renderHook(() => useArtworkUrl(api, ref));
 
       expect(result.current).toBeUndefined();
-      await waitFor(() => expect(result.current).toBe('blob:fake'));
+      await settle();
+      expect(result.current).toBe('blob:fake');
       expect(artworkFetch).toHaveBeenCalled();
       unmount();
     } finally {

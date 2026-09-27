@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
-import { renderHook, waitFor } from '@testing-library/react';
+import { renderHook } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { confirmMachaEndpoint, sameOriginCandidate, useSameOriginEndpoint } from './sameOriginEndpoint';
+import { settle } from '../test/settle';
 
 function answer(status: number, contentType: string | null, body: unknown): Response {
   return {
@@ -170,7 +171,8 @@ describe('useSameOriginEndpoint', () => {
     const { result } = renderHook(() => useSameOriginEndpoint(true));
     expect(result.current.probing).toBe(true);
     expect(result.current.endpoint).toBeUndefined();
-    await waitFor(() => expect(result.current.probing).toBe(false));
+    await settle();
+    expect(result.current.probing).toBe(false);
     expect(result.current.endpoint).toBe('http://localhost:3000');
   });
 
