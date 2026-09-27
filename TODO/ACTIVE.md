@@ -164,6 +164,31 @@ an ingest/server one, [evidence](2026-09-16-video-fit-mode.md)).
 `readyState` 0 (instrumented, no mechanism). Seek misbehaviour. A handover
 with no lead. Failover from an https page onto an http node (core's).
 
+## Cluster torrents, server 0.64.0 (designed, not built; web work waiting)
+
+Torrents belong to the cluster: added once, claimed by any torrent-capable
+node or a pinned one. The server settled the web's nine review points
+(2026-09-27). Web work once it is built, through core:
+- Add form: a node selector from `GET /api/v1/torrents/nodes` (only capable
+  nodes; `accepting` and `not_accepting_reason`: slots_full, staging_full or
+  draining), defaulting to any node, with names joined from status nodes.
+  Remove after completion: off, or 0 s to 24 h. Say what the default is from
+  `default_remove_after_ms` (null means off).
+- Unclaimed jobs: `phase`/`state` `awaiting_node`, `node_id` null, and
+  `pinned_node_id`; re-pin or unpin by `PATCH {node_id}` while awaiting.
+- Actions are intent: show pending until `desired_applied`, and say why
+  when `desired_blocked_reason` is set (owner_unreachable,
+  pinned_node_unavailable, no_capable_node). Not applied after
+  2 x `refresh_interval_ms` with no reason also means stuck. Add and action
+  202s carry the full job; show it at once.
+- Poll at `refresh_interval_ms` (5000), not 1.5 s. Show unknown live fields
+  as unknown, not "0 B".
+- Ingest `sources`: `reachable: false` means that node's jobs are listed
+  from its last poll (`as_of_unix_ms`) and may be stale; null means never
+  reached.
+- 503 `metadata_unavailable` (`scope: cluster`) on adds, PATCH and actions
+  on unclaimed jobs; actions on claimed jobs still work.
+
 ## Versions and quality (in progress with core, TV and phone)
 
 Tom, 2026-09-24/25, in his words where given:
