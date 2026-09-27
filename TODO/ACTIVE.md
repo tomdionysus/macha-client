@@ -397,6 +397,21 @@ tar -czf /etc/macha/web.bak-$(date +%Y%m%d-%H%M%S).tar.gz -C /etc/macha web
 rsync -a --omit-dir-times --chown=1000:50 dist/ root@<node>:/etc/macha/web/
 ```
 
+**develop deployed to fi-1 and gbni-1, 2026-09-27 17:30 (local), on Tom's
+instruction ("Yes deploy now please"); es-1 did not answer (ssh timed out)
+and was not deployed.** Commit `61e3389`, bundle `index-CFMMhNaI.js`,
+718,190 bytes, `shasum` `37023126745f`, built against core `e964514`
+(clean, dist current), suite 618. Carries everything since `8c09aa3`: the
+0.63.0 torrent refusals and the router-unwrapped placement wording, the
+per-file media lines and the track line from core's technical summaries,
+the track details beside the artwork, cluster torrents on 0.64.0 (node
+selector, remove-after, intents, re-pin, stale sources) and Continue
+Watching's item and file ids with resume state. Backups
+`web.bak-20260927-173002`; additive rsync, 24 files each; served on
+`127.0.0.1:7438` with a matching `shasum`, owned `1000:50`,
+`hls-Bt6kO1A0.js` and the previous `index-BHladCbs.js` `200`, and on
+`macnessa`.
+
 **develop deployed to fi-1 and gbni-1, 2026-09-25 17:28 (local), on Tom's
 instruction ("deploy to all nodes"); es-1 did not answer (ssh timed out) and
 was not deployed.** Commit `8c09aa3`, bundle `index-BHladCbs.js`, 704,990
