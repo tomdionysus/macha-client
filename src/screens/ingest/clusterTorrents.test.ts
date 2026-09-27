@@ -35,6 +35,12 @@ describe('the add form\'s choices', () => {
     expect(torrentNodeLabel({ node_id: 'n', host: 'gbni-1', accepting: true, not_accepting_reason: null, active_jobs: 1, max_active: 4 })).toBe('gbni-1 (1 of 4 running)');
     expect(torrentNodeLabel({ node_id: 'n', host: 'gbni-1', accepting: false, not_accepting_reason: 'staging_full', active_jobs: 4, max_active: 4 })).toBe('gbni-1 (staging full)');
   });
+
+  it('states each node\'s own staging room, as the page no longer has one figure for it', () => {
+    const staging = { free_bytes: 12 * 1024 ** 3, limit_bytes: 100 * 1024 ** 3 };
+    expect(torrentNodeLabel({ node_id: 'n', host: 'gbni-1', accepting: true, not_accepting_reason: null, active_jobs: 1, max_active: 4, staging })).toBe('gbni-1 (1 of 4 running · 12.0 GB free of 100 GB)');
+    expect(torrentNodeLabel({ node_id: 'n', host: 'gbni-1', accepting: false, not_accepting_reason: 'staging_full', active_jobs: 4, max_active: 4, staging: { free_bytes: 0, limit_bytes: 100 * 1024 ** 3 } })).toBe('gbni-1 (staging full · 0 B free of 100 GB)');
+  });
 });
 
 describe('a list some nodes could not answer for', () => {

@@ -3,8 +3,6 @@
 .ingest-screen { width: 100%; }
 .ingest-header { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; margin-bottom: .75rem; }
 .ingest-header h1 { margin: 0; }
-.ingest-staging-summary { margin: 0; color: var(--text-faint); font-size: .82rem; white-space: nowrap; }
-.ingest-staging-summary strong { margin-left: .35rem; color: #d0d0d4; font-weight: 500; font-variant-numeric: tabular-nums; }
 
 .ingest-add-bar { display: grid; grid-template-columns: minmax(0, 1fr); gap: .6rem; margin-bottom: .5rem; }
 .ingest-add-form { display: flex; flex-wrap: wrap; gap: .4rem; min-width: 0; }

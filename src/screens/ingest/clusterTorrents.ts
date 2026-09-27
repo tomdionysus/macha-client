@@ -1,5 +1,5 @@
 import type { AcquisitionSource, TorrentJob, TorrentNode } from '@machafoundation/core';
-import { formatAge } from './format';
+import { formatAge, formatBytes } from './format';
 
 /**
  * Server 0.64.0: torrents belong to the cluster. An action is intent: the
@@ -56,12 +56,22 @@ const NOT_ACCEPTING: Record<string, string> = {
   unreachable: 'unreachable',
 };
 
-/** A node in the add form's selector: its host, and why it is not taking work now. It can still be chosen; the torrent then waits for it. */
-export function torrentNodeLabel(node: Pick<TorrentNode, 'host' | 'node_id' | 'accepting' | 'not_accepting_reason' | 'active_jobs' | 'max_active'>): string {
+/**
+ * A node in the add form's selector: its host, its load or why it is not
+ * taking work now, and its own staging room. Tom, 2026-09-27: with torrents
+ * the cluster's, the page's single staging figure (the answering node's) was
+ * wrong, so each node states its own here. It can still be chosen when not
+ * accepting; the torrent then waits for it.
+ */
+export function torrentNodeLabel(node: Pick<TorrentNode, 'host' | 'node_id' | 'accepting' | 'not_accepting_reason' | 'active_jobs' | 'max_active'> & { staging?: Pick<TorrentNode['staging'], 'free_bytes' | 'limit_bytes'> }): string {
   const name = node.host || node.node_id;
-  if (node.accepting) return `${name} (${node.active_jobs} of ${node.max_active} running)`;
-  const why = node.not_accepting_reason ? NOT_ACCEPTING[node.not_accepting_reason] ?? node.not_accepting_reason.replace(/_/g, ' ') : 'not taking torrents';
-  return `${name} (${why})`;
+  const load = node.accepting
+    ? `${node.active_jobs} of ${node.max_active} running`
+    : node.not_accepting_reason ? NOT_ACCEPTING[node.not_accepting_reason] ?? node.not_accepting_reason.replace(/_/g, ' ') : 'not taking torrents';
+  const room = node.staging && node.staging.limit_bytes > 0
+    ? ` · ${formatBytes(node.staging.free_bytes)} free of ${formatBytes(node.staging.limit_bytes)}`
+    : '';
+  return `${name} (${load}${room})`;
 }
 
 /**

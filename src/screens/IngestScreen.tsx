@@ -142,7 +142,6 @@ export function IngestScreen({ api, section }: Props) {
   const beforeClusterTorrents = Boolean(torrentNodes.error);
   const torrentEnabled = beforeClusterTorrents ? snapshot?.torrentStatus.enabled ?? false : clusterTakesTorrents;
   const torrentBuilt = snapshot?.torrentStatus.build_available ?? false;
-  const staging = snapshot?.ingestStatus.staging;
   const now = Date.now();
   const refreshIntervalMs = snapshot?.refreshIntervalMs ?? 5_000;
   const staleNotes = staleSourceNotes(
@@ -161,11 +160,6 @@ export function IngestScreen({ api, section }: Props) {
     <section className="ingest-screen">
       <header className="ingest-header">
         <h1>Import</h1>
-        {staging && (
-          <p className="ingest-staging-summary" title={staging.path}>
-            Staging <strong>{formatBytes(staging.accounted_bytes)} / {formatBytes(staging.limit_bytes)}</strong>
-          </p>
-        )}
       </header>
 
       <div className="ingest-add-bar">

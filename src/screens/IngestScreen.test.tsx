@@ -374,7 +374,7 @@ describe('adding a torrent to the cluster (server 0.64.0)', () => {
     renderAt('/ingest/torrents', withoutTorrents, api);
     const node = await screen.findByLabelText('Download on') as HTMLSelectElement;
     expect(screen.queryByText(/built without libtorrent/)).toBeNull();
-    expect([...node.options].map((option) => option.textContent)).toEqual(['Any node', 'gbni-1 (0 of 4 running)']);
+    expect([...node.options].map((option) => option.textContent)).toEqual(['Any node', 'gbni-1 (0 of 4 running · 1 B free of 1 B)']);
     fireEvent.change(node, { target: { value: 'gbni' } });
     fireEvent.change(screen.getByLabelText('Remove after completion'), { target: { value: '3600000' } });
     fireEvent.change(screen.getByLabelText('Magnet link'), { target: { value: 'magnet:?xt=urn:btih:abc' } });
