@@ -8,7 +8,8 @@ import type { PlaybackRuntime, PlaybackRuntimeSnapshot } from '@machafoundation/
 import { ContinueWatchingStore } from '@machafoundation/core';
 import { PlaybackQueueStore } from '@machafoundation/core';
 import { VolumeStore } from '../state/volume';
-import type { Episode, MediaSummary, SeasonDetails } from '@machafoundation/core';
+import type { Episode, MediaSummary, PlaybackProgress, SeasonDetails, VersionStep } from '@machafoundation/core';
+import { resumePreferences, versionPreferences } from '@machafoundation/core';
 import { usePlaybackController } from './usePlaybackController';
 
 function movie(id: string): MediaSummary {
@@ -250,4 +251,57 @@ describe('usePlaybackController season queue', () => {
     expect(details).not.toHaveBeenCalled();
     expect(result.current.canNext).toBe(true);
   });
+
+  it("starts a picked quality as the viewer's choice, and Play as core's", () => {
+    const play = vi.fn().mockResolvedValue(undefined);
+    const runtime = { play, stop: vi.fn(), setReturnTo: vi.fn() } as unknown as PlaybackRuntime;
+    const api = { details: vi.fn() } as unknown as MediaApi;
+    const progressStore = new ContinueWatchingStore('test-client');
+    const queueStore = new PlaybackQueueStore('test-client');
+    const volumeStore = new VolumeStore('test-client');
+    const { result } = renderHook(
+      () => usePlaybackController({ api, platform, runtime, runtimeState: stalledSnapshot(), progressStore, queueStore, volumeStore, ready: true }),
+      { wrapper: ({ children }) => <MemoryRouter initialEntries={['/movies']}>{children}</MemoryRouter> },
+    );
+    const version: VersionStep = {
+      quality: 720,
+      source: 'transcode',
+      mediaId: 'file:m1',
+      instruction: { mode: 'transcode', video: 'transcode', audio: 'transcode', container: 'fmp4', reasons: [], assumed: [] },
+      maxHeight: 534,
+    };
+
+    act(() => { result.current.startPlayback(movie('m1'), { version }); });
+    expect(play).toHaveBeenLastCalledWith(expect.objectContaining({ media: movie('m1') }), versionPreferences(version));
+    expect(play.mock.lastCall?.[1]).toMatchObject({ mode: 'transcode', maxHeight: 534, mediaId: 'file:m1' });
+
+    act(() => { result.current.startPlayback(movie('m2')); });
+    expect(play.mock.lastCall?.[1]).toBeUndefined();
+  });
+
+  it("resumes a title as it was playing, unless started from the beginning or at a picked quality", () => {
+    const play = vi.fn().mockResolvedValue(undefined);
+    const runtime = { play, stop: vi.fn(), setReturnTo: vi.fn() } as unknown as PlaybackRuntime;
+    const api = { details: vi.fn() } as unknown as MediaApi;
+    const progressStore = new ContinueWatchingStore('test-client');
+    const queueStore = new PlaybackQueueStore('test-client');
+    const volumeStore = new VolumeStore('test-client');
+    const saved: PlaybackProgress = {
+      itemId: 'm1', fileMediaId: 'macha:uhd', positionMs: 120_000, durationMs: 600_000, updatedAt: Date.now(), media: movie('m1'),
+      resume: { chosenByViewer: true, mode: 'transcode', container: 'fmp4', maxHeight: 720, audioStream: 2, subtitleStream: 4 },
+    };
+    progressStore.update(saved);
+    const { result } = renderHook(
+      () => usePlaybackController({ api, platform, runtime, runtimeState: stalledSnapshot(), progressStore, queueStore, volumeStore, ready: true }),
+      { wrapper: ({ children }) => <MemoryRouter initialEntries={['/movies']}>{children}</MemoryRouter> },
+    );
+
+    act(() => { result.current.startPlayback(movie('m1')); });
+    expect(play).toHaveBeenLastCalledWith(expect.objectContaining({ startPositionMs: 120_000 }), resumePreferences(saved));
+    expect(play.mock.lastCall?.[1]).toMatchObject({ mediaId: 'macha:uhd', mode: 'transcode', maxHeight: 720, audioStream: 2, subtitleStream: 4 });
+
+    act(() => { result.current.startPlayback(movie('m1'), { fromStart: true }); });
+    expect(play.mock.lastCall?.[1]).toBeUndefined();
+  });
 });
+

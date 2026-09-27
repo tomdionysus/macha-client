@@ -15,8 +15,20 @@ import {
   playbackStartsFromBeginning,
   playerRouteItemId,
   restoredPlaybackPosition,
+  resumePreferences,
   routePlaybackMedia,
+  versionPreferences,
 } from '@machafoundation/core';
+
+/**
+ * How a title resumes: its file, and the mode, cap and audio and subtitle
+ * choices it was playing with. Tom, 2026-09-27: resume "as if you'd never
+ * left". Nothing to restore when starting from the beginning or with nothing
+ * saved; a quality the viewer picks now is theirs instead.
+ */
+function resumeWith(entry: PlaybackProgress | undefined) {
+  return entry ? resumePreferences(entry) : undefined;
+}
 
 export function usePlaybackController(options: {
   api: MediaApi;
@@ -87,7 +99,7 @@ export function usePlaybackController(options: {
     ? activePlayback?.returnTo ?? routes.home
     : `${location.pathname}${location.search}`;
   const progressById = useMemo(
-    () => new Map(continueWatching.map((entry) => [entry.mediaId, entry])),
+    () => new Map(continueWatching.map((entry) => [entry.itemId, entry])),
     [continueWatching],
   );
 
@@ -135,7 +147,8 @@ export function usePlaybackController(options: {
     const index = requestedIndex >= 0 ? requestedIndex : 0;
     const persistedQueue = queueStore.replace(queue, index);
     setQueueState(persistedQueue);
-    const storedPosition = progressStore.list().find((entry) => entry.mediaId === item.id)?.positionMs ?? 0;
+    const stored = progressStore.list().find((entry) => entry.itemId === item.id);
+    const storedPosition = stored?.positionMs ?? 0;
     const returnTo = playbackReturnTo(
       playerRouteActive,
       activePlayback?.returnTo,
@@ -163,7 +176,7 @@ export function usePlaybackController(options: {
       media: item,
       startPositionMs: startOptions.fromStart ? 0 : storedPosition,
       returnTo,
-    });
+    }, startOptions.version ? versionPreferences(startOptions.version) : resumeWith(startOptions.fromStart ? undefined : stored));
     if (persistedQueue.items.length === 1) {
       void widenToSeason(item).catch((error) => console.warn('[macha] unable to load the rest of the season', error));
     }
@@ -228,7 +241,7 @@ export function usePlaybackController(options: {
         playerItemId,
         routeState,
         nextQueue?.items,
-        progressStore.list().find((entry) => entry.mediaId === playerItemId)?.media,
+        progressStore.list().find((entry) => entry.itemId === playerItemId)?.media,
       );
       if (!media) media = await api.details(playerItemId) as MediaSummary;
       if (cancelled) return;
@@ -239,7 +252,8 @@ export function usePlaybackController(options: {
         nextQueue = queueStore.select(queueIndex) ?? nextQueue;
       }
       setQueueState(nextQueue);
-      const storedPosition = progressStore.list().find((entry) => entry.mediaId === playerItemId)?.positionMs ?? 0;
+      const stored = progressStore.list().find((entry) => entry.itemId === playerItemId);
+      const storedPosition = stored?.positionMs ?? 0;
       const queuePosition = nextQueue.items[nextQueue.currentIndex]?.id === playerItemId ? nextQueue.positionMs : 0;
       void runtime.play({
         media,
@@ -250,7 +264,7 @@ export function usePlaybackController(options: {
           persistedRoutePositionMs: persistedRoutePosition,
         }),
         returnTo: routeState?.returnTo ?? pathForMedia(media),
-      });
+      }, resumeWith(fromStart ? undefined : stored));
       // Deep-linking or reloading into an episode reconstructs the same lone
       // queue startPlayback would have, and needs the same widening.
       if (nextQueue.items.length === 1) await widenToSeason(media);

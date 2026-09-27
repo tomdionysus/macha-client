@@ -1,12 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { MachaAcquisitionApiError, MachaConnectionError, NOT_PLAYABLE_CODE, SESSION_PROVENANCE_UNKNOWN_CODE, type MediaSummary, type PlaybackStatusDescription, type PlaybackStreamInfo } from '@machafoundation/core';
+import { endpointFailure, MachaAcquisitionApiError, MachaConnectionError, MachaPlaybackError, NOT_PLAYABLE_CODE, SESSION_PROVENANCE_UNKNOWN_CODE, type MediaSummary, type PlaybackNotice, type PlaybackStatusDescription, type PlaybackStreamInfo } from '@machafoundation/core';
 import {
+  playbackRefusalText,
   diagnosticErrorText,
   hintResultLabel,
   jobErrorText,
   serverStatusText,
   albumLabel, alphabetIndexKeyText, cardSubtitle, episodeCode, episodeLabel, playbackFailureCodeText, playbackNoticeText,
-  playbackTimeText, SERVER_UNREACHABLE_TEXT, sortChoiceLabel, streamStatusText, trackNumberLabel, viewerErrorText,
+  playbackTimeText, qualityLimitText, SERVER_UNREACHABLE_TEXT, sortChoiceLabel, streamStatusText, trackNumberLabel, viewerErrorText,
 } from './viewerText';
 
 const item = (overrides: Partial<MediaSummary>) => ({ id: 'i', kind: 'movie', title: 'T', mediaIds: [], ...overrides }) as MediaSummary;
@@ -14,7 +15,9 @@ const item = (overrides: Partial<MediaSummary>) => ({ id: 'i', kind: 'movie', ti
 describe('media wording, now this client\'s', () => {
   it('names an episode compactly inside its season, and in full away from it', () => {
     expect(episodeCode(item({ kind: 'episode', seasonNumber: 1, episodeNumber: 4 }))).toBe('S01E04');
-    expect(episodeLabel(item({ kind: 'episode', seasonNumber: 1, episodeNumber: 4 }))).toBe('Season 1 Episode 4');
+    // Tom, 2026-09-27: "S04E08 in all cases", on every client.
+    expect(episodeLabel(item({ kind: 'episode', seasonNumber: 1, episodeNumber: 4 }))).toBe('S01E04');
+    expect(episodeLabel(item({ kind: 'episode', episodeNumber: 4, playbackContext: { series: { id: 's', title: 'S' }, season: { id: 'x', title: 'Season 4', seasonNumber: 4 } } }))).toBe('S04E04');
     expect(episodeLabel(item({ kind: 'episode', episodeNumber: 4 }))).toBe('Episode 4');
   });
 
@@ -151,5 +154,70 @@ describe('the server\'s codes, worded here (server 0.56.0)', () => {
     expect(serverStatusText({ code: 'ok', detail: null })).toBeUndefined();
     expect(serverStatusText({ code: null, detail: null })).toBeUndefined();
     expect(serverStatusText({ code: 'playback_unavailable', detail: null })).toBe('Playback unavailable');
+  });
+});
+
+describe('a refused playback change says why (Tom: no more "That change could not be made")', () => {
+  const refusal = (code: string, choice?: string, detail?: string) => {
+    const error = new MachaPlaybackError('log text', 400, code, undefined, undefined, detail);
+    if (choice) error.choice = choice;
+    return error;
+  };
+
+  it('words a stream choice the node refused', () => {
+    expect(playbackRefusalText(refusal('choice_required', 'audio_stream'))).toBe('This file has more than one audio track and none was chosen.');
+    expect(playbackRefusalText(refusal('choice_not_available', 'subtitle_stream'))).toBe('The chosen subtitle track is not in this file.');
+  });
+
+  it('carries the node\'s own reason for anything else, and says plainly when there was none', () => {
+    expect(playbackRefusalText(refusal('bad_request', undefined, 'A quality limit needs a converted stream.'))).toBe('A quality limit needs a converted stream.');
+    expect(playbackRefusalText(undefined)).toBe('The node refused it without saying why.');
+  });
+
+  it('reads the refusal core puts on the notice, even with no error beside it', () => {
+    expect(playbackNoticeText({ code: 'update-failed', refusal: { status: 400, code: 'choice_required', choice: 'audio_stream', choices: [1, 2] } }))
+      .toBe('Playback settings were not changed: This file has more than one audio track and none was chosen.');
+  });
+
+  it('never shows the old sentence', () => {
+    expect(playbackNoticeText({ code: 'update-failed', error: refusal('choice_required', 'container') })).toBe('Playback settings were not changed: This file has more than one streaming format and none was chosen.');
+    expect(playbackNoticeText({ code: 'update-failed' })).not.toMatch(/could not be made/);
+  });
+});
+
+describe('quality wording', () => {
+  it('gives each cap on Play its own reason', () => {
+    expect(qualityLimitText({ quality: 1080, reason: 'ceiling-display' })).toBe('Play chooses up to 1080p, the most this screen shows. Pick a quality to play another.');
+    expect(qualityLimitText({ quality: 720, reason: 'ceiling-preference' })).toBe('Play chooses up to 720p, as set in Settings. Pick a quality to play another.');
+    expect(qualityLimitText({ quality: 720, reason: 'ceiling-cellular' })).toBe('Play chooses up to 720p on mobile data. Pick a quality to play another.');
+    expect(qualityLimitText({ quality: 1080, reason: 'ceiling-device' })).toBe('Play chooses up to 1080p, the most this device plays. Pick a quality to play another.');
+  });
+});
+
+describe('a refusal because the node is busy', () => {
+  it('says the node is converting for others rather than quoting the server', () => {
+    const error = new MachaPlaybackError('Macha playback request failed: video transcode limit reached', 429, 'resource_limit');
+    expect(playbackNoticeText({ code: 'update-failed', error } as PlaybackNotice)).toBe('Playback settings were not changed: This node is already converting as much as it can for other viewers. Try again shortly.');
+  });
+});
+
+describe('adding a torrent a node already holds (server 0.63.0)', () => {
+  it('says it is already in the list, and how to add it again, without the job id', () => {
+    const error = new MachaAcquisitionApiError('Macha acquisition request failed: job 3f2a already holds this torrent', 409, 'torrent_already_added', 'job 3f2a already holds this torrent');
+    expect(viewerErrorText(error)).toBe('That torrent is already in the list. To download it again, remove its job first.');
+  });
+});
+
+describe('an acquisition refusal that reached us through the cluster router', () => {
+  it('is worded from the node\'s own refusal inside the wrapping', () => {
+    const placement = endpointFailure('e', 'http://node', new MachaAcquisitionApiError('m', 409, 'placement_failed', 'server sentence', 'node_refused'));
+    expect(viewerErrorText(placement)).toBe('That node refused the torrent.');
+    const held = endpointFailure('e', 'http://node', new MachaAcquisitionApiError('m', 409, 'torrent_already_added', 'job x already holds this torrent'));
+    expect(viewerErrorText(held)).toBe('That torrent is already in the list. To download it again, remove its job first.');
+  });
+
+  it('words the two torrent faults of server 0.63.0', () => {
+    expect(jobErrorText({ error_code: 'duplicate_torrent', error: 'x' })).toMatch(/^Another job already held this torrent/);
+    expect(jobErrorText({ error_code: 'torrent_fault', error: 'x' })).toBe('The download engine failed on this torrent. Remove it and add the torrent again.');
   });
 });

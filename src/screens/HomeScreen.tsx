@@ -22,7 +22,7 @@ export function HomeScreen({ api, continueWatching, onOpen, onResume, onRemoveFr
   </section>;
 
   const progressItems = continueWatching.flatMap((entry) => entry.media ? [entry.media] : []);
-  const progressMap = new Map(continueWatching.map((entry) => [entry.mediaId, entry]));
+  const progressMap = new Map(continueWatching.map((entry) => [entry.itemId, entry]));
   const recentMovies = newestCatalogueFirst(home.value.movies).slice(0, 14);
   const recentShows = newestCatalogueFirst(home.value.shows).slice(0, 14);
   const recentAlbums = newestCatalogueFirst(home.value.albums).slice(0, 14);

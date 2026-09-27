@@ -3,14 +3,29 @@
 .ingest-screen { width: 100%; }
 .ingest-header { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; margin-bottom: .75rem; }
 .ingest-header h1 { margin: 0; }
-.ingest-staging-summary { margin: 0; color: var(--text-faint); font-size: .82rem; white-space: nowrap; }
-.ingest-staging-summary strong { margin-left: .35rem; color: #d0d0d4; font-weight: 500; font-variant-numeric: tabular-nums; }
 
 .ingest-add-bar { display: grid; grid-template-columns: minmax(0, 1fr); gap: .6rem; margin-bottom: .5rem; }
-.ingest-add-form { display: flex; gap: .4rem; min-width: 0; }
+.ingest-add-form { display: flex; flex-wrap: wrap; gap: .4rem; min-width: 0; }
+/* Where the torrent downloads and when it is removed (server 0.64.0): as
+   narrow as their longest choice, and onto their own row on a narrow screen,
+   where the link keeps the full width. */
+.ingest-add-form select {
+  flex: 0 1 auto;
+  max-width: 18rem;
+  min-width: 0;
+  appearance: none;
+  padding: .45rem 1.7rem .45rem .6rem;
+  background: #19191c url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23b8b8be' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right .55rem center;
+  border: 1px solid #3a3a40;
+  border-radius: .45rem;
+  color: #d7d7da;
+  font-size: .85rem;
+  text-overflow: ellipsis;
+}
+.ingest-add-form select:focus { outline: 1px solid var(--focus); border-color: var(--focus); }
 .ingest-add-form input {
   min-width: 0;
-  flex: 1;
+  flex: 1 1 18rem;
   padding: .45rem .65rem;
   border: 1px solid #3a3a40;
   border-radius: .45rem;
@@ -20,6 +35,8 @@
 }
 .ingest-add-form input:focus { outline: 1px solid var(--focus); border-color: var(--focus); }
 .ingest-add-form button { flex: 0 0 auto; margin: 0; padding: .45rem .8rem; font-size: .85rem; }
+/* The refresh at the row's far right: square, and as tall as the field and Add torrent beside it. */
+.ingest-add-form .secondary-button.async-icon-button { width: auto; height: auto; align-self: stretch; aspect-ratio: 1; }
 .ingest-add-form button:disabled, .ingest-job-actions button:disabled { opacity: .4; cursor: default; }
 .ingest-disabled-note { margin: .2rem 0; color: #d9a9ad; font-size: .8rem; }
 
@@ -88,3 +105,9 @@
 @media (max-width: 900px) {
   .torrent-stages { grid-template-columns: 1fr; }
 }
+
+/* Where a cluster torrent downloads and when it is removed (server 0.64.0). */
+.torrent-placement { display: flex; flex-wrap: wrap; gap: .8rem 1.4rem; margin: .4rem 0 1rem; }
+.torrent-placement label { display: flex; flex-direction: column; gap: .3rem; font-size: .78rem; color: var(--text-faint); text-transform: uppercase; letter-spacing: .06em; }
+.torrent-placement select { max-width: 20rem; appearance: none; padding: .45rem 1.7rem .45rem .6rem; background: #19191c url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23b8b8be' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right .55rem center; border: 1px solid #3a3a40; border-radius: .45rem; color: #d7d7da; font-size: .85rem; text-transform: none; letter-spacing: normal; }
+.torrent-placement select:focus { outline: 1px solid var(--focus); border-color: var(--focus); }

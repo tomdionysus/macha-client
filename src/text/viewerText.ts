@@ -1,11 +1,15 @@
 import {
-  MachaAcquisitionApiError,
+  acquisitionError,
+  CHOICE_NOT_AVAILABLE_CODE,
+  CHOICE_REQUIRED_CODE,
+  MachaPlaybackError,
   MachaConnectionError,
   NOT_PLAYABLE_CODE,
   REGENERATION_ENDPOINT_GONE_CODE,
   SESSION_PROVENANCE_UNKNOWN_CODE,
   playbackFailureCode,
   playbackFailureDetail,
+  qualityLabel,
   startupPhase,
   type CatalogueHintResult,
   type ClusterStartupStatus,
@@ -13,7 +17,9 @@ import {
   type MediaSummary,
   type MusicHierarchyContext,
   type PlaybackNotice,
+  type PlaybackRefusal,
   type PlaybackStatusDescription,
+  type QualityCeiling,
   type SearchCategoryKey,
   type StartupSubsystem,
   type TorrentJobErrorCode,
@@ -44,10 +50,14 @@ export function episodeCode(item: Pick<MediaSummary, 'seasonNumber' | 'episodeNu
  * "Season 1 Episode 4", or "Episode 4" with no season. Tom's ruling for an
  * episode shown away from its season: search and Continue Watching.
  */
+/**
+ * An episode's mark where it is shown away from its season (search,
+ * Continue Watching), taking the season from its context where the item
+ * lacks one. Tom, 2026-09-27: "S04E08 in all cases", on every client; this
+ * read "Season 4 Episode 8" before.
+ */
 export function episodeLabel(item: Pick<MediaSummary, 'seasonNumber' | 'episodeNumber' | 'playbackContext'>): string | undefined {
-  if (item.episodeNumber === undefined) return undefined;
-  const season = item.playbackContext?.season.seasonNumber ?? item.seasonNumber;
-  return season === undefined ? `Episode ${item.episodeNumber}` : `Season ${season} Episode ${item.episodeNumber}`;
+  return episodeCode({ episodeNumber: item.episodeNumber, seasonNumber: item.playbackContext?.season.seasonNumber ?? item.seasonNumber });
 }
 
 export function seasonLabel(seasonNumber: number | undefined): string | undefined {
@@ -174,6 +184,9 @@ const JOB_ERRORS: Record<TorrentJobErrorCode, string> = {
   ingest_submit_failed: 'It could not be handed over for import.',
   ingest_failed: 'Its import failed.',
   torrent_failed: 'The download failed.',
+  duplicate_torrent: 'Another job already held this torrent, so this one was stopped. Remove it and add the torrent again if it is still wanted.',
+  torrent_fault: 'The download engine failed on this torrent. Remove it and add the torrent again.',
+  adopt_failed: 'No node could take this torrent over. Remove it and add the torrent again.',
 };
 const GENERIC_JOB_ERRORS = new Set(['filesystem_error', 'import_failed', 'torrent_error', 'torrent_failed', 'ingest_failed']);
 
@@ -193,6 +206,7 @@ const HINT_RESULTS: Record<CatalogueHintResult, string> = {
   media_not_live: 'Not live yet',
   manual_existing_item: 'Matched by hand',
   manual_metadata: 'Entered by hand',
+  path_not_yet_visible: 'Not visible yet; tried again with the next batch',
 };
 
 /** A snake_case code as words, for one this client has no sentence for: "no_match" reads "No match". */
@@ -231,11 +245,27 @@ const PLACEMENT_REASONS: Record<string, string> = {
   node_did_not_start: 'That node did not start the torrent.',
   missing_uri: 'There was no magnet link to pass on.',
   add_failed: 'That node could not add the torrent.',
+  node_not_torrent_capable: 'That node cannot run torrents.',
 };
 
-/** A torrent another node would not take: by its reason, or the peer's own code where that is a job's. */
-function placementText(error: unknown): string | undefined {
-  if (!(error instanceof MachaAcquisitionApiError) || error.code !== 'placement_failed' || !error.reason) return undefined;
+/**
+ * Server 0.63.0: a node holds a torrent in one job, and a second add of the
+ * same torrent is refused while that job exists, in whatever state. Before,
+ * it made a second job on the same download, and cancelling either destroyed
+ * the other.
+ */
+const TORRENT_ALREADY_ADDED_CODE = 'torrent_already_added';
+
+/**
+ * A torrent another node would not take: by its reason, or the peer's own
+ * code where that is a job's. Read through core's `acquisitionError`, since
+ * the cluster router wraps the node's refusal as the cause of its own.
+ */
+function placementText(caught: unknown): string | undefined {
+  const error = acquisitionError(caught);
+  if (!error) return undefined;
+  if (error.code === TORRENT_ALREADY_ADDED_CODE) return 'That torrent is already in the list. To download it again, remove its job first.';
+  if (error.code !== 'placement_failed' || !error.reason) return undefined;
   return PLACEMENT_REASONS[error.reason] ?? JOB_ERRORS[error.reason as TorrentJobErrorCode];
 }
 
@@ -273,6 +303,40 @@ export function viewerErrorText(error: unknown, fallback = 'Something went wrong
   return fallback;
 }
 
+const CHOICE_NAMES: Record<string, string> = {
+  audio_stream: 'audio track',
+  video_stream: 'video track',
+  subtitle_stream: 'subtitle track',
+  container: 'streaming format',
+};
+
+/**
+ * Why the node refused a playback change, as specifically as it said. A
+ * stream choice (server 0.58.0) is worded from its code; anything else is the
+ * server's own sentence; and where nothing said why, it says so plainly
+ * rather than inventing a reason (Tom, 2026-09-25: "That change could not be
+ * made" was "worse than 'something has gone wrong'").
+ */
+/**
+ * The node is converting as much as it is allowed to. From server 0.60.0 a
+ * change back into a transcode reacquires the node's slot and can meet this
+ * when another viewer took it meanwhile; the server's own sentence ("video
+ * transcode limit reached") is the operator's, not the viewer's.
+ */
+const RESOURCE_LIMIT_CODE = 'resource_limit';
+
+export function playbackRefusalText(error: unknown, refusal?: PlaybackRefusal): string {
+  const code = refusal?.code ?? (error instanceof MachaPlaybackError ? error.code : undefined);
+  if (code === RESOURCE_LIMIT_CODE) return 'This node is already converting as much as it can for other viewers. Try again shortly.';
+  const choice = refusal?.choice ?? (error instanceof MachaPlaybackError ? error.choice : undefined);
+  if (choice) {
+    const what = CHOICE_NAMES[choice] ?? choice.replace(/_/g, ' ');
+    if (code === CHOICE_NOT_AVAILABLE_CODE) return `The chosen ${what} is not in this file.`;
+    if (code === CHOICE_REQUIRED_CODE) return `This file has more than one ${what} and none was chosen.`;
+  }
+  return viewerErrorText(error, 'The node refused it without saying why.');
+}
+
 /** The player's passing notice for one of core's notice codes. */
 export function playbackNoticeText(notice: PlaybackNotice): string {
   switch (notice.code) {
@@ -280,9 +344,9 @@ export function playbackNoticeText(notice: PlaybackNotice): string {
     case 'decode-fallback': return 'This device could not play the original streams, so they are being converted.';
     case 'cannot-seek': return 'This stream cannot seek.';
     case 'not-ready': return 'Playback is still loading.';
-    case 'instruction-failed': return 'Could not work out how to play this here.';
+    case 'instruction-failed': return `Could not start this way: ${playbackRefusalText(notice.error, notice.refusal)}`;
     case 'subtitles-loading': return 'Loading subtitles…';
-    case 'update-failed': return 'That change could not be made.';
+    case 'update-failed': return `Playback settings were not changed: ${playbackRefusalText(notice.error, notice.refusal)}`;
   }
 }
 
@@ -412,4 +476,17 @@ export function alphabetIndexKeyText(key: string): string {
 
 export function alphabetIndexKeyDescription(key: string): string {
   return key === 'other' ? 'Titles beginning with a number or symbol' : `Titles beginning with ${key}`;
+}
+
+/**
+ * Why Play will not choose the largest file, for the viewer (Tom: automatic
+ * play capped "with context to the user as to why"). Shown only when core
+ * says the ceiling kept Play off a larger file.
+ */
+export function qualityLimitText(ceiling: QualityCeiling): string {
+  const label = qualityLabel(ceiling.quality);
+  if (ceiling.reason === 'ceiling-display') return `Play chooses up to ${label}, the most this screen shows. Pick a quality to play another.`;
+  if (ceiling.reason === 'ceiling-device') return `Play chooses up to ${label}, the most this device plays. Pick a quality to play another.`;
+  if (ceiling.reason === 'ceiling-cellular') return `Play chooses up to ${label} on mobile data. Pick a quality to play another.`;
+  return `Play chooses up to ${label}, as set in Settings. Pick a quality to play another.`;
 }

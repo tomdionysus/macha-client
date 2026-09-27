@@ -27,6 +27,7 @@ import {
 } from '../playback/directPlayReadAhead';
 import { hlsEventSummary, videoState, WebMediaDiagnostics } from './WebMediaDiagnostics';
 import { nodeStartCosts } from '../playback/nodeStartCosts';
+import { browserDisplayResolution, type DisplayResolution } from './displayResolution';
 import { shouldReportStart, StartRecorder, type StartOutcome, type StartRole, type StartSample } from './startRecorder';
 import {
   isHlsNetworkDegradation,
@@ -2668,6 +2669,16 @@ export class WebPlatform implements Platform {
   private activePlayer?: WebPlayer;
 
   constructor(private readonly playerOptions: WebPlayerOptions = {}) {}
+
+  /**
+   * The screen automatic play is capped to. The TV shells that wrap this
+   * platform do not delegate to it: a browser screen there is the UI
+   * surface, not the panel, and an understated screen denies a viewer the
+   * file it can show.
+   */
+  displayResolution(): DisplayResolution | undefined {
+    return browserDisplayResolution();
+  }
 
   async capabilities(): Promise<PlaybackCapabilities> {
     const video = document.createElement('video');

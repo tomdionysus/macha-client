@@ -106,6 +106,7 @@ export function SelectPageBox({ ids, selection, disabled }: { ids: readonly stri
     <input
       type="checkbox"
       aria-label="Select this page"
+      data-tv-focusable="true"
       checked={all}
       ref={(element) => { if (element) element.indeterminate = some; }}
       onChange={(event) => selection.setMany(ids, event.target.checked)}
@@ -122,6 +123,7 @@ export function SelectRowBox({ id, name, selection, disabled }: { id: string; na
       checked={selection.checked.has(id)}
       onChange={(event) => selection.setMany([id], event.target.checked)}
       aria-label={`Select ${name}`}
+      data-tv-focusable="true"
       disabled={disabled}
     />
   );

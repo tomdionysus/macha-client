@@ -1,10 +1,14 @@
+import { qualityLabel } from '@machafoundation/core';
 import type {
+  OfferedMode,
   PlaybackDecisionReason,
   PlaybackInstructionReport,
   PlaybackPreferencesUpdate,
   PlaybackSession,
   PlaybackStreamInfo,
   PlaybackUpdate,
+  PlaybackVersions,
+  VersionStep,
 } from '@machafoundation/core';
 import type { PlaybackCapabilities, PlaybackMode } from '@machafoundation/core';
 import { useEffect, useRef } from 'react';
@@ -24,6 +28,7 @@ const REASON_TEXT: Record<PlaybackDecisionReason, string> = {
   'video-codec-not-playable': 'this device cannot decode the video',
   'video-codec-not-deliverable-over-hls': 'the video cannot be delivered over HLS here',
   'video-bit-depth-exceeds-client': 'the video is deeper than this device decodes',
+  'video-size-exceeds-client': 'the picture is larger than this device plays',
   'video-transfer-not-presentable': 'this device cannot present the colour transfer',
   'video-dolby-vision-not-supported': 'this device does not support this Dolby Vision profile',
   'audio-codec-not-playable': 'this device cannot decode the audio',
@@ -99,8 +104,18 @@ function assumptionNote(instruction: PlaybackInstructionReport | undefined): str
   return `Decided without: ${instruction.assumed.join(', ')}.`;
 }
 
-export function PlayerOptions({ session, pendingPreferences, instruction, capabilities, nodes = [], movingToNode, onApply, onSelectNode }: {
+export function PlayerOptions({ session, pendingPreferences, instruction, capabilities, versions, offered, nodes = [], movingToNode, onApply, onPlayVersion, onSelectNode }: {
   session: PlaybackSession;
+  /**
+   * Which modes this device can play the file in (core's `offeredModes`).
+   * A mode not offered is not shown; one offered only because the viewer
+   * asked for everything says why the device objects. Absent shows every
+   * mode the node allows.
+   */
+  offered?: readonly OfferedMode[];
+  /** The item's qualities, as on its detail page; see core's `snapshot.versions`. */
+  versions?: PlaybackVersions;
+  onPlayVersion?: (step: VersionStep) => void;
   /** What this device can actually decode, which decides what remux may copy. */
   capabilities?: PlaybackCapabilities;
   pendingPreferences?: PlaybackPreferencesUpdate;
@@ -161,11 +176,18 @@ export function PlayerOptions({ session, pendingPreferences, instruction, capabi
         <span>Mode</span>
         <div>
           <button type="button" data-tv-focusable="true" className={chosenByViewer ? undefined : 'selected'} onClick={() => mode('choose')}>Auto</button>
-          {session.options.modes.map((candidate) => (
-            <button type="button" key={candidate} data-tv-focusable="true" className={effectivePreferences.mode === candidate ? 'selected' : undefined} onClick={() => mode(candidate)}>
-              {candidate === 'direct' ? 'Direct' : candidate === 'remux' ? 'Remux' : 'Transcode'}
-            </button>
-          ))}
+          {session.options.modes.map((candidate) => {
+            const offer = offered?.find((entry) => entry.mode === candidate);
+            if (offer && !offer.offered) return null;
+            const objection = offer && offer.reasons.length > 0
+              ? `This device may not play this: ${offer.reasons.map((reason) => REASON_TEXT[reason] ?? reason).join('; ')}.`
+              : undefined;
+            return (
+              <button type="button" key={candidate} data-tv-focusable="true" className={effectivePreferences.mode === candidate ? 'selected' : undefined} title={objection} onClick={() => mode(candidate)}>
+                {candidate === 'direct' ? 'Direct' : candidate === 'remux' ? 'Remux' : 'Transcode'}
+              </button>
+            );
+          })}
         </div>
         {instructionNote(instruction) && <small className={instruction?.withoutFacts ? 'player-option-note player-option-warning' : 'player-option-note'}>
           {instructionNote(instruction)}
@@ -175,7 +197,12 @@ export function PlayerOptions({ session, pendingPreferences, instruction, capabi
         </small>}
       </div>
 
-      {session.options.canChangeQuality && <div className="player-option-group">
+      {versions && versions.steps.length > 0 && onPlayVersion ? <div className="player-option-group">
+        <span>Quality</span>
+        <div>
+          {versions.steps.map((step) => <button type="button" key={step.quality} data-tv-focusable="true" className={instruction?.quality === step.quality ? 'selected' : undefined} onClick={() => onPlayVersion(step)}>{qualityLabel(step.quality)}</button>)}
+        </div>
+      </div> : session.options.canChangeQuality && <div className="player-option-group">
         <span>Quality</span>
         <div>
           <button type="button" data-tv-focusable="true" className={effectivePreferences.maxHeight === null && effectivePreferences.maxBitrate === null ? 'selected' : undefined} onClick={() => preferences({ maxHeight: null, maxBitrate: null })}>Original</button>

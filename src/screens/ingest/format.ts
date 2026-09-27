@@ -2,7 +2,18 @@ import { codeWords } from '../../text/viewerText';
 import type { TorrentJob } from '@machafoundation/core';
 import { presentedTime } from '../../diagnostics/timestamps';
 
-export function formatBytes(value: number): string {
+/** The last part of a path: the file's own name. */
+export function fileName(path: string): string {
+  const slash = path.lastIndexOf('/');
+  return slash >= 0 ? path.slice(slash + 1) : path;
+}
+
+/**
+ * From server 0.64.0 a job whose node is not in view reports its live
+ * figures as null: unknown, which reads "—", not "0 B".
+ */
+export function formatBytes(value: number | null): string {
+  if (value === null) return '—';
   if (!Number.isFinite(value) || value <= 0) return '0 B';
   const units = ['B', 'KB', 'MB', 'GB', 'TB'];
   let amount = value;
@@ -15,8 +26,8 @@ export function formatBytes(value: number): string {
   return `${amount.toFixed(decimals)} ${units[index]}`;
 }
 
-export function formatRate(value: number): string {
-  return value > 0 ? `${formatBytes(value)}/s` : '—';
+export function formatRate(value: number | null): string {
+  return value !== null && value > 0 ? `${formatBytes(value)}/s` : '—';
 }
 
 export function formatEta(value: number | null): string {
@@ -28,9 +39,9 @@ export function formatEta(value: number | null): string {
   return minutes ? `${hours}h ${minutes}m` : `${hours}h`;
 }
 
-export function percent(progress: number | null, completed: number, total: number): number | null {
+export function percent(progress: number | null, completed: number | null, total: number | null): number | null {
   if (progress !== null && Number.isFinite(progress)) return Math.max(0, Math.min(100, progress * 100));
-  if (total > 0) return Math.max(0, Math.min(100, (completed / total) * 100));
+  if (total !== null && completed !== null && total > 0) return Math.max(0, Math.min(100, (completed / total) * 100));
   return null;
 }
 
@@ -56,8 +67,20 @@ export function formatAge(value: number, now: number): string {
   return minutes ? `${hours}h ${minutes}m ago` : `${hours}h ago`;
 }
 
+/** States whose code does not read as words. */
+const STATE_LABELS: Record<string, string> = {
+  verify_queued: 'Waiting to verify',
+  // Server 0.64.0: added to the cluster, not yet claimed by a node.
+  awaiting_node: 'Waiting for a node',
+};
+
+/** A count the server may not know (null from 0.64.0), as "—". */
+export function formatCount(value: number | null): string {
+  return value === null ? '—' : String(value);
+}
+
 export function stateLabel(state: string): string {
-  return codeWords(state);
+  return STATE_LABELS[state] ?? codeWords(state);
 }
 
 /**
@@ -66,7 +89,7 @@ export function stateLabel(state: string): string {
  * uploaded the same amount has served its peers a full ratio of what it holds.
  */
 export function ratioOf(job: TorrentJob): number | null {
-  return job.bytes_completed > 0 ? job.uploaded_total / job.bytes_completed : null;
+  return job.bytes_completed !== null && job.bytes_completed > 0 && job.uploaded_total !== null ? job.uploaded_total / job.bytes_completed : null;
 }
 
 export function formatRatio(job: TorrentJob): string {

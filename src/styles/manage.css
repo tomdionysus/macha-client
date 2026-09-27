@@ -15,18 +15,6 @@
 .manage-muted, .manage-empty { color: var(--text-dim); }
 .manage-empty { padding: 1rem; border: 1px dashed #ffffff14; border-radius: .55rem; text-align: center; }
 .manage-label { margin: 0 0 .55rem; color: var(--text-faint); text-transform: uppercase; letter-spacing: .09em; font-size: .72rem; }
-.manage-probe-list, .manage-match-list { display: grid; gap: .5rem; }
-/* A button now, not a panel: choosing one seeds the manual metadata form. */
-.manage-probe {
-  display: block; width: 100%; padding: .7rem .8rem;
-  border: 1px solid transparent; border-radius: .55rem; background: #ffffff07;
-  color: inherit; font: inherit; text-align: left; cursor: pointer;
-}
-.manage-probe:hover:not(:disabled) { background: #ffffff0f; }
-.manage-probe.chosen { border-color: #a8324a; background: #ffffff12; }
-.manage-probe:disabled { cursor: default; opacity: .6; }
-.manage-probe strong { display: block; overflow-wrap: anywhere; }
-.manage-probe span { display: block; margin-top: .15rem; color: var(--text-dim); font-size: .82rem; }
 .manage-match-section { padding-top: .2rem; }
 .manage-search-row { display: flex; gap: .55rem; margin-bottom: .7rem; }
 .manage-search-row input, .manage-fs-operation input,
@@ -45,10 +33,6 @@
   border-color: var(--focus);
 }
 .manage-search-row input { flex: 1; }
-.manage-match-row { display: flex; justify-content: space-between; align-items: center; gap: 1rem; padding: .7rem .8rem; border: 1px solid #ffffff0d; border-radius: .55rem; }
-.manage-match-row > div { min-width: 0; display: grid; gap: .18rem; }
-.manage-match-row strong { overflow-wrap: anywhere; }
-.manage-match-row span { color: var(--text-faint); font-size: .78rem; text-transform: capitalize; }
 .manage-actions { display: flex; flex-wrap: wrap; gap: .55rem; }
 .manage-actions button { margin: 0; }
 .manage-danger { border-color: #612028; color: #e2b0b4; }
@@ -78,7 +62,7 @@
 .manage-fs-operation h3 { margin: 0; overflow-wrap: anywhere; }
 
 @media (max-width: 720px) {
-  .manage-panel-heading, .manage-match-row { align-items: stretch; flex-direction: column; }
+  .manage-panel-heading, .identify-candidates li, .identify-matches li { align-items: stretch; flex-direction: column; }
   .manage-field-row { grid-template-columns: 1fr; }
   .manage-search-row { display: grid; }
   .manage-pathbar { align-items: stretch; flex-direction: column; }
@@ -93,9 +77,24 @@
 .unmatched-table .col-status { width: 21rem; max-width: 21rem; }
 .unmatched-table .col-added { width: 8.4rem; }
 /* A file's page: what it could be, beside what it could be matched to. */
-.unmatched-choices { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .8rem; }
-.unmatched-choices .detail-card { margin-top: .8rem; }
-.detail-screen .manage-search-row { margin-bottom: .7rem; }
-@media (max-width: 900px) { .unmatched-choices { grid-template-columns: 1fr; } }
+/*
+ * Identifying a file: three tabs (candidates, search, manual), each a list of
+ * rows with what the choice is on the left and its actions on the right.
+ */
+.identify-panel { margin-top: .8rem; }
+.identify-tabs { display: flex; flex-wrap: wrap; gap: .35rem; margin: .2rem 0 .9rem; border-bottom: 1px solid #ffffff12; }
+.identify-tabs button { margin: 0 0 -1px; padding: .5rem .8rem; border: 0; border-bottom: 2px solid transparent; background: none; color: var(--text-dim); font: inherit; cursor: pointer; }
+.identify-tabs button.active { border-bottom-color: var(--red-400); color: #f2f2f4; }
+.identify-tabs button:focus-visible { outline: 1px solid var(--focus); outline-offset: 2px; }
+.identify-candidates, .identify-matches { display: grid; gap: .5rem; margin: 0; padding: 0; list-style: none; }
+.identify-candidates li, .identify-matches li { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: .6rem .8rem; border: 1px solid #ffffff0d; border-radius: .55rem; }
+.identify-candidates li > div:first-child, .identify-matches li > div { display: grid; flex: 1; gap: .18rem; min-width: 0; }
+.identify-candidates strong, .identify-matches strong { overflow-wrap: anywhere; }
+.identify-candidates span, .identify-matches span { color: var(--text-faint); font-size: .78rem; text-transform: capitalize; }
+.identify-actions { display: flex; flex: 0 0 auto; gap: .4rem; }
+.identify-actions button, .identify-matches button { margin: 0; }
+/* A match's own picture, so a viewer can tell two items of one name apart. */
+.identify-matches .identify-art { flex: 0 0 auto; width: 2.6rem; aspect-ratio: 2 / 3; overflow: hidden; border-radius: .3rem; background: var(--surface-2); }
+.identify-matches .identify-art img { display: block; width: 100%; height: 100%; object-fit: cover; }
 /* The unmatched list and a file's page run the page's full width, as Import's do. */
 .manage-screen.manage-screen-unmatched, .manage-screen.detail-screen { width: 100%; }

@@ -2,7 +2,7 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { describe, expect, it, vi } from 'vitest';
-import type { AcquisitionApi, AcquisitionSnapshot, IngestJob, TorrentJob } from '@machafoundation/core';
+import { endpointFailure, MachaAcquisitionApiError, type AcquisitionApi, type AcquisitionSnapshot, type IngestJob, type TorrentJob } from '@machafoundation/core';
 import { IngestScreen } from './IngestScreen';
 import { TorrentDetailScreen } from './TorrentDetailScreen';
 
@@ -43,6 +43,8 @@ function snapshot(torrentJobs: TorrentJob[], ingestJobs: IngestJob[] = []): Acqu
     torrentStatus: { enabled: true, build_available: true, search_enabled: true },
     ingestJobs,
     torrentJobs,
+    ingestSources: [],
+    torrentSources: [],
   };
 }
 
@@ -61,6 +63,8 @@ function fakeApi(value: AcquisitionSnapshot | (() => AcquisitionSnapshot), overr
     retryTorrent: unused,
     cancelTorrent: unused,
     clearTorrent: unused,
+    // As the cluster is today: one node that runs torrents (server 0.64.0).
+    torrentNodes: () => Promise.resolve({ nodes: [{ node_id: 'gbni', host: 'gbni-1', local: false, reachable: true, as_of_unix_ms: 1, max_active: 4, active_jobs: 0, accepting: true, not_accepting_reason: null, staging: { limit_bytes: 1, disk_bytes: 1, reserved_bytes: 0, free_bytes: 1 } }] }),
     ...overrides,
   } as unknown as AcquisitionApi;
 }
@@ -306,5 +310,118 @@ describe('bulk actions on torrents', () => {
     await waitFor(() => expect(screen.queryByRole('group', { name: 'Selected torrent actions' })).toBeNull());
     expect(cancelTorrent.mock.calls).toEqual([['a']]);
     expect(clearTorrent.mock.calls.map(([id]) => id).sort()).toEqual(['a', 'd']);
+  });
+});
+
+describe('refreshing the torrent list', () => {
+  it('sits last in the add row, after Add torrent, and spins while a refresh it asked for is loading', async () => {
+    const value = snapshot([torrentJob()]);
+    let release: (() => void) | undefined;
+    let calls = 0;
+    const api = fakeApi(value, {
+      snapshot: () => {
+        calls += 1;
+        // The first answer arrives at once; the viewer's refresh waits until released.
+        return calls === 1 ? Promise.resolve(value) : new Promise<AcquisitionSnapshot>((resolve) => { release = () => resolve(value); });
+      },
+    });
+    renderAt('/ingest/torrents', value, api);
+    await screen.findByText('Some.Release.2024.1080p');
+
+    const form = screen.getByLabelText('Magnet link').closest('form') as HTMLFormElement;
+    const buttons = within(form).getAllByRole('button');
+    expect(buttons.map((button) => button.textContent || button.getAttribute('aria-label'))).toEqual(['Add torrent', 'Refresh torrents']);
+
+    fireEvent.click(within(form).getByRole('button', { name: 'Refresh torrents' }));
+    const busy = await within(form).findByRole('button', { name: 'Refresh torrents in progress' });
+    expect(busy.querySelector('.button-spinner')).toBeTruthy();
+    expect(calls).toBe(2);
+
+    release?.();
+    await within(form).findByRole('button', { name: 'Refresh torrents' });
+    expect(form.querySelector('.button-spinner')).toBeNull();
+  });
+
+  it('spins while the list is first loading', async () => {
+    const value = snapshot([torrentJob()]);
+    renderAt('/ingest/torrents', value, fakeApi(value, { snapshot: () => new Promise<AcquisitionSnapshot>(() => undefined) }));
+    expect(await screen.findByRole('button', { name: 'Refresh torrents in progress' })).toBeTruthy();
+  });
+});
+
+describe('adding a torrent the node already holds (server 0.63.0)', () => {
+  it('says so and offers the job that holds it, through the router\'s wrapping', async () => {
+    const refusal = new MachaAcquisitionApiError('m', 409, 'torrent_already_added', 'job tor-1 already holds this torrent', undefined, { id: 'tor-1', nodeId: 'n1' });
+    const api = fakeApi(snapshot([torrentJob()]), { submitMagnet: () => Promise.reject(endpointFailure('e', 'http://node', refusal)) });
+    renderAt('/ingest/torrents', snapshot([torrentJob()]), api);
+    await screen.findByText('Some.Release.2024.1080p');
+    fireEvent.change(screen.getByLabelText('Magnet link'), { target: { value: 'magnet:?xt=urn:btih:c2a1f0e9b8d7c6b5a4938271605f4e3d2c1b0a99' } });
+    fireEvent.click(screen.getByText('Add torrent'));
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toContain('That torrent is already in the list. To download it again, remove its job first.');
+    fireEvent.click(within(alert).getByText('Open it'));
+    // Waits for the route, not just the element: under load the click lands
+    // before the navigation renders, and the address still reads the list.
+    await waitFor(() => expect(screen.getByTestId('where').textContent).toContain('/ingest/torrents/tor-1'));
+  });
+});
+
+describe('adding a torrent to the cluster (server 0.64.0)', () => {
+  const capable = { node_id: 'gbni', host: 'gbni-1', local: false, reachable: true, as_of_unix_ms: 1, max_active: 4, active_jobs: 0, accepting: true, not_accepting_reason: null, staging: { limit_bytes: 1, disk_bytes: 1, reserved_bytes: 0, free_bytes: 1 } };
+
+  it('takes an add on a node without torrents when the cluster has a node that does, pinned and with a removal time', async () => {
+    const submitMagnet = vi.fn(async () => ({ id: 'new', infoHash: null, pinnedNodeId: 'gbni' }));
+    const withoutTorrents = { ...snapshot([torrentJob()]), torrentStatus: { enabled: false, build_available: false, search_enabled: false } };
+    const api = fakeApi(withoutTorrents, { submitMagnet, torrentNodes: () => Promise.resolve({ nodes: [capable], defaultRemoveAfterMs: null }) } as Partial<AcquisitionApi>);
+    renderAt('/ingest/torrents', withoutTorrents, api);
+    const node = await screen.findByLabelText('Download on') as HTMLSelectElement;
+    expect(screen.queryByText(/built without libtorrent/)).toBeNull();
+    expect([...node.options].map((option) => option.textContent)).toEqual(['Any node', 'gbni-1 (0 of 4 running · 1 B free of 1 B)']);
+    fireEvent.change(node, { target: { value: 'gbni' } });
+    fireEvent.change(screen.getByLabelText('Remove after completion'), { target: { value: '3600000' } });
+    fireEvent.change(screen.getByLabelText('Magnet link'), { target: { value: 'magnet:?xt=urn:btih:abc' } });
+    fireEvent.click(screen.getByText('Add torrent'));
+    await waitFor(() => expect(submitMagnet).toHaveBeenCalledWith('magnet:?xt=urn:btih:abc', { nodeId: 'gbni', removeAfterMs: 3_600_000 }));
+  });
+
+  it('leaves the node and removal to the cluster unless the viewer chooses', async () => {
+    const submitMagnet = vi.fn(async () => ({ id: 'new', infoHash: null, pinnedNodeId: null }));
+    const api = fakeApi(snapshot([torrentJob()]), { submitMagnet, torrentNodes: () => Promise.resolve({ nodes: [capable], defaultRemoveAfterMs: null }) } as Partial<AcquisitionApi>);
+    renderAt('/ingest/torrents', snapshot([torrentJob()]), api);
+    await screen.findByLabelText('Download on');
+    expect((screen.getByLabelText('Remove after completion') as HTMLSelectElement).options[0]!.textContent).toBe('Keep it (the default)');
+    fireEvent.change(screen.getByLabelText('Magnet link'), { target: { value: 'magnet:?xt=urn:btih:abc' } });
+    fireEvent.click(screen.getByText('Add torrent'));
+    await waitFor(() => expect(submitMagnet).toHaveBeenCalledWith('magnet:?xt=urn:btih:abc', {}));
+  });
+
+  it('shows an action still under way in the status column', async () => {
+    renderAt('/ingest/torrents', snapshot([torrentJob({ desired: 'paused', desired_applied: false, desired_changed_unix_ms: Date.now() })]));
+    expect(await screen.findByText('Pausing…')).toBeTruthy();
+  });
+});
+
+describe('whether torrents can be added, from the cluster not the node that answered (server 0.64.0)', () => {
+  const noTorrentsHere = () => ({ ...snapshot([torrentJob()]), torrentStatus: { enabled: false, build_available: false, search_enabled: false } });
+
+  it('says nothing about the answering node while the cluster\'s nodes are still loading', async () => {
+    const api = fakeApi(noTorrentsHere(), { torrentNodes: () => new Promise(() => {}) } as Partial<AcquisitionApi>);
+    renderAt('/ingest/torrents', noTorrentsHere(), api);
+    await screen.findByText('Some.Release.2024.1080p');
+    expect(screen.queryByText(/built without libtorrent|disabled in server configuration|No node in this cluster/)).toBeNull();
+  });
+
+  it('says so when no node in the cluster can download torrents', async () => {
+    const api = fakeApi(noTorrentsHere(), { torrentNodes: () => Promise.resolve({ nodes: [] }) } as Partial<AcquisitionApi>);
+    renderAt('/ingest/torrents', noTorrentsHere(), api);
+    expect(await screen.findByText('No node in this cluster can download torrents.')).toBeTruthy();
+    expect((screen.getByLabelText('Magnet link') as HTMLInputElement).disabled).toBe(true);
+    expect(screen.queryByText(/built without libtorrent/)).toBeNull();
+  });
+
+  it('keeps the answering node\'s word on a server older than 0.64.0, which has no node list', async () => {
+    const api = fakeApi(noTorrentsHere(), { torrentNodes: () => Promise.reject(new Error('404')) } as Partial<AcquisitionApi>);
+    renderAt('/ingest/torrents', noTorrentsHere(), api);
+    expect(await screen.findByText('This server was built without libtorrent-rasterbar.')).toBeTruthy();
   });
 });

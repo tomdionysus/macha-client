@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useState, useSyncExternalStore } from 'react';
 import { Link } from 'react-router-dom';
 import type { MediaApi } from '@machafoundation/core';
-import type { ServerApi, ServerStatus } from '@machafoundation/core';
+import { qualityLabel, type QualityCeiling, type QualityClass, type QualityPreference, type QualityPreferenceStore, type ServerApi, type ServerStatus } from '@machafoundation/core';
 import { machaLogoUrl as logoUrl } from '../uiAssets';
 import { useAsync } from '../hooks/useAsync';
 import { routes } from '@machafoundation/core';
@@ -19,7 +19,25 @@ interface Props {
   usingHost?: string;
   connectionNotice?: string;
   onSave: (urls: readonly string[]) => Promise<string | undefined>;
+  /** The viewer's Maximum quality for this device; the web sets only `wifi`, which an unknown connection uses. */
+  qualityPreferences?: QualityPreferenceStore;
+  /** This device's cap on automatic play, as the runtime will read it. */
+  qualityCeiling?: () => QualityCeiling | undefined;
 }
+
+/** The ceilings a viewer may set: every class a file is commonly found at. */
+const MAXIMUM_QUALITY_CHOICES: readonly QualityClass[] = [2160, 1440, 1080, 720, 480];
+
+/** What Automatic means on this device, or what the setting does. */
+function maximumQualityNote(setting: QualityClass | undefined, ceiling: QualityCeiling | undefined): string {
+  if (setting !== undefined) return `Play chooses up to ${qualityLabel(setting)} on this device. Any quality can still be picked on a title's page.`;
+  if (ceiling) return `Automatic: Play chooses up to ${qualityLabel(ceiling.quality)}, the most this screen shows.`;
+  return 'Automatic: Play chooses the best file, as this screen\'s size is not known.';
+}
+
+const noSubscription = () => () => {};
+const NO_PREFERENCE: QualityPreference = {};
+const noPreference = () => NO_PREFERENCE;
 
 function booleanField(status: ServerStatus | undefined, name: string): boolean | undefined {
   const value = status?.playback[name];
@@ -39,8 +57,27 @@ function formatLastSync(unixMs: number): string {
   return presentedTime(unixMs);
 }
 
-export function SettingsScreen({ api, serverApi, bootstrapEndpoints, usingHost, connectionNotice, onSave }: Props) {
+export function SettingsScreen({ api, serverApi, bootstrapEndpoints, usingHost, connectionNotice, onSave, qualityPreferences, qualityCeiling }: Props) {
   const [failureTrail, setFailureTrail] = useState(failureTrailEnabled);
+  const preference = useSyncExternalStore(
+    qualityPreferences?.subscribe ?? noSubscription,
+    qualityPreferences?.getSnapshot ?? noPreference,
+  );
+  const maximum = preference.wifi;
+  const setOfferAll = (offerAll: boolean) => {
+    try {
+      qualityPreferences?.setOfferAll(offerAll);
+    } catch {
+      // As for Maximum quality: the switch shows the setting still in force.
+    }
+  };
+  const chooseMaximum = (quality: QualityClass | undefined) => {
+    try {
+      qualityPreferences?.set('wifi', quality);
+    } catch {
+      // Storage can throw (a private window); the screen keeps showing the old choice, which is still the one in force.
+    }
+  };
   const server = useAsync(() => serverApi.status(), [serverApi]);
   const catalogue = useAsync(() => api.status(), [api]);
 
@@ -118,6 +155,33 @@ export function SettingsScreen({ api, serverApi, bootstrapEndpoints, usingHost, 
         </article>
 
       </div>
+
+      {qualityPreferences && <div className="settings-playback">
+        <h2>Playback</h2>
+        <div className="player-option-group">
+          <span>Maximum quality</span>
+          <div>
+            <button type="button" data-tv-focusable="true" className={maximum === undefined ? 'selected' : undefined} onClick={() => chooseMaximum(undefined)}>Automatic</button>
+            {MAXIMUM_QUALITY_CHOICES.map((quality) => (
+              <button type="button" key={quality} data-tv-focusable="true" className={maximum === quality ? 'selected' : undefined} onClick={() => chooseMaximum(quality)}>{qualityLabel(quality)}</button>
+            ))}
+          </div>
+          <small className="player-option-note">{maximumQualityNote(maximum, qualityCeiling?.())}</small>
+        </div>
+        <label className="settings-toggle">
+          <span className="settings-switch">
+            <input
+              type="checkbox"
+              role="switch"
+              data-tv-focusable="true"
+              checked={preference.offerAll === true}
+              onChange={(event) => setOfferAll(event.target.checked)}
+            />
+            <span className="settings-switch-track" aria-hidden="true" />
+          </span>
+          <span className="settings-toggle-label">Offer every quality and mode, even ones this device may not play</span>
+        </label>
+      </div>}
 
       <div className="settings-diagnostics">
         <h2>Diagnostics</h2>

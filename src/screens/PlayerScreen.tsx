@@ -8,10 +8,12 @@ import { requestTvDefaultFocus } from '../hooks/useTvNavigation';
 import { useElapsedMs } from '../hooks/useElapsedMs';
 import { usePointerIdle } from '../hooks/usePointerIdle';
 import { cardSubtitle, episodeCode, playbackNoticeText, playbackTimeText, streamStatusText } from '../text/viewerText';
+import { TrackFacts } from './player/TrackFacts';
+import { useAsync } from '../hooks/useAsync';
 import type { Platform } from '@machafoundation/core';
 import { platformTraits } from '../platform/traits';
 import type { PlaybackUpdate } from '@machafoundation/core';
-import { isSubtitleOnlyPlaybackUpdate, type PlaybackCoordinatorSnapshot } from '@machafoundation/core';
+import { isSubtitleOnlyPlaybackUpdate, offeredModes, progressFor, technicalSummary, technicalProfileFromSession, type OfferedMode, type PlaybackCoordinatorSnapshot, type PlaybackPolicyOverrides, type PlaybackSession } from '@machafoundation/core';
 import { PlaybackRuntime, type PlaybackRuntimeRequest, type PlaybackRuntimeSnapshot } from '@machafoundation/core';
 import { uiSettings } from '../settings';
 import { describePlaybackSession } from '@machafoundation/core';
@@ -56,6 +58,11 @@ interface Props {
    * the pin is set where the registry lives and this player only says which.
    */
   onPinEndpoint?: (endpointIds: readonly string[]) => string | undefined;
+  /**
+   * The viewer's "offer everything" setting. Tom, 2026-09-25: limit to the
+   * device's capabilities on all clients, with a setting to turn that off.
+   */
+  offerAll?: boolean;
 }
 
 
@@ -77,10 +84,11 @@ interface Props {
  * that bound a start — negotiating a generation, waiting for its first
  * fragment, and starvation once a URL is attached — are sequential and nothing
  * bounds their sum, so a cold node can spend the better part of a minute with
- * every budget behaving exactly as written. Law 2: a degraded state must be
- * visible and actionable rather than becoming indefinite waiting, and a viewer
- * told what is being waited for and for how long is in a different position
- * from one watching a spinner, even though the wait is identical.
+ * every budget behaving exactly as written. The principle that work is bounded
+ * and event-driven: a degraded state must be visible and actionable rather than
+ * becoming indefinite waiting, and a viewer told what is being waited for and
+ * for how long is in a different position from one watching a spinner, even
+ * though the wait is identical.
  *
  * Only a start. A rebuffer mid-film has the picture behind it to say what is
  * going on, and a timer over that would turn every brief hesitation into an
@@ -257,7 +265,7 @@ export function webArrowTargetOwnsKey(target: EventTarget | null): boolean {
 
 export const isSubtitleOnlyUpdate = isSubtitleOnlyPlaybackUpdate;
 
-function PlayerSession({ api, media, platform, runtime, startPositionMs, presentation, onProgress, onPosition, onMinimize, onExpand, onStop, onPrevious, onNext, onEnded, canPrevious, canNext, queuePosition, volume, onVolumeChange, endpoints, onPinEndpoint }: Omit<Props, 'request'> & { media: MediaSummary; startPositionMs: number }) {
+function PlayerSession({ api, media, platform, runtime, startPositionMs, presentation, onProgress, onPosition, onMinimize, onExpand, onStop, onPrevious, onNext, onEnded, canPrevious, canNext, queuePosition, volume, onVolumeChange, endpoints, onPinEndpoint, offerAll = false }: Omit<Props, 'request'> & { media: MediaSummary; startPositionMs: number }) {
   const pageRef = useRef<HTMLElement | null>(null);
   const hostRef = useRef<HTMLDivElement | null>(null);
   const chromeRef = useRef<HTMLDivElement | null>(null);
@@ -272,6 +280,9 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
   /** True while the control bar is up only because a transport seek revealed it. */
   const seekRevealedControlsRef = useRef(false);
   const lastEventByMediaRef = useRef(new Map<string, PlaybackEvent>());
+  // How the title was last seen playing, for the save on the way out, when
+  // the snapshot may already be gone.
+  const lastPlayingRef = useRef<PlaybackCoordinatorSnapshot | undefined>(undefined);
   const log = useMemo(() => createClientLogger('playback.screen', { mediaId: media.id }), [media.id]);
   const traits = platformTraits(platform);
   const webControls = traits.hasPointerControls;
@@ -347,28 +358,18 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
     }
     if (shouldTrackProgress(media) && (event.ended || now - lastReportRef.current >= 10_000)) {
       lastReportRef.current = now;
-      onProgress({
-        mediaId: media.id,
-        positionMs: event.positionMs,
-        durationMs: event.durationMs,
-        updatedAt: now,
-        media,
-      });
+      // The title, the file and how it was playing (Tom, 2026-09-27).
+      lastPlayingRef.current = runtimePlayback;
+      onProgress(progressFor(media, event.positionMs, event.durationMs, runtimePlayback));
     }
-  }, [media, onPosition, onProgress, playback.event]);
+  }, [media, onPosition, onProgress, playback.event, runtimePlayback]);
 
   useEffect(() => () => {
     if (!shouldTrackProgress(media)) return;
     const event = lastEventByMediaRef.current.get(media.id);
     lastEventByMediaRef.current.delete(media.id);
     if (!event?.durationMs) return;
-    onProgress({
-      mediaId: media.id,
-      positionMs: event.positionMs,
-      durationMs: event.durationMs,
-      updatedAt: Date.now(),
-      media,
-    });
+    onProgress(progressFor(media, event.positionMs, event.durationMs, lastPlayingRef.current));
   }, [media, onProgress]);
 
   useEffect(() => {
@@ -795,6 +796,10 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
   }, [armControlsHide, canNext, canPrevious, controlsVisible, focusSamsungControls, interactionControlled, onMinimize, onNext, onPrevious, onStop, optionsVisible, playback.intent.paused, presentation, samsungControls, seekBy, setPaused, setScrubPosition, showControls, webControls]);
 
   const session = playback.session;
+  const offered = useMemo(
+    () => modesToOffer(runtimePlayback?.modes, session, capabilities, (platform as { playbackPolicy?: PlaybackPolicyOverrides }).playbackPolicy, offerAll),
+    [capabilities, offerAll, platform, runtimePlayback?.modes, session],
+  );
   const event = playback.event;
   const duration = firstUsableDurationMs(session?.durationMs, event.durationMs, media.durationMs);
   const displayedProgress = scrubValue ?? Math.min(duration, playback.intent.positionMs);
@@ -818,6 +823,19 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
     </span>
   );
   const audio = media.kind === 'track';
+  // The playing track's format line, from its file's catalogue profile. Tom,
+  // 2026-09-27: music shows the same line as a title page, in the player
+  // beside the artwork. Only the file actually playing, once the session
+  // names it; a profile that cannot be read shows nothing.
+  const playingMediaId = audio ? session?.mediaId : undefined;
+  const trackFormat = useAsync(
+    async (signal) => {
+      if (!playingMediaId?.startsWith('macha:') || !api.mediaProfile) return undefined;
+      const profile = await api.mediaProfile(playingMediaId, signal);
+      return profile ? technicalSummary(profile).parts : undefined;
+    },
+    [api, playingMediaId],
+  );
   const described = describePlaybackSession(session, event.streamOrigin);
   const streamStatus = described && { endpoint: described.endpoint, ...streamStatusText(described) };
   const mediaSubtitle = playerMediaSubtitle(media);
@@ -867,6 +885,7 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
           {cover ? <img src={cover} alt="" /> : <div className="audio-player-placeholder">♪</div>}
         </div>
       )}
+      {audio && <TrackFacts track={media} format={trackFormat.value} />}
       {showBuffering && (
         <Loading
           delayMs={playback.starting ? 0 : uiSettings.playerSeekSpinnerDelayMs}
@@ -965,8 +984,11 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
           session ? (
             <PlayerOptions
               session={session}
+              offered={offered}
               pendingPreferences={playback.pendingPreferences}
               instruction={runtimePlayback?.instruction}
+              versions={runtimePlayback?.versions}
+              onPlayVersion={(step) => { void runtime.playVersion(step); }}
               capabilities={capabilities}
               nodes={nodeChoices}
               movingToNode={movingToNode}
@@ -1098,6 +1120,25 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
       </div>
     </section>
   );
+}
+
+/**
+ * Which modes this device can play the playing file in, so the options offer
+ * only those unless the viewer asked for everything (Tom, 2026-09-25). Core's
+ * answer carries the node's operations and is preferred; until its facts
+ * arrive, the session's profile answers without them, which can offer a
+ * remux the node's build then refuses.
+ */
+export function modesToOffer(
+  fromCore: readonly OfferedMode[] | undefined,
+  session: PlaybackSession | undefined,
+  capabilities: PlaybackCapabilities | undefined,
+  overrides: PlaybackPolicyOverrides | undefined,
+  offerAll: boolean,
+): readonly OfferedMode[] | undefined {
+  if (fromCore) return fromCore;
+  if (!session || !capabilities) return undefined;
+  return offeredModes(technicalProfileFromSession(session), capabilities, { overrides, offerAll });
 }
 
 export function PlayerHost(props: Props) {

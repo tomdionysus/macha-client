@@ -382,6 +382,7 @@ function NodeCard({ node, canManage, resetting, onReset }: { node: ClusterNodeSt
           <span className={telemetryAgeClassName(node)}>{freshnessLabel(node)}</span>
         </div>
         <dl className="cluster-node-stats">
+          <div><dt>Version</dt><dd>{node.version || '—'}</dd></div>
           <div><dt>Uptime</dt><dd>{node.runtime.uptime_ms != null ? formatDuration(node.runtime.uptime_ms) : '—'}</dd></div>
           <div><dt>Storage</dt><dd>{formatBytes(node.storage.used_bytes)} / {formatBytes(node.storage.capacity_bytes)}</dd></div>
           <div><dt>Cache</dt><dd>{node.cache.capacity_bytes ? `${formatBytes(node.cache.used_bytes)} / ${formatBytes(node.cache.capacity_bytes)}` : '—'}</dd></div>
@@ -425,6 +426,16 @@ export async function acceptNodeIdentityAssociationReset(
   onAccepted(result);
   await refreshOnce();
   return result;
+}
+
+/** "1.64 TB / 8.01 TB": what is known to be used, of the known whole. */
+export function usedOfTotal(known: { used_bytes: number; capacity_bytes: number }): string {
+  return `${formatBytes(known.used_bytes)} / ${formatBytes(known.capacity_bytes)}`;
+}
+
+/** "6.37 TB / 8.01 TB Available": what the online nodes have free, of the known whole. */
+export function availableOfTotal(online: { free_bytes: number }, known: { capacity_bytes: number }): string {
+  return `${formatBytes(online.free_bytes)} / ${formatBytes(known.capacity_bytes)} Available`;
 }
 
 export function StatusScreen({ api, endpointRegistry, manageApi, platform, section, auth }: {
@@ -553,8 +564,10 @@ export function StatusScreen({ api, endpointRegistry, manageApi, platform, secti
       <div className="metric-grid">
         <MetricTile label="Nodes" value={`${cluster.nodes_online} / ${cluster.nodes_known}`} detail="online" />
         <MetricTile label="Metadata" value={cluster.metadata_availability === 'writable' ? 'Writable' : cluster.metadata_availability === 'read-only' ? 'Read-only' : 'Unavailable'} detail={`${cluster.metadata_voters_online}/${cluster.metadata_voters} voters · ${cluster.metadata_quorum_required} required`} />
-        <MetricTile label="Durable storage" value={`${formatBytes(cluster.storage_online.capacity_bytes)} / ${formatBytes(cluster.storage_known.capacity_bytes)}`} detail={`${formatBytes(cluster.storage_known.used_bytes)} known used`} />
-        <MetricTile label="Cache" value={cluster.cache_known.capacity_bytes ? `${formatBytes(cluster.cache_online.capacity_bytes)} / ${formatBytes(cluster.cache_known.capacity_bytes)}` : 'None'} detail={cluster.cache_known.capacity_bytes ? `${formatBytes(cluster.cache_known.used_bytes)} known used` : undefined} />
+        {/* Tom, 2026-09-27: what is used first, then what is left, each out of
+            the whole. Available is what the online nodes have free. */}
+        <MetricTile label="Durable storage" value={usedOfTotal(cluster.storage_known)} detail={availableOfTotal(cluster.storage_online, cluster.storage_known)} />
+        <MetricTile label="Cache" value={cluster.cache_known.capacity_bytes ? usedOfTotal(cluster.cache_known) : 'None'} detail={cluster.cache_known.capacity_bytes ? availableOfTotal(cluster.cache_online, cluster.cache_known) : undefined} />
       </div>
 
       <div className="cluster-capacity-grid">

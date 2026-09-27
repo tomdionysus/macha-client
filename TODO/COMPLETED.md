@@ -1,6 +1,426 @@
 # Completed and tested
 
-Last updated: 2026-09-24, after the search sort
+Last updated: 2026-09-27, at a break for a clear: finished work moved here, the backlog rationalised
+
+## Quality selection: a Play button per quality, and a Maximum quality — 2026-09-25
+
+Tom: "different buttons for 'play' on media depending on available quality
+... The generic play button stays, and means 'make the decision for me'";
+"a 1080p can only be 1080p or 720p", no upscaling; below 720p "display the
+480p class anyway"; "cap at the screen resolution for automatic play", with
+the reason shown and a Settings override.
+
+- Built on core's versions API (`40b453d`): Play plus 4K / 2K / 1080p /
+  720p (or the best file's own class below 720p) on movie and episode pages,
+  through `versionPreferences`; the cap's reason under them
+  (`qualityLimitText`); the same list in the player's options, marked from
+  `instruction.quality`, switching by `playVersion`; Maximum quality in
+  Settings, kept in core's `QualityPreferenceStore` as `wifi`. The ceiling
+  is the browser screen (`displayResolution.ts`); Samsung and the Android web
+  shell state none, so stay uncapped until the panel can be read.
+- **Device limit** (Tom: "limit to the device capabilities for direct on all
+  clients - but, all clients should also have a setting to disable this";
+  `1730925`, `0768f12`): the player's modes come from core's
+  `snapshot.modes` (with the node's `operations`); an unplayable mode is
+  hidden, or shown with the device's objection when Settings' "Offer every
+  quality and mode" is on. The web states no `maxWidth`/`maxHeight`: a
+  browser cannot report a decode size limit honestly.
+- **Seen live** (dev client, `tmdb:movie:185`): 720p played at 1194x720,
+  a switch to 1080p went direct at 1792x1080 from the same position, a
+  720p Maximum capped Play with its reason, and after core `42cebd6` a
+  1080p direct start lists "1080p* | 720p".
+
+## A page exit frees the node's transcode slot — 2026-09-25
+
+fi-1 refused a transcode with no other viewer on it. Two faults: (a) the
+server kept a session's transcode slot after a PATCH to direct (fixed in
+server 0.60.0: a PATCH out of transcode releases it; checked 12:44Z, a
+second viewer's transcode admitted); (b) this client skipped the page-exit
+close when Chrome put the playing page in the back-forward cache
+(`pagehide` with `persisted: true`). **Fixed in `9a05438`: close on every
+pagehide.** Verified on server 0.60.0 and core `42cebd6`: navigating away
+from a 720p transcode on fi-1 freed the slot within 3 s where it had been
+held about 5 min. Back restores the page and restarts playback on its
+route (plain Play, so a picked quality is not carried over). The CORS
+preflight explanation was never proven; core's signed-URL close (server
+0.60.0) is sent beside the DELETE and answers 204. A switch back into
+transcode refused for room reads "This node is already converting as much
+as it can for other viewers. Try again shortly." (`b34e5be`).
+
+## Media info the same on every client — 2026-09-27
+
+Tom: "Copy the web style, formatted for the device screen. For music - yes
+... We need all the UIs to match, within the confines of their devices";
+"Format, codec, bitrate etc details are non i18n and technical. They are
+core's responsibility, but should be supplied to clients in a structured
+object. The client should still 'format' them, in terms of layout"; "If the
+files have the same resolution, codec, length and bitrate combine them";
+"sort by descending resolution and add a (4K), (2K), (1080p) etc after the
+physical resolution. Also add a channel count after the audio codec".
+
+- A title page shows one line per file under the title, from core's
+  `fileSummaries` (combined, highest resolution first), e.g. "2h 31m ·
+  3840×2160 (4K) · HEVC · TRUEHD · 7.1 · 47.4 Mbps" (`cfbd6bf`, `ddb31c8`,
+  `d8d8e82`, `a50cdf1`). The duplicate-report TODO lives in core beside
+  `fileSummaries`.
+- A track reads "9:32 · FLAC · 24-bit · 44.1 kHz · Stereo · 1,504 kbps";
+  in the player it sits beside the artwork on a landscape screen at least
+  760 px wide, under it otherwise (`8535bca`). `MediaLine` wraps only
+  between fields.
+- The phone matches (its pills and MEDIA section gone); the TV matches on
+  .133. Seen live on the web: a two-file title's lines, and the track line
+  beside the artwork.
+
+## Continue Watching keeps the title, the file and how it played — 2026-09-27
+
+Tom (via the TV): store "both the item id AND the media ID", the mode,
+resolution and subtitle settings "and all other data needed to resume as if
+you'd never left". Core `89a9d0c`: `itemId`, `fileMediaId`, `resume`.
+The player saves through `progressFor` with the snapshot; a start from the
+title page, Continue Watching or a reload resumes with `resumePreferences`,
+except from the beginning or at a picked quality (`61e3389`). Existing
+entries were rewritten by core to `itemId`, positions intact (checked). The
+save itself was not seen live (hidden test tab, no media events).
+
+## Torrents across server 0.61.0 to 0.64.1 — 2026-09-26/27
+
+- 0.61.0: `verify_queued` reads "Waiting to verify", pausable, sorted with
+  the waiting; the torrent page's first stage says "Verifying data already
+  on disk" with the check's ETA (`8c09aa3`).
+- 0.63.0: a second add of a held torrent reads "That torrent is already in
+  the list ..." with an "Open it" link (`torrentHeldBy`); the new fault codes
+  are worded (`2271cf6`). **Found on the way:** behind the cluster router
+  the placement wording ("That node refused the torrent.") had never
+  matched in production; refusals are now found in the cause chain (core's
+  `acquisitionError`, `d71167c`).
+- 0.64.0, torrents belong to the cluster (`84dc3cc`, `9f57f73`, `3d9a548`,
+  `bd68eb7`, `99ba09f`): "Download on" (any node or a pinned one, each with
+  its load and its own staging room, "12.0 GB free of 100 GB") and "Remove
+  after completion" on add; the same two on a torrent's page (the node only
+  until one claims it); intents shown as "Pausing…" until applied, with the
+  blocked reason; "Not yet claimed by a node"; stale-source notices;
+  polling at the server's `refresh_interval_ms`; unknown live figures as
+  "—". Availability comes from `/torrents/nodes`, not the answering node's
+  `/torrents/status` (fi-1 runs no torrents, which had shown "built without
+  libtorrent-rasterbar"). The page's single staging figure is gone.
+- Seen live: the add form and the placement controls on a claimed torrent;
+  nothing added (a real download).
+
+## Episodes read S04E08 everywhere — 2026-09-27
+
+Tom (on the TV): "it should be S04E08 in all cases"; then "The ruling about
+SxxEyy covers all clients." Search and Continue Watching read "S04E08" where
+they read "Season 4 Episode 8", taking the season from the episode's context
+where the item lacks one, and the season page's rail reads "S04E08 · Title"
+where it read "8. Title". "Episode 8" with no season number, as before.
+
+## Status: storage and cache, and node versions — 2026-09-27
+
+Tom: "<known used>/<total>, next line is <available storage>/<total
+storage> Available", the same for cache, and the server version in the node
+cards (`f25319a`).
+
+## Client deploys, 2026-09-25 to 2026-09-27
+
+fi-1 and gbni-1, each on Tom's word, each additive with a backup first and
+verified by `shasum` on `127.0.0.1:7438` and on `macnessa`, the `hls` chunk
+and the previous bundle still `200`. es-1 down throughout.
+`index-BHladCbs.js` (09-25 17:28), `index-CFMMhNaI.js` (09-27 17:30),
+`index-gmwnlN3H.js` (18:09), `index-BV1CkG1Z.js` (20:30),
+`index-DrAa1jr2.js` (20:53), `index-BltD7CmH.js` (21:18, S04E08),
+**`index-DT7YOjdl.js` (21:24, `4ac6ef0`, core `482bbb1` = the 0.20.0
+candidate code `ae82922`, `shasum` `c96c289bf82d`, backups
+`web.bak-20260927-212437`)**. Full records in `ACTIVE.md`'s deploy section.
+
+## Playback against server 0.58.0, where the server chooses nothing — 2026-09-25
+
+Server 0.58.0 (briefly announced as 0.57.1) takes `media_id` only on session
+create and refuses `item_id`; it names no file, stream or container itself.
+Tom ruled the choice is the client's ("in Macha it's the client that makes the
+decision on what to play"), and that the server's old item-only ranking was a
+violation, not a fallback.
+
+- This client hands core every file's facts (`121c280`); core's chooser
+  (`284e52e`, `580473f`, `b94b468`, `0bce895`) names the file, streams and
+  container on every create.
+- **Found live, fixed in core `de86392`:** a session begun direct named no
+  container or stream, so the PATCH into transcode (the HEVC decode fallback,
+  or a viewer's mode change) was refused; and a language the file lacks is
+  refused outright by 0.58.0. Found from fi-1's journal: create direct, then
+  "seek fast-path skipped ... reason=preferences-changed", then no admission.
+- **Refusals say why** (`b0765e7`, `8d6c5da`): Tom, "That change could not be
+  made ... needs to die in a fire ... it's worse than 'something has gone
+  wrong'". `playbackRefusalText` words `choice_required` and
+  `choice_not_available` from `notice.refusal`, else the node's sentence,
+  else says the node gave no reason.
+- **Seen live:** on `macnessa` with bundle `index-DajU39j8.js`, a film
+  advanced 4 s in 4 s at 1920 wide, `readyState` 4. The three media that
+  failed on fi-1 have not been retried on the fixed build.
+- Checked for anything relying on a server pick: nothing builds a playback
+  request outside core; the Direct Play service worker proxies session URLs
+  only; the Samsung path uses core's URLs.
+
+## main onto published core 0.19.0, pushed — 2026-09-24
+
+Tom: "Go for it, core 0.19.0". Merge `26e8bcc`; `package.json` to `^0.19.0`,
+the lockfile's link entries removed, `test -L` failing (a real directory,
+gitHead `4e1746a`, the verified candidate); typecheck, suite 542 and build
+green against the registry copy and again from a fresh clone with no core tree
+beside it (`npm ci`); bundle `index-DKJODXg4.js`, identical to the build
+against the linked candidate. `develop` re-linked (`abf7c7b`). Client version
+left at 0.18.0 and the changelog section Unreleased: no bump or tag was asked
+for.
+
+## Principles and laws standardised on core's, and the documentation rationalised — 2026-09-24
+
+- **Laws.** Tom: standardise every Macha project on core's
+  `docs/principles-and-laws.md`. This repo's copy is byte-identical to core's
+  (`cmp` clean, including core's added sentence on choosing among an item's
+  files). Law 4, "Thou Shalt Not Shoot Thyself In The Foot", added as core
+  words it. No citation needed a new number; per Tom's ruling that
+  "attributions must be accurate to the canonical lawset", three citations
+  that quoted the bounded-work principle as "Law 2" now name the principle.
+- **`Idempotency-Key`** removed from current documents (Tom: "There's no
+  Idempotency-Key"); the `idempotency_key` query parameter is what exists.
+- **Documents checked against the code:** `README.md`, `docs/architecture.md`,
+  `docs/server-api.md` (the largest drift: a token-file auth model, fetched
+  artwork, missing acquisition, 0.56.0 codes, manage and users routes),
+  `docs/playback-handover.md`; the backlog cut from 3,458 lines to 2,840.
+- A TV-focus fault found on the way: the selection boxes lacked
+  `data-tv-focusable` (`ede5694`).
+
+## The paging test's timeouts were machine load, not the code — 2026-09-24
+
+`IngestScreen.test.tsx`, "a long torrent list shows fifty rows a page", timed
+out in 8 of 12 full runs (6.3 s against 5 s). Measured on a quiet machine:
+0.45 s alone, about 0.3 s of CPU (React render ~230 ms, whole-page text
+queries ~180 ms), nothing per row standing out. Its time tracked machine load
+(0.74 s at load 26 to 1.84 s at 55), and the load was the Server session's
+`cmake --build build -j8` (six to eleven `clang++`) on this shared 12-core
+machine, peaking above 100. Five back-to-back runs later passed 542/542 with
+load rising from 3 to 234, this test's slowest 2.3 s. The remedy (accept,
+raise `testTimeout`, or cut its cost) is Tom's and stays in ACTIVE.
+
+## Retired from the backlog 2026-09-24
+
+Removed from `ACTIVE.md` in the rationalisation against the code, `git log`
+and core 0.19.0, because their premise is gone or they repeated another
+entry:
+
+- **"`/api/v1/manage/unmatched` is fetched on every Home load"** (Home P1):
+  the fetch fed only the Manage nav's count pill, and both went in
+  `b83b21f` (2026-09-24, on Tom's word that the pill appeared at random).
+- **"Show `cpu_cores` per node on Status → Nodes once the server sends it"**:
+  the server has sent it since 0.36.3 (2026-09-08) and the node cards and
+  node page have shown Cores beside Load since client 0.12.1 (`b0e0792`,
+  2026-09-09); the item was never closed.
+- **Core's endpoint-ranking design notes** (one estimator from capacity,
+  latency and throughput; `candidates()` reading them; node telemetry in the
+  registry; damping and normalisation by cores; unmeasured throughput no
+  longer load-bearing): owned by core and built there, in 0.6.0 (`bd83754`,
+  2026-09-08, `recordCapacity` off the status fetch) and `72d68d4`
+  (2026-09-13, ranking by elimination on throughput, latency, then capacity
+  divided by cores, reporting the deciding axis). What is left for this
+  client (showing it on Status) stays in ACTIVE.
+- **"Root-cause the hard-reactivation seek failure"** (any-node failover
+  P1): superseded by the seek P0, as that section itself recorded on
+  2026-09-20. Its disproved EVENT-playlist candidate and the server's 90 s
+  mid-file stall are kept in ACTIVE as a note.
+- **"The failure message names the wrong event"** (seek P0): answered. Core
+  chains the ending failure onto the originating one (0.14.0), and the
+  failure screen shows core's `playbackFailureDetail` (2026-09-23). The live
+  check of both sentences at once stays under the https failover P0.
+- **"Not built ahead of the deployment, deliberately"** (torrent node
+  choice P1): the server shipped the contract in 0.51.0 (`f648418`,
+  2026-09-22) and both live nodes run 0.55.1. The item now waits on core's
+  `submitMagnet`, which takes no node.
+- **The "Release in preparation" paragraph and the uncommitted-work notes in
+  Start here**: the work was committed (`fe9c042`, `f64c15c`), core published
+  0.19.0 carrying `e840d72` and everything this client needs, and `main`
+  resolves it (`26e8bcc`, pushed). The version bump and tag remain, as
+  Tom's.
+- **The separate "Logout uses a revoked token" P1**: merged into the owed
+  live check (log out, `f64c15c`) and the session-model P1, which keeps
+  Tom's ruling and the core defect.
+
+## Artwork: the host choice and the caching fixed and verified — 2026-09-24
+
+The business P0 (Tom: "We STILL have slow artwork loading"; "It's also a
+caching problem I thought we'd solved 20 versions ago."). Its open half, the
+server's slow first read and poster size, stays in ACTIVE. Measured from the
+fi-1 site, test account, dev client:
+
+- **Before: the URLs changed every UTC day.** `exp` was the next UTC midnight
+  (1790294400000 = 2026-09-25T00:00Z) and every artwork URL carried it, so
+  the browser cache (`public, max-age=86400, immutable`) missed on every
+  poster after midnight UTC. Signatures were otherwise stable: 2,068 URLs
+  identical across all three nodes and across reads.
+- **Before: each cached poster expired 24 h after it was fetched, with
+  nothing to revalidate against.** Tom: "I see it randomly - I think it's
+  local cache expiry." The headers agreed: `max-age=86400` and no `ETag` or
+  `Last-Modified`, so an expired entry could not be answered with a 304 and
+  was downloaded whole again, each poster on its own clock. Within a day the
+  cache held: in-app revisit 0-25 ms per poster.
+- **Host choice ignored this viewer's link; fixed in core, seen live
+  (`ccc0381`).** Every poster came from macnessa (https, WAN from here;
+  636 ms median cold) while fi-1 (LAN, http) serves the same URL in 65 ms.
+  Core now picks the artwork host once per run by health-probe round trip
+  (switching only on a gain of at least 50 ms and 40%), and keeps it sticky.
+  The first load moved all 33 visible posters to fi-1 (all done 644 ms after
+  the cards rendered, against up to 3.4 s before); a reload kept fi-1 and
+  every poster was ready as its card rendered.
+- **Server 0.54.1 (all nodes 07:36Z) fixed the caching half, verified the
+  same morning (`8fe9fd8`)** on all three nodes over http and on macnessa
+  and ramaroja over https: `Cache-Control: public, max-age=2592000,
+  immutable` (30 days, tied to the capability), `ETag` = the artwork id,
+  `If-None-Match` answered 304 with no body (4 ms on fi-1, one RTT
+  elsewhere), `Timing-Allow-Origin: *`. Every URL now carries one `exp`,
+  2026-11-03T00:00Z, 39.7 days out, identical across nodes (es-1 listed one
+  extra artwork; no URL differed). So a poster is one download per browser
+  per ~30 days.
+- **Seen in the browser the same day (`291a7bc`):** `Timing-Allow-Origin`
+  makes artwork timing readable; Movies with everything cached came from
+  fi-1 with no network request, 56 ms median per poster, all 30 visible
+  posters complete 56 ms after the cards render. On the first visit after
+  the URL change, 18 of 67 posters downloaded (84 KB median, 178 ms first
+  byte from fi-1) and the 49 cache hits alongside them took ~580 ms,
+  apparently queued behind those downloads rather than slow in themselves.
+
+## A reclaimed Direct Play source is re-created, not called unsupported — 2026-09-24
+
+Seen 2026-09-23: a direct session reclaimed by the node after a hidden start
+failed as `PlaybackSourceError: Web media source is unsupported`, terminal,
+though the format was fine. Not the worker losing its configuration on a
+restart: the proxy URL carries source, size and mime, and a restarted worker
+rebuilds from it. It was a race. The worker handed the element the node's 404
+and posted its "source gone" report separately, after an await; the element's
+`error` handler judged terminal unless that report had already landed
+(`notFoundSourceGeneration`), and nothing ordered the two. `60e2f8e`: the
+worker records the status before returning the response and answers a
+`macha-direct-read-ahead-status` query, and the element error handler for a
+read-ahead source asks it (1 s budget) before judging, so a 404 becomes
+`not-found` (re-create) whichever arrives first. Seen red first in both
+halves: the player test read `unsupported`, the worker test had no answer.
+
+**Live run (`be1697b`):** direct play from the worker, the session deleted on
+the node from the page (204), then a seek from 56 min to 100 min. The worker
+reported the 404 (`source-degraded`, status 404), the element's error became
+`source-gone` rather than `unsupported`, the client re-created the session in
+direct mode and was playing at 100:21 with no failure screen. In that run the
+worker's report beat the element's error, so it exercised the existing path;
+the reverse order is unit-tested only, and that and the hidden start stay in
+ACTIVE.
+
+## A cold start with two nodes down shows its first screen in 2.8 s — 2026-09-24
+
+Core `9654e1e` (pushed, in 0.19.0): a cold start with fi-1 and es-1 down took
+17.2 s before anything showed, because the session check walked the nodes one
+at a time. Validation is now hedged at 1 s. Seen live against `9654e1e`:
+first screen at 2.8 s, same two nodes down.
+
+## Television focus follows the Android TV client's scorer, and smaller touches — 2026-09-24
+
+- **TV focus**, ported from the Android TV client's fixes to the same scorer:
+  direction judged from edges rather than centres, and candidates on the
+  current row first (`50a2ff7`; before it, the two layouts named landed on
+  card-5); up and down go to the nearest row, not the same column
+  (`1e60686`; before it, Up under a short Continue Watching row skipped to
+  nav-search); left and right stop at the end of a row (`a574786`). No
+  move-undo on the web, by Tom's decision (`427f2d7`). Not seen on a set;
+  that check is in ACTIVE with the televisions.
+- **Uptime on the Status node cards** (`2b0ec23`, Tom), seen live.
+- **Music track cards** name the album, then the artist below it
+  (`cf8eed4`, Tom's ruling relayed by core).
+- **Login**: a larger logo beside the title, and no "no permissions" notice
+  (`3d1e8a7`, Tom).
+- **Import tables**: slightly larger text, columns scaled to match
+  (`585756e`); measured live, nothing clips at the longest values and no
+  column moves.
+
+## Client deploys to the nodes, 2026-09-20 to 2026-09-24
+
+Moved from `ACTIVE.md`'s deploy section on 2026-09-24, where only the latest
+deploy and the procedure stay. Newest first.
+
+**develop deployed to fi-1 and gbni-1, 2026-09-24 18:03 (local), on Tom's
+instruction; es-1 is offline for the foreseeable future and was not
+touched.** Bundle `index-8e3uI4_9.js`, 674,669 bytes, `shasum`
+`1acc554bcd78`, built from the uncommitted `develop` working tree (bulk
+torrent actions, 0.56.0 code wording, `seedEndpoints`, the Status reset gate)
+against linked core `47812f7` (with `6fd7747` notes; tree clean). Backups
+first at `/etc/macha/web.bak-20260924-180351.tar.gz` on both; rsync additive,
+no `--delete`, 24 files and 1,847,166 bytes each. Verified served on both via
+`http://127.0.0.1:7438/`: index names the bundle, the bundle is `200` at full
+size with a matching `shasum`, owned `1000:50`, and `hls-Bt6kO1A0.js` (shared
+with the previous build) still `200`. `macnessa.macha.network` serves it too.
+Not yet opened in a browser on either node.
+
+**0.18.0 is deployed to all three nodes, 2026-09-21 22:53 UTC, on Tom's
+instruction.** Bundle `index-CKNh5Q9D.js`, 633,692 bytes, `shasum`
+`eff197072a8e`, `dist` hash `091ae1eaef6d` — built from `main` at `ce74408`
+(tag `0.18.0`) against `@machafoundation/core` **0.18.0 from the registry**,
+which is what makes it the first deployed artefact not built against a linked
+tree. Backups first on all three at
+`/etc/macha/web.bak-20260921-225245.tar.gz`; rsync additive, no `--delete`,
+24 files and 1,800,061 bytes to each node, written `1000:50` (verified
+numerically with `stat`, not by name — the nodes happen to *name* uid 1000
+`tom` and gid 50 `staff`, which reads like a mistake and is not one).
+
+**Verified served rather than copied:** each node answers
+`index-CKNh5Q9D.js` on `http://127.0.0.1:7438/` with the bundle `200` at the
+full 633,692 bytes, and the CSS and Service Worker `200`; `ramaroja` and
+`macnessa` both serve it too, gzipped to 183,296 bytes. The previous bundle's
+assets are all still in place, and **both bundles reference the same lazy
+`hls-Bt6kO1A0.js` chunk**, so a viewer still running the old page is not
+broken by the swap — which is the thing the additive rule exists to protect,
+and it is worth checking rather than assuming on each deploy.
+
+**Booted once, and the browser check then hit its own confound.** The console
+shows `boot-start`, `platform-detected` and `react-mounted` at 29 ms with the
+read-ahead worker registered at 96 ms and no exception, so the artefact runs.
+After that the tab logged nothing for **101 seconds**, then `route-exhausted`
+and `same-origin-absent`, and the renderer stopped answering CDP entirely.
+That is a frozen background tab rather than a finding: measured independently
+with `curl`, all five hosts answer `/api/v1/health` with
+`{"service":"macha","status":"ok","version":"0.48.2"}` as `application/json`,
+which is exactly what `confirmMachaEndpoint` requires, and that probe aborts
+at 1.5 s against a tab whose timers had stopped.
+
+**Foregrounded check done 2026-09-23 14:30-14:33 UTC, and it closes the
+deploy.** `macnessa` in a Chrome tab with `document.visibilityState` read as
+`visible` and `hasFocus()` true (the first read after navigation said
+`hidden`; the window had to be activated with AppleScript before any of it
+counted). The already-signed-in client mounted at 21 ms, routed three
+attempts to `route-success` inside 700 ms, and every `probe-cycle` from
+14:30:56 to 14:33:28 reported `reachable 3, known 3, decidedBy sticky`,
+captured by wrapping `console.debug` in the page since the extension shows
+the payloads as `Object`. `useNodeIdentity` ran at mount and at 60 s
+intervals, so the cycles at 14:31:55 and 14:32:55 fell between probes that
+counted three on both sides: **no endpoint dropped**. The persisted discovered
+list (`ramaroja`, `10.35.1.50:7438`) was unchanged too. It is the
+configuration where the drop could not happen — same-origin plus two
+discovered, all three nodes in the status snapshot — so it clears the deploy
+rather than exonerating the hook, which was deleted regardless (2026-09-23, below).
+
+**All three nodes served the develop build with the hot-linked core,
+deployed 2026-09-21 14:37 on Tom's instruction ("they are NOT production").**
+Bundle `index-NDVfpduh.js`, 624,128 bytes, `shasum` `be3dc9c3367a` — identical
+on `fi-1`, `es-1` and `gbni-1` and to the local artefact — built from
+`develop` against linked core `648474d`, **not** from `main`, so this is
+ahead of released 0.17.3 (`index-CnpOpAES.js`) rather than being it. It is the
+first bundle in front of a viewer that carries the 410 mapping. Backups taken
+first on all three at `/etc/macha/web.bak-20260921-143750.tar.gz`; rsync was
+additive, no `--delete`, so the 0.17.2 assets are still there. Verified
+served, not just copied: each node answers `index-NDVfpduh.js` on
+`http://127.0.0.1:7438/` with the bundle and CSS both `200`, and
+`ramaroja.macha.network` and `macnessa.macha.network` both serve it too.
+
+**Previously, all three nodes ran the same build as of 2026-09-20.** `3476e34` (0.17.2,
+bundle `index-BGrNH6KR.js`) is on `fi-1`, `es-1` and `gbni-1`, deployed on Tom's
+instruction with backups at `/etc/macha/web.bak-20260920-220338.tar.gz` on the
+first two (`gbni-1` had no web root to back up). The earlier hashed bundles are still in place on all of them. So is
+the front: `ramaroja` and `macnessa` both serve `index-BGrNH6KR.js`.
+
 
 ## Manage Unmatched in the torrent list's style, each file on its own page, and paging — 2026-09-24, unreleased
 
@@ -129,6 +549,17 @@ extension disconnected) and the startup panel (no node was starting).
   2009, 2007, 2003 first and the yearless episodes and tracks last.
   The server answers a search with at most 50 results, so a sort reorders
   those 50, not the library. Needs core published before a release.
+
+## The `relocate` seek lands clean — verified 2026-09-23
+
+Closes the "not covered" note under "The generation clock stopped running
+backwards (client 0.17.2)" below. Remux from fi-1, scrubber click: seek to
+3,333,000 ms, the node started the generation on the keyframe at 3,330,473,
+the client was handed local 2,527 ms, `relocation-hold-begin` then
+`media-seeked currentTime=2.527` then `relocation-hold-complete`. The pre-roll
+was not presented, and the readout (55:45) equals generation start plus
+element time (3,330.473 + 14.72 s), so no constant offset. Recorded in
+`868452f`.
 
 ## The Import page, the README version, and native HLS without a probe — 2026-09-23, unreleased
 
@@ -704,6 +1135,15 @@ exit, and that exit starts by condemning the node.
       long enough to fill the buffer leaves more runway than hls.js has
       patience, so the fatal always wins while this adapter escalates it. That
       raises the stakes on the teardown change below rather than lowering them.
+
+## The torrent Node row's fixture stopped claiming a readable name — 2026-09-22
+
+The `Node` row's fixture said `gbni-2`; no server has ever sent that. A real
+id is 32 hex characters, so the row an operator reads says
+`855716bd8bb0ad12b0c4f876386699de`. Fixture and assertion corrected to a real
+id (`95cb3a0`), which makes the naming problem (a human `name` on status
+`nodes[]`, asked of the server) visible in the suite rather than only on a
+screen.
 
 ## Client 0.18.0 — released 2026-09-21, deployed the same night, all five changes watched live
 

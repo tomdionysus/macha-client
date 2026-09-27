@@ -1,25 +1,36 @@
-import { useEffect, useMemo, useState } from 'react';
-import type { CatalogueApi, CatalogueArtwork, CatalogueItem, CatalogueKind } from '@machafoundation/core';
+import { useEffect, useMemo, useState, type ChangeEvent } from 'react';
+import type { CatalogueApi, CatalogueArtwork, CatalogueItem, CatalogueKind, ManageApi, PlaybackFactsApi } from '@machafoundation/core';
+import { ItemFiles } from './identify/ItemFiles';
+import { NumberField, numberText, TextAreaField, TextField, wholeNumber } from './identify/fields';
 import { ErrorMessage, Loading } from '../components/Status';
 import { useAsync } from '../hooks/useAsync';
 
 interface Props {
   api: CatalogueApi;
+  /** Reads what each of the item's files is. */
+  facts: PlaybackFactsApi;
+  /** Present when this account may attach files; adding a version needs it. */
+  manage?: ManageApi;
   itemId: string;
   onBack: () => void;
   onSaved: () => void;
   onCleared: (item: CatalogueItem) => void;
 }
 
+/** The picture roles the server's cataloguer gives each kind, offered for upload even where none is attached yet. */
+const KIND_ARTWORK_ROLES: Record<CatalogueKind, readonly string[]> = {
+  movie: ['poster', 'backdrop'],
+  show: ['poster', 'backdrop'],
+  season: ['poster'],
+  episode: ['still'],
+  artist: [],
+  album: ['cover'],
+  track: ['cover'],
+};
+
 const INTERNAL_EXTERNAL_ID_PREFIX = 'macha_';
 const METADATA_LOCK_KEY = 'macha_metadata_locked';
 
-function optionalInt(value: string): number | null {
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-  const parsed = Number.parseInt(trimmed, 10);
-  return Number.isFinite(parsed) ? parsed : null;
-}
 
 function isProviderExternalId(key: string): boolean {
   return !key.startsWith(INTERNAL_EXTERNAL_ID_PREFIX);
@@ -110,7 +121,11 @@ function ArtworkPreview({ api, artwork, selected, onSelect }: {
   );
 }
 
-function MetadataForm({ api, initial, onBack, onSaved, onCleared }: {
+function MetadataForm({ api, facts, manage, initial, onBack, onSaved, onCleared, onReload }: {
+  /** Reads the item again, after something saved it outside this form. */
+  onReload: () => void;
+  facts: PlaybackFactsApi;
+  manage?: ManageApi;
   api: CatalogueApi;
   initial: CatalogueItem;
   onBack: () => void;
@@ -135,8 +150,28 @@ function MetadataForm({ api, initial, onBack, onSaved, onCleared }: {
   const artworkRoles = useMemo(() => {
     const roles: string[] = [];
     for (const art of draft.artwork) if (!roles.includes(art.role)) roles.push(art.role);
+    for (const role of KIND_ARTWORK_ROLES[draft.kind] ?? []) if (!roles.includes(role)) roles.push(role);
     return roles;
-  }, [draft.artwork]);
+  }, [draft.artwork, draft.kind]);
+  const [uploading, setUploading] = useState<string>();
+  // An upload saves at once and reloads the item, which would drop anything
+  // typed here and not yet saved; so it waits until there is nothing to lose.
+  const dirty = JSON.stringify(draft) !== JSON.stringify(initial) || aliasesText !== initial.aliases.join('\n');
+
+  const upload = async (role: string, event: ChangeEvent<HTMLInputElement>) => {
+    const image = event.target.files?.[0];
+    event.target.value = '';
+    if (!image) return;
+    setUploading(role);
+    setError(undefined);
+    try {
+      await api.putArtwork(initial.id, role, image.type || 'image/jpeg', image);
+      onReload();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause : new Error(String(cause)));
+      setUploading(undefined);
+    }
+  };
 
   const update = <K extends keyof CatalogueItem>(key: K, value: CatalogueItem[K]) => {
     setDraft((current) => ({ ...current, [key]: value }));
@@ -208,50 +243,23 @@ function MetadataForm({ api, initial, onBack, onSaved, onCleared }: {
       <div className="metadata-editor-grid">
         <section className="metadata-editor-panel">
           <h2>Metadata</h2>
-          <label>
-            <span>Title</span>
-            <input value={draft.title} onChange={(event) => update('title', event.target.value)} />
-          </label>
-          <label>
-            <span>Sort title</span>
-            <input value={draft.sort_title} onChange={(event) => update('sort_title', event.target.value)} />
-          </label>
-          <label>
-            <span>Year</span>
-            <input inputMode="numeric" value={draft.year ?? ''} onChange={(event) => update('year', optionalInt(event.target.value))} />
-          </label>
+          <TextField label="Title" value={draft.title} onChange={(value) => update('title', value)} />
+          <TextField label="Sort title" value={draft.sort_title} onChange={(value) => update('sort_title', value)} />
+          <NumberField label="Year" value={numberText(draft.year)} onChange={(value) => update('year', wholeNumber(value) ?? null)} />
           {(draft.kind === 'season' || draft.kind === 'episode') && (
-            <label>
-              <span>Season number</span>
-              <input inputMode="numeric" value={draft.season_number ?? ''} onChange={(event) => update('season_number', optionalInt(event.target.value))} />
-            </label>
+            <NumberField label="Season number" value={numberText(draft.season_number)} onChange={(value) => update('season_number', wholeNumber(value) ?? null)} />
           )}
           {draft.kind === 'episode' && (
-            <label>
-              <span>Episode number</span>
-              <input inputMode="numeric" value={draft.episode_number ?? ''} onChange={(event) => update('episode_number', optionalInt(event.target.value))} />
-            </label>
+            <NumberField label="Episode number" value={numberText(draft.episode_number)} onChange={(value) => update('episode_number', wholeNumber(value) ?? null)} />
           )}
           {draft.kind === 'track' && (
             <>
-              <label>
-                <span>Disc number</span>
-                <input inputMode="numeric" value={draft.disc_number ?? ''} onChange={(event) => update('disc_number', optionalInt(event.target.value))} />
-              </label>
-              <label>
-                <span>Track number</span>
-                <input inputMode="numeric" value={draft.track_number ?? ''} onChange={(event) => update('track_number', optionalInt(event.target.value))} />
-              </label>
+              <NumberField label="Disc number" value={numberText(draft.disc_number)} onChange={(value) => update('disc_number', wholeNumber(value) ?? null)} />
+              <NumberField label="Track number" value={numberText(draft.track_number)} onChange={(value) => update('track_number', wholeNumber(value) ?? null)} />
             </>
           )}
-          <label className="metadata-editor-wide-field">
-            <span>Synopsis</span>
-            <textarea rows={8} value={draft.synopsis} onChange={(event) => update('synopsis', event.target.value)} />
-          </label>
-          <label className="metadata-editor-wide-field">
-            <span>Aliases <small>one per line</small></span>
-            <textarea rows={4} value={aliasesText} onChange={(event) => setAliasesText(event.target.value)} />
-          </label>
+          <TextAreaField className="metadata-editor-wide-field" label="Synopsis" rows={8} value={draft.synopsis} onChange={(value) => update('synopsis', value)} />
+          <TextAreaField className="metadata-editor-wide-field" label={<>Aliases <small>one per line</small></>} value={aliasesText} onChange={setAliasesText} />
         </section>
 
         <section className="metadata-editor-panel">
@@ -303,6 +311,8 @@ function MetadataForm({ api, initial, onBack, onSaved, onCleared }: {
         </section>
       </div>
 
+      <ItemFiles item={initial} facts={facts} manage={manage} />
+
       <section className="metadata-editor-panel metadata-artwork-panel">
         <h2>Artwork</h2>
         {artworkRoles.length === 0 && <p className="metadata-editor-muted">No artwork is currently attached to this item.</p>}
@@ -312,7 +322,7 @@ function MetadataForm({ api, initial, onBack, onSaved, onCleared }: {
             <div className="metadata-artwork-role" key={role}>
               <div className="metadata-artwork-role-heading">
                 <h3>{role}</h3>
-                <span>{items.length > 1 ? 'Choose the image used by the client' : 'Current image'}</span>
+                <span>{items.length > 1 ? 'Choose the image used by the client' : items.length === 1 ? 'Current image' : 'None yet'}</span>
               </div>
               <div className="metadata-artwork-grid">
                 {items.map((art) => (
@@ -325,18 +335,24 @@ function MetadataForm({ api, initial, onBack, onSaved, onCleared }: {
                   />
                 ))}
               </div>
+              <label className="metadata-artwork-upload">
+                <span>{uploading === role ? 'Uploading…' : `Upload a new ${role}`}</span>
+                <input type="file" accept="image/*" disabled={dirty || Boolean(uploading)} onChange={(event) => void upload(role, event)} data-tv-focusable="true" />
+              </label>
             </div>
           );
         })}
+        {dirty && <p className="metadata-editor-muted">Save or cancel your changes before uploading: an upload saves at once.</p>}
       </section>
     </section>
   );
 }
 
-export function MetadataEditorScreen({ api, itemId, onBack, onSaved, onCleared }: Props) {
-  const item = useAsync(() => api.get(itemId), [api, itemId]);
+export function MetadataEditorScreen({ api, facts, manage, itemId, onBack, onSaved, onCleared }: Props) {
+  const [version, setVersion] = useState(0);
+  const item = useAsync(() => api.get(itemId), [api, itemId, version]);
   if (item.loading) return <Loading />;
   if (item.error) return <ErrorMessage error={item.error} />;
   if (!item.value) return null;
-  return <MetadataForm key={`${item.value.id}:${item.value.revision}`} api={api} initial={item.value} onBack={onBack} onSaved={onSaved} onCleared={onCleared} />;
+  return <MetadataForm key={`${item.value.id}:${item.value.revision}`} api={api} facts={facts} manage={manage} initial={item.value} onReload={() => setVersion((current) => current + 1)} onBack={onBack} onSaved={onSaved} onCleared={onCleared} />;
 }

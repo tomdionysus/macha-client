@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { boundedPlayerSeekTarget, firstUsableDurationMs, startWaitNotice, isSubtitleOnlyUpdate, playerBackAction, playerBufferedTimelineEnabled, playerControlShowsPlay, playerMediaSubtitle, samsungTransportSeekDirection, webSeekDeltaForKey } from './PlayerScreen';
-import type { MediaSummary } from '@machafoundation/core';
+import { boundedPlayerSeekTarget, modesToOffer, firstUsableDurationMs, startWaitNotice, isSubtitleOnlyUpdate, playerBackAction, playerBufferedTimelineEnabled, playerControlShowsPlay, playerMediaSubtitle, samsungTransportSeekDirection, webSeekDeltaForKey } from './PlayerScreen';
+import type { MediaSummary, OfferedMode, PlaybackCapabilities, PlaybackSession } from '@machafoundation/core';
 
 describe('player UI transport bindings', () => {
   it('maps Web left/right arrows to ten-second seeks', () => {
@@ -129,8 +129,8 @@ describe('what to tell a viewer whose title has not started yet', () => {
   });
 
   it('names what is being waited for, and how long it has been', () => {
-    // Law 2: a failure or a degraded state must be visible and actionable
-    // rather than becoming indefinite waiting. The budgets bound three
+    // Work is bounded and event-driven: a failure or a degraded state must be
+    // visible and actionable rather than becoming indefinite waiting. The budgets bound three
     // sequential phases and nothing bounds their sum, so a cold node can
     // legitimately spend the better part of a minute before anything is
     // declared wrong. A viewer told what is happening and for how long is in
@@ -145,5 +145,33 @@ describe('what to tell a viewer whose title has not started yet', () => {
     // say what is going on, and a timer over it would turn every brief
     // hesitation into an announcement.
     expect(startWaitNotice(false, 30_000)).toBeUndefined();
+  });
+});
+
+describe('the modes the player offers', () => {
+  // An HEVC file in MP4, on a device that decodes only H.264.
+  const session = {
+    mediaId: 'macha:hevc', mode: 'transcode', mimeType: 'application/vnd.apple.mpegurl', durationMs: 60_000,
+    sourceInfo: { path: '', format: 'mov,mp4,m4a,3gp,3g2,mj2', container: 'mp4', size: 1, bitrate: 1, streams: [
+      { index: 0, type: 'video', codec: 'hevc', profile: 'Main', language: 'und', default: true, forced: false, width: 1920, height: 1080 },
+      { index: 1, type: 'audio', codec: 'aac', profile: 'LC', language: 'eng', default: true, forced: false, channels: 2 },
+    ] },
+    output: {},
+  } as unknown as PlaybackSession;
+  const h264Only = {
+    platform: 'web', videoCodecs: ['h264'], audioCodecs: ['aac'], hlsVideoCodecs: ['h264'], hlsAudioCodecs: ['aac'],
+    containers: ['mp4'], hlsFmp4: true, hlsTs: true, dash: false, videoBitDepth: 8, hdr: [], dolbyVision: [],
+  } as PlaybackCapabilities;
+  const offeredOf = (modes: readonly OfferedMode[] | undefined) => modes?.filter((mode) => mode.offered).map((mode) => mode.mode);
+
+  it('takes core\'s answer, which knows the node\'s operations, over its own', () => {
+    const fromCore: OfferedMode[] = [{ mode: 'direct', offered: false, reasons: [] }, { mode: 'remux', offered: false, reasons: [] }, { mode: 'transcode', offered: true, reasons: [] }];
+    expect(modesToOffer(fromCore, session, h264Only, undefined, false)).toBe(fromCore);
+  });
+
+  it('answers from the session until core\'s facts arrive, hiding what the device cannot play unless asked for everything', () => {
+    expect(offeredOf(modesToOffer(undefined, session, h264Only, undefined, false))).toEqual(['transcode']);
+    expect(offeredOf(modesToOffer(undefined, session, h264Only, undefined, true))).toEqual(['direct', 'remux', 'transcode']);
+    expect(modesToOffer(undefined, undefined, h264Only, undefined, false)).toBeUndefined();
   });
 });

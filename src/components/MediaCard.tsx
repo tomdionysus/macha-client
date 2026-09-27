@@ -60,7 +60,7 @@ type ContextLink = { to: string; label: string };
 
 /**
  * Where an item sits, each step linking to its page, one line per entry: an
- * episode's series, then "Season x Episode y"; a track's "Artist - Album
+ * episode's series, then its mark ("S04E08"); a track's "Artist - Album
  * (year)" on one line. For an item shown away from its parent (Continue
  * Watching, search); a season or album page already says both, so its rows
  * never ask for this.

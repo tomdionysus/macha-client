@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useState, type ReactElement } from 'react';
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore, type ReactElement } from 'react';
 import { Navigate, NavLink, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom';
-import type { CatalogueApi, CatalogueMediaProfile } from '@machafoundation/core';
+import type { CatalogueApi, CatalogueMediaProfile, ManageApi, PlaybackFactsApi } from '@machafoundation/core';
 import type { MediaApi } from '@machafoundation/core';
 import { AppLogo } from './components/AppLogo';
 import { MusicNav } from './components/MusicNav';
@@ -51,7 +51,8 @@ import { SponsorScreen } from './screens/SponsorScreen';
 import { MetadataEditorScreen } from './screens/MetadataEditorScreen';
 import { IngestScreen } from './screens/IngestScreen';
 import { TorrentDetailScreen } from './screens/TorrentDetailScreen';
-import { ManageScreen, UnmatchedFilePage, type ManageSection } from './screens/ManageScreen';
+import { ManageScreen, type ManageSection } from './screens/ManageScreen';
+import { UnmatchedFilePage } from './screens/identify/UnmatchedFilePage';
 import { NodeStatusScreen, StatusScreen } from './screens/StatusScreen';
 import { pathForMedia, routes } from '@machafoundation/core';
 import { playerRouteItemId } from '@machafoundation/core';
@@ -68,7 +69,8 @@ import { useMusicController } from './app/useMusicController';
 import { usePlaybackRuntime } from './app/usePlaybackRuntime';
 import { measureStartCosts } from './playback/nodeStartCosts';
 import { usePlaybackController } from './app/usePlaybackController';
-import { technicalProfileFromCatalogue, type PlaybackPolicyOverrides } from '@machafoundation/core';
+import { playbackVersions, qualityCeiling, QualityPreferenceStore, technicalProfileFromCatalogue, type PlaybackPolicyOverrides, type PlaybackVersions, type VersionStep } from '@machafoundation/core';
+import type { DisplayResolution } from './platform/displayResolution';
 import { ConnectionGateScreen } from './screens/ConnectionGateScreen';
 import { initialConnectionGate, normalizeConnectionEndpoints, shouldEnterConnectionGate, type ConnectionGate } from '@machafoundation/core';
 
@@ -134,10 +136,12 @@ function required(value: string | undefined, name: string): string {
   return value;
 }
 
-function DetailRoute({ api, onPlay, onPlayFromStart, progressById, parameter, onEdit, onMediaProfile }: {
+function DetailRoute({ api, onPlay, onPlayFromStart, loadVersions, onPlayVersion, progressById, parameter, onEdit, onMediaProfile }: {
   api: MediaApi;
   onPlay: (item: MediaSummary) => void;
   onPlayFromStart: (item: MediaSummary) => void;
+  loadVersions?: (item: MediaSummary) => Promise<PlaybackVersions>;
+  onPlayVersion?: (item: MediaSummary, version: VersionStep) => void;
   progressById: Map<string, PlaybackProgress>;
   parameter: 'movieId' | 'episodeId' | 'trackId' | 'itemId';
   onEdit?: (id: string) => void;
@@ -153,6 +157,8 @@ function DetailRoute({ api, onPlay, onPlayFromStart, progressById, parameter, on
       onBack={back}
       onPlay={onPlay}
       onPlayFromStart={onPlayFromStart}
+      loadVersions={loadVersions}
+      onPlayVersion={onPlayVersion}
       progress={progressById.get(itemId)}
       onEdit={onEdit ? () => onEdit(itemId) : undefined}
       onMediaProfile={onMediaProfile}
@@ -256,12 +262,14 @@ function AlbumRoute({ api, onPlay, onPlayAll, onOpenTrack, onAddToPlaylist, onPl
   );
 }
 
-function MetadataEditorRoute({ api }: { api: CatalogueApi }) {
+function MetadataEditorRoute({ api, facts, manage }: { api: CatalogueApi; facts: PlaybackFactsApi; manage?: ManageApi }) {
   const { itemId } = useParams();
   const navigate = useNavigate();
   return (
     <MetadataEditorScreen
       api={api}
+      facts={facts}
+      manage={manage}
       itemId={required(itemId, 'itemId')}
       onBack={() => navigate(-1)}
       onSaved={() => navigate(-1)}
@@ -325,6 +333,13 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
   const queueStore = useMemo(() => new PlaybackQueueStore(clientId), [clientId]);
   const playlistStore = useMemo(() => new MusicPlaylistStore(clientId), [clientId]);
   const volumeStore = useMemo(() => new VolumeStore(clientId), [clientId]);
+  // Per device, at core's key, so every client keeps the setting alike.
+  const qualityPreferences = useMemo(() => new QualityPreferenceStore(), []);
+  // Tom, 2026-09-25: offer only what this device can play, with a setting to
+  // offer everything. Read live for the player's options, and at each start
+  // and each title page for the rest.
+  const offerAll = useSyncExternalStore(qualityPreferences.subscribe, qualityPreferences.getSnapshot).offerAll === true;
+  const offerAllNow = useCallback(() => qualityPreferences.get().offerAll === true, [qualityPreferences]);
   const endpointKey = effectiveEndpoints.join('\n');
   const endpointRegistry = useMemo(
     () => new EndpointRegistry(seedEndpoints({
@@ -483,6 +498,16 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
   const landing = mediaAvailable ? routes.home : manageLanding ?? routes.settings;
   const metadataEditingAvailable = libraryManagementAvailable;
 
+  const policyOverrides = (platform as { playbackPolicy?: PlaybackPolicyOverrides }).playbackPolicy;
+  // The cap on automatic play: the viewer's Maximum quality, else the screen
+  // this platform states. Read at each start, so a change in Settings applies
+  // to the next title without rebuilding the runtime. A browser cannot tell
+  // mobile data reliably, so the connection is left unknown, which core reads
+  // as Wi-Fi.
+  const deviceCeiling = useCallback(() => qualityCeiling({
+    display: (platform as { displayResolution?: () => DisplayResolution | undefined }).displayResolution?.(),
+    preference: qualityPreferences.get(),
+  }), [platform, qualityPreferences]);
   // What the instruction chooser reasons from: the server's reported facts for
   // the item about to play, and the platform truths no probe can discover.
   const playbackRuntimeOptions = useMemo(() => ({
@@ -494,9 +519,21 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
     // The cluster API resolves the preferred endpoint per call, so operations
     // describe the node that will execute the instruction rather than whichever
     // one happened to be preferred at boot.
-    facts: async (media: MediaSummary) => (await playbackFactsApi.facts({ itemId: media.id }))[0],
-    policyOverrides: (platform as { playbackPolicy?: PlaybackPolicyOverrides }).playbackPolicy,
-  }), [playbackFactsApi, platform]);
+    // Every file the item holds: core's chooser weighs each against this
+    // client's capabilities and names the one it plays (Tom, 2026-09-24).
+    facts: async (media: MediaSummary) => playbackFactsApi.facts({ itemId: media.id }),
+    policyOverrides,
+    qualityCeiling: deviceCeiling,
+    offerAll: offerAllNow,
+  }), [deviceCeiling, offerAllNow, playbackFactsApi, policyOverrides]);
+  // The qualities a detail page offers beside Play, from the same facts,
+  // capabilities, policy and ceiling the runtime will start with, so a button
+  // plays what it says.
+  const loadVersions = useCallback(async (item: MediaSummary): Promise<PlaybackVersions> => playbackVersions(
+    await playbackFactsApi.facts({ itemId: item.id }),
+    await platform.capabilities(),
+    { overrides: policyOverrides, mediaIds: item.mediaIds, ceiling: deviceCeiling(), offerAll: offerAllNow() },
+  ), [deviceCeiling, offerAllNow, platform, playbackFactsApi, policyOverrides]);
   // Every session core asks for is timed from the request, so the player's
   // first fragment closes a measurement of what that node costs to start.
   const measuredResolver = useMemo(() => measureStartCosts(playbackResolver), [playbackResolver]);
@@ -619,6 +656,7 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
   const open = useCallback((item: MediaSummary) => navigate(pathForMedia(item)), [navigate]);
   const openPlayer = useCallback((item: MediaSummary) => playback.startPlayback(item), [playback.startPlayback]);
   const openPlayerFromStart = useCallback((item: MediaSummary) => playback.startPlayback(item, { fromStart: true }), [playback.startPlayback]);
+  const openPlayerVersion = useCallback((item: MediaSummary, version: VersionStep) => playback.startPlayback(item, { version }), [playback.startPlayback]);
 
   const music = useMusicController({
     api,
@@ -671,8 +709,18 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
   const openMetadataEditor = useCallback((id: string) => {
     navigate(routes.edit(id));
   }, [navigate]);
+  const detailRouteProps = {
+    api,
+    onPlay: openPlayer,
+    onPlayFromStart: openPlayerFromStart,
+    loadVersions,
+    onPlayVersion: openPlayerVersion,
+    progressById: playback.progressById,
+    onEdit: metadataEditingAvailable ? openMetadataEditor : undefined,
+    onMediaProfile: preparePlaybackProfile,
+  };
 
-  const settingsPane = <SettingsScreen api={api} serverApi={serverApi} bootstrapEndpoints={bootstrapEndpoints} usingHost={sameOrigin.endpoint} connectionNotice={connectionNotice} onSave={saveServer} />;
+  const settingsPane = <SettingsScreen api={api} serverApi={serverApi} bootstrapEndpoints={bootstrapEndpoints} usingHost={sameOrigin.endpoint} connectionNotice={connectionNotice} onSave={saveServer} qualityPreferences={qualityPreferences} qualityCeiling={deviceCeiling} />;
   const usersPane = <UsersScreen api={usersApi} session={session} />;
   /**
    * Hiding a link is not access control — a bookmark, a Back, or the catch-all
@@ -711,6 +759,7 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
     queuePosition={playback.queueState ? { index: playback.queueState.currentIndex, total: playback.queueState.items.length } : undefined}
     volume={playback.volume}
     onVolumeChange={playback.changeVolume}
+    offerAll={offerAll}
   /> : null;
 
   // Presentation only, and the same shape as the session splash below: hold
@@ -853,11 +902,11 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
         <Routes>
           <Route path={routes.home} element={mediaPane(<HomeScreen api={api} continueWatching={playback.continueWatching} onOpen={open} onResume={openPlayer} onRemoveFromContinueWatching={playback.removeFromContinueWatching} />)} />
           <Route path={routes.movies} element={mediaPane(<LibraryScreen api={api} kind="movies" onOpen={open} />)} />
-          <Route path="/movies/:movieId" element={mediaPane(<DetailRoute api={api} onPlay={openPlayer} onPlayFromStart={openPlayerFromStart} progressById={playback.progressById} parameter="movieId" onEdit={metadataEditingAvailable ? openMetadataEditor : undefined} onMediaProfile={preparePlaybackProfile} />)} />
+          <Route path="/movies/:movieId" element={mediaPane(<DetailRoute {...detailRouteProps} parameter="movieId" />)} />
           <Route path={routes.series} element={mediaPane(<LibraryScreen api={api} kind="shows" onOpen={open} />)} />
           <Route path="/series/:seriesId" element={mediaPane(<SeriesRoute api={api} onOpenSeason={open} onEdit={metadataEditingAvailable ? openMetadataEditor : undefined} />)} />
           <Route path="/series/:seriesId/seasons/:seasonId" element={mediaPane(<SeasonRoute api={api} progress={playback.progressById} onPlayEpisode={playback.openSeasonEpisode} onEdit={metadataEditingAvailable ? openMetadataEditor : undefined} />)} />
-          <Route path="/episodes/:episodeId" element={mediaPane(<DetailRoute api={api} onPlay={openPlayer} onPlayFromStart={openPlayerFromStart} progressById={playback.progressById} parameter="episodeId" onEdit={metadataEditingAvailable ? openMetadataEditor : undefined} onMediaProfile={preparePlaybackProfile} />)} />
+          <Route path="/episodes/:episodeId" element={mediaPane(<DetailRoute {...detailRouteProps} parameter="episodeId" />)} />
           <Route path={routes.music} element={mediaPane(<Navigate to={routes.musicArtists} replace />)} />
           <Route path={routes.musicArtists} element={mediaPane(<MusicScreen api={api} section="artists" onOpen={open} onPlayNow={music.playNow} onAddToPlaylist={music.addToPlaylist} onPlayNext={music.playNext} onPlayLater={music.playLater} onShuffle={music.shuffle} />)} />
           <Route path={routes.musicAlbums} element={mediaPane(<MusicScreen api={api} section="albums" onOpen={open} onPlayNow={music.playNow} onAddToPlaylist={music.addToPlaylist} onPlayNext={music.playNext} onPlayLater={music.playLater} onShuffle={music.shuffle} />)} />
@@ -865,10 +914,10 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
           <Route path={routes.musicPlaylist} element={mediaPane(<MusicPlaylistScreen api={api} entries={music.playlistEntries} onPlay={(index) => music.playPlaylist(false, index)} onShuffle={() => music.playPlaylist(true)} onRemove={music.removePlaylistEntry} onMove={music.movePlaylistEntry} onClear={music.clearPlaylist} />)} />
           <Route path="/music/artists/:artistId" element={mediaPane(<ArtistRoute api={api} onOpenAlbum={open} onAddToPlaylist={music.addToPlaylist} onPlayNext={music.playNext} onPlayLater={music.playLater} onShuffle={music.shuffle} onEdit={metadataEditingAvailable ? openMetadataEditor : undefined} />)} />
           <Route path="/music/albums/:albumId" element={mediaPane(<AlbumRoute api={api} onPlay={playback.openAlbumTrack} onPlayAll={music.playAlbumAll} onOpenTrack={open} onAddToPlaylist={music.addToPlaylist} onPlayNext={music.playNext} onPlayLater={music.playLater} onShuffle={music.shuffle} onEdit={metadataEditingAvailable ? openMetadataEditor : undefined} />)} />
-          <Route path="/music/tracks/:trackId" element={mediaPane(<DetailRoute api={api} onPlay={openPlayer} onPlayFromStart={openPlayerFromStart} progressById={playback.progressById} parameter="trackId" onEdit={metadataEditingAvailable ? openMetadataEditor : undefined} onMediaProfile={preparePlaybackProfile} />)} />
+          <Route path="/music/tracks/:trackId" element={mediaPane(<DetailRoute {...detailRouteProps} parameter="trackId" />)} />
           <Route path="/play/:itemId" element={<div className="player-route-placeholder" aria-hidden="true" />} />
-          <Route path="/items/:itemId" element={mediaPane(<DetailRoute api={api} onPlay={openPlayer} onPlayFromStart={openPlayerFromStart} progressById={playback.progressById} parameter="itemId" onEdit={metadataEditingAvailable ? openMetadataEditor : undefined} onMediaProfile={preparePlaybackProfile} />)} />
-          <Route path="/items/:itemId/edit" element={metadataEditingAvailable ? <MetadataEditorRoute api={catalogueApi} /> : <Navigate to={landing} replace />} />
+          <Route path="/items/:itemId" element={mediaPane(<DetailRoute {...detailRouteProps} parameter="itemId" />)} />
+          <Route path="/items/:itemId/edit" element={metadataEditingAvailable ? <MetadataEditorRoute api={catalogueApi} facts={playbackFactsApi} manage={libraryManagementAvailable ? manageApi : undefined} /> : <Navigate to={landing} replace />} />
           <Route path={routes.search} element={mediaPane(<SearchScreen api={api} onOpen={open} />)} />
           <Route path={routes.ingest} element={<Navigate to={routes.ingestTorrents} replace />} />
           <Route path={routes.ingestTorrents} element={permits('importer') ? <IngestScreen api={acquisitionApi} section="torrents" /> : <Navigate to={landing} replace />} />

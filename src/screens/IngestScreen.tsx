@@ -1,13 +1,17 @@
 import { useMemo, useState, type ChangeEvent, type FormEvent, type MouseEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { routes, type AcquisitionApi, type IngestJob, type TorrentJob } from '@machafoundation/core';
+import { routes, torrentHeldBy, type AcquisitionApi, type IngestJob, type TorrentJob } from '@machafoundation/core';
 import { JobControls, Progress } from './ingest/JobControls';
-import { formatAge, formatBytes, formatEta, formatPercent, formatRate, formatRatio, formatTimestamp, percent, stateLabel } from './ingest/format';
+import { intentNote, REMOVE_AFTER_CHOICES, staleSourceNotes, removeAfterDefaultLabel, torrentNodeLabel } from './ingest/clusterTorrents';
+import { useAsync } from '../hooks/useAsync';
+import { formatAge, formatBytes, formatCount, formatEta, formatPercent, formatRate, formatRatio, formatTimestamp, percent, stateLabel } from './ingest/format';
 import { canPause, canResume, canRetryImport, displayStateOf, jobKey, linkedIngestOf } from './ingest/jobs';
 import { DEFAULT_TORRENT_SORT, sortTorrents, TORRENT_SORT_KEYS } from './ingest/torrentSort';
 import { SortControl, SortHeader, useListSort } from '../components/ListSortControls';
 import { BulkActions, ListHeading, Pager, SelectPageBox, SelectRowBox, useListSelection } from '../components/ListParts';
 import { ConfirmModal } from '../components/Modal';
+import { AsyncIconButton } from '../components/AsyncIconButton';
+import { RefreshIcon } from '../components/ManageIcons';
 import { pageSlice } from '../lists/paging';
 import { useAcquisition } from './ingest/useAcquisition';
 import { jobErrorText, viewerErrorText } from '../text/viewerText';
@@ -31,7 +35,17 @@ export function IngestScreen({ api, section }: Props) {
   const [path, setPath] = useState('');
   const [magnet, setMagnet] = useState('');
   const [submitting, setSubmitting] = useState<'path' | 'magnet'>();
+  const [refreshing, setRefreshing] = useState(false);
   const navigate = useNavigate();
+  // The job already holding a torrent the viewer tried to add again (server
+  // 0.63.0 refuses a second job for it), to offer a way straight to it.
+  const [heldBy, setHeldBy] = useState<string | undefined>(undefined);
+  // Server 0.64.0: a torrent is added to the cluster, to download on any
+  // capable node or on one the viewer pins, and can be removed a while after
+  // it completes. '' is "any node" and "the cluster default".
+  const torrentNodes = useAsync(() => section === 'torrents' ? api.torrentNodes() : Promise.resolve(undefined), [api, section]);
+  const [nodeChoice, setNodeChoice] = useState('');
+  const [removeAfter, setRemoveAfter] = useState('');
   const { sort, setSort, sortBy, page, setPage, search } = useListSort(TORRENT_SORT_KEYS, DEFAULT_TORRENT_SORT);
 
   const filesystemJobs = useMemo(
@@ -80,6 +94,7 @@ export function IngestScreen({ api, section }: Props) {
     }
     setSubmitting(kind);
     setError(undefined);
+    setHeldBy(undefined);
     setNotice(undefined);
     try {
       if (kind === 'path') {
@@ -87,23 +102,53 @@ export function IngestScreen({ api, section }: Props) {
         setPath('');
         setNotice(`Import queued: ${value}`);
       } else {
-        await api.submitMagnet(value);
+        await api.submitMagnet(value, {
+          ...(nodeChoice ? { nodeId: nodeChoice } : {}),
+          ...(removeAfter !== '' ? { removeAfterMs: Number(removeAfter) } : {}),
+        });
         setMagnet('');
         setNotice('Torrent queued.');
       }
       await refresh();
     } catch (reason: unknown) {
       setError(viewerErrorText(reason));
+      setHeldBy(torrentHeldBy(reason)?.id);
     } finally {
       setSubmitting(undefined);
     }
   };
 
+  /** A refresh the viewer asked for. The list also polls, quietly, and that does not spin the button. */
+  const refreshNow = async () => {
+    setRefreshing(true);
+    try {
+      await refresh();
+    } catch (reason: unknown) {
+      setError(viewerErrorText(reason));
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
   const ingestEnabled = snapshot?.ingestStatus.enabled ?? false;
-  const torrentEnabled = snapshot?.torrentStatus.enabled ?? false;
+  // From server 0.64.0 torrents are the cluster's: every node takes adds,
+  // and /torrents/status describes only the node that answered (fi-1 runs
+  // none and says so). So whether torrents are available is the cluster's
+  // node list, and nothing is said until it has answered. A server older
+  // than 0.64.0 has no such list; there the answering node's status is the
+  // whole story, as before.
+  const clusterAnswered = torrentNodes.value !== undefined;
+  const clusterTakesTorrents = (torrentNodes.value?.nodes.length ?? 0) > 0;
+  const beforeClusterTorrents = Boolean(torrentNodes.error);
+  const torrentEnabled = beforeClusterTorrents ? snapshot?.torrentStatus.enabled ?? false : clusterTakesTorrents;
   const torrentBuilt = snapshot?.torrentStatus.build_available ?? false;
-  const staging = snapshot?.ingestStatus.staging;
   const now = Date.now();
+  const refreshIntervalMs = snapshot?.refreshIntervalMs ?? 5_000;
+  const staleNotes = staleSourceNotes(
+    (section === 'torrents' ? snapshot?.torrentSources : snapshot?.ingestSources) ?? [],
+    new Map(torrentNodes.value?.nodes.map((node) => [node.node_id, node.host]) ?? []),
+    now,
+  );
 
   /** The whole row opens the torrent, except where a control inside it was the target. */
   const openRow = (event: MouseEvent<HTMLTableRowElement>, job: TorrentJob) => {
@@ -115,11 +160,6 @@ export function IngestScreen({ api, section }: Props) {
     <section className="ingest-screen">
       <header className="ingest-header">
         <h1>Import</h1>
-        {staging && (
-          <p className="ingest-staging-summary" title={staging.path}>
-            Staging <strong>{formatBytes(staging.accounted_bytes)} / {formatBytes(staging.limit_bytes)}</strong>
-          </p>
-        )}
       </header>
 
       <div className="ingest-add-bar">
@@ -133,9 +173,22 @@ export function IngestScreen({ api, section }: Props) {
               placeholder="magnet:?xt=urn:btih:…"
               disabled={!torrentEnabled || submitting === 'magnet'}
             />
+            {clusterTakesTorrents && (
+              <select aria-label="Download on" data-tv-focusable="true" value={nodeChoice} onChange={(event) => setNodeChoice(event.target.value)} disabled={submitting === 'magnet'}>
+                <option value="">Any node</option>
+                {torrentNodes.value?.nodes.map((node) => <option key={node.node_id} value={node.node_id}>{torrentNodeLabel(node)}</option>)}
+              </select>
+            )}
+            {clusterTakesTorrents && (
+              <select aria-label="Remove after completion" data-tv-focusable="true" value={removeAfter} onChange={(event) => setRemoveAfter(event.target.value)} disabled={submitting === 'magnet'}>
+                <option value="">{removeAfterDefaultLabel(torrentNodes.value?.defaultRemoveAfterMs)}</option>
+                {REMOVE_AFTER_CHOICES.map((choice) => <option key={choice.ms} value={String(choice.ms)}>{`Remove ${choice.label.charAt(0).toLowerCase()}${choice.label.slice(1)}`}</option>)}
+              </select>
+            )}
             <button className="primary-button" data-tv-focusable="true" type="submit" disabled={!torrentEnabled || !magnet.trim() || Boolean(submitting)}>
               {submitting === 'magnet' ? 'Adding…' : 'Add torrent'}
             </button>
+            <AsyncIconButton label="Refresh torrents" busy={refreshing || (loading && !snapshot)} onClick={() => void refreshNow()} icon={<RefreshIcon />} />
           </form>
         ) : (
           <form className="ingest-add-form" onSubmit={(event) => { void submit('path', event); }}>
@@ -154,12 +207,14 @@ export function IngestScreen({ api, section }: Props) {
           </form>
         )}
       </div>
-      {section === 'torrents' && snapshot && !torrentBuilt && <p className="ingest-disabled-note">This server was built without libtorrent-rasterbar.</p>}
-      {section === 'torrents' && snapshot && torrentBuilt && !torrentEnabled && <p className="ingest-disabled-note">Torrent acquisition is disabled in server configuration.</p>}
+      {section === 'torrents' && clusterAnswered && !clusterTakesTorrents && <p className="ingest-disabled-note">No node in this cluster can download torrents.</p>}
+      {section === 'torrents' && beforeClusterTorrents && snapshot && !torrentBuilt && <p className="ingest-disabled-note">This server was built without libtorrent-rasterbar.</p>}
+      {section === 'torrents' && beforeClusterTorrents && snapshot && torrentBuilt && !torrentEnabled && <p className="ingest-disabled-note">Torrent acquisition is disabled in server configuration.</p>}
       {section === 'files' && snapshot && !ingestEnabled && <p className="ingest-disabled-note">Filesystem import is disabled in server configuration.</p>}
 
-      {error && <p className="ingest-page-error" role="alert">{error}</p>}
+      {error && <p className="ingest-page-error" role="alert">{error}{heldBy && <> <Link data-tv-focusable="true" to={torrentPath(heldBy)}>Open it</Link></>}</p>}
       {notice && <p className="ingest-page-notice">{notice}</p>}
+      {staleNotes.map((note) => <p key={note} className="ingest-page-notice ingest-stale-source">{note}</p>)}
       {loading && !snapshot && <p className="ingest-loading">Loading import state…</p>}
 
       {section === 'torrents' && (
@@ -209,17 +264,17 @@ export function IngestScreen({ api, section }: Props) {
                       <td className="col-name">
                         <Link to={torrentPath(job.id, search)} data-tv-focusable="true" title={name}>{name}</Link>
                       </td>
-                      <td className="col-size">{job.bytes_total > 0 ? formatBytes(job.bytes_total) : '—'}</td>
+                      <td className="col-size">{job.bytes_total !== null && job.bytes_total > 0 ? formatBytes(job.bytes_total) : '—'}</td>
                       <td className="col-progress">
                         <Progress value={progress} />
                         <span>{formatPercent(progress)}</span>
                       </td>
-                      <td className={`col-status${failure ? ' has-error' : ''}`} title={failure}>{stateLabel(state)}</td>
+                      <td className={`col-status${failure ? ' has-error' : ''}`} title={failure}>{intentNote(job, now, refreshIntervalMs) ?? stateLabel(state)}</td>
                       <td className="col-rate">{formatRate(job.download_rate)}</td>
                       <td className="col-rate col-optional">{formatRate(job.upload_rate)}</td>
                       <td className="col-eta">{formatEta(job.eta_seconds)}</td>
-                      <td className="col-peers col-optional">{job.seeds}</td>
-                      <td className="col-peers col-optional">{job.peers}</td>
+                      <td className="col-peers col-optional">{formatCount(job.seeds)}</td>
+                      <td className="col-peers col-optional">{formatCount(job.peers)}</td>
                       <td className="col-ratio col-optional">{formatRatio(job)}</td>
                       <td className="col-added col-optional" title={formatTimestamp(job.created_unix_ms)}>{formatAge(job.created_unix_ms, now)}</td>
                       <td className="col-actions">

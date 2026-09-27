@@ -2,7 +2,10 @@ import type { ReactNode } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { routes, type AcquisitionApi, type IngestJob, type TorrentJob } from '@machafoundation/core';
 import { JobControls, Progress } from './ingest/JobControls';
-import { formatAge, formatBytes, formatEta, formatPercent, formatRate, formatRatio, formatTimestamp, percent, stateLabel } from './ingest/format';
+import { intentNote } from './ingest/clusterTorrents';
+import { placementRefusalText, TorrentPlacement } from './ingest/TorrentPlacement';
+import { useAsync } from '../hooks/useAsync';
+import { formatAge, formatBytes, formatCount, formatEta, formatPercent, formatRate, formatRatio, formatTimestamp, percent, stateLabel } from './ingest/format';
 import { jobErrorText } from '../text/viewerText';
 import { MetricTile } from '../components/MetricTile';
 import { DetailCard, DetailHeader, Facts } from '../components/ListParts';
@@ -46,7 +49,8 @@ function TorrentBody({ job, linkedIngest }: { job: TorrentJob; linkedIngest?: In
   // bytes, progress and rate in the torrent's own fields. So the download's
   // figures are only read while the download is what is running.
   const downloadProgress = downloaded ? 100 : percent(job.progress, job.bytes_completed, job.bytes_total);
-  const remaining = downloaded ? 0 : Math.max(0, job.bytes_total - job.bytes_completed);
+  // Unknown while the owning node is out of view (server 0.64.0): nothing is said to remain.
+  const remaining = downloaded || job.bytes_total === null || job.bytes_completed === null ? 0 : Math.max(0, job.bytes_total - job.bytes_completed);
   const catalogue = job.catalogue;
   const catalogueDone = catalogue ? catalogue.catalogued + catalogue.no_match + catalogue.failed : 0;
   const importProgress = importStage.status === 'done' ? 100 : linkedIngest ? percent(linkedIngest.progress, linkedIngest.bytes_completed, linkedIngest.bytes_total) : null;
@@ -55,7 +59,7 @@ function TorrentBody({ job, linkedIngest }: { job: TorrentJob; linkedIngest?: In
   // The headline is whichever stage is under way, named, so the big number is
   // never a finished stage's or a stage that has not started.
   const current = [
-    { stage: download, progress: downloadProgress, doing: 'Downloading', detail: `${formatBytes(job.bytes_completed)} of ${job.bytes_total > 0 ? formatBytes(job.bytes_total) : 'unknown size'}${remaining > 0 ? ` · ${formatBytes(remaining)} to go · ETA ${formatEta(job.eta_seconds)}` : ''}` },
+    { stage: download, progress: downloadProgress, ...downloadStageText(job, remaining) },
     { stage: importStage, progress: importProgress, doing: 'Copying into the library', detail: linkedIngest ? `${formatBytes(linkedIngest.bytes_completed)} of ${formatBytes(linkedIngest.bytes_total)} · ${linkedIngest.files_completed} of ${linkedIngest.files_total} files · ETA ${formatEta(linkedIngest.eta_seconds)}` : 'Starting' },
     { stage: catalogueStage, progress: catalogueProgress, doing: 'Cataloguing', detail: catalogue ? `${catalogueDone} of ${catalogue.total} files matched or settled` : '' },
   ].find((entry) => entry.stage.status !== 'done' && entry.stage.status !== 'issues');
@@ -72,7 +76,7 @@ function TorrentBody({ job, linkedIngest }: { job: TorrentJob; linkedIngest?: In
       </section>
 
       <div className="metric-grid torrent-metrics">
-        <MetricTile label="Download" value={downloaded ? 'Complete' : formatRate(job.download_rate)} detail={`${job.seeds} seeds · ${job.peers} peers`} />
+        <MetricTile label="Download" value={downloaded ? 'Complete' : formatRate(job.download_rate)} detail={`${formatCount(job.seeds)} seeds · ${formatCount(job.peers)} peers`} />
         <MetricTile label="Upload" value={formatRate(job.upload_rate)} detail={`${formatBytes(job.uploaded_total)} sent`} />
         <MetricTile label="Ratio" value={formatRatio(job)} detail="Sent against what this node holds" />
         <MetricTile label="Added" value={formatAge(job.created_unix_ms, now)} detail={`Last change ${formatAge(job.updated_unix_ms, now)}`} />
@@ -128,7 +132,10 @@ function TorrentBody({ job, linkedIngest }: { job: TorrentJob; linkedIngest?: In
       <DetailCard id="torrent-identity-heading" title="Torrent">
         <Facts rows={[
           ['Info hash', <code>{job.info_hash || 'Not yet known'}</code>],
-          ...(job.node_id ? [['Node', <code>{job.node_id}</code>] as const] : []),
+          // From 0.64.0 a torrent is the cluster's until a node claims it.
+          ['Node', job.node_id ? <code>{job.node_id}</code> : 'Not yet claimed by a node'],
+          ...(job.pinned_node_id ? [['Pinned to', <code>{job.pinned_node_id}</code>] as const] : []),
+          ...(job.remove_at_unix_ms ? [['Removed at', formatTimestamp(job.remove_at_unix_ms)] as const] : []),
           ['Added', formatTimestamp(job.created_unix_ms)],
           ['Job', <code>{job.id}</code>],
           ...(linkedIngest ? [['Import job', <code>{linkedIngest.id}</code>] as const] : []),
@@ -139,11 +146,26 @@ function TorrentBody({ job, linkedIngest }: { job: TorrentJob; linkedIngest?: In
 }
 
 /** One torrent's own page. The list carries its sort in the address, and so does the way back. */
+/**
+ * What the first stage is doing, from the torrent's state. From server
+ * 0.61.0 a torrent checks the data it already has before downloading, one
+ * torrent at a time: `verify_queued` waits for another's check, and
+ * `verifying` is its own, with `eta_seconds` for the check. `progress` is
+ * valid pieces over the total throughout.
+ */
+export function downloadStageText(job: Pick<TorrentJob, 'state' | 'bytes_completed' | 'bytes_total' | 'eta_seconds'>, remaining: number): { doing: string; detail: string } {
+  const of = `${formatBytes(job.bytes_completed)} of ${job.bytes_total !== null && job.bytes_total > 0 ? formatBytes(job.bytes_total) : 'unknown size'}`;
+  if (job.state === 'verify_queued') return { doing: 'Waiting to verify', detail: 'Waiting for another torrent\'s check to finish' };
+  if (job.state === 'verifying') return { doing: 'Verifying data already on disk', detail: `${of} verified · ETA ${formatEta(job.eta_seconds)}` };
+  return { doing: 'Downloading', detail: `${of}${remaining > 0 ? ` · ${formatBytes(remaining)} to go · ETA ${formatEta(job.eta_seconds)}` : ''}` };
+}
+
 export function TorrentDetailScreen({ api }: { api: AcquisitionApi }) {
   const { torrentId = '' } = useParams();
   const { search } = useLocation();
   const navigate = useNavigate();
-  const { snapshot, loading, error, busyByJob, confirmRemove, setConfirmRemove, act } = useAcquisition(api);
+  const { snapshot, loading, error, setError, refresh, busyByJob, confirmRemove, setConfirmRemove, act } = useAcquisition(api);
+  const torrentNodes = useAsync(() => api.torrentNodes(), [api]);
   const back = `${routes.ingestTorrents}${search}`;
   const job = snapshot?.torrentJobs.find((candidate) => candidate.id === torrentId);
   const linked = job ? linkedIngestOf(job, snapshot?.ingestJobs) : undefined;
@@ -166,7 +188,7 @@ export function TorrentDetailScreen({ api }: { api: AcquisitionApi }) {
     <section className="ingest-screen detail-screen">
       <Link className="back-button" to={back} data-tv-focusable="true">← Torrents</Link>
       <DetailHeader
-        kicker={stateLabel(state)}
+        kicker={intentNote(job, Date.now(), snapshot?.refreshIntervalMs ?? 5_000) ?? stateLabel(state)}
         kickerClass={`state-${state}`}
         title={name}
         actions={(
@@ -191,6 +213,13 @@ export function TorrentDetailScreen({ api }: { api: AcquisitionApi }) {
       {error && <p className="ingest-page-error" role="alert">{error}</p>}
       {failure && <p className="ingest-job-error">{failure}</p>}
       {lifecycle && <p className="ingest-current">{lifecycle}</p>}
+      <TorrentPlacement
+        api={api}
+        job={job}
+        nodes={torrentNodes.value}
+        onChanged={() => { setError(undefined); void refresh(); }}
+        onError={(reason) => setError(placementRefusalText(reason))}
+      />
       <TorrentBody job={job} linkedIngest={linked} />
     </section>
   );
