@@ -2,7 +2,8 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { CatalogueMediaProfile, MediaApi, MediaDetails, PlaybackVersions, VersionStep } from '@machafoundation/core';
-import { DetailScreen, fileLines } from './DetailScreen';
+import { DetailScreen } from './DetailScreen';
+import { fileLines } from '../text/mediaLines';
 
 const step = (quality: VersionStep['quality'], source: VersionStep['source']): VersionStep => ({
   quality,

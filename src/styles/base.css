@@ -874,10 +874,21 @@ h2 { font-size: clamp(1.2rem, 2vw, 1.75rem); letter-spacing: -.01em; margin: 1.1
 .audio-player-placeholder { width: 100%; height: 100%; display: grid; place-items: center; font-size: 7rem; color: #ffffff22; }
 /* Artist, album and year, and the track's place, centred under the artwork: the artist brightest, the rest quieter. */
 .audio-player-facts { position: absolute; left: 50%; top: calc(44% + min(21vh, 19vw, 210px) + 1.3rem); width: min(90vw, 36rem); transform: translateX(-50%); text-align: center; pointer-events: none; }
-.audio-player-facts p { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.audio-player-facts p { margin: 0; overflow-wrap: anywhere; }
 .audio-player-artist { color: #f2f2f4; font-size: 1.35rem; font-weight: 600; }
 .audio-player-facts .audio-player-album { margin-top: .3rem; color: var(--text-dim); font-size: 1.05rem; }
 .audio-player-facts .audio-player-track { margin-top: .35rem; color: var(--text-faint); font-size: .85rem; letter-spacing: .06em; text-transform: uppercase; }
+.audio-player-facts .audio-player-format { margin-top: .6rem; color: var(--text-dim); font-size: .9rem; letter-spacing: .02em; }
+/* A media line wraps only between its fields; see MediaLine. */
+.media-line-field { white-space: nowrap; }
+/* Beside the artwork where the screen has room across (Tom, 2026-09-27), under
+   it otherwise. --art, --gap and --facts size the pair, which is centred as
+   one block so neither half drifts off a wide screen. */
+@media (min-width: 760px) and (min-aspect-ratio: 1/1) {
+  .audio-player { --art: min(42vh, 38vw, 420px); --gap: 2.5rem; --facts: min(28rem, 36vw); }
+  .audio-player .audio-player-art { left: calc(50% - (var(--art) + var(--gap) + var(--facts)) / 2); width: var(--art); transform: translateY(-50%); }
+  .audio-player .audio-player-facts { left: calc(50% - (var(--art) + var(--gap) + var(--facts)) / 2 + var(--art) + var(--gap)); top: 44%; width: var(--facts); transform: translateY(-50%); text-align: left; }
+}
 .player-page .loading-overlay { z-index: 110; }
 /* What is being waited for, under the spinner. Quiet: it is company during a
    wait, not a warning about one. */

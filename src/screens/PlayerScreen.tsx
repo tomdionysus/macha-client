@@ -9,6 +9,8 @@ import { useElapsedMs } from '../hooks/useElapsedMs';
 import { usePointerIdle } from '../hooks/usePointerIdle';
 import { cardSubtitle, episodeCode, playbackNoticeText, playbackTimeText, streamStatusText } from '../text/viewerText';
 import { TrackFacts } from './player/TrackFacts';
+import { useAsync } from '../hooks/useAsync';
+import { mediaProfileSummary } from '../text/mediaLines';
 import type { Platform } from '@machafoundation/core';
 import { platformTraits } from '../platform/traits';
 import type { PlaybackUpdate } from '@machafoundation/core';
@@ -829,6 +831,19 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
     </span>
   );
   const audio = media.kind === 'track';
+  // The playing track's format line, from its file's catalogue profile. Tom,
+  // 2026-09-27: music shows the same line as a title page, in the player
+  // beside the artwork. Only the file actually playing, once the session
+  // names it; a profile that cannot be read shows nothing.
+  const playingMediaId = audio ? session?.mediaId : undefined;
+  const trackFormat = useAsync(
+    async (signal) => {
+      if (!playingMediaId?.startsWith('macha:') || !api.mediaProfile) return undefined;
+      const profile = await api.mediaProfile(playingMediaId, signal);
+      return profile ? mediaProfileSummary(profile) : undefined;
+    },
+    [api, playingMediaId],
+  );
   const described = describePlaybackSession(session, event.streamOrigin);
   const streamStatus = described && { endpoint: described.endpoint, ...streamStatusText(described) };
   const mediaSubtitle = playerMediaSubtitle(media);
@@ -878,7 +893,7 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
           {cover ? <img src={cover} alt="" /> : <div className="audio-player-placeholder">♪</div>}
         </div>
       )}
-      {audio && <TrackFacts track={media} />}
+      {audio && <TrackFacts track={media} format={trackFormat.value} />}
       {showBuffering && (
         <Loading
           delayMs={playback.starting ? 0 : uiSettings.playerSeekSpinnerDelayMs}

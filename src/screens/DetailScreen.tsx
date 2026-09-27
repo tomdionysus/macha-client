@@ -12,6 +12,8 @@ import { useEffect } from 'react';
 import { EditButton } from '../components/EditButton';
 import { episodeCode, qualityLabel, qualityLimitText } from '../text/viewerText';
 import { MediaPageTitle } from '../components/MediaPageTitle';
+import { MediaLine } from '../components/MediaLine';
+import { fileLines } from '../text/mediaLines';
 
 interface Props {
   api: MediaApi;
@@ -36,91 +38,9 @@ function hasPicture(media: MediaSummary): boolean {
   return media.kind === 'movie' || media.kind === 'episode';
 }
 
-/**
- * One line per file's format, with files that read the same (length,
- * resolution, codecs and bitrate) combined into one line (Tom, 2026-09-27).
- *
- * TODO: files identical in all of these are very likely the same media
- * stored twice. Report them to the server once it has a route for flagging
- * duplicates, rather than only hiding the repeat here.
- */
-export function fileLines(profiles: readonly CatalogueMediaProfile[]): string[] {
-  return [...new Set(profiles.map(mediaProfileSummary))];
-}
-
 function canResume(media: MediaSummary, progress?: PlaybackProgress): boolean {
   return (media.kind === 'movie' || media.kind === 'episode')
     && Boolean(progress && progress.positionMs > 0 && progress.durationMs > 0);
-}
-
-function codecLabel(codec: string): string {
-  const normalized = codec.trim().toLowerCase();
-  if (normalized === 'h264') return 'H.264';
-  if (normalized === 'hevc' || normalized === 'h265') return 'HEVC';
-  if (normalized === 'aac') return 'AAC';
-  if (normalized === 'ac3') return 'AC-3';
-  if (normalized === 'eac3') return 'E-AC-3';
-  return codec.toUpperCase();
-}
-
-function channelsLabel(channels: number): string {
-  if (channels === 1) return 'Mono';
-  if (channels === 2) return 'Stereo';
-  if (channels === 6) return '5.1';
-  if (channels === 8) return '7.1';
-  return `${channels}ch`;
-}
-
-/** A track's length as a player shows it: "3:45", or "1:02:03" past an hour. */
-function trackLength(ms: number): string {
-  const total = Math.round(ms / 1000);
-  const hours = Math.floor(total / 3600);
-  const minutes = Math.floor((total % 3600) / 60);
-  const seconds = String(total % 60).padStart(2, '0');
-  return hours > 0 ? `${hours}:${String(minutes).padStart(2, '0')}:${seconds}` : `${minutes}:${seconds}`;
-}
-
-/**
- * A file with no picture, as "3:45 · FLAC · 24-bit · 96 kHz · Stereo ·
- * 2,304 kbps": what matters about audio is its resolution in bits and
- * samples, not a picture's. The music extension of the per-file line, as
- * proposed to the TV and phone clients on 2026-09-27.
- */
-/**
- * The audio a line names: the file's default track, else its first. A film
- * can carry eight (TrueHD, DTS, AC-3 and more), and the default is the one
- * that plays.
- */
-function lineAudio(profile: CatalogueMediaProfile) {
-  return profile.streams.find((stream) => stream.type === 'audio' && stream.default)
-    ?? profile.streams.find((stream) => stream.type === 'audio');
-}
-
-function audioProfileSummary(profile: CatalogueMediaProfile): string {
-  const audio = lineAudio(profile);
-  const parts: string[] = [];
-  if (profile.duration_ms > 0) parts.push(trackLength(profile.duration_ms));
-  if (audio?.codec) parts.push(codecLabel(audio.codec));
-  if (audio && audio.bit_depth > 0) parts.push(`${audio.bit_depth}-bit`);
-  if (audio && audio.sample_rate > 0) parts.push(`${Number((audio.sample_rate / 1000).toFixed(1))} kHz`);
-  if (audio && audio.channels > 0) parts.push(channelsLabel(audio.channels));
-  if (profile.bitrate > 0) parts.push(`${Math.round(profile.bitrate / 1000).toLocaleString('en-GB')} kbps`);
-  return parts.join(' · ');
-}
-
-export function mediaProfileSummary(profile: CatalogueMediaProfile): string {
-  if (!profile.streams.some((stream) => stream.type === 'video' && !stream.attached_picture)) return audioProfileSummary(profile);
-  const parts: string[] = [];
-  const minutes = Math.floor(profile.duration_ms / 60_000);
-  if (minutes >= 60) parts.push(`${Math.floor(minutes / 60)}h ${minutes % 60}m`);
-  else if (minutes > 0) parts.push(`${minutes}m`);
-  const video = profile.streams.find((stream) => stream.type === 'video' && !stream.attached_picture);
-  const audio = lineAudio(profile);
-  if (video?.width && video.height) parts.push(`${video.width}×${video.height}`);
-  if (video?.codec) parts.push(codecLabel(video.codec));
-  if (audio?.codec) parts.push(codecLabel(audio.codec));
-  if (profile.bitrate > 0) parts.push(`${(profile.bitrate / 1_000_000).toFixed(1)} Mbps`);
-  return parts.join(' · ');
 }
 
 export function DetailScreen({ api, itemId, onBack, onPlay, onPlayFromStart, loadVersions, onPlayVersion, progress, onEdit, onMediaProfile }: Props) {
@@ -170,7 +90,7 @@ export function DetailScreen({ api, itemId, onBack, onPlay, onPlayFromStart, loa
       <p className="eyebrow">{media.kind}{media.year ? ` · ${media.year}` : ''}</p>
       <MediaPageTitle refreshing={details.refreshing} onRefresh={details.refresh}>{media.title}</MediaPageTitle>
       {media.kind === 'episode' && episodeCode(media) && <p className="subtitle">{episodeCode(media)}</p>}
-      {profiles.value && fileLines(profiles.value).map((line) => <p key={line} className="media-profile-summary">{line}</p>)}
+      {profiles.value && fileLines(profiles.value).map((line) => <MediaLine key={line} className="media-profile-summary" line={line} />)}
       {media.synopsis && <p className="synopsis">{media.synopsis}</p>}
       {playable && (
         <div className="play-actions detail-play-controls" aria-label="Playback controls">

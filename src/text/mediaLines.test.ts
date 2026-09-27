@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { CatalogueMediaProfile } from '@machafoundation/core';
-import { mediaProfileSummary } from './DetailScreen';
+import { mediaProfileSummary } from './mediaLines';
 
 describe('mediaProfileSummary', () => {
   it('presents immutable playback facts compactly without path-derived data', () => {
