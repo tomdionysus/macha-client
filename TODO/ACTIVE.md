@@ -164,7 +164,15 @@ an ingest/server one, [evidence](2026-09-16-video-fit-mode.md)).
 `readyState` 0 (instrumented, no mechanism). Seek misbehaviour. A handover
 with no lead. Failover from an https page onto an http node (core's).
 
-## Cluster torrents, server 0.64.0 (designed, not built; web work waiting)
+## Cluster torrents, server 0.64.0 (live; web built `9f57f73`, not deployed)
+
+Built on core `201700f`: node selector and remove-after on the add form,
+intents in the status column and on the torrent page, "Not yet claimed",
+the pinned node and removal time, polling at `refresh_interval_ms`, and
+null-safe live figures. Seen live (the form only; nothing added). Not yet
+built: re-pinning an unclaimed job (`PATCH {node_id}`), changing
+remove-after on an existing job, and a stale-source notice from `sources`.
+The notes below are the design as settled.
 
 Torrents belong to the cluster: added once, claimed by any torrent-capable
 node or a pinned one. The server settled the web's nine review points
