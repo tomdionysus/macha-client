@@ -202,3 +202,10 @@ describe('a refusal because the node is busy', () => {
     expect(playbackNoticeText({ code: 'update-failed', error } as PlaybackNotice)).toBe('Playback settings were not changed: This node is already converting as much as it can for other viewers. Try again shortly.');
   });
 });
+
+describe('adding a torrent a node already holds (server 0.63.0)', () => {
+  it('says it is already in the list, and how to add it again, without the job id', () => {
+    const error = new MachaAcquisitionApiError('Macha acquisition request failed: job 3f2a already holds this torrent', 409, 'torrent_already_added', 'job 3f2a already holds this torrent');
+    expect(viewerErrorText(error)).toBe('That torrent is already in the list. To download it again, remove its job first.');
+  });
+});

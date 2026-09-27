@@ -239,9 +239,19 @@ const PLACEMENT_REASONS: Record<string, string> = {
   add_failed: 'That node could not add the torrent.',
 };
 
+/**
+ * Server 0.63.0: a node holds a torrent in one job, and a second add of the
+ * same torrent is refused while that job exists, in whatever state. Before,
+ * it made a second job on the same download, and cancelling either destroyed
+ * the other.
+ */
+const TORRENT_ALREADY_ADDED_CODE = 'torrent_already_added';
+
 /** A torrent another node would not take: by its reason, or the peer's own code where that is a job's. */
 function placementText(error: unknown): string | undefined {
-  if (!(error instanceof MachaAcquisitionApiError) || error.code !== 'placement_failed' || !error.reason) return undefined;
+  if (!(error instanceof MachaAcquisitionApiError)) return undefined;
+  if (error.code === TORRENT_ALREADY_ADDED_CODE) return 'That torrent is already in the list. To download it again, remove its job first.';
+  if (error.code !== 'placement_failed' || !error.reason) return undefined;
   return PLACEMENT_REASONS[error.reason] ?? JOB_ERRORS[error.reason as TorrentJobErrorCode];
 }
 
