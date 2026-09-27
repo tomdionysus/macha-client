@@ -360,7 +360,9 @@ describe('adding a torrent the node already holds (server 0.63.0)', () => {
     const alert = await screen.findByRole('alert');
     expect(alert.textContent).toContain('That torrent is already in the list. To download it again, remove its job first.');
     fireEvent.click(within(alert).getByText('Open it'));
-    expect(await screen.findByTestId('where')).toHaveProperty('textContent', expect.stringContaining('/ingest/torrents/tor-1'));
+    // Waits for the route, not just the element: under load the click lands
+    // before the navigation renders, and the address still reads the list.
+    await waitFor(() => expect(screen.getByTestId('where').textContent).toContain('/ingest/torrents/tor-1'));
   });
 });
 
