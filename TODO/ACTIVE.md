@@ -441,6 +441,17 @@ tar -czf /etc/macha/web.bak-$(date +%Y%m%d-%H%M%S).tar.gz -C /etc/macha web
 rsync -a --omit-dir-times --chown=1000:50 dist/ root@<node>:/etc/macha/web/
 ```
 
+**develop deployed to fi-1 and gbni-1, 2026-09-27 20:30 (local), on Tom's
+word; es-1 not tried.** Commit `f25319a`, bundle `index-BV1CkG1Z.js`,
+719,007 bytes, `shasum` `8c50d0859725`, core `75ba254` (the 0.20.0
+candidate's code `7a79d49`; clean, dist current), suite 623. Adds: staging
+per node in the torrent node list (header figure removed), storage and
+cache tiles as used / total then available / total, and a Version line on
+each node card. Backups `web.bak-20260927-203054`; additive, 24 files
+each; served on `127.0.0.1:7438` with a matching `shasum`,
+`hls-Bt6kO1A0.js` and the previous `index-gmwnlN3H.js` `200`, and on
+`macnessa`.
+
 **develop deployed to fi-1 and gbni-1, 2026-09-27 18:09 (local), on Tom's
 "Yes"; es-1 not tried (down all day).** Commit `bd68eb7`, bundle
 `index-gmwnlN3H.js`, 718,372 bytes, `shasum` `555e42cfdaea`, core `e964514`
