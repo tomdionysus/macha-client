@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import type { MediaApi, MediaDetails, PlaybackVersions, VersionStep } from '@machafoundation/core';
-import { DetailScreen } from './DetailScreen';
+import type { MediaApi, MediaDetails, PlaybackMode, PlaybackVersions, VersionFile, VersionStep } from '@machafoundation/core';
+import { DetailScreen, fileSummary } from './DetailScreen';
 
 const step = (quality: VersionStep['quality'], source: VersionStep['source']): VersionStep => ({
   quality,
@@ -59,5 +59,36 @@ describe('the detail page\'s quality buttons', () => {
     expect(await screen.findByTitle('Play')).toBeTruthy();
     expect(loadVersions).not.toHaveBeenCalled();
     expect(screen.queryAllByTitle(/^Play at /)).toHaveLength(0);
+  });
+});
+
+const file = (quality: VersionFile['quality'], mode: PlaybackMode, index: number): VersionFile => ({
+  mediaId: `macha:${index}`, quality, index,
+  instruction: { mode, video: mode === 'transcode' ? 'transcode' : 'copy', audio: 'copy', reasons: [], assumed: [] },
+});
+
+describe('a title\'s files, below its title', () => {
+  it('groups the files by how this device plays them, largest first', () => {
+    expect(fileSummary([file(1080, 'direct', 0), file(2160, 'direct', 1), file(720, 'transcode', 2), file(1080, 'remux', 3)]))
+      .toEqual(['Direct: 4K, 1080p', 'Remux: 1080p', 'Transcode: 720p']);
+  });
+
+  it('counts files that share a quality rather than hiding the second', () => {
+    expect(fileSummary([file(1080, 'direct', 0), file(1080, 'direct', 1), file(2160, 'direct', 2)])).toEqual(['Direct: 4K, 1080p ×2']);
+  });
+
+  it('says nothing for a title with one file', () => {
+    expect(fileSummary([file(1080, 'direct', 0)])).toEqual([]);
+  });
+
+  it('shows the groups as pills on the page for a title with several files', async () => {
+    show(film, { ...fourK, files: [file(2160, 'direct', 0), file(1080, 'direct', 1)] });
+    expect((await screen.findByLabelText('Files')).textContent).toBe('Direct: 4K, 1080p');
+  });
+
+  it('shows no pills for a title with one file', async () => {
+    show(film, { ...fourK, files: [file(2160, 'direct', 0)] });
+    await screen.findByTitle('Play at 4K');
+    expect(screen.queryByLabelText('Files')).toBeNull();
   });
 });

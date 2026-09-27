@@ -1,7 +1,7 @@
 import type { MediaApi } from '@machafoundation/core';
 import type { CatalogueMediaProfile } from '@machafoundation/core';
 import { PlayIcon, RestartIcon } from '../components/PlaybackIcons';
-import type { MediaDetails, MediaSummary, PlaybackProgress, PlaybackVersions, VersionStep } from '@machafoundation/core';
+import type { MediaDetails, MediaSummary, PlaybackMode, PlaybackProgress, PlaybackVersions, VersionFile, VersionStep } from '@machafoundation/core';
 import { useAsync } from '../hooks/useAsync';
 import { useRefreshableAsync } from '../hooks/useRefreshableAsync';
 import { ErrorMessage, Loading } from '../components/Status';
@@ -34,6 +34,26 @@ function canPlayDirectly(details: MediaDetails): boolean {
 /** A picture has qualities to pick between; a track's audio does not. */
 function hasPicture(media: MediaSummary): boolean {
   return media.kind === 'movie' || media.kind === 'episode';
+}
+
+const MODE_NAMES: Record<PlaybackMode, string> = { direct: 'Direct', remux: 'Remux', transcode: 'Transcode' };
+
+/**
+ * An item's files, grouped by how this device would play each, as
+ * "Direct: 4K, 1080p ×2". Tom, 2026-09-27: a title with several files shows
+ * them below its title, beside the quality buttons. Files of one quality are
+ * counted, not merged, since the point is that there are several. Nothing
+ * for a title with one file, where the buttons already say it all.
+ */
+export function fileSummary(files: readonly VersionFile[]): string[] {
+  if (files.length < 2) return [];
+  return (['direct', 'remux', 'transcode'] as const).flatMap((mode) => {
+    const counts = new Map<VersionFile['quality'], number>();
+    for (const file of files) if (file.instruction.mode === mode) counts.set(file.quality, (counts.get(file.quality) ?? 0) + 1);
+    const qualities = [...counts.keys()].sort((a, b) => b - a)
+      .map((quality) => counts.get(quality)! > 1 ? `${qualityLabel(quality)} ×${counts.get(quality)}` : qualityLabel(quality));
+    return qualities.length > 0 ? [`${MODE_NAMES[mode]}: ${qualities.join(', ')}`] : [];
+  });
 }
 
 function canResume(media: MediaSummary, progress?: PlaybackProgress): boolean {
@@ -103,6 +123,11 @@ export function DetailScreen({ api, itemId, onBack, onPlay, onPlayFromStart, loa
       <p className="eyebrow">{media.kind}{media.year ? ` · ${media.year}` : ''}</p>
       <MediaPageTitle refreshing={details.refreshing} onRefresh={details.refresh}>{media.title}</MediaPageTitle>
       {media.kind === 'episode' && episodeCode(media) && <p className="subtitle">{episodeCode(media)}</p>}
+      {versions.value && fileSummary(versions.value.files).length > 0 && (
+        <p className="media-file-pills" aria-label="Files">
+          {fileSummary(versions.value.files).map((line) => <span key={line} className="media-file-pill">{line}</span>)}
+        </p>
+      )}
       {profile.value && <p className="media-profile-summary">{mediaProfileSummary(profile.value)}</p>}
       {media.synopsis && <p className="synopsis">{media.synopsis}</p>}
       {playable && (
