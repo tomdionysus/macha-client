@@ -90,10 +90,8 @@ export function DetailScreen({ api, itemId, onBack, onPlay, onPlayFromStart, loa
       <MediaPageTitle refreshing={details.refreshing} onRefresh={details.refresh}>{media.title}</MediaPageTitle>
       {media.kind === 'episode' && episodeCode(media) && <p className="subtitle">{episodeCode(media)}</p>}
       {/* One line per distinct file; core combines files whose summaries read
-          the same (Tom, 2026-09-27).
-          TODO: an entry standing for more than one media id is very likely the
-          same media stored twice. Report it to the server once it has a route
-          for flagging duplicates, rather than only showing one line here. */}
+          the same (Tom, 2026-09-27), and holds the TODO to report them to the
+          server as likely duplicates. */}
       {profiles.value && fileSummaries(profiles.value).map(({ summary, mediaIds }) => <MediaLine key={mediaIds[0]} className="media-profile-summary" parts={summary.parts} />)}
       {media.synopsis && <p className="synopsis">{media.synopsis}</p>}
       {playable && (
