@@ -36,6 +36,18 @@ function hasPicture(media: MediaSummary): boolean {
   return media.kind === 'movie' || media.kind === 'episode';
 }
 
+/**
+ * One line per file's format, with files that read the same (length,
+ * resolution, codecs and bitrate) combined into one line (Tom, 2026-09-27).
+ *
+ * TODO: files identical in all of these are very likely the same media
+ * stored twice. Report them to the server once it has a route for flagging
+ * duplicates, rather than only hiding the repeat here.
+ */
+export function fileLines(profiles: readonly CatalogueMediaProfile[]): string[] {
+  return [...new Set(profiles.map(mediaProfileSummary))];
+}
+
 function canResume(media: MediaSummary, progress?: PlaybackProgress): boolean {
   return (media.kind === 'movie' || media.kind === 'episode')
     && Boolean(progress && progress.positionMs > 0 && progress.durationMs > 0);
@@ -112,7 +124,7 @@ export function DetailScreen({ api, itemId, onBack, onPlay, onPlayFromStart, loa
       <p className="eyebrow">{media.kind}{media.year ? ` · ${media.year}` : ''}</p>
       <MediaPageTitle refreshing={details.refreshing} onRefresh={details.refresh}>{media.title}</MediaPageTitle>
       {media.kind === 'episode' && episodeCode(media) && <p className="subtitle">{episodeCode(media)}</p>}
-      {profiles.value?.map((each) => <p key={each.media_id} className="media-profile-summary">{mediaProfileSummary(each)}</p>)}
+      {profiles.value && fileLines(profiles.value).map((line) => <p key={line} className="media-profile-summary">{line}</p>)}
       {media.synopsis && <p className="synopsis">{media.synopsis}</p>}
       {playable && (
         <div className="play-actions detail-play-controls" aria-label="Playback controls">

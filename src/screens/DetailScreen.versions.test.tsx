@@ -2,7 +2,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { CatalogueMediaProfile, MediaApi, MediaDetails, PlaybackVersions, VersionStep } from '@machafoundation/core';
-import { DetailScreen } from './DetailScreen';
+import { DetailScreen, fileLines } from './DetailScreen';
 
 const step = (quality: VersionStep['quality'], source: VersionStep['source']): VersionStep => ({
   quality,
@@ -97,5 +97,19 @@ describe('a title\'s files, one line each', () => {
     const { container } = render(<DetailScreen api={api} itemId="film" onBack={vi.fn()} onPlay={vi.fn()} onPlayFromStart={vi.fn()} />);
     await screen.findByText(/1920×1080/);
     expect(container.querySelectorAll('.media-profile-summary')).toHaveLength(1);
+  });
+});
+
+describe('files that are the same', () => {
+  it('share one line when length, resolution, codecs and bitrate all match', () => {
+    const same = profileOf('macha:a', 1920, 1080, 'h264', 'aac', 8_000_000);
+    expect(fileLines([same, { ...same, media_id: 'macha:b' }, profileOf('macha:c', 3840, 2160, 'hevc', 'truehd', 47_400_000)])).toEqual([
+      '2h 31m · 1920×1080 · H.264 · AAC · 8.0 Mbps',
+      '2h 31m · 3840×2160 · HEVC · TRUEHD · 47.4 Mbps',
+    ]);
+  });
+
+  it('keep their own lines when the bitrate differs', () => {
+    expect(fileLines([profileOf('macha:a', 1920, 804, 'hevc', 'aac', 2_200_000), profileOf('macha:b', 1920, 804, 'hevc', 'aac', 2_400_000)])).toHaveLength(2);
   });
 });
