@@ -164,6 +164,50 @@ an ingest/server one, [evidence](2026-09-16-video-fit-mode.md)).
 `readyState` 0 (instrumented, no mechanism). Seek misbehaviour. A handover
 with no lead. Failover from an https page onto an http node (core's).
 
+## Cards with no artwork (investigated 2026-09-27; let go, waiting on es-1)
+
+Tom saw cards with no artwork on `macnessa` while looking right at them.
+**Cause: the artwork bytes are held by no online node.** Measured with the
+test account at 19:1xZ against gbni-1: of 301 movies, 296 have a poster in
+their catalogue artwork list, and **60 of those 296 answer 404
+`not_found` "artwork not found"** on their signed URL. The same ids are 404
+through fi-1 too. The other 236 answer 200. Series had no items and albums
+no posters in that listing, so movies were the whole sample.
+
+- **Every missing poster belongs to an item last updated 2026-09-06 to
+  2026-09-10** (32 on the 7th, 17 on the 10th). Served posters spread from
+  the 6th to the 27th. That fits the server's hypothesis: es-1 did the
+  matching then (it had the scanner and the TMDB key), the bytes were
+  stored there, and es-1 has been offline since 2026-09-24. Unproven: the
+  server cannot read the boxes from its session, and nothing reports
+  per-object presence across the cluster. **Tom's ruling: it is missing
+  because es-1 is offline, or if not, it cannot be tested; let it go.**
+- **The client is not at fault.** The page asked fi-1 (the artwork host by
+  round trip), and fi-1 fetches through from peers: first reads 1.7-3.4 s,
+  repeats 15-66 ms, and a 404 in about 2 s means it asked every reachable
+  node (server's reading of `DistributedStore::get`). A browser re-fetch of
+  12 on-screen posters took 187 ms in all. `loading="lazy"` images not
+  loading in my hidden test tab was the tab, not the fault Tom saw.
+- **The server cannot heal it on its own.** Repair and prompt replication
+  copy only from a holder; nothing re-fetches from the provider (the
+  catalogue keeps role, object id and mime, not the TMDB URL). A re-match
+  (`DELETE .../metadata`) would re-download, but it is destructive and
+  Tom's call. The server has taken restore-es-1 / re-match /
+  re-fetch-on-unsourceable to Tom.
+- **The same failure is forming now.** gbni-1's
+  `diagnostics.prompt_replication` read `skipped_no_room 687, dropped 687`:
+  687 new objects since it started found no peer with room for a second
+  copy, because fi-1's 10 GiB backend is full. Those exist only on gbni-1.
+  Repair `passes_completed 0`. With the server, as a capacity decision for
+  Tom.
+- **Client mitigation considered, not built:** fall back to another role
+  when the first is held nowhere. 58 of the 60 items have a backdrop, and
+  for 40 of them it answers 200, so a card could show the cropped backdrop
+  instead of a letter. A first draft (a `fallbacks` chain on `LazyArtwork`)
+  was reverted unfinished when Tom said to let it go: its two new tests
+  failed, the capability path not yet handing over to the next artwork after
+  the authenticated fetch's 404. Pick it up only if Tom asks.
+
 ## Cluster torrents, server 0.64.0 (live; web built `9f57f73`, not deployed)
 
 Built on core `201700f`: node selector and remove-after on the add form,
