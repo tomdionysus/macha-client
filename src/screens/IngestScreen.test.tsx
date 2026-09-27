@@ -63,7 +63,8 @@ function fakeApi(value: AcquisitionSnapshot | (() => AcquisitionSnapshot), overr
     retryTorrent: unused,
     cancelTorrent: unused,
     clearTorrent: unused,
-    torrentNodes: () => Promise.resolve({ nodes: [] }),
+    // As the cluster is today: one node that runs torrents (server 0.64.0).
+    torrentNodes: () => Promise.resolve({ nodes: [{ node_id: 'gbni', host: 'gbni-1', local: false, reachable: true, as_of_unix_ms: 1, max_active: 4, active_jobs: 0, accepting: true, not_accepting_reason: null, staging: { limit_bytes: 1, disk_bytes: 1, reserved_bytes: 0, free_bytes: 1 } }] }),
     ...overrides,
   } as unknown as AcquisitionApi;
 }
@@ -395,5 +396,30 @@ describe('adding a torrent to the cluster (server 0.64.0)', () => {
   it('shows an action still under way in the status column', async () => {
     renderAt('/ingest/torrents', snapshot([torrentJob({ desired: 'paused', desired_applied: false, desired_changed_unix_ms: Date.now() })]));
     expect(await screen.findByText('Pausing…')).toBeTruthy();
+  });
+});
+
+describe('whether torrents can be added, from the cluster not the node that answered (server 0.64.0)', () => {
+  const noTorrentsHere = () => ({ ...snapshot([torrentJob()]), torrentStatus: { enabled: false, build_available: false, search_enabled: false } });
+
+  it('says nothing about the answering node while the cluster\'s nodes are still loading', async () => {
+    const api = fakeApi(noTorrentsHere(), { torrentNodes: () => new Promise(() => {}) } as Partial<AcquisitionApi>);
+    renderAt('/ingest/torrents', noTorrentsHere(), api);
+    await screen.findByText('Some.Release.2024.1080p');
+    expect(screen.queryByText(/built without libtorrent|disabled in server configuration|No node in this cluster/)).toBeNull();
+  });
+
+  it('says so when no node in the cluster can download torrents', async () => {
+    const api = fakeApi(noTorrentsHere(), { torrentNodes: () => Promise.resolve({ nodes: [] }) } as Partial<AcquisitionApi>);
+    renderAt('/ingest/torrents', noTorrentsHere(), api);
+    expect(await screen.findByText('No node in this cluster can download torrents.')).toBeTruthy();
+    expect((screen.getByLabelText('Magnet link') as HTMLInputElement).disabled).toBe(true);
+    expect(screen.queryByText(/built without libtorrent/)).toBeNull();
+  });
+
+  it('keeps the answering node\'s word on a server older than 0.64.0, which has no node list', async () => {
+    const api = fakeApi(noTorrentsHere(), { torrentNodes: () => Promise.reject(new Error('404')) } as Partial<AcquisitionApi>);
+    renderAt('/ingest/torrents', noTorrentsHere(), api);
+    expect(await screen.findByText('This server was built without libtorrent-rasterbar.')).toBeTruthy();
   });
 });

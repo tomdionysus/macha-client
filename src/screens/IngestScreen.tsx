@@ -131,12 +131,17 @@ export function IngestScreen({ api, section }: Props) {
   };
 
   const ingestEnabled = snapshot?.ingestStatus.enabled ?? false;
-  // A node without torrents still takes adds from 0.64.0, for the cluster's
-  // capable nodes to claim, so the form is open when either this node takes
-  // torrents or the cluster lists a node that does.
+  // From server 0.64.0 torrents are the cluster's: every node takes adds,
+  // and /torrents/status describes only the node that answered (fi-1 runs
+  // none and says so). So whether torrents are available is the cluster's
+  // node list, and nothing is said until it has answered. A server older
+  // than 0.64.0 has no such list; there the answering node's status is the
+  // whole story, as before.
+  const clusterAnswered = torrentNodes.value !== undefined;
   const clusterTakesTorrents = (torrentNodes.value?.nodes.length ?? 0) > 0;
-  const torrentEnabled = (snapshot?.torrentStatus.enabled ?? false) || clusterTakesTorrents;
-  const torrentBuilt = (snapshot?.torrentStatus.build_available ?? false) || clusterTakesTorrents;
+  const beforeClusterTorrents = Boolean(torrentNodes.error);
+  const torrentEnabled = beforeClusterTorrents ? snapshot?.torrentStatus.enabled ?? false : clusterTakesTorrents;
+  const torrentBuilt = snapshot?.torrentStatus.build_available ?? false;
   const staging = snapshot?.ingestStatus.staging;
   const now = Date.now();
   const refreshIntervalMs = snapshot?.refreshIntervalMs ?? 5_000;
@@ -208,8 +213,9 @@ export function IngestScreen({ api, section }: Props) {
           </form>
         )}
       </div>
-      {section === 'torrents' && snapshot && !torrentBuilt && <p className="ingest-disabled-note">This server was built without libtorrent-rasterbar.</p>}
-      {section === 'torrents' && snapshot && torrentBuilt && !torrentEnabled && <p className="ingest-disabled-note">Torrent acquisition is disabled in server configuration.</p>}
+      {section === 'torrents' && clusterAnswered && !clusterTakesTorrents && <p className="ingest-disabled-note">No node in this cluster can download torrents.</p>}
+      {section === 'torrents' && beforeClusterTorrents && snapshot && !torrentBuilt && <p className="ingest-disabled-note">This server was built without libtorrent-rasterbar.</p>}
+      {section === 'torrents' && beforeClusterTorrents && snapshot && torrentBuilt && !torrentEnabled && <p className="ingest-disabled-note">Torrent acquisition is disabled in server configuration.</p>}
       {section === 'files' && snapshot && !ingestEnabled && <p className="ingest-disabled-note">Filesystem import is disabled in server configuration.</p>}
 
       {error && <p className="ingest-page-error" role="alert">{error}{heldBy && <> <Link data-tv-focusable="true" to={torrentPath(heldBy)}>Open it</Link></>}</p>}
