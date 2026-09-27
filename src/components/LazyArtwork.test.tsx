@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { ArtworkRef, MediaApi } from '@machafoundation/core';
 import { LazyArtwork } from './LazyArtwork';
+import { settle } from '../test/settle';
 
 const FUTURE = '?exp=9999999999999&sig=abc';
 const PAST = '?exp=1&sig=abc';
@@ -97,7 +98,8 @@ describe('LazyArtwork', () => {
       />,
     );
 
-    expect(await screen.findByRole<HTMLImageElement>('img', { name: 'Legacy poster' })).toBeTruthy();
+    await settle();
+    expect(screen.getByRole<HTMLImageElement>('img', { name: 'Legacy poster' })).toBeTruthy();
     expect(artworkFetch).toHaveBeenCalledWith({ id: 'legacy-1', mimeType: 'image/jpeg' });
   }));
 
@@ -125,7 +127,8 @@ describe('LazyArtwork', () => {
 
     fireEvent.error(poster());
     expect(artworkFetch).toHaveBeenCalledWith(ref);
-    expect((await screen.findByRole<HTMLImageElement>('img', { name: 'Movie poster' })).src).toBe('blob:fake');
+    await settle();
+    expect((screen.getByRole<HTMLImageElement>('img', { name: 'Movie poster' })).src).toBe('blob:fake');
   }));
 
   it('goes straight to the authenticated fetch when the cluster offers only one header-free source', () => withObjectUrls(async () => {
@@ -155,7 +158,8 @@ describe('LazyArtwork', () => {
     // Never node b's authenticated URL: an <img> cannot send the header.
     expect(screen.queryByRole('img', { name: 'Movie poster' })).toBeNull();
     expect(artworkFetch).toHaveBeenCalled();
-    expect((await screen.findByRole<HTMLImageElement>('img', { name: 'Movie poster' })).src).toBe('blob:fake');
+    await settle();
+    expect((screen.getByRole<HTMLImageElement>('img', { name: 'Movie poster' })).src).toBe('blob:fake');
   }));
 
   it('adopts a fresh capability URL for the same artwork once the current one has failed', () => {

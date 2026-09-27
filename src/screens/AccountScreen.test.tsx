@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { describe, expect, it } from 'vitest';
 import type { MachaUser, UserMutability, UsersApi } from '@machafoundation/core';
 import { AccountScreen } from './AccountScreen';
+import { settle } from '../test/settle';
 
 function account(mutable: Partial<UserMutability> | undefined): MachaUser {
   return {
@@ -35,7 +36,8 @@ function renderAccount(user: MachaUser) {
 describe('AccountScreen password control', () => {
   it('offers a password change for an account that may set one', async () => {
     renderAccount(account({ rename: true, delete: true, set_password: true, set_roles: true }));
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Change password' })).toBeTruthy());
+    await settle();
+    expect(screen.getByRole('button', { name: 'Change password' })).toBeTruthy();
   });
 
   it('offers none for an account that holds no credential, and says why', async () => {
@@ -43,7 +45,8 @@ describe('AccountScreen password control', () => {
     // password PATCH answers 409 `no_password`. Drawing the control anyway
     // would be a button whose only possible outcome is an error.
     renderAccount(account({ rename: false, delete: false, set_password: false, set_roles: true }));
-    await waitFor(() => expect(screen.getByText('This account has no password, and one cannot be set for it.')).toBeTruthy());
+    await settle();
+    expect(screen.getByText('This account has no password, and one cannot be set for it.')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Change password' })).toBeNull();
   });
 
@@ -51,6 +54,7 @@ describe('AccountScreen password control', () => {
     // An older node saying nothing is not a refusal. The server still decides;
     // hiding the control on silence would remove it for everyone on that node.
     renderAccount(account(undefined));
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Change password' })).toBeTruthy());
+    await settle();
+    expect(screen.getByRole('button', { name: 'Change password' })).toBeTruthy();
   });
 });

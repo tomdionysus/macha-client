@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { CatalogueItem, ManageApi, PlaybackFactsApi, PlaybackMediaFacts, UnmatchedFile } from '@machafoundation/core';
 import { ItemFiles, fileSummary } from './ItemFiles';
+import { settle } from '../../test/settle';
 
 const item = (overrides: Partial<CatalogueItem> = {}): CatalogueItem => ({
   id: 'item-1', kind: 'movie', title: 'A Film', sort_title: 'A Film', synopsis: '', parent_id: null, year: 2001,
@@ -30,7 +31,8 @@ describe('an item\'s files', () => {
   it('lists each file with what it is', async () => {
     const facts = { facts: vi.fn(async () => [file('m1', '/movies/a-film-1080.mkv', 1920, 'h264'), file('m2', '/movies/a-film-2160.mkv', 3840, 'hevc')]) } as unknown as PlaybackFactsApi;
     render(<ItemFiles item={item()} facts={facts} />);
-    const list = await screen.findByRole('list');
+    await settle();
+    const list = screen.getByRole('list');
     expect([...list.querySelectorAll('strong')].map((name) => name.textContent)).toEqual(['a-film-1080.mkv', 'a-film-2160.mkv']);
     expect(list.textContent).toContain('3840×2160 HEVC · AAC 6ch · MKV');
     expect(facts.facts).toHaveBeenCalledWith({ itemId: 'item-1' });
@@ -52,18 +54,23 @@ describe('an item\'s files', () => {
       match,
     } as unknown as ManageApi;
     render(<ItemFiles item={item()} facts={facts} manage={manage} />);
-    await screen.findByText('a.mkv');
+    await settle();
+    screen.getByText('a.mkv');
 
     fireEvent.click(screen.getByRole('button', { name: 'Add a file' }));
-    const dialog = await screen.findByRole('dialog', { name: 'Add a file to A Film' });
-    await within(dialog).findByText('other-thing.mkv');
+    await settle();
+    const dialog = screen.getByRole('dialog', { name: 'Add a file to A Film' });
+    await settle();
+    within(dialog).getByText('other-thing.mkv');
     fireEvent.change(within(dialog).getByLabelText('Filter unmatched files'), { target: { value: '2160' } });
     expect(within(dialog).queryByText('other-thing.mkv')).toBeNull();
 
     fireEvent.click(within(dialog).getByRole('button', { name: 'Add as a version' }));
-    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    await settle();
+    expect(screen.queryByRole('dialog')).toBeNull();
     expect(match).toHaveBeenCalledWith('u2', 'item-1');
-    expect(await screen.findByText('b.mkv')).toBeTruthy();
+    await settle();
+    expect(screen.getByText('b.mkv')).toBeTruthy();
   });
 
   it('summarises a file from what it states', () => {

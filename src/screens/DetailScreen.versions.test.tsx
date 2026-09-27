@@ -3,6 +3,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { CatalogueMediaProfile, MediaApi, MediaDetails, PlaybackVersions, VersionStep } from '@machafoundation/core';
 import { DetailScreen } from './DetailScreen';
+import { settle } from '../test/settle';
 
 const step = (quality: VersionStep['quality'], source: VersionStep['source']): VersionStep => ({
   quality,
@@ -35,7 +36,8 @@ const fourK: PlaybackVersions = {
 describe('the detail page\'s quality buttons', () => {
   it('offers Play and one button per quality, and plays the one pressed', async () => {
     const { onPlayVersion } = show(film, fourK);
-    expect(await screen.findByTitle('Play at 4K')).toBeTruthy();
+    await settle();
+    expect(screen.getByTitle('Play at 4K')).toBeTruthy();
     expect(screen.getByTitle('Play')).toBeTruthy();
     expect(screen.getAllByTitle(/^Play at /).map((button) => button.textContent)).toEqual(['4K', '2K', '1080p', '720p']);
     fireEvent.click(screen.getByTitle('Play at 720p'));
@@ -44,19 +46,22 @@ describe('the detail page\'s quality buttons', () => {
 
   it('says why Play will not choose the largest file when the screen caps it', async () => {
     show(film, fourK);
-    expect(await screen.findByText('Play chooses up to 1080p, the most this screen shows. Pick a quality to play another.')).toBeTruthy();
+    await settle();
+    expect(screen.getByText('Play chooses up to 1080p, the most this screen shows. Pick a quality to play another.')).toBeTruthy();
   });
 
   it('says nothing about a cap that kept Play off no file', async () => {
     show(film, { ...fourK, limitedBy: undefined });
-    await screen.findByTitle('Play at 4K');
+    await settle();
+    screen.getByTitle('Play at 4K');
     expect(screen.queryByText(/Play chooses up to/)).toBeNull();
   });
 
   it('offers a track no qualities, as it has no picture', async () => {
     const track = { id: 'track', kind: 'track', title: 'A track', mediaIds: ['macha:song'] } as MediaDetails;
     const { loadVersions } = show(track, fourK);
-    expect(await screen.findByTitle('Play')).toBeTruthy();
+    await settle();
+    expect(screen.getByTitle('Play')).toBeTruthy();
     expect(loadVersions).not.toHaveBeenCalled();
     expect(screen.queryAllByTitle(/^Play at /)).toHaveLength(0);
   });
@@ -80,7 +85,8 @@ describe('a title\'s files, one line each', () => {
     const api = { details: vi.fn(async () => twoFiles), mediaProfile: vi.fn(async (id: string) => profiles[id]) } as unknown as MediaApi;
     const onMediaProfile = vi.fn();
     const { container } = render(<DetailScreen api={api} itemId="film" onBack={vi.fn()} onPlay={vi.fn()} onPlayFromStart={vi.fn()} onMediaProfile={onMediaProfile} />);
-    await screen.findByText(/3840×2160/);
+    await settle();
+    screen.getByText(/3840×2160/);
     expect([...container.querySelectorAll('.media-profile-summary')].map((line) => line.textContent)).toEqual([
       // Tom, 2026-09-27: highest resolution first, its class after it, and
       // the channel count after the audio codec. Core's parts, laid out as given.
@@ -97,7 +103,8 @@ describe('a title\'s files, one line each', () => {
       mediaProfile: vi.fn(async (id: string) => { if (id === 'macha:gone') throw new Error('not found'); return profileOf(id, 1920, 1080, 'h264', 'aac', 8_000_000); }),
     } as unknown as MediaApi;
     const { container } = render(<DetailScreen api={api} itemId="film" onBack={vi.fn()} onPlay={vi.fn()} onPlayFromStart={vi.fn()} />);
-    await screen.findByText(/1920×1080/);
+    await settle();
+    screen.getByText(/1920×1080/);
     expect(container.querySelectorAll('.media-profile-summary')).toHaveLength(1);
   });
 });
@@ -113,7 +120,8 @@ describe('files that are the same', () => {
     };
     const api = { details: vi.fn(async () => threeFiles), mediaProfile: vi.fn(async (id: string) => profiles[id]) } as unknown as MediaApi;
     const { container } = render(<DetailScreen api={api} itemId="film" onBack={vi.fn()} onPlay={vi.fn()} onPlayFromStart={vi.fn()} />);
-    await screen.findByText(/3840×2160/);
+    await settle();
+    screen.getByText(/3840×2160/);
     expect([...container.querySelectorAll('.media-profile-summary')].map((line) => line.textContent)).toEqual([
       // Tom, 2026-09-27: highest resolution first, its class after it, and
       // the channel count after the audio codec. Core's parts, laid out as given.

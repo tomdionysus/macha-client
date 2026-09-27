@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { useSession } from './useSession';
 import { SessionManager } from '@machafoundation/core';
 import { bootstrapEndpoints, EndpointRegistry } from '@machafoundation/core';
+import { settle } from '../test/settle';
 
 /**
  * The mint is stopped at the network rather than by replacing a core export.
@@ -49,7 +50,8 @@ describe('useSession', () => {
     const { result } = renderSession();
 
     expect(result.current.ready).toBe(false);
-    await vi.waitFor(() => expect(result.current.ready).toBe(true));
+    await settle();
+    expect(result.current.ready).toBe(true);
   });
 
   it('carries why the mint failed, and tells a refusal from a silence', async () => {
@@ -64,7 +66,9 @@ describe('useSession', () => {
     )));
     const { result } = renderSession();
 
-    await vi.waitFor(() => expect(result.current.ready).toBe(true));
+    await settle();
+
+    expect(result.current.ready).toBe(true);
     expect(result.current.mintFailure?.reason).toBe('refused');
     expect(result.current.mintFailure?.status).toBe(403);
   });
@@ -73,7 +77,9 @@ describe('useSession', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(sessionResponse()));
     const { result } = renderSession();
 
-    await vi.waitFor(() => expect(result.current.ready).toBe(true));
+    await settle();
+
+    expect(result.current.ready).toBe(true);
     expect(result.current.mintFailure).toBeUndefined();
   });
 
@@ -98,7 +104,8 @@ describe('useSession', () => {
   it('stops the manager on unmount', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(sessionResponse()));
     const { manager, unmount } = renderSession();
-    await vi.waitFor(() => expect(manager.isReady).toBe(true));
+    await settle();
+    expect(manager.isReady).toBe(true);
 
     unmount();
 
@@ -132,14 +139,16 @@ describe('useSession', () => {
       const { calls, fetch } = node(async () => new Response(null, { status: 204 }));
       vi.stubGlobal('fetch', fetch);
       const { manager, result } = renderSession();
-      await vi.waitFor(() => expect(result.current.ready).toBe(true));
+      await settle();
+      expect(result.current.ready).toBe(true);
       const before = calls.length;
 
       await act(() => result.current.signOut());
 
       const after = calls.slice(before);
       expect(after[0]).toMatchObject({ method: 'DELETE', path: '/api/v1/session', authorization: 'Bearer token-a' });
-      await vi.waitFor(() => expect(result.current.ready).toBe(true));
+      await settle();
+      expect(result.current.ready).toBe(true);
       expect(calls.slice(before + 1).every((call) => call.authorization !== 'Bearer token-a')).toBe(true);
       expect(await manager.authorization()).toBe('Bearer token-b');
     });
@@ -148,12 +157,15 @@ describe('useSession', () => {
       const { calls, fetch } = node(async () => { throw new TypeError('Failed to fetch'); });
       vi.stubGlobal('fetch', fetch);
       const { result } = renderSession();
-      await vi.waitFor(() => expect(result.current.ready).toBe(true));
+      await settle();
+      expect(result.current.ready).toBe(true);
       const before = calls.length;
 
       await act(async () => { await expect(result.current.signOut()).rejects.toBeTruthy(); });
 
-      await vi.waitFor(() => expect(calls.slice(before).some((call) => call.method === 'POST')).toBe(true));
+      await settle();
+
+      expect(calls.slice(before).some((call) => call.method === 'POST')).toBe(true);
       expect(calls.slice(before).filter((call) => call.method !== 'DELETE').every((call) => call.authorization !== 'Bearer token-a')).toBe(true);
     });
   });

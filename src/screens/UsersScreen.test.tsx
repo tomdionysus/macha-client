@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { CurrentSession, MachaUser, UserMutability, UsersApi } from '@machafoundation/core';
 import { byStanding, roleSummary, UsersScreen, usersScreenAvailable } from './UsersScreen';
+import { settle } from '../test/settle';
 
 function user(overrides: Partial<MachaUser> = {}): MachaUser {
   return {
@@ -48,7 +49,8 @@ function disabled(element: HTMLElement): boolean {
 
 /** The list row for one account. Rows carry no inputs, so it is found by name. */
 async function row(username: string): Promise<HTMLElement> {
-  const main = await screen.findByRole('button', { name: `Edit ${username}` });
+  await settle();
+  const main = screen.getByRole('button', { name: `Edit ${username}` });
   const host = main.closest('li');
   if (!host) throw new Error(`no row around ${username}`);
   return host;
@@ -155,7 +157,8 @@ describe('UsersScreen', () => {
       session={session()}
     />);
 
-    await screen.findByRole('button', { name: 'Edit alice' });
+    await settle();
+    screen.getByRole('button', { name: 'Edit alice' });
     const names = [...document.querySelectorAll('.record-name')].map((each) => each.textContent?.replace('You', '').trim());
     expect(names).toEqual(['root', 'anonymous', 'alice']);
   });
@@ -166,7 +169,8 @@ describe('UsersScreen', () => {
       session={session()}
     />);
 
-    await screen.findByRole('button', { name: 'Edit alice' });
+    await settle();
+    screen.getByRole('button', { name: 'Edit alice' });
     const rows = [...document.querySelectorAll('.record-list > li')];
     const dividers = rows.filter((each) => each.classList.contains('record-divider'));
     expect(dividers).toHaveLength(1);
@@ -182,7 +186,8 @@ describe('UsersScreen', () => {
     // case that actually happens.
     render(<UsersScreen api={fakeApi([anonymousUser(), rootUser()])} session={session()} />);
 
-    await screen.findByRole('button', { name: 'Edit root' });
+    await settle();
+    screen.getByRole('button', { name: 'Edit root' });
     expect(document.querySelectorAll('.record-divider')).toHaveLength(0);
   });
 
@@ -245,7 +250,8 @@ describe('UsersScreen', () => {
     fireEvent.change(within(dialogue()).getByLabelText('Username'), { target: { value: 'bob' } });
     fireEvent.click(within(dialogue()).getByRole('button', { name: 'Save' }));
 
-    const message = await within(dialogue()).findByText('That username is taken.');
+    await settle();
+    const message = within(dialogue()).getByText('That username is taken.');
     // "Against the field" means somewhere the reader associates with the
     // username: not inside the roles fieldset, and not in the dialogue's
     // form-level slot at the foot.
@@ -264,7 +270,8 @@ describe('UsersScreen', () => {
     fireEvent.change(within(dialogue()).getByLabelText('Username'), { target: { value: 'bob' } });
     fireEvent.click(within(dialogue()).getByRole('button', { name: 'Save' }));
 
-    await within(dialogue()).findByText('That username is taken.');
+    await settle();
+    within(dialogue()).getByText('That username is taken.');
     expect(screen.queryByRole('dialog')).not.toBeNull();
   });
 
@@ -278,7 +285,8 @@ describe('UsersScreen', () => {
     fireEvent.change(within(dialogue()).getByLabelText('New password'), { target: { value: 'wibble-wobble' } });
     fireEvent.click(within(dialogue()).getByRole('button', { name: 'Change password' }));
 
-    expect(await within(dialogue()).findByText('That password is too weak.')).toBeTruthy();
+    await settle();
+    expect(within(dialogue()).getByText('That password is too weak.')).toBeTruthy();
     expect(update).toHaveBeenCalledWith('user-1', { password: 'wibble-wobble' });
   });
 
@@ -293,7 +301,8 @@ describe('UsersScreen', () => {
     fireEvent.click(within(dialogue()).getByRole('checkbox', { name: /Import/ }));
     fireEvent.click(within(dialogue()).getByRole('button', { name: 'Save' }));
 
-    await waitFor(() => expect(update).toHaveBeenCalledWith('user-1', { roles: ['media_viewer', 'importer'] }));
+    await settle();
+    expect(update).toHaveBeenCalledWith('user-1', { roles: ['media_viewer', 'importer'] });
   });
 
   it('cannot save a dialogue nobody has changed', async () => {
@@ -316,7 +325,8 @@ describe('UsersScreen', () => {
     fireEvent.change(within(dialogue()).getByLabelText('New password'), { target: { value: 'short' } });
     fireEvent.click(within(dialogue()).getByRole('button', { name: 'Change password' }));
 
-    expect(await within(dialogue()).findByText('Passwords must be at least 8 characters.')).toBeTruthy();
+    await settle();
+    expect(within(dialogue()).getByText('Passwords must be at least 8 characters.')).toBeTruthy();
     expect(update).not.toHaveBeenCalled();
   });
 
@@ -331,7 +341,8 @@ describe('UsersScreen', () => {
     fireEvent.change(within(dialogue()).getByLabelText('New password'), { target: { value: 'x' } });
     fireEvent.click(within(dialogue()).getByRole('button', { name: 'Change password' }));
 
-    await waitFor(() => expect(update).toHaveBeenCalledWith('user-1', { password: 'x' }));
+    await settle();
+    expect(update).toHaveBeenCalledWith('user-1', { password: 'x' });
   });
 
   it('offers no password action at all where the server says one cannot be set', async () => {
@@ -349,17 +360,19 @@ describe('UsersScreen', () => {
     const create = vi.fn(() => Promise.resolve(user({ username: 'carol' })));
     render(<UsersScreen api={fakeApi([user()], { create })} session={session()} />);
 
-    await screen.findByRole('button', { name: 'Edit alice' });
+    await settle();
+    screen.getByRole('button', { name: 'Edit alice' });
     fireEvent.click(screen.getByRole('button', { name: 'Add a user' }));
     fireEvent.change(within(dialogue()).getByLabelText('Username'), { target: { value: 'carol' } });
     fireEvent.change(within(dialogue()).getByLabelText('Password'), { target: { value: 'a-good-password' } });
     fireEvent.click(within(dialogue()).getByRole('button', { name: 'Create user' }));
 
-    await waitFor(() => expect(create).toHaveBeenCalledWith({
+    await settle();
+    expect(create).toHaveBeenCalledWith({
       username: 'carol',
       password: 'a-good-password',
       roles: ['media_viewer'],
-    }));
+    });
   });
 });
 

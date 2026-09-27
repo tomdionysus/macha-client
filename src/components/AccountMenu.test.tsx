@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { describe, expect, it, vi } from 'vitest';
 import type { CurrentSession } from '@machafoundation/core';
 import { AccountMenu } from './AccountMenu';
+import { settle } from '../test/settle';
 
 function session(overrides: Partial<CurrentSession> = {}): CurrentSession {
   return {
@@ -101,7 +102,8 @@ describe('AccountMenu', () => {
     expect(onSignOut).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole('button', { name: 'Log out' }));
-    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    await settle();
+    expect(screen.queryByRole('dialog')).toBeNull();
     expect(onSignOut).toHaveBeenCalledTimes(1);
   });
 
