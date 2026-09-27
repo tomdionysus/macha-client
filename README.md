@@ -1,6 +1,6 @@
 # Macha Client
 
-_v0.18.0_
+_v0.19.0_
 
 The React/TypeScript television and web client for **Macha**, a self-hosted,
 clustered media system. It browses the catalogue a Macha node exposes,
