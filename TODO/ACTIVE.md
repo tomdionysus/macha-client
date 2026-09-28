@@ -96,6 +96,98 @@ black window (burnt-in bars; the fix is an ingest/server one,
 `readyState` 0 (instrumented, no mechanism). Seek misbehaviour. A handover
 with no lead. Failover from an https page onto an http node (core's).
 
+## Direct Play buffered bar (2026-09-28; waiting on Server, then Core)
+
+Tom saw the pink buffered bar start ahead of the playhead with a gap on Direct
+Play. **Cause: Chrome's `video.buffered` is not residency for a plain-URL
+video.** Chromium's `BufferedDataSourceHostImpl::AddBufferedTimeRanges` maps
+each buffered byte range to time as byte / total_bytes x duration. Our path is
+faithful: `WebPlatform.publish()` passes the element's ranges untouched, and
+core adds no offset on direct (`PlaybackCoordinator.ts:3056-3090`).
+
+Seen live on gbni-1, deployed client, visible tab, a Direct Play MP4 (2.0
+Mb/s, 6443.5 s). With currentTime set to 3000, readyState 4 and playing, the
+element reported `[2997.5 -> 3021]` plus a phantom `[2902 -> 2940]` 95 s
+behind, growing in step with playback. Nothing sought there: two byte regions
+(likely video and audio chunks) read at once, each mapped linearly.
+
+**Tom's choice: the server mod.** Hiding the bar on Direct Play was refused.
+Server builds `GET /api/v1/catalogue/media/{id}/keyframes`, per its workup:
+immutable per media id, an immutable DATA object referenced from the profile,
+computed at profile time or on first request and never on the create path
+(Direct Play create stays instant). MP4 offsets are exact per sample; MKV
+offsets are cluster-level; sparse Cues bound the interpolation error. Asked
+for per-stream entries (audio as well as video) and a precision flag.
+
+Core then adds the fetch and a pure byte-to-time mapping. It agreed on
+2026-09-28: `MediaApi.keyframes(mediaId)` cached per id, and
+`bufferedTimeRanges(index, sizeBytes, byteRanges)` returning the intersection
+across streams, as a utility this client calls, not in the coordinator. It
+builds once Server announces the shape. Relayed to Server: entries must be
+sorted by byte offset too, and the tail needs an end anchor so it maps to the
+duration.
+
+**Server built it: 0.68.0, `8135c66`, docs `d8cd5d5`, not deployed.** The
+response carries `container`, `offsets` ("sample" for MP4, "cluster" for
+Matroska), `size_bytes`, `duration_ms`, and `streams[{index, type, codec,
+entries[[t_ms, byte]]}]`. Each stream is sorted by offset, and past the last
+entry the file ends at `(duration_ms, size_bytes)`. Audio keeps at most one
+entry per second; Matroska audio may have none. `streams[].index` is the
+session's `selected.video_stream` / `selected.audio_stream`, so intersect the
+video stream with the selected audio stream only, and drop a stream with no
+entries. Times are decode times: B-frame keyframes read early by their
+composition offset, which is fine for a bar. Errors: 400 `bad_media_id`, 404
+`not_found`, 422 `keyframes_not_supported`, 422 `keyframes_failed`. A file
+with no index (neither MP4 nor Matroska) keeps Chrome's estimate: Tom,
+2026-09-28, "No index? Best guess."
+
+**Core built its side** (develop `7dfa518`): `catalogue.keyframes(mediaId)` and
+`bufferedTimeRanges(index, heldBytes, playing)`. **This client is wired, on
+develop, uncommitted.** `App.tsx` hands `setKeyframeSource` the catalogue. For
+each Direct Play generation, `WebPlatform.loadKeyframeIndex` fetches the index
+off the start path. `publish()` then inverts Chrome's ranges to bytes with the
+element's own duration (`directPlayBufferedRanges`) and maps them through the
+index. `bufferedRangesMs`, `forwardBufferMs` and the stall watchdog's buffered
+end all use the result. Until the index arrives, or for a file the node cannot
+index, Chrome's figures stand. On Direct Play the browser picks the audio track
+from the file, so core's default (the first audio stream) is right. The
+worker's cache is **not** folded in: `forwardBufferMs` is documented as the
+element's own buffer, and core already counts the worker's cover through
+`readAheadBytes`, so folding it in would count it twice. Showing the worker's
+cover on the bar would need a separate field from core. Four tests, each
+mutation-checked; suite 633. **Owed: a live look once server 0.68.0 is
+deployed**, on the same title (gbni-1, set to 3000 s): the phantom 2902-2940 s
+range must be gone and the bar must start at the playhead. This
+client supplies byte ranges from two sources: Chrome's ranges inverted exactly
+(byte = time / element duration x size) and the read-ahead worker's own cache.
+It draws the playable minimum across streams. HLS is unaffected.
+
+## Playback start reports progress (server 0.69.0, planned; not built)
+
+This is the server's plan `TODO/2026-09-27-playback-start-progress-plan.md`.
+Opt-in `?start=async` on create and PATCH answers 202 with a `start` object:
+`stage` (planning, preroll, encoding, ready, failed) and measured counters. An
+absent counter means the stage cannot measure it, never zero. The client
+long-polls `GET .../sessions/{id}?after=&wait_ms=`. The node fails a start only
+when progress stops (`startup_no_progress_ms`), never on elapsed time. A
+pending PATCH keeps the current generation serving until the replacement is
+ready.
+
+Agreed with Server on 2026-09-28, after the web client's review:
+- Direct Play is never pending: 201 with URLs, as blocking.
+- A replacement's URLs arrive on the same long-poll the moment it is ready,
+  so the handover can buffer beside the playing generation.
+- DELETE of a pending start frees its transcode slot at once, so Core can
+  race or abandon a slow start on its own budget ("never make the viewer
+  wait").
+- Viewer text stays this client's: once core names the stage,
+  `startWaitNotice` can state it with `output_media_ms / first_fragment_ms`
+  as a measured fraction.
+
+Server sends the final shape and version when built. Its plan says clients
+enter release lockdown after this; confirm with Tom what that means for this
+client.
+
 ## Cards with no artwork (investigated 2026-09-27; let go, waiting on es-1)
 
 Tom saw cards with no artwork on `macnessa` while looking right at them.

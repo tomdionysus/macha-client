@@ -63,6 +63,7 @@ import { preferredEndpointForNode } from './cluster/preferredEndpoint';
 import { lockoutNotice, lockoutReason } from './app/lockoutNotice';
 import { useEndpointCandidates } from './cluster/useEndpointCandidates';
 import { setMediaTransferListener } from './playback/directPlayReadAhead';
+import { setKeyframeSource } from './platform/WebPlatform';
 import { Loading } from './components/Status';
 import { useMediaRouteBack } from './app/useMediaRouteBack';
 import { useMusicController } from './app/useMusicController';
@@ -426,6 +427,12 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
     managementAvailable,
   } = useMachaServices({ endpointRegistry, auth, apiOverride, playbackOverride });
   useEndpointHealthMonitor(endpointRegistry, clusterStatusApi, auth, connectionRequired && effectiveEndpoints.length > 0 && !effectiveConnectionGate);
+  // Direct Play's buffered bar reads the file's own byte index, which lives in
+  // the catalogue; the platform was created before there was one.
+  useEffect(() => {
+    setKeyframeSource((mediaId) => catalogueApi.keyframes(mediaId));
+    return () => setKeyframeSource(undefined);
+  }, [catalogueApi]);
   // Not before the session has settled. `SessionManager.fetch` retries a 401
   // only when it actually sent a token, so a whoami that goes out during the
   // cold-start mint is answered 401, returned as-is, and the roles are never
