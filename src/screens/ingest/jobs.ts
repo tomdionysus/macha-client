@@ -18,12 +18,25 @@ export function jobKey(kind: JobKind, id: string): string {
   return `${kind}:${id}`;
 }
 
-export function canPause(kind: JobKind, state: string): boolean {
-  return kind === 'ingest' ? ingestPauseableStates.has(state) : torrentPauseableStates.has(state);
+/**
+ * A torrent's `desired` (server 0.64.0) is what was asked of it, and it
+ * decides as much as the state does: a torrent added paused (0.71.0) waits
+ * for a node, or is held by one, with `desired` "paused" and a state that
+ * never says so. The server resumes whenever `desired` is "paused".
+ */
+export function canPause(kind: JobKind, state: string, desired?: string): boolean {
+  return kind === 'ingest' ? ingestPauseableStates.has(state) : torrentPauseableStates.has(state) && desired !== 'paused';
 }
 
-export function canResume(kind: JobKind, state: string): boolean {
-  return kind === 'ingest' ? ingestResumableStates.has(state) : torrentResumableStates.has(state);
+export function canResume(kind: JobKind, state: string, desired?: string): boolean {
+  if (kind === 'ingest') return ingestResumableStates.has(state);
+  return torrentResumableStates.has(state) || (desired === 'paused' && !isTerminal(state));
+}
+
+/** "Paused" for a torrent held by request whose state does not say so: "Paused, waiting for a node". */
+export function heldStatus(job: Pick<TorrentJob, 'state' | 'desired'>): string | undefined {
+  if (job.desired !== 'paused' || torrentResumableStates.has(job.state) || isTerminal(job.state)) return undefined;
+  return job.state === 'awaiting_node' ? 'Paused, waiting for a node' : 'Paused';
 }
 
 export function isTerminal(state: string): boolean {

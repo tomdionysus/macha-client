@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { IngestJob, TorrentJob } from '@machafoundation/core';
-import { storingOf, storingPercent, storingStallText, torrentStages } from './jobs';
+import { canPause, canResume, heldStatus, storingOf, storingPercent, storingStallText, torrentStages } from './jobs';
 
 function torrent(overrides: Partial<TorrentJob> = {}): TorrentJob {
   return {
@@ -65,5 +65,21 @@ describe('the download being stored in the cluster, before the import (server 0.
   it('says it has stood still once a minute has gone by with no progress, and not before', () => {
     expect(storingStallText({ ...publication, progress_age_ms: 59_999 })).toBeUndefined();
     expect(storingStallText({ ...publication, progress_age_ms: 4 * 60_000 + 30_000 })).toBe('no progress for 4 min');
+  });
+});
+
+describe('a torrent held by request, whose state does not say so (added paused, server 0.71.0)', () => {
+  it('offers Resume and not Pause while it waits for a node, as the server resumes on desired alone', () => {
+    expect(canResume('torrent', 'awaiting_node', 'paused')).toBe(true);
+    expect(canPause('torrent', 'awaiting_node', 'paused')).toBe(false);
+    expect(heldStatus({ state: 'awaiting_node', desired: 'paused' })).toBe('Paused, waiting for a node');
+  });
+
+  it('is left to its state when nothing was asked of it, or once it is over', () => {
+    expect(canPause('torrent', 'awaiting_node', 'active')).toBe(true);
+    expect(canResume('torrent', 'awaiting_node', 'active')).toBe(false);
+    expect(canResume('torrent', 'cancelled', 'paused')).toBe(false);
+    expect(heldStatus({ state: 'downloading', desired: 'active' })).toBeUndefined();
+    expect(heldStatus({ state: 'paused', desired: 'paused' })).toBeUndefined();
   });
 });

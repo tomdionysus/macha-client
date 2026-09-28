@@ -5,7 +5,7 @@ import { JobControls, Progress } from './ingest/JobControls';
 import { intentNote, REMOVE_AFTER_CHOICES, staleSourceNotes, removeAfterDefaultLabel, torrentNodeLabel } from './ingest/clusterTorrents';
 import { useAsync } from '../hooks/useAsync';
 import { formatAge, formatBytes, formatCount, formatEta, formatPercent, formatRate, formatRatio, formatTimestamp, percent, stateLabel } from './ingest/format';
-import { canPause, canResume, canRetryImport, displayStateOf, jobKey, linkedIngestOf, storingOf, storingPercent, storingStallText } from './ingest/jobs';
+import { canPause, canResume, canRetryImport, displayStateOf, heldStatus, jobKey, linkedIngestOf, storingOf, storingPercent, storingStallText } from './ingest/jobs';
 import { DEFAULT_TORRENT_SORT, sortTorrents, TORRENT_SORT_KEYS } from './ingest/torrentSort';
 import { SortControl, SortHeader, useListSort } from '../components/ListSortControls';
 import { BulkActions, ListHeading, Pager, SelectPageBox, SelectRowBox, useListSelection } from '../components/ListParts';
@@ -79,8 +79,8 @@ export function IngestScreen({ api, section }: Props) {
   const torrentPage = pageSlice(torrentJobs, page);
   const selection = useListSelection(torrentJobs);
   const selected = torrentJobs.filter((job) => selection.checked.has(job.id));
-  const pausable = selected.filter((job) => canPause('torrent', job.state));
-  const resumable = selected.filter((job) => canResume('torrent', job.state));
+  const pausable = selected.filter((job) => canPause('torrent', job.state, job.desired));
+  const resumable = selected.filter((job) => canResume('torrent', job.state, job.desired));
   const [bulkBusy, setBulkBusy] = useState(false);
   const [confirmBulkRemove, setConfirmBulkRemove] = useState(false);
 
@@ -298,7 +298,7 @@ export function IngestScreen({ api, section }: Props) {
                         <Progress value={progress} />
                         <span>{formatPercent(progress)}</span>
                       </td>
-                      <td className={`col-status${failure ? ' has-error' : ''}`} title={failure}>{intentNote(job, now, refreshIntervalMs) ?? storingStatus(job) ?? stateLabel(state)}</td>
+                      <td className={`col-status${failure ? ' has-error' : ''}`} title={failure}>{intentNote(job, now, refreshIntervalMs) ?? heldStatus(job) ?? storingStatus(job) ?? stateLabel(state)}</td>
                       <td className="col-rate">{formatRate(job.download_rate)}</td>
                       <td className="col-rate col-optional">{formatRate(job.upload_rate)}</td>
                       <td className="col-eta">{formatEta(job.eta_seconds)}</td>
@@ -313,6 +313,7 @@ export function IngestScreen({ api, section }: Props) {
                           id={job.id}
                           name={name}
                           state={job.state}
+                          desired={job.desired}
                           retryable={canRetryImport(job, linked)}
                           busyAction={busyByJob[jobKey('torrent', job.id)]}
                           confirming={confirmRemove === jobKey('torrent', job.id)}

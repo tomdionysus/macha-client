@@ -16,12 +16,14 @@ export function Progress({ value }: { value: number | null }) {
  * page. Removing a job that is still running cancels it first, so it always
  * asks; removing one that has finished only clears it, so it does not.
  */
-export function JobControls({ variant, kind, id, name, state, retryable = false, busyAction, confirming, onAction, onConfirm }: {
+export function JobControls({ variant, kind, id, name, state, desired, retryable = false, busyAction, confirming, onAction, onConfirm }: {
   variant: 'row' | 'page';
   kind: JobKind;
   id: string;
   name: string;
   state: string;
+  /** A torrent's `desired`, which decides pause and resume alongside its state. */
+  desired?: string;
   retryable?: boolean;
   busyAction: JobAction | undefined;
   confirming: boolean;
@@ -48,12 +50,12 @@ export function JobControls({ variant, kind, id, name, state, retryable = false,
 
   return (
     <div className={`ingest-job-actions ingest-job-actions-${variant}`}>
-      {canPause(kind, state) && (
+      {canPause(kind, state, desired) && (
         <button type="button" className="secondary-button" data-tv-focusable="true" disabled={busy} aria-label={`Pause ${name}`} onClick={() => onAction('pause')}>
           {pending('pause', 'Pause', 'Pausing…')}
         </button>
       )}
-      {canResume(kind, state) && (
+      {canResume(kind, state, desired) && (
         <button type="button" className="secondary-button" data-tv-focusable="true" disabled={busy} aria-label={`Resume ${name}`} onClick={() => onAction('resume')}>
           {pending('resume', 'Resume', 'Resuming…')}
         </button>

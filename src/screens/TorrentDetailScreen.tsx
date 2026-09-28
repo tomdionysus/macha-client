@@ -9,7 +9,7 @@ import { formatAge, formatBytes, formatCount, formatEta, formatPercent, formatRa
 import { jobErrorText } from '../text/viewerText';
 import { MetricTile } from '../components/MetricTile';
 import { DetailCard, DetailHeader, Facts } from '../components/ListParts';
-import { canRetryImport, displayStateOf, jobKey, linkedIngestOf, storingOf, storingPercent, storingStallText, torrentLifecycleMessage, torrentStages, type TorrentStage } from './ingest/jobs';
+import { canRetryImport, displayStateOf, heldStatus, jobKey, linkedIngestOf, storingOf, storingPercent, storingStallText, torrentLifecycleMessage, torrentStages, type TorrentStage } from './ingest/jobs';
 import { useAcquisition } from './ingest/useAcquisition';
 
 /** One stage of the way in: where it stands, how far it has got, and what it is doing now. */
@@ -197,7 +197,7 @@ export function TorrentDetailScreen({ api }: { api: AcquisitionApi }) {
     <section className="ingest-screen detail-screen">
       <Link className="back-button" to={back} data-tv-focusable="true">← Torrents</Link>
       <DetailHeader
-        kicker={intentNote(job, Date.now(), snapshot?.refreshIntervalMs ?? 5_000) ?? stateLabel(state)}
+        kicker={intentNote(job, Date.now(), snapshot?.refreshIntervalMs ?? 5_000) ?? heldStatus(job) ?? stateLabel(state)}
         kickerClass={`state-${state}`}
         title={name}
         actions={(
@@ -207,6 +207,7 @@ export function TorrentDetailScreen({ api }: { api: AcquisitionApi }) {
             id={job.id}
             name={name}
             state={job.state}
+            desired={job.desired}
             retryable={canRetryImport(job, linked)}
             busyAction={busyByJob[jobKey('torrent', job.id)]}
             confirming={confirmRemove === jobKey('torrent', job.id)}

@@ -421,6 +421,16 @@ describe('adding a torrent to the cluster (server 0.64.0)', () => {
   });
 });
 
+describe('a torrent added paused, waiting for a node', () => {
+  it('reads as paused and offers Resume, not Pause', async () => {
+    renderAt('/ingest/torrents', snapshot([torrentJob({ id: 'held', name: 'Held', state: 'awaiting_node', desired: 'paused', desired_applied: true })]));
+    await settle();
+    expect(screen.getByText('Paused, waiting for a node')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Resume Held' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Pause Held' })).toBeNull();
+  });
+});
+
 describe('a download being stored in the cluster (server 0.71.0)', () => {
   const publication = { published_extents: 246, extents: 624, published_bytes: 1_031_798_784, bytes: 2_607_096_508, progress_age_ms: 2_000 };
   const storing = (progressAgeMs = 2_000) => torrentJob({ state: 'downloaded', progress: 1, waiting_reason: 'extent_publication', publication: { ...publication, progress_age_ms: progressAgeMs } });
