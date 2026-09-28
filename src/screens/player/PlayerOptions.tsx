@@ -43,6 +43,7 @@ const REASON_TEXT: Record<PlaybackDecisionReason, string> = {
   'executor-cannot-copy-video': 'this server cannot repackage the video',
   'executor-cannot-copy-audio': 'this server cannot repackage the audio',
   'player-could-not-decode': 'this device could not decode the copied streams',
+  'transcode-below-real-time': 'the server cannot convert this picture fast enough to play',
 };
 
 /**

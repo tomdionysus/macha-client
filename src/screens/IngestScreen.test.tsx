@@ -421,6 +421,80 @@ describe('adding a torrent to the cluster (server 0.64.0)', () => {
   });
 });
 
+describe('a download being stored in the cluster (server 0.71.0)', () => {
+  const publication = { published_extents: 246, extents: 624, published_bytes: 1_031_798_784, bytes: 2_607_096_508, progress_age_ms: 2_000 };
+  const storing = (progressAgeMs = 2_000) => torrentJob({ state: 'downloaded', progress: 1, waiting_reason: 'extent_publication', publication: { ...publication, progress_age_ms: progressAgeMs } });
+
+  it('says so in the list, with how far it has got', async () => {
+    renderAt('/ingest/torrents', snapshot([storing()]));
+    await settle();
+    expect(screen.getByText('Storing 39.4%')).toBeTruthy();
+  });
+
+  it('says in the list when it has stood still', async () => {
+    renderAt('/ingest/torrents', snapshot([storing(4 * 60_000)]));
+    await settle();
+    expect(screen.getByText('Storing 39.4%, no progress for 4 min')).toBeTruthy();
+  });
+
+  it("shows it as the torrent's current stage, with what has been stored", async () => {
+    renderAt('/ingest/torrents/tor-1', snapshot([storing()]));
+    await settle();
+    expect(document.querySelector('.torrent-hero-stage')?.textContent).toBe('Storing in the cluster');
+    expect(screen.getByText('984 MB of 2.43 GB stored.')).toBeTruthy();
+  });
+});
+
+describe('adding a torrent paused (server 0.71.0)', () => {
+  const magnetLink = 'magnet:?xt=urn:btih:abc';
+  function add(submitMagnet: AcquisitionApi['submitMagnet'], tickPaused: boolean) {
+    const api = fakeApi(snapshot([torrentJob()]), { submitMagnet });
+    renderAt('/ingest/torrents', snapshot([torrentJob()]), api);
+    return async () => {
+      await settle();
+      if (tickPaused) fireEvent.click(screen.getByLabelText('Start paused'));
+      fireEvent.change(screen.getByLabelText('Magnet link'), { target: { value: magnetLink } });
+      fireEvent.click(screen.getByText('Add torrent'));
+      await settle();
+    };
+  }
+
+  it('asks for it held, and says it is waiting to be resumed', async () => {
+    const submitMagnet = vi.fn(async () => ({ id: 'new', infoHash: null, pinnedNodeId: null, job: torrentJob({ id: 'new', desired: 'paused' }) }));
+    await add(submitMagnet, true)();
+    expect(submitMagnet).toHaveBeenCalledWith(magnetLink, { paused: true });
+    expect(screen.getByText('Torrent queued, paused. Resume it in the list to start it.')).toBeTruthy();
+  });
+
+  it('asks nothing of the kind when the box is left alone', async () => {
+    const submitMagnet = vi.fn(async () => ({ id: 'new', infoHash: null, pinnedNodeId: null }));
+    await add(submitMagnet, false)();
+    expect(submitMagnet).toHaveBeenCalledWith(magnetLink, {});
+    expect(screen.getByText('Torrent queued.')).toBeTruthy();
+  });
+
+  it('says so when core had to pause it just after a server older than 0.71.0 started it', async () => {
+    const submitMagnet = vi.fn(async () => ({ id: 'new', infoHash: null, pinnedNodeId: null, pausedAfterAdd: true, job: torrentJob({ id: 'new', desired: 'paused' }) }));
+    await add(submitMagnet, true)();
+    expect(screen.getByText('Torrent queued, paused. It started for a moment first: this server cannot add a torrent paused yet.')).toBeTruthy();
+  });
+
+  it('says it is running when the pause core tried after the add failed', async () => {
+    const submitMagnet = vi.fn(async () => ({
+      id: 'new', infoHash: null, pinnedNodeId: null, pausedAfterAdd: false, pauseError: new Error('500'),
+      job: torrentJob({ id: 'new', desired: 'active' }),
+    }));
+    await add(submitMagnet, true)();
+    expect(screen.getByText('Torrent queued, but this server started it: it cannot add a torrent paused yet. Pause it in the list.')).toBeTruthy();
+  });
+
+  it('never claims a pause a server older than 0.71.0 ignored', async () => {
+    const submitMagnet = vi.fn(async () => ({ id: 'new', infoHash: null, pinnedNodeId: null, job: torrentJob({ id: 'new', desired: 'active' }) }));
+    await add(submitMagnet, true)();
+    expect(screen.getByText('Torrent queued, but this server started it: it cannot add a torrent paused yet. Pause it in the list.')).toBeTruthy();
+  });
+});
+
 describe('whether torrents can be added, from the cluster not the node that answered (server 0.64.0)', () => {
   const noTorrentsHere = () => ({ ...snapshot([torrentJob()]), torrentStatus: { enabled: false, build_available: false, search_enabled: false } });
 

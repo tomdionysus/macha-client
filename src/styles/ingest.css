@@ -35,6 +35,10 @@
 }
 .ingest-add-form input:focus { outline: 1px solid var(--focus); border-color: var(--focus); }
 .ingest-add-form button { flex: 0 0 auto; margin: 0; padding: .45rem .8rem; font-size: .85rem; }
+/* Add it held (server 0.71.0): a box and its words, not a field, so the
+   form's input rule is undone here. */
+.ingest-add-form .ingest-start-paused { display: inline-flex; align-items: center; gap: .35rem; flex: 0 0 auto; color: #d7d7da; font-size: .85rem; white-space: nowrap; }
+.ingest-add-form .ingest-start-paused input { flex: none; width: auto; margin: 0; padding: 0; accent-color: var(--focus); }
 /* The refresh at the row's far right: square, and as tall as the field and Add torrent beside it. */
 .ingest-add-form .secondary-button.async-icon-button { width: auto; height: auto; align-self: stretch; aspect-ratio: 1; }
 .ingest-add-form button:disabled, .ingest-job-actions button:disabled { opacity: .4; cursor: default; }

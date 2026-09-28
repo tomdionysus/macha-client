@@ -5,7 +5,7 @@ import { JobControls, Progress } from './ingest/JobControls';
 import { intentNote, REMOVE_AFTER_CHOICES, staleSourceNotes, removeAfterDefaultLabel, torrentNodeLabel } from './ingest/clusterTorrents';
 import { useAsync } from '../hooks/useAsync';
 import { formatAge, formatBytes, formatCount, formatEta, formatPercent, formatRate, formatRatio, formatTimestamp, percent, stateLabel } from './ingest/format';
-import { canPause, canResume, canRetryImport, displayStateOf, jobKey, linkedIngestOf } from './ingest/jobs';
+import { canPause, canResume, canRetryImport, displayStateOf, jobKey, linkedIngestOf, storingOf, storingPercent, storingStallText } from './ingest/jobs';
 import { DEFAULT_TORRENT_SORT, sortTorrents, TORRENT_SORT_KEYS } from './ingest/torrentSort';
 import { SortControl, SortHeader, useListSort } from '../components/ListSortControls';
 import { BulkActions, ListHeading, Pager, SelectPageBox, SelectRowBox, useListSelection } from '../components/ListParts';
@@ -29,11 +29,21 @@ export function torrentPath(id: string, search = ''): string {
   return `${routes.ingestTorrent(id)}${search}`;
 }
 
+/** The list's status while the download is stored in the cluster: "Storing 40%". */
+function storingStatus(job: TorrentJob): string | undefined {
+  const storing = storingOf(job);
+  if (!storing) return undefined;
+  const stall = storingStallText(storing);
+  return `Storing ${formatPercent(storingPercent(storing) ?? null)}${stall ? `, ${stall}` : ''}`;
+}
+
 export function IngestScreen({ api, section }: Props) {
   const acquisition = useAcquisition(api);
   const { snapshot, loading, error, setError, notice, setNotice, refresh, busyByJob, confirmRemove, setConfirmRemove, act, actMany } = acquisition;
   const [path, setPath] = useState('');
   const [magnet, setMagnet] = useState('');
+  // Server 0.71.0: added held, so nothing is checked or downloaded until resumed.
+  const [startPaused, setStartPaused] = useState(false);
   const [submitting, setSubmitting] = useState<'path' | 'magnet'>();
   const [refreshing, setRefreshing] = useState(false);
   const navigate = useNavigate();
@@ -102,12 +112,21 @@ export function IngestScreen({ api, section }: Props) {
         setPath('');
         setNotice(`Import queued: ${value}`);
       } else {
-        await api.submitMagnet(value, {
+        const added = await api.submitMagnet(value, {
           ...(nodeChoice ? { nodeId: nodeChoice } : {}),
           ...(removeAfter !== '' ? { removeAfterMs: Number(removeAfter) } : {}),
+          ...(startPaused ? { paused: true } : {}),
         });
         setMagnet('');
-        setNotice('Torrent queued.');
+        // A node older than 0.71.0 ignores the request and starts the job; core
+        // then pauses it at once (`pausedAfterAdd`). Said as it happened, and a
+        // job still not paused is never called paused.
+        setNotice(!startPaused ? 'Torrent queued.'
+          : added.job && added.job.desired !== 'paused'
+            ? 'Torrent queued, but this server started it: it cannot add a torrent paused yet. Pause it in the list.'
+            : added.pausedAfterAdd
+              ? 'Torrent queued, paused. It started for a moment first: this server cannot add a torrent paused yet.'
+              : 'Torrent queued, paused. Resume it in the list to start it.');
       }
       await refresh();
     } catch (reason: unknown) {
@@ -185,6 +204,16 @@ export function IngestScreen({ api, section }: Props) {
                 {REMOVE_AFTER_CHOICES.map((choice) => <option key={choice.ms} value={String(choice.ms)}>{`Remove ${choice.label.charAt(0).toLowerCase()}${choice.label.slice(1)}`}</option>)}
               </select>
             )}
+            <label className="ingest-start-paused">
+              <input
+                type="checkbox"
+                data-tv-focusable="true"
+                checked={startPaused}
+                onChange={(event) => setStartPaused(event.target.checked)}
+                disabled={!torrentEnabled || submitting === 'magnet'}
+              />
+              <span>Start paused</span>
+            </label>
             <button className="primary-button" data-tv-focusable="true" type="submit" disabled={!torrentEnabled || !magnet.trim() || Boolean(submitting)}>
               {submitting === 'magnet' ? 'Adding…' : 'Add torrent'}
             </button>
@@ -269,7 +298,7 @@ export function IngestScreen({ api, section }: Props) {
                         <Progress value={progress} />
                         <span>{formatPercent(progress)}</span>
                       </td>
-                      <td className={`col-status${failure ? ' has-error' : ''}`} title={failure}>{intentNote(job, now, refreshIntervalMs) ?? stateLabel(state)}</td>
+                      <td className={`col-status${failure ? ' has-error' : ''}`} title={failure}>{intentNote(job, now, refreshIntervalMs) ?? storingStatus(job) ?? stateLabel(state)}</td>
                       <td className="col-rate">{formatRate(job.download_rate)}</td>
                       <td className="col-rate col-optional">{formatRate(job.upload_rate)}</td>
                       <td className="col-eta">{formatEta(job.eta_seconds)}</td>

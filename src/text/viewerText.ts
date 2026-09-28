@@ -8,6 +8,7 @@ import {
   REGENERATION_ENDPOINT_GONE_CODE,
   SESSION_PROVENANCE_UNKNOWN_CODE,
   START_NO_PROGRESS_CODE,
+  TOO_SLOW_TO_PLAY_CODE,
   playbackFailureCode,
   playbackFailureDetail,
   qualityLabel,
@@ -23,6 +24,7 @@ import {
   type PlaybackStartProgress,
   type PlaybackStatusDescription,
   type QualityCeiling,
+  type QualityClass,
   type SearchCategoryKey,
   type StartupSubsystem,
   type TorrentJobErrorCode,
@@ -341,8 +343,9 @@ export function playbackRefusalText(error: unknown, refusal?: PlaybackRefusal): 
 }
 
 /** The player's passing notice for one of core's notice codes. */
-export function playbackNoticeText(notice: PlaybackNotice): string {
+export function playbackNoticeText(notice: PlaybackNotice, quality?: QualityClass): string {
   switch (notice.code) {
+    case 'quality-stepped-down': return qualitySteppedDownText(quality);
     case 'copy-refused': return 'This node could not copy the original streams, so they are being converted.';
     case 'decode-fallback': return 'This device could not play the original streams, so they are being converted.';
     case 'cannot-seek': return 'This stream cannot seek.';
@@ -369,6 +372,8 @@ export function playbackFailureCodeText(code: string | undefined): string | unde
     // 0.69.0) stops reporting any: there is no server sentence behind it.
     case START_NO_PROGRESS_CODE:
       return 'The node stopped making progress starting this stream.';
+    case TOO_SLOW_TO_PLAY_CODE:
+      return tooSlowToPlayText();
     default:
       return undefined;
   }
@@ -516,6 +521,27 @@ export function alphabetIndexKeyDescription(key: string): string {
   return key === 'other' ? 'Titles beginning with a number or symbol' : `Titles beginning with ${key}`;
 }
 
+/** "its video", "its audio", "its video and audio", or undefined for neither. */
+function convertedStreams(video: boolean, audio: boolean): string | undefined {
+  return video && audio ? 'its video and audio' : video ? 'its video' : audio ? 'its audio' : undefined;
+}
+
+/**
+ * A quality the viewer chose that no node can convert at real speed (core's
+ * `TOO_SLOW_TO_PLAY_CODE`), built from the facts where they are known: the
+ * quality playing, and which streams the session converts. Tom: "clear,
+ * concise, and visible 'Macha can't play this quality because...'".
+ */
+export function tooSlowToPlayText(quality?: QualityClass, transform?: { video: string; audio: string }): string {
+  const streams = transform && convertedStreams(transform.video === 'transcode', transform.audio === 'transcode');
+  return `Macha can't play ${quality ? qualityLabel(quality) : 'this quality'} because the server can't convert ${streams ?? 'it'} fast enough to keep up.`;
+}
+
+/** Core stepped its own choice down to a quality a node can keep up with. */
+export function qualitySteppedDownText(quality?: QualityClass): string {
+  return `Switched to ${quality ? qualityLabel(quality) : 'a lower quality'}: the server can't convert a higher quality fast enough.`;
+}
+
 /**
  * Why Play chooses the file it does, as one sentence built from every fact
  * core gives (`PlaybackVersions`): the file chosen, a larger one passed over
@@ -532,9 +558,13 @@ export function qualityChoiceText(versions: Pick<PlaybackVersions, 'files' | 'au
   const { automatic, limitedBy, passedOver } = versions;
   if (!automatic) return undefined;
   const clauses: string[] = [];
-  const { video, audio } = passedOver?.converts ?? { video: false, audio: false };
-  const converted = video && audio ? 'its video and audio' : video ? 'its video' : audio ? 'its audio' : undefined;
-  if (passedOver && converted) clauses.push(`${qualityLabel(passedOver.quality)} needs ${converted} converted`);
+  const converted = passedOver && convertedStreams(passedOver.converts.video, passedOver.converts.audio);
+  // A node's measured rate for this kind of picture (server 0.70.0): the
+  // conversion is not only needed but too slow to watch.
+  const tooSlow = passedOver?.reasons.includes('transcode-below-real-time');
+  if (passedOver && converted) {
+    clauses.push(`${qualityLabel(passedOver.quality)} needs ${converted} converted${tooSlow ? ', which the server can\'t do fast enough' : ''}`);
+  }
   const above = limitedBy
     ? Math.max(...versions.files.map((file) => file.quality).filter((quality) => quality > limitedBy.quality))
     : Number.NEGATIVE_INFINITY;

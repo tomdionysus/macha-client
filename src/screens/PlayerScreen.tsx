@@ -7,7 +7,7 @@ import { useArtworkUrl } from '../hooks/useArtworkUrl';
 import { requestTvDefaultFocus } from '../hooks/useTvNavigation';
 import { useElapsedMs } from '../hooks/useElapsedMs';
 import { usePointerIdle } from '../hooks/usePointerIdle';
-import { cardSubtitle, episodeCode, playbackNoticeText, playbackTimeText, startProgressText, streamStatusText } from '../text/viewerText';
+import { cardSubtitle, episodeCode, playbackNoticeText, playbackTimeText, startProgressText, streamStatusText, tooSlowToPlayText } from '../text/viewerText';
 import { TrackFacts } from './player/TrackFacts';
 import { useAsync } from '../hooks/useAsync';
 import type { Platform } from '@machafoundation/core';
@@ -21,7 +21,7 @@ import { playbackFailureTrail, type PlaybackFailureTrailEntry } from './player/f
 import { nodeName, playerNodeChoices } from './player/nodeChoices';
 import { moveStreamToNode } from './player/nodeMove';
 import { nodeStartCosts } from '../playback/nodeStartCosts';
-import { MOVE_LEAD_MARGIN_MS } from '@machafoundation/core';
+import { MOVE_LEAD_MARGIN_MS, playbackFailureCode, TOO_SLOW_TO_PLAY_CODE } from '@machafoundation/core';
 import { failureTrailEnabled } from '../diagnostics/failureTrailSetting';
 import { accountSessionLimitNotice, playbackFailureHeadline } from '../diagnostics/failureCauses';
 import { bufferedTimelineSegments } from '@machafoundation/core';
@@ -51,6 +51,8 @@ interface Props {
   onVolumeChange: (volume: number) => void;
   /** Every node this client knows, so the viewer can send the stream to one. */
   endpoints?: readonly EndpointCandidate[];
+  /** The cluster's name for the node behind an endpoint (the registry's `nodeName`), for the node picker. */
+  nodeNameOf?: (endpointId: string) => string | undefined;
   /**
    * Put this node at the head of the candidate order and keep it there.
    *
@@ -281,7 +283,7 @@ export function webArrowTargetOwnsKey(target: EventTarget | null): boolean {
 
 export const isSubtitleOnlyUpdate = isSubtitleOnlyPlaybackUpdate;
 
-function PlayerSession({ api, media, platform, runtime, startPositionMs, presentation, onProgress, onPosition, onMinimize, onExpand, onStop, onPrevious, onNext, onEnded, canPrevious, canNext, queuePosition, volume, onVolumeChange, endpoints, onPinEndpoint, offerAll = false }: Omit<Props, 'request'> & { media: MediaSummary; startPositionMs: number }) {
+function PlayerSession({ api, media, platform, runtime, startPositionMs, presentation, onProgress, onPosition, onMinimize, onExpand, onStop, onPrevious, onNext, onEnded, canPrevious, canNext, queuePosition, volume, onVolumeChange, endpoints, nodeNameOf, onPinEndpoint, offerAll = false }: Omit<Props, 'request'> & { media: MediaSummary; startPositionMs: number }) {
   const pageRef = useRef<HTMLElement | null>(null);
   const hostRef = useRef<HTMLDivElement | null>(null);
   const chromeRef = useRef<HTMLDivElement | null>(null);
@@ -399,7 +401,7 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
   }, [onEnded, playback.event.ended]);
 
   const fatalError = runtimeState.fatalError ?? playback.fatalError;
-  const playbackNotice = localNotice ?? (playback.notice && playbackNoticeText(playback.notice));
+  const playbackNotice = localNotice ?? (playback.notice && playbackNoticeText(playback.notice, runtimePlayback?.instruction?.quality));
 
   const hideControls = useCallback(() => {
     if (hideTimerRef.current !== undefined) {
@@ -505,7 +507,7 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
     if (!accepted) {
       releasePicture();
       const notice = runtime.getPlaybackSnapshot()?.notice;
-      setLocalNotice(notice && playbackNoticeText(notice));
+      setLocalNotice(notice && playbackNoticeText(notice, runtime.getPlaybackSnapshot()?.instruction?.quality));
     }
     if (!interactionControlled) showControls();
     return accepted;
@@ -552,8 +554,8 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
    * because `play()` closes before it starts. That is what this replaced.
    */
   const nodeChoices = useMemo(
-    () => playerNodeChoices(endpoints ?? [], playback.session?.endpoint?.id),
-    [endpoints, playback.session?.endpoint?.id],
+    () => playerNodeChoices(endpoints ?? [], playback.session?.endpoint?.id, nodeNameOf),
+    [endpoints, nodeNameOf, playback.session?.endpoint?.id],
   );
   // What this device can decode, asked once per player. It decides what a
   // remux press may ask the node to copy; without it every remux press would
@@ -860,6 +862,7 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
   const pausedForControl = playerControlShowsPlay(playback.intent.paused, Boolean(fatalError));
   const queueLabel = queuePosition && queuePosition.total > 1 ? `${queuePosition.index + 1} of ${queuePosition.total}` : undefined;
   const playerSubtitle = [mediaSubtitle, queueLabel].filter(Boolean).join(' · ');
+  const tooSlow = Boolean(fatalError) && playbackFailureCode(fatalError) === TOO_SLOW_TO_PLAY_CODE;
   const showBuffering = !fatalError && (playback.starting || Boolean(event.buffering));
   // How long this start has been going on, for telling the viewer. Counted
   // here rather than from a timestamp on the snapshot, because core says
@@ -921,8 +924,19 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
           {/* Core's sentence, never `.message`: by the time a failure reaches
               here its message is two of core's envelopes and a node address.
               The trail below still carries the whole chain for anyone who
-              switched it on. */}
-          <span>{playbackFailureHeadline(fatalError)}</span>
+              switched it on. A quality no node can keep up with is worded from
+              the facts of what was playing, since those say which. */}
+          <span>{tooSlow ? tooSlowToPlayText(runtimePlayback?.instruction?.quality, session?.transform) : playbackFailureHeadline(fatalError)}</span>
+          {/* Tom: stop "with a try again option". Another quality is the other
+              way on, so the list is offered beside it. */}
+          {tooSlow && (
+            <div className="player-failure-actions">
+              <button type="button" className="secondary-button" data-tv-focusable="true" data-tv-default-focus="true" onClick={() => { void runtime.retry(); }}>Try again</button>
+              {session && (
+                <button type="button" className="secondary-button" data-tv-focusable="true" onClick={() => setOptionsVisible(true)}>Choose another quality</button>
+              )}
+            </div>
+          )}
           {/* **The cap explains why recovery could not finish. It is not what
               went wrong**, and putting it first would tell a viewer their
               account is busy when a node had just died under them. Core's head

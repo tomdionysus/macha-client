@@ -87,6 +87,8 @@ export function nodeName(endpoint: string | undefined): string | undefined {
 export function playerNodeChoices(
   candidates: readonly EndpointCandidate[],
   activeEndpointId?: string,
+  /** The cluster's name for the node behind an endpoint, where core knows it (the registry's `nodeName`). */
+  nameOf?: (endpointId: string) => string | undefined,
 ): PlayerNodeChoice[] {
   const seen = new Map<string, number>();
   for (const candidate of candidates) {
@@ -110,7 +112,7 @@ export function playerNodeChoices(
     return {
       id,
       endpointIds: group.map((candidate) => candidate.endpoint.id),
-      label: nodeLabel(preferredAddress(group), shared),
+      label: group.map((candidate) => nameOf?.(candidate.endpoint.id)).find(Boolean) ?? nodeLabel(preferredAddress(group), shared),
       detail: active
         ? `${addresses.join(', ')} — serving this stream`
         : ready ? addresses.join(', ') : `${addresses.join(', ')} — cooling down after a failure`,

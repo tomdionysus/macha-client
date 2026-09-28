@@ -1,4 +1,4 @@
-import type { IngestJob, TorrentJob } from '@machafoundation/core';
+import type { IngestJob, TorrentJob, TorrentPublication } from '@machafoundation/core';
 import { stateLabel } from './format';
 
 export type JobKind = 'ingest' | 'torrent';
@@ -38,6 +38,35 @@ export function linkedIngestOf(job: TorrentJob, ingestJobs: readonly IngestJob[]
 /** What a viewer is shown: once a torrent is importing, the import is its state. */
 export function displayStateOf(job: TorrentJob, linkedIngest?: IngestJob): string {
   return linkedIngest?.state ?? job.state;
+}
+
+/**
+ * The download still being stored in the cluster (server 0.71.0), between
+ * the download finishing and the import starting: minutes to tens of minutes
+ * on a large torrent, after which the import itself takes seconds. Read from
+ * the server's own reason, never rebuilt from the state, and only while it is
+ * incomplete.
+ */
+export function storingOf(job: TorrentJob): TorrentPublication | undefined {
+  const publication = job.publication;
+  return job.waiting_reason === 'extent_publication' && publication && publication.published_extents < publication.extents
+    ? publication
+    : undefined;
+}
+
+/** How far storing has got, from the extents; undefined when there are none to count. */
+export function storingPercent(publication: TorrentPublication): number | undefined {
+  return publication.extents > 0 ? Math.max(0, Math.min(100, publication.published_extents / publication.extents * 100)) : undefined;
+}
+
+/**
+ * "no progress for 4 min" once storing has stood still a minute or more. A
+ * flat figure reads the same whether the node is busy or stuck, and the
+ * server imports anyway after ten minutes, so stuck is real.
+ */
+export function storingStallText(publication: TorrentPublication): string | undefined {
+  const minutes = Math.floor(publication.progress_age_ms / 60_000);
+  return minutes >= 1 ? `no progress for ${minutes} min` : undefined;
 }
 
 export function canRetryImport(job: TorrentJob, linkedIngest?: IngestJob): boolean {
@@ -84,7 +113,9 @@ export function torrentStages(job: TorrentJob, linkedIngest?: IngestJob): Torren
   const imported = linkedIngest ? linkedIngest.state === 'completed' || linkedIngest.state === 'cataloguing' : false;
   const importStage: Pick<TorrentStage, 'status' | 'label'> = linkedIngest
     ? stageOf(linkedIngest.state, imported)
-    : { status: 'waiting', label: downloaded ? 'Starting' : 'After the download' };
+    : storingOf(job)
+      ? { status: 'active', label: 'Storing in the cluster' }
+      : { status: 'waiting', label: downloaded ? 'Starting' : 'After the download' };
 
   const catalogue = job.catalogue;
   const catalogueStage: Pick<TorrentStage, 'status' | 'label'> = !catalogue || catalogue.state === 'waiting'

@@ -11,6 +11,16 @@ function candidate(id: string, baseUrl: string, ready = true, nodeId?: string): 
 }
 
 describe('playerNodeChoices', () => {
+  it("labels a node by the cluster's name for it where core knows it, from any of its addresses", () => {
+    const names: Record<string, string> = { lan: 'Corvus GBNI-1' };
+    const choices = playerNodeChoices(
+      [candidate('wan', 'https://macnessa.macha.network', true, 'gbni'), candidate('lan', 'http://10.44.1.50:7438', true, 'gbni'), candidate('fi', 'http://10.35.1.50:7438', true, 'fi')],
+      undefined,
+      (endpointId) => names[endpointId],
+    );
+    expect(choices.map((choice) => choice.label)).toEqual(['10.35.1.50', 'Corvus GBNI-1']);
+  });
+
   it('labels a node by its host, because that is what the Status screen calls it', () => {
     const choices = playerNodeChoices([candidate('a', 'https://macnessa.macha.network:7438')]);
     expect(choices[0].label).toBe('macnessa.macha.network');

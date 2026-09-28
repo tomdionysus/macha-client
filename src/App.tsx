@@ -744,9 +744,12 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
     />
   );
 
+  // The operator's name for each node, as core learns it from status.
+  const nodeNameOf = useCallback((endpointId: string) => endpointRegistry.nodeName(endpointId), [endpointRegistry]);
   const miniPlayerActive = Boolean(playback.playerVisible && !playback.playerRouteActive);
   const playerHost = playback.playerVisible && activePlayback ? <PlayerHost
     endpoints={endpointCandidates}
+    nodeNameOf={nodeNameOf}
     onPinEndpoint={pinEndpoint}
     api={api}
     request={activePlayback}

@@ -9,7 +9,7 @@ import { formatAge, formatBytes, formatCount, formatEta, formatPercent, formatRa
 import { jobErrorText } from '../text/viewerText';
 import { MetricTile } from '../components/MetricTile';
 import { DetailCard, DetailHeader, Facts } from '../components/ListParts';
-import { canRetryImport, displayStateOf, jobKey, linkedIngestOf, torrentLifecycleMessage, torrentStages, type TorrentStage } from './ingest/jobs';
+import { canRetryImport, displayStateOf, jobKey, linkedIngestOf, storingOf, storingPercent, storingStallText, torrentLifecycleMessage, torrentStages, type TorrentStage } from './ingest/jobs';
 import { useAcquisition } from './ingest/useAcquisition';
 
 /** One stage of the way in: where it stands, how far it has got, and what it is doing now. */
@@ -53,14 +53,21 @@ function TorrentBody({ job, linkedIngest }: { job: TorrentJob; linkedIngest?: In
   const remaining = downloaded || job.bytes_total === null || job.bytes_completed === null ? 0 : Math.max(0, job.bytes_total - job.bytes_completed);
   const catalogue = job.catalogue;
   const catalogueDone = catalogue ? catalogue.catalogued + catalogue.no_match + catalogue.failed : 0;
-  const importProgress = importStage.status === 'done' ? 100 : linkedIngest ? percent(linkedIngest.progress, linkedIngest.bytes_completed, linkedIngest.bytes_total) : null;
+  // Between the download and the import the owner stores the download in the
+  // cluster (server 0.71.0); the import stage shows that until the import starts.
+  const storing = linkedIngest ? undefined : storingOf(job);
+  const storingStall = storing && storingStallText(storing);
+  const storedText = storing && `${formatBytes(storing.published_bytes)} of ${formatBytes(storing.bytes)} stored${storingStall ? `, ${storingStall}` : ''}`;
+  const importProgress = importStage.status === 'done' ? 100
+    : linkedIngest ? percent(linkedIngest.progress, linkedIngest.bytes_completed, linkedIngest.bytes_total)
+      : storing ? storingPercent(storing) ?? null : null;
   const catalogueProgress = catalogueStage.status === 'done' || catalogueStage.status === 'issues' ? 100 : catalogue && catalogue.total > 0 ? (catalogueDone / catalogue.total) * 100 : null;
 
   // The headline is whichever stage is under way, named, so the big number is
   // never a finished stage's or a stage that has not started.
   const current = [
     { stage: download, progress: downloadProgress, ...downloadStageText(job, remaining) },
-    { stage: importStage, progress: importProgress, doing: 'Copying into the library', detail: linkedIngest ? `${formatBytes(linkedIngest.bytes_completed)} of ${formatBytes(linkedIngest.bytes_total)} · ${linkedIngest.files_completed} of ${linkedIngest.files_total} files · ETA ${formatEta(linkedIngest.eta_seconds)}` : 'Starting' },
+    { stage: importStage, progress: importProgress, doing: storing ? 'Storing in the cluster' : 'Copying into the library', detail: linkedIngest ? `${formatBytes(linkedIngest.bytes_completed)} of ${formatBytes(linkedIngest.bytes_total)} · ${linkedIngest.files_completed} of ${linkedIngest.files_total} files · ETA ${formatEta(linkedIngest.eta_seconds)}` : storedText ?? 'Starting' },
     { stage: catalogueStage, progress: catalogueProgress, doing: 'Cataloguing', detail: catalogue ? `${catalogueDone} of ${catalogue.total} files matched or settled` : '' },
   ].find((entry) => entry.stage.status !== 'done' && entry.stage.status !== 'issues');
 
@@ -101,8 +108,10 @@ function TorrentBody({ job, linkedIngest }: { job: TorrentJob; linkedIngest?: In
           progress={importProgress}
           summary={linkedIngest
             ? `${formatBytes(linkedIngest.bytes_completed)} of ${formatBytes(linkedIngest.bytes_total)} copied, ${linkedIngest.files_completed} of ${linkedIngest.files_total} files.`
-            : 'Copies the finished download into the library.'}
-          rows={linkedIngest ? [
+            : storedText ? `${storedText}.` : 'Copies the finished download into the library.'}
+          rows={storing ? [
+            ['Extents', `${storing.published_extents} / ${storing.extents}`],
+          ] : linkedIngest ? [
             ...(importStage.status === 'done' ? [] : [
               ['Rate', formatRate(linkedIngest.rate_bytes_per_second)] as const,
               ['ETA', formatEta(linkedIngest.eta_seconds)] as const,
