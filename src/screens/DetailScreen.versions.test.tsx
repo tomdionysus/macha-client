@@ -23,7 +23,9 @@ function show(details: MediaDetails, versions: PlaybackVersions) {
 
 const film = { id: 'film', kind: 'movie', title: 'A film', mediaIds: ['macha:big'] } as MediaDetails;
 const fourK: PlaybackVersions = {
-  files: [],
+  // The 4K file the screen's ceiling keeps Play off, as core only sets
+  // limitedBy when a file is above it.
+  files: [{ quality: 2160, instruction: step(2160, 'file').instruction, index: 0 }],
   steps: [step(2160, 'file'), step(1440, 'transcode'), step(1080, 'transcode'), step(720, 'transcode')],
   automatic: step(1080, 'transcode'),
   limitedBy: { quality: 1080, reason: 'ceiling-display' },
@@ -47,14 +49,14 @@ describe('the detail page\'s quality buttons', () => {
   it('says why Play will not choose the largest file when the screen caps it', async () => {
     show(film, fourK);
     await settle();
-    expect(screen.getByText('Play chooses up to 1080p, the most this screen shows. Pick a quality to play another.')).toBeTruthy();
+    expect(screen.getByText('Play chooses 1080p. 4K is more than this screen shows. Pick a quality to play another.')).toBeTruthy();
   });
 
   it('says nothing about a cap that kept Play off no file', async () => {
     show(film, { ...fourK, limitedBy: undefined });
     await settle();
     screen.getByTitle('Play at 4K');
-    expect(screen.queryByText(/Play chooses up to/)).toBeNull();
+    expect(screen.queryByText(/Play chooses/)).toBeNull();
   });
 
   it('offers a track no qualities, as it has no picture', async () => {

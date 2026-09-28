@@ -10,7 +10,7 @@ import { requestTvDefaultFocus } from '../hooks/useTvNavigation';
 import { buildPlatformTraits } from '../platform/traits';
 import { useEffect } from 'react';
 import { EditButton } from '../components/EditButton';
-import { episodeCode, qualityLimitText } from '../text/viewerText';
+import { episodeCode, qualityChoiceText } from '../text/viewerText';
 import { MediaPageTitle } from '../components/MediaPageTitle';
 import { MediaLine } from '../components/MediaLine';
 
@@ -82,6 +82,7 @@ export function DetailScreen({ api, itemId, onBack, onPlay, onPlayFromStart, loa
 
   const media = details.value;
   const playable = canPlayDirectly(media) && media.mediaIds.length > 0;
+  const qualityNote = playable && versions.value ? qualityChoiceText(versions.value) : undefined;
   const resumable = playable && canResume(media, progress);
 
   const copy = (
@@ -137,7 +138,7 @@ export function DetailScreen({ api, itemId, onBack, onPlay, onPlayFromStart, loa
           })}
         </div>
       )}
-      {playable && versions.value?.limitedBy && <p className="media-quality-note">{qualityLimitText(versions.value.limitedBy)}</p>}
+      {qualityNote && <p className="media-quality-note">{qualityNote}</p>}
     </div>
   );
 

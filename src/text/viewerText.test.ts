@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { endpointFailure, MachaAcquisitionApiError, MachaConnectionError, MachaPlaybackError, NOT_PLAYABLE_CODE, SESSION_PROVENANCE_UNKNOWN_CODE, START_NO_PROGRESS_CODE, type MediaSummary, type PlaybackNotice, type PlaybackStartProgress, type PlaybackStatusDescription, type PlaybackStreamInfo } from '@machafoundation/core';
+import { endpointFailure, MachaAcquisitionApiError, MachaConnectionError, MachaPlaybackError, NOT_PLAYABLE_CODE, SESSION_PROVENANCE_UNKNOWN_CODE, START_NO_PROGRESS_CODE, type MediaSummary, type PlaybackNotice, type PlaybackStartProgress, type VersionStep, type PassedOverVersion, type QualityCeiling, type PlaybackStatusDescription, type PlaybackStreamInfo } from '@machafoundation/core';
 import {
   playbackRefusalText,
   diagnosticErrorText,
@@ -7,7 +7,7 @@ import {
   jobErrorText,
   serverStatusText,
   albumLabel, alphabetIndexKeyText, cardSubtitle, episodeCode, episodeLabel, playbackFailureCodeText, playbackNoticeText,
-  playbackTimeText, qualityLimitText, SERVER_UNREACHABLE_TEXT, sortChoiceLabel, startProgressText, streamStatusText, trackNumberLabel, viewerErrorText,
+  playbackTimeText, qualityChoiceText, SERVER_UNREACHABLE_TEXT, sortChoiceLabel, startProgressText, streamStatusText, trackNumberLabel, viewerErrorText,
 } from './viewerText';
 
 const item = (overrides: Partial<MediaSummary>) => ({ id: 'i', kind: 'movie', title: 'T', mediaIds: [], ...overrides }) as MediaSummary;
@@ -185,15 +185,6 @@ describe('a refused playback change says why (Tom: no more "That change could no
   });
 });
 
-describe('quality wording', () => {
-  it('gives each cap on Play its own reason', () => {
-    expect(qualityLimitText({ quality: 1080, reason: 'ceiling-display' })).toBe('Play chooses up to 1080p, the most this screen shows. Pick a quality to play another.');
-    expect(qualityLimitText({ quality: 720, reason: 'ceiling-preference' })).toBe('Play chooses up to 720p, as set in Settings. Pick a quality to play another.');
-    expect(qualityLimitText({ quality: 720, reason: 'ceiling-cellular' })).toBe('Play chooses up to 720p on mobile data. Pick a quality to play another.');
-    expect(qualityLimitText({ quality: 1080, reason: 'ceiling-device' })).toBe('Play chooses up to 1080p, the most this device plays. Pick a quality to play another.');
-  });
-});
-
 describe('a refusal because the node is busy', () => {
   it('says the node is converting for others rather than quoting the server', () => {
     const error = new MachaPlaybackError('Macha playback request failed: video transcode limit reached', 429, 'resource_limit');
@@ -256,5 +247,48 @@ describe('what a start or a change is doing (server 0.69.0)', () => {
   it('says nothing once the start is over, whichever way it ended', () => {
     expect(startProgressText(progress({ stage: 'ready' }))).toBeUndefined();
     expect(startProgressText(progress({ stage: 'failed' }))).toBeUndefined();
+  });
+});
+
+describe('why Play chooses the file it does, as one sentence from every fact', () => {
+  const instruction = (video: 'copy' | 'transcode', audio: 'copy' | 'transcode') =>
+    ({ mode: video === 'transcode' || audio === 'transcode' ? 'transcode' : 'direct', video, audio, reasons: [], assumed: [] }) as VersionStep['instruction'];
+  const file = (quality: VersionStep['quality'], video: 'copy' | 'transcode' = 'copy', audio: 'copy' | 'transcode' = 'copy') =>
+    ({ quality, instruction: instruction(video, audio), index: 0 });
+  // The Martian: a 4K file (HEVC, TrueHD), a 1080p file (HEVC, E-AC-3) and a 720p file (H.264, AAC).
+  const files = [file(2160, 'copy', 'transcode'), file(1080, 'copy', 'transcode'), file(720)];
+  const automatic = (quality: VersionStep['quality'], video: 'copy' | 'transcode' = 'copy', audio: 'copy' | 'transcode' = 'copy') =>
+    ({ quality, source: 'file', mediaId: 'm', instruction: instruction(video, audio) }) as VersionStep;
+  const passedOver = (quality: VersionStep['quality'], video: boolean, audio: boolean): PassedOverVersion =>
+    ({ quality, converts: { video, audio }, reasons: [] });
+
+  it('builds one sentence when a ceiling and a conversion both kept Play off a larger file', () => {
+    // This Mac: the screen caps at 1080p, and Chrome cannot play E-AC-3.
+    expect(qualityChoiceText({ files, automatic: automatic(720), limitedBy: { quality: 1080, reason: 'ceiling-display' }, passedOver: passedOver(1080, false, true) }))
+      .toBe('Play chooses 720p, which plays without converting. 1080p needs its audio converted, and 4K is more than this screen shows. Pick a quality to play another.');
+  });
+
+  it('names only the conversion, where no ceiling applies (the 4K television)', () => {
+    expect(qualityChoiceText({ files, automatic: automatic(1080), passedOver: passedOver(2160, false, true) }))
+      .toBe('Play chooses 1080p, which plays without converting. 4K needs its audio converted. Pick a quality to play another.');
+    expect(qualityChoiceText({ files, automatic: automatic(1080), passedOver: passedOver(2160, true, true) }))
+      .toBe('Play chooses 1080p, which plays without converting. 4K needs its video and audio converted. Pick a quality to play another.');
+  });
+
+  it('names only the ceiling, with its reason, and the largest file it kept out', () => {
+    const only = (reason: QualityCeiling['reason']) => qualityChoiceText({ files, automatic: automatic(1080), limitedBy: { quality: 1080, reason } });
+    expect(only('ceiling-display')).toBe('Play chooses 1080p. 4K is more than this screen shows. Pick a quality to play another.');
+    expect(only('ceiling-device')).toBe('Play chooses 1080p. 4K is more than this device plays. Pick a quality to play another.');
+    expect(only('ceiling-cellular')).toBe('Play chooses 1080p. 4K is more than Play uses on mobile data. Pick a quality to play another.');
+    expect(only('ceiling-preference')).toBe('Play chooses 1080p. 4K is more than the most set in Settings. Pick a quality to play another.');
+  });
+
+  it('never claims the chosen file plays as it is when it does not', () => {
+    expect(qualityChoiceText({ files, automatic: automatic(1080, 'copy', 'transcode'), passedOver: passedOver(2160, true, true) }))
+      .toBe('Play chooses 1080p. 4K needs its video and audio converted. Pick a quality to play another.');
+  });
+
+  it('says nothing when Play chooses the largest file there is', () => {
+    expect(qualityChoiceText({ files, automatic: automatic(2160) })).toBeUndefined();
   });
 });

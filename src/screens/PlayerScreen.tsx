@@ -853,7 +853,9 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
     [api, playingMediaId],
   );
   const described = describePlaybackSession(session, event.streamOrigin);
-  const streamStatus = described && { endpoint: nodeName(described.endpoint), ...streamStatusText(described) };
+  // The cluster's own name for the serving node where core knows it
+  // ("corvus-fi-1"), else its host: never a URL.
+  const streamStatus = described && { endpoint: described.endpointName ?? nodeName(described.endpoint), ...streamStatusText(described) };
   const mediaSubtitle = playerMediaSubtitle(media);
   const pausedForControl = playerControlShowsPlay(playback.intent.paused, Boolean(fatalError));
   const queueLabel = queuePosition && queuePosition.total > 1 ? `${queuePosition.index + 1} of ${queuePosition.total}` : undefined;

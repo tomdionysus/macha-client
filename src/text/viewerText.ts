@@ -19,6 +19,7 @@ import {
   type MusicHierarchyContext,
   type PlaybackNotice,
   type PlaybackRefusal,
+  type PlaybackVersions,
   type PlaybackStartProgress,
   type PlaybackStatusDescription,
   type QualityCeiling,
@@ -516,14 +517,36 @@ export function alphabetIndexKeyDescription(key: string): string {
 }
 
 /**
- * Why Play will not choose the largest file, for the viewer (Tom: automatic
- * play capped "with context to the user as to why"). Shown only when core
- * says the ceiling kept Play off a larger file.
+ * Why Play chooses the file it does, as one sentence built from every fact
+ * core gives (`PlaybackVersions`): the file chosen, a larger one passed over
+ * because it would need converting (`passedOver`), and a ceiling that kept a
+ * larger one out (`limitedBy`, with its reason). Tom: automatic play is capped
+ * "with context to the user as to why", and the facts are parsed into one
+ * sentence rather than a line each.
+ *
+ * "Which plays without converting" is said only when a larger file was passed
+ * over for needing it, since only then is it the reason. Undefined when Play
+ * is choosing the largest file there is, which needs no explaining.
  */
-export function qualityLimitText(ceiling: QualityCeiling): string {
-  const label = qualityLabel(ceiling.quality);
-  if (ceiling.reason === 'ceiling-display') return `Play chooses up to ${label}, the most this screen shows. Pick a quality to play another.`;
-  if (ceiling.reason === 'ceiling-device') return `Play chooses up to ${label}, the most this device plays. Pick a quality to play another.`;
-  if (ceiling.reason === 'ceiling-cellular') return `Play chooses up to ${label} on mobile data. Pick a quality to play another.`;
-  return `Play chooses up to ${label}, as set in Settings. Pick a quality to play another.`;
+export function qualityChoiceText(versions: Pick<PlaybackVersions, 'files' | 'automatic' | 'limitedBy' | 'passedOver'>): string | undefined {
+  const { automatic, limitedBy, passedOver } = versions;
+  if (!automatic) return undefined;
+  const clauses: string[] = [];
+  const { video, audio } = passedOver?.converts ?? { video: false, audio: false };
+  const converted = video && audio ? 'its video and audio' : video ? 'its video' : audio ? 'its audio' : undefined;
+  if (passedOver && converted) clauses.push(`${qualityLabel(passedOver.quality)} needs ${converted} converted`);
+  const above = limitedBy
+    ? Math.max(...versions.files.map((file) => file.quality).filter((quality) => quality > limitedBy.quality))
+    : Number.NEGATIVE_INFINITY;
+  if (limitedBy && Number.isFinite(above)) {
+    const larger = qualityLabel(above as QualityCeiling['quality']);
+    clauses.push(limitedBy.reason === 'ceiling-display' ? `${larger} is more than this screen shows`
+      : limitedBy.reason === 'ceiling-device' ? `${larger} is more than this device plays`
+        : limitedBy.reason === 'ceiling-cellular' ? `${larger} is more than Play uses on mobile data`
+          : `${larger} is more than the most set in Settings`);
+  }
+  if (clauses.length === 0) return undefined;
+  const plays = automatic.instruction.video !== 'transcode' && automatic.instruction.audio !== 'transcode';
+  const chosen = `Play chooses ${qualityLabel(automatic.quality)}${passedOver && converted && plays ? ', which plays without converting' : ''}.`;
+  return `${chosen} ${clauses.join(', and ')}. Pick a quality to play another.`;
 }
