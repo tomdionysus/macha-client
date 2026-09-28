@@ -57,7 +57,9 @@ function hostname(baseUrl: string): string | undefined {
  */
 export function nodeName(endpoint: string | undefined): string | undefined {
   if (!endpoint) return undefined;
-  return hostname(endpoint) ?? endpoint;
+  // `||`, not `??`: an address that parses with no host (a `file:` URL, or
+  // anything on a runtime whose URL does not throw) answers ''.
+  return hostname(endpoint) || endpoint;
 }
 
 /**

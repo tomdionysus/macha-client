@@ -142,6 +142,8 @@ describe('what the player calls the node serving a stream', () => {
 
   it('shows an address it cannot parse as it is, and nothing for no address', () => {
     expect(nodeName('not a url')).toBe('not a url');
+    // Parses, but names no host: never an empty name.
+    expect(nodeName('file:///srv/macha')).toBe('file:///srv/macha');
     expect(nodeName(undefined)).toBeUndefined();
   });
 });
