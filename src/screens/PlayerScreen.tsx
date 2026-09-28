@@ -7,18 +7,18 @@ import { useArtworkUrl } from '../hooks/useArtworkUrl';
 import { requestTvDefaultFocus } from '../hooks/useTvNavigation';
 import { useElapsedMs } from '../hooks/useElapsedMs';
 import { usePointerIdle } from '../hooks/usePointerIdle';
-import { cardSubtitle, episodeCode, playbackNoticeText, playbackTimeText, streamStatusText } from '../text/viewerText';
+import { cardSubtitle, episodeCode, playbackNoticeText, playbackTimeText, startProgressText, streamStatusText } from '../text/viewerText';
 import { TrackFacts } from './player/TrackFacts';
 import { useAsync } from '../hooks/useAsync';
 import type { Platform } from '@machafoundation/core';
 import { platformTraits } from '../platform/traits';
 import type { PlaybackUpdate } from '@machafoundation/core';
-import { isSubtitleOnlyPlaybackUpdate, offeredModes, progressFor, technicalSummary, technicalProfileFromSession, type OfferedMode, type PlaybackCoordinatorSnapshot, type PlaybackPolicyOverrides, type PlaybackSession } from '@machafoundation/core';
+import { isSubtitleOnlyPlaybackUpdate, offeredModes, type PlaybackStartProgress, progressFor, technicalSummary, technicalProfileFromSession, type OfferedMode, type PlaybackCoordinatorSnapshot, type PlaybackPolicyOverrides, type PlaybackSession } from '@machafoundation/core';
 import { PlaybackRuntime, type PlaybackRuntimeRequest, type PlaybackRuntimeSnapshot } from '@machafoundation/core';
 import { uiSettings } from '../settings';
 import { describePlaybackSession } from '@machafoundation/core';
 import { playbackFailureTrail, type PlaybackFailureTrailEntry } from './player/failureTrail';
-import { playerNodeChoices } from './player/nodeChoices';
+import { nodeName, playerNodeChoices } from './player/nodeChoices';
 import { moveStreamToNode } from './player/nodeMove';
 import { nodeStartCosts } from '../playback/nodeStartCosts';
 import { MOVE_LEAD_MARGIN_MS } from '@machafoundation/core';
@@ -94,13 +94,29 @@ interface Props {
  * going on, and a timer over that would turn every brief hesitation into an
  * announcement.
  *
- * Core says `starting` and not yet which of the three phases it is in; when it
- * does, this is where that belongs — the sentence gets more specific and the
- * number stays where it is.
+ * A node that reports its start's progress (server 0.69.0) says which stage it
+ * is in, and `stage` is that sentence: it replaces the general one, and the
+ * number stays where it is. The delay before anything shows is unchanged,
+ * since a quick start is no more worth announcing for being measured.
  */
-export function startWaitNotice(starting: boolean, elapsedMs: number): string | undefined {
+export function startWaitNotice(starting: boolean, elapsedMs: number, stage?: string): string | undefined {
   if (!starting || elapsedMs < uiSettings.playerStartWaitNoticeMs) return undefined;
-  return `Waiting for the node to start the stream — ${Math.floor(elapsedMs / 1_000)}s`;
+  return `${stage ?? 'Waiting for the node to start the stream'} — ${Math.floor(elapsedMs / 1_000)}s`;
+}
+
+/**
+ * The status line while a new stream is prepared behind the one playing.
+ *
+ * A change (a seek, a mode or quality switch) is built on the node already
+ * serving, so that node is named. A failover also arrives as a *start*, on a
+ * node this line cannot name: the endpoint it holds is the one being
+ * replaced. So a start is worded as a new stream with no node, and a node
+ * that reports no progress keeps the sentence it always had.
+ */
+export function preparingStreamText(progress: PlaybackStartProgress | undefined, endpoint: string | undefined): string {
+  const stage = progress && startProgressText({ ...progress, kind: 'change' }, progress.kind === 'change' ? endpoint : undefined, true);
+  if (stage) return stage;
+  return endpoint ? `Preparing new stream on ${endpoint}…` : 'Preparing new stream…';
 }
 
 export function firstUsableDurationMs(...candidates: (number | undefined)[]): number {
@@ -837,7 +853,7 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
     [api, playingMediaId],
   );
   const described = describePlaybackSession(session, event.streamOrigin);
-  const streamStatus = described && { endpoint: described.endpoint, ...streamStatusText(described) };
+  const streamStatus = described && { endpoint: nodeName(described.endpoint), ...streamStatusText(described) };
   const mediaSubtitle = playerMediaSubtitle(media);
   const pausedForControl = playerControlShowsPlay(playback.intent.paused, Boolean(fatalError));
   const queueLabel = queuePosition && queuePosition.total > 1 ? `${queuePosition.index + 1} of ${queuePosition.total}` : undefined;
@@ -889,7 +905,11 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
       {showBuffering && (
         <Loading
           delayMs={playback.starting ? 0 : uiSettings.playerSeekSpinnerDelayMs}
-          note={startWaitNotice(playback.starting, startWaitMs)}
+          note={startWaitNotice(
+            playback.starting,
+            startWaitMs,
+            playback.startProgress?.kind === 'start' ? startProgressText(playback.startProgress, streamStatus?.endpoint) : undefined,
+          )}
         />
       )}
 
@@ -958,7 +978,7 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
               // doing the work during a seek — and it flips to the replacement
               // the moment that generation activates, so watching this line
               // through a failover shows how far round the cluster it has got.
-              <small>{streamStatus?.endpoint ? `Preparing new stream on ${streamStatus.endpoint}…` : 'Preparing new stream…'}</small>
+              <small>{preparingStreamText(playback.startProgress, streamStatus?.endpoint)}</small>
             ) : (
               <>
                 {/* The carriage and the node that served it, on one line as

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { endpointFailure, MachaAcquisitionApiError, MachaConnectionError, MachaPlaybackError, NOT_PLAYABLE_CODE, SESSION_PROVENANCE_UNKNOWN_CODE, type MediaSummary, type PlaybackNotice, type PlaybackStatusDescription, type PlaybackStreamInfo } from '@machafoundation/core';
+import { endpointFailure, MachaAcquisitionApiError, MachaConnectionError, MachaPlaybackError, NOT_PLAYABLE_CODE, SESSION_PROVENANCE_UNKNOWN_CODE, START_NO_PROGRESS_CODE, type MediaSummary, type PlaybackNotice, type PlaybackStartProgress, type PlaybackStatusDescription, type PlaybackStreamInfo } from '@machafoundation/core';
 import {
   playbackRefusalText,
   diagnosticErrorText,
@@ -7,7 +7,7 @@ import {
   jobErrorText,
   serverStatusText,
   albumLabel, alphabetIndexKeyText, cardSubtitle, episodeCode, episodeLabel, playbackFailureCodeText, playbackNoticeText,
-  playbackTimeText, qualityLimitText, SERVER_UNREACHABLE_TEXT, sortChoiceLabel, streamStatusText, trackNumberLabel, viewerErrorText,
+  playbackTimeText, qualityLimitText, SERVER_UNREACHABLE_TEXT, sortChoiceLabel, startProgressText, streamStatusText, trackNumberLabel, viewerErrorText,
 } from './viewerText';
 
 const item = (overrides: Partial<MediaSummary>) => ({ id: 'i', kind: 'movie', title: 'T', mediaIds: [], ...overrides }) as MediaSummary;
@@ -219,5 +219,42 @@ describe('an acquisition refusal that reached us through the cluster router', ()
   it('words the two torrent faults of server 0.63.0', () => {
     expect(jobErrorText({ error_code: 'duplicate_torrent', error: 'x' })).toMatch(/^Another job already held this torrent/);
     expect(jobErrorText({ error_code: 'torrent_fault', error: 'x' })).toBe('The download engine failed on this torrent. Remove it and add the torrent again.');
+  });
+});
+
+describe('what a start or a change is doing (server 0.69.0)', () => {
+  const progress = (overrides: Partial<PlaybackStartProgress>): PlaybackStartProgress => ({
+    kind: 'start', stage: 'planning', progressSeq: 1, elapsedMs: 0, ...overrides,
+  });
+
+  it('names the stage of a start, and the node only while it is planning', () => {
+    expect(startProgressText(progress({ stage: 'planning' }), 'fi-1')).toBe('Preparing the stream on fi-1');
+    expect(startProgressText(progress({ stage: 'preroll', prerollDecodedMs: 2_000, prerollTotalMs: 5_000 }), 'fi-1'))
+      .toBe('Finding the start point: 40%');
+    expect(startProgressText(progress({ stage: 'encoding', outputMediaMs: 1_200, firstFragmentMs: 2_000 }), 'fi-1'))
+      .toBe('Starting the stream: 60%');
+  });
+
+  it('names the node throughout a change, since another stream is playing meanwhile', () => {
+    expect(startProgressText(progress({ kind: 'change', stage: 'planning' }), 'fi-1', true)).toBe('Preparing new stream on fi-1…');
+    expect(startProgressText(progress({ kind: 'change', stage: 'preroll', prerollDecodedMs: 1, prerollTotalMs: 4 }), 'fi-1', true))
+      .toBe('Finding the start point on fi-1: 25%');
+    expect(startProgressText(progress({ kind: 'change', stage: 'encoding', outputMediaMs: 0, firstFragmentMs: 2_000 }), 'fi-1', true))
+      .toBe('Starting the new stream on fi-1: 0%');
+  });
+
+  it('shows no figure the node did not measure, rather than a zero or a guess', () => {
+    expect(startProgressText(progress({ stage: 'encoding', firstFragmentMs: 2_000 }))).toBe('Starting the stream');
+    expect(startProgressText(progress({ stage: 'preroll', prerollDecodedMs: 3_000, prerollTotalMs: 0 }))).toBe('Finding the start point');
+    expect(startProgressText(progress({ kind: 'change', stage: 'encoding' }), undefined, true)).toBe('Starting the new stream…');
+  });
+
+  it('words a start that stopped progressing, which has no server sentence of its own', () => {
+    expect(playbackFailureCodeText(START_NO_PROGRESS_CODE)).toBe('The node stopped making progress starting this stream.');
+  });
+
+  it('says nothing once the start is over, whichever way it ended', () => {
+    expect(startProgressText(progress({ stage: 'ready' }))).toBeUndefined();
+    expect(startProgressText(progress({ stage: 'failed' }))).toBeUndefined();
   });
 });

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { EndpointCandidate } from '@machafoundation/core';
-import { playerNodeChoices } from './nodeChoices';
+import { nodeName, playerNodeChoices } from './nodeChoices';
 
 function candidate(id: string, baseUrl: string, ready = true, nodeId?: string): EndpointCandidate {
   return {
@@ -131,5 +131,17 @@ describe('playerNodeChoices', () => {
     ], 'z');
     expect(choices.map((choice) => choice.label)).toEqual(['alpha.test', 'zulu.test']);
     expect(choices[1].active).toBe(true);
+  });
+});
+
+describe('what the player calls the node serving a stream', () => {
+  it('is the host, without the scheme or the port', () => {
+    expect(nodeName('http://10.35.1.50:7438')).toBe('10.35.1.50');
+    expect(nodeName('https://macnessa.macha.network')).toBe('macnessa.macha.network');
+  });
+
+  it('shows an address it cannot parse as it is, and nothing for no address', () => {
+    expect(nodeName('not a url')).toBe('not a url');
+    expect(nodeName(undefined)).toBeUndefined();
   });
 });

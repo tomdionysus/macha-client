@@ -7,6 +7,7 @@ import {
   NOT_PLAYABLE_CODE,
   REGENERATION_ENDPOINT_GONE_CODE,
   SESSION_PROVENANCE_UNKNOWN_CODE,
+  START_NO_PROGRESS_CODE,
   playbackFailureCode,
   playbackFailureDetail,
   qualityLabel,
@@ -18,6 +19,7 @@ import {
   type MusicHierarchyContext,
   type PlaybackNotice,
   type PlaybackRefusal,
+  type PlaybackStartProgress,
   type PlaybackStatusDescription,
   type QualityCeiling,
   type SearchCategoryKey,
@@ -362,6 +364,10 @@ export function playbackFailureCodeText(code: string | undefined): string | unde
       return 'This stream is no longer available. Start it again.';
     case NOT_PLAYABLE_CODE:
       return 'This item cannot be played here.';
+    // Core's own code, raised when a start that reports progress (server
+    // 0.69.0) stops reporting any: there is no server sentence behind it.
+    case START_NO_PROGRESS_CODE:
+      return 'The node stopped making progress starting this stream.';
     default:
       return undefined;
   }
@@ -453,6 +459,37 @@ export function streamStatusText(description: PlaybackStatusDescription | undefi
       : [whole ?? 'AUDIO COPY', ...audioParts(audio.source, true)].join(' · ')),
     subtitle: subtitle && ['SUBTITLES', subtitle.language ? subtitle.language.toUpperCase() : 'UND', subtitle.codec.toUpperCase(), ...(subtitle.forced ? ['FORCED'] : [])].join(' · '),
   };
+}
+
+/** A whole percentage of `done` over `total`, when the node measured both. */
+function measuredPercent(done: number | undefined, total: number | undefined): number | undefined {
+  if (done === undefined || total === undefined || !Number.isFinite(done) || !Number.isFinite(total) || total <= 0) return undefined;
+  return Math.min(100, Math.max(0, Math.floor(done / total * 100)));
+}
+
+/**
+ * What a start or a change is doing, from core's counters (server 0.69.0):
+ * the stage, and how far through it when the node measured that. Never an
+ * estimate — a counter the node did not report shows no figure at all.
+ *
+ * `node` names where the work is happening. A change names it throughout,
+ * because the viewer is watching one stream while another is built; a start
+ * names it only while planning. `standalone` marks an open stage with an
+ * ellipsis, for a line with nothing after it.
+ */
+export function startProgressText(progress: PlaybackStartProgress, node?: string, standalone = false): string | undefined {
+  const on = node ? ` on ${node}` : '';
+  const change = progress.kind === 'change';
+  const words = progress.stage === 'planning' ? `${change ? 'Preparing new stream' : 'Preparing the stream'}${on}`
+    : progress.stage === 'preroll' ? `Finding the start point${change ? on : ''}`
+      : progress.stage === 'encoding' ? (change ? `Starting the new stream${on}` : 'Starting the stream')
+        : undefined;
+  if (!words) return undefined;
+  const percent = progress.stage === 'preroll' ? measuredPercent(progress.prerollDecodedMs, progress.prerollTotalMs)
+    : progress.stage === 'encoding' ? measuredPercent(progress.outputMediaMs, progress.firstFragmentMs)
+      : undefined;
+  if (percent !== undefined) return `${words}: ${percent}%`;
+  return standalone ? `${words}…` : words;
 }
 
 /**
