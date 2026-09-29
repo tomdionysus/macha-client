@@ -70,8 +70,13 @@ function percentage(used: number, capacity: number): string {
   return `${Math.min(100, Math.max(0, used / capacity * 100)).toFixed(0)}%`;
 }
 
-function nodeName(node: ClusterNodeStatus): string {
-  return node.host || node.id.slice(0, 12);
+/**
+ * The operator's name for a node (server 0.70.0 `node_name`, such as
+ * "Corvus FI-1"), else its host. Tom: show the names the server sends. The
+ * host stays the address wherever one is needed, as for Reset association.
+ */
+export function statusNodeName(node: ClusterNodeStatus): string {
+  return node.node_name?.trim() || node.host || node.id.slice(0, 12);
 }
 
 /**
@@ -367,7 +372,7 @@ function NodeCard({ node, canManage, resetting, onReset }: { node: ClusterNodeSt
     <article className={`cluster-node-card ${nodeStatusClassName(node)}`}>
       <Link className="cluster-node-card-link" to={routes.statusNode(node.id)} data-tv-focusable="true">
         <div className="cluster-node-heading">
-          <div><strong>{nodeName(node)}</strong><code>{node.id.slice(0, 12)}</code></div>
+          <div><strong>{statusNodeName(node)}</strong><code>{node.id.slice(0, 12)}</code></div>
           <span className={`cluster-state-pill ${nodeStatusClassName(node)}`}>{nodeStatusLabel(node)}</span>
         </div>
         {/* Version belongs on the card, not only on the node's own page. This
@@ -663,7 +668,7 @@ export function NodeStatusScreen({ api }: { api: ClusterStatusApi }) {
   return (
     <section className="cluster-status-screen node-status-screen">
       <Link className="back-button" to={routes.status} data-tv-focusable="true">← Overview</Link>
-      <StatusHeader eyebrow="Cluster node" title={nodeName(node)} health={{ className: nodeNotYetReady(node) ? 'recovering' : node.state === 'online' ? 'healthy' : node.state === 'retired' ? 'degraded' : 'critical', label: nodeStatusLabel(node) }} refreshing={refreshing} onRefresh={() => void refreshPage()} />
+      <StatusHeader eyebrow="Cluster node" title={statusNodeName(node)} health={{ className: nodeNotYetReady(node) ? 'recovering' : node.state === 'online' ? 'healthy' : node.state === 'retired' ? 'degraded' : 'critical', label: nodeStatusLabel(node) }} refreshing={refreshing} onRefresh={() => void refreshPage()} />
       {error && <p className="manage-error">Live refresh failed: {error}</p>}
       {connectivity && <p className={`cluster-check-result ${connectivity.reachable ? 'reachable' : 'unreachable'}`}>Connectivity: {connectivity.reachable ? 'reachable' : 'unreachable'}{diagnosticErrorText(connectivity) ? ` · ${diagnosticErrorText(connectivity)}` : ''}</p>}
 

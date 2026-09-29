@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { IngestJob, TorrentJob } from '@machafoundation/core';
-import { torrentStages } from './jobs';
+import { canPause, canResume, heldStatus, storingOf, storingPercent, storingStallText, torrentStages } from './jobs';
 
 function torrent(overrides: Partial<TorrentJob> = {}): TorrentJob {
   return {
@@ -42,5 +42,44 @@ describe('where a torrent is on its way into the library', () => {
     expect(statuses(torrent({ state: 'failed' }))).toEqual(['download:failed', 'import:waiting', 'catalogue:waiting']);
     expect(statuses(torrent({ state: 'failed', ingest_job_id: 'i' }), ingest('failed'))).toEqual(['download:done', 'import:failed', 'catalogue:waiting']);
     expect(statuses(torrent({ state: 'paused' }))).toEqual(['download:paused', 'import:waiting', 'catalogue:waiting']);
+  });
+});
+
+describe('the download being stored in the cluster, before the import (server 0.71.0)', () => {
+  const publication = { published_extents: 246, extents: 624, published_bytes: 1_031_798_784, bytes: 2_607_096_508, progress_age_ms: 2_000 };
+  const storing = (overrides: Partial<TorrentJob> = {}) => torrent({ state: 'downloaded', progress: 1, bytes_completed: 100, waiting_reason: 'extent_publication', publication, ...overrides });
+
+  it('shows the import stage as storing, not as starting, while the server says it is waiting on it', () => {
+    const [, importStage] = torrentStages(storing());
+    expect(importStage).toEqual({ key: 'import', status: 'active', label: 'Storing in the cluster' });
+    expect(storingPercent(storingOf(storing())!)).toBeCloseTo(39.42, 1);
+  });
+
+  it("takes the server's reason, not the state, and nothing once storing is complete or the node says nothing", () => {
+    expect(storingOf(storing({ waiting_reason: null }))).toBeUndefined();
+    expect(storingOf(storing({ publication: { ...publication, published_extents: 624 } }))).toBeUndefined();
+    expect(storingOf(storing({ publication: null }))).toBeUndefined();
+    expect(torrentStages(storing({ waiting_reason: null }))[1].label).toBe('Starting');
+  });
+
+  it('says it has stood still once a minute has gone by with no progress, and not before', () => {
+    expect(storingStallText({ ...publication, progress_age_ms: 59_999 })).toBeUndefined();
+    expect(storingStallText({ ...publication, progress_age_ms: 4 * 60_000 + 30_000 })).toBe('no progress for 4 min');
+  });
+});
+
+describe('a torrent held by request, whose state does not say so (added paused, server 0.71.0)', () => {
+  it('offers Resume and not Pause while it waits for a node, as the server resumes on desired alone', () => {
+    expect(canResume('torrent', 'awaiting_node', 'paused')).toBe(true);
+    expect(canPause('torrent', 'awaiting_node', 'paused')).toBe(false);
+    expect(heldStatus({ state: 'awaiting_node', desired: 'paused' })).toBe('Paused, waiting for a node');
+  });
+
+  it('is left to its state when nothing was asked of it, or once it is over', () => {
+    expect(canPause('torrent', 'awaiting_node', 'active')).toBe(true);
+    expect(canResume('torrent', 'awaiting_node', 'active')).toBe(false);
+    expect(canResume('torrent', 'cancelled', 'paused')).toBe(false);
+    expect(heldStatus({ state: 'downloading', desired: 'active' })).toBeUndefined();
+    expect(heldStatus({ state: 'paused', desired: 'paused' })).toBeUndefined();
   });
 });

@@ -9,7 +9,8 @@ import {
   type PlaybackListener,
   type Player,
 } from '@machafoundation/core';
-import type { MediaTechnicalProfile, PlaybackCapabilities, PlaybackEvent, PlaybackSource, PlaybackTimeRange, PlaybackTransition } from '@machafoundation/core';
+import type { KeyframeIndex, MediaTechnicalProfile, PlaybackCapabilities, PlaybackEvent, PlaybackSource, PlaybackTimeRange, PlaybackTransition } from '@machafoundation/core';
+import { bufferedTimeRanges } from '@machafoundation/core';
 import { ManagedHlsMediaRecoveryBudget } from './ManagedHlsRecovery';
 import { MediaStallWatchdog, MediaStartWatchdog } from '@machafoundation/core';
 import { browserMediaWatchdogEnvironment } from './mediaWatchdogEnvironment';
@@ -486,6 +487,49 @@ export function forwardBufferMsAt(positionMs: number, ranges: PlaybackTimeRange[
   return forwardMs;
 }
 
+/** Where a player asks for a Direct Play file's keyframe byte index. */
+export type KeyframeSource = (mediaId: string) => Promise<KeyframeIndex | undefined>;
+
+let keyframeSource: KeyframeSource | undefined;
+
+/**
+ * Set by the app, which owns the catalogue; the platform is created before
+ * there is one, so the source is handed in rather than passed at construction.
+ */
+export function setKeyframeSource(source: KeyframeSource | undefined): void {
+  keyframeSource = source;
+}
+
+/**
+ * The element's real buffered ranges on Direct Play, from the bytes it holds.
+ *
+ * **Chrome's `video.buffered` for a file served whole is an estimate.**
+ * Chromium converts each buffered byte range to time as
+ * `byte / size × duration` (`BufferedDataSourceHostImpl::AddBufferedTimeRanges`),
+ * so a file whose bitrate is uneven reports media where it is not. Measured
+ * 2026-09-28 on gbni-1: a Direct Play MP4 playing smoothly at 3000 s reported a
+ * range 95 s behind the playhead, growing in step with playback, beside the
+ * one that held it — its video and audio bytes, read together from two places
+ * in the file.
+ *
+ * That conversion runs backwards exactly, using the same duration Chrome
+ * used, which is the element's own. The bytes then go through the file's own
+ * index, which knows where each stream's media sits. Undefined when there is
+ * nothing to divide by, so the caller keeps what it had.
+ */
+export function directPlayBufferedRanges(
+  index: KeyframeIndex,
+  estimated: readonly PlaybackTimeRange[],
+  elementDurationMs: number,
+): PlaybackTimeRange[] | undefined {
+  if (!Number.isFinite(elementDurationMs) || elementDurationMs <= 0 || index.sizeBytes <= 0) return undefined;
+  const byteAt = (ms: number) => ms / elementDurationMs * index.sizeBytes;
+  return bufferedTimeRanges(index, estimated.map((range) => ({
+    startByte: Math.floor(byteAt(range.startMs)),
+    endByte: Math.ceil(byteAt(range.endMs)),
+  })));
+}
+
 function playbackTimeRanges(rangesValue: TimeRanges): PlaybackTimeRange[] {
   const out: PlaybackTimeRange[] = [];
   for (let index = 0; index < rangesValue.length; index += 1) {
@@ -596,6 +640,8 @@ class WebPlayer implements Player {
   /** A managed-HLS load stopped by a fatal error raised while nobody was watching. */
   private hlsLoadParkedWhilePaused = false;
   private mediaTimeline?: WebMediaTimeline;
+  /** The Direct Play file's byte index, once loaded; see `directPlayBufferedRanges`. */
+  private keyframeIndex?: KeyframeIndex;
   /** A picture frozen at the control while a seek's destination is decided. */
   private pictureHold?: { resumeWanted: boolean };
   private lastPublishedEvent?: PlaybackEvent;
@@ -817,6 +863,7 @@ class WebPlayer implements Player {
     this.activeSource = undefined;
     this.attachedSourceGeneration = undefined;
     this.mediaTimeline = undefined;
+    this.keyframeIndex = undefined;
     this.lastPublishedEvent = undefined;
     this.log.info('source-load-begin', {
       mode: source.mode,
@@ -987,6 +1034,7 @@ class WebPlayer implements Player {
       video.src = directUrl;
       this.attachedSourceGeneration = sourceGeneration;
       elementOwnsFetch = true;
+      if (source.mode === 'direct') this.loadKeyframeIndex(video, source, sourceGeneration);
     }
 
     if (sourceGeneration !== this.sourceGeneration || this.failedSourceGeneration === sourceGeneration) return false;
@@ -1986,6 +2034,7 @@ class WebPlayer implements Player {
     this.wantsPlayback = false;
     this.activeSource = undefined;
     this.mediaTimeline = undefined;
+    this.keyframeIndex = undefined;
     this.lastPublishedEvent = undefined;
     this.log.debug('stop', this.video ? videoState(this.video) : undefined);
     if (this.video) this.finishStartRecorder(this.video, 'abandoned');
@@ -2542,6 +2591,35 @@ class WebPlayer implements Player {
     return { hls, recovery: mediaRecovery };
   }
 
+  /**
+   * Ask for this file's byte index, and republish once it is here.
+   *
+   * Off the start path: the element plays on Chrome's own figures until the
+   * index arrives, which the node builds once per file and then serves from
+   * cache. A file it cannot index (neither MP4 nor Matroska) keeps them.
+   */
+  private loadKeyframeIndex(video: HTMLVideoElement, source: PlaybackSource, sourceGeneration: number): void {
+    const load = keyframeSource;
+    if (!load) return;
+    void load(source.mediaId).then((index) => {
+      if (sourceGeneration !== this.sourceGeneration || video !== this.video) return;
+      if (!index || !index.streams.some((stream) => stream.entries.length >= 2)) {
+        this.log.info('keyframe-index-absent', { mediaId: source.mediaId });
+        return;
+      }
+      this.keyframeIndex = index;
+      this.log.info('keyframe-index-loaded', {
+        mediaId: source.mediaId,
+        container: index.container,
+        offsets: index.offsets,
+        streams: index.streams.map((stream) => `${stream.type}:${stream.entries.length}`),
+      });
+      this.publish(video);
+    }).catch((error: unknown) => {
+      this.log.warn('keyframe-index-failed', { mediaId: source.mediaId, error: error instanceof Error ? error.message : String(error) });
+    });
+  }
+
   private publish(video: HTMLVideoElement): void {
     const timeline = this.mediaTimeline;
     if (!timeline || video !== this.video) return;
@@ -2557,18 +2635,21 @@ class WebPlayer implements Player {
     // timestamp origin. Suppress those ambiguous observations rather than
     // interpreting them on the wrong generation timeline.
     if (!normalized) return;
+    const index = this.activeSource?.mode === 'direct' ? this.keyframeIndex : undefined;
+    const bufferedRangesMs = (index && directPlayBufferedRanges(index, normalized.bufferedRangesMs, video.duration * 1000))
+      ?? normalized.bufferedRangesMs;
 
     // Playing versus arriving. `note()` judges nothing on its own — it needs
     // both, because a node producing below realtime freezes the picture while
     // the buffer keeps filling, and that is a slow node rather than a dead one.
     if (!video.paused) {
-      const bufferedEndMs = normalized.bufferedRangesMs.reduce((end, range) => Math.max(end, range.endMs), 0);
+      const bufferedEndMs = bufferedRangesMs.reduce((end, range) => Math.max(end, range.endMs), 0);
       this.stallWatchdog.note(normalized.positionMs, bufferedEndMs);
     }
 
     const duration = Number.isFinite(video.duration) ? video.duration * 1000 : 0;
     const currentMs = normalized.positionMs;
-    const forwardBufferMs = forwardBufferMsAt(currentMs, normalized.bufferedRangesMs);
+    const forwardBufferMs = forwardBufferMsAt(currentMs, bufferedRangesMs);
     this.hlsMediaRecovery?.observePlaybackPosition(
       currentMs,
       !video.paused && !video.ended && !video.seeking,
@@ -2607,7 +2688,7 @@ class WebPlayer implements Player {
       buffering: !video.paused
         && !video.ended
         && (video.seeking || video.readyState < HTMLMediaElement.HAVE_FUTURE_DATA),
-      bufferedRangesMs: wholeMillisecondRanges(normalized.bufferedRangesMs),
+      bufferedRangesMs: wholeMillisecondRanges(bufferedRangesMs),
       forwardBufferMs: Math.round(forwardBufferMs),
       streamOrigin: readAheadMetrics?.sourceOrigin || undefined,
       // The worker's cover, which `forwardBufferMs` cannot see: that is

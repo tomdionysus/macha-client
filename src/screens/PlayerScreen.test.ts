@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { boundedPlayerSeekTarget, modesToOffer, firstUsableDurationMs, startWaitNotice, isSubtitleOnlyUpdate, playerBackAction, playerBufferedTimelineEnabled, playerControlShowsPlay, playerMediaSubtitle, samsungTransportSeekDirection, webSeekDeltaForKey } from './PlayerScreen';
+import { boundedPlayerSeekTarget, modesToOffer, firstUsableDurationMs, preparingStreamText, startWaitNotice, isSubtitleOnlyUpdate, playerBackAction, playerBufferedTimelineEnabled, playerControlShowsPlay, playerMediaSubtitle, samsungTransportSeekDirection, webSeekDeltaForKey } from './PlayerScreen';
 import type { MediaSummary, OfferedMode, PlaybackCapabilities, PlaybackSession } from '@machafoundation/core';
 
 describe('player UI transport bindings', () => {
@@ -146,6 +146,11 @@ describe('what to tell a viewer whose title has not started yet', () => {
     // hesitation into an announcement.
     expect(startWaitNotice(false, 30_000)).toBeUndefined();
   });
+
+  it('says what the node reports it is doing, when it reports that, after the same delay', () => {
+    expect(startWaitNotice(true, 4_999, 'Starting the stream: 60%')).toBeUndefined();
+    expect(startWaitNotice(true, 9_200, 'Starting the stream: 60%')).toBe('Starting the stream: 60% — 9s');
+  });
 });
 
 describe('the modes the player offers', () => {
@@ -173,5 +178,26 @@ describe('the modes the player offers', () => {
     expect(offeredOf(modesToOffer(undefined, session, h264Only, undefined, false))).toEqual(['transcode']);
     expect(offeredOf(modesToOffer(undefined, session, h264Only, undefined, true))).toEqual(['direct', 'remux', 'transcode']);
     expect(modesToOffer(undefined, undefined, h264Only, undefined, false)).toBeUndefined();
+  });
+});
+
+describe('the status line while a new stream is prepared behind the one playing', () => {
+  const progress = { progressSeq: 1, elapsedMs: 0 };
+
+  it('names the node serving a change, which is where the new stream is built', () => {
+    expect(preparingStreamText({ ...progress, kind: 'change', stage: 'encoding', outputMediaMs: 600, firstFragmentMs: 2_000 }, 'fi-1'))
+      .toBe('Starting the new stream on fi-1: 30%');
+  });
+
+  it('names no node for a failover, since the one this line holds is the one being replaced', () => {
+    expect(preparingStreamText({ ...progress, kind: 'start', stage: 'planning' }, 'gbni-1')).toBe('Preparing new stream…');
+    expect(preparingStreamText({ ...progress, kind: 'start', stage: 'preroll', prerollDecodedMs: 1, prerollTotalMs: 2 }, 'gbni-1'))
+      .toBe('Finding the start point: 50%');
+    expect(preparingStreamText({ ...progress, kind: 'start', stage: 'encoding' }, 'gbni-1')).toBe('Starting the new stream…');
+  });
+
+  it('keeps the sentence it always had for a node that reports no progress', () => {
+    expect(preparingStreamText(undefined, 'fi-1')).toBe('Preparing new stream on fi-1…');
+    expect(preparingStreamText(undefined, undefined)).toBe('Preparing new stream…');
   });
 });

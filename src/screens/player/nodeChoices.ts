@@ -48,6 +48,21 @@ function hostname(baseUrl: string): string | undefined {
 }
 
 /**
+ * What the player calls the node serving a stream, in the status line and
+ * while a new stream is prepared: the host, as the node picker names it,
+ * never the whole URL. "Starting the new stream on 10.35.1.50: 60%" reads;
+ * the same sentence with `http://` and `:7438:` in it does not (Tom,
+ * 2026-09-28: every client names nodes this way). An unparseable address is
+ * shown as it is, which at least matches what was configured.
+ */
+export function nodeName(endpoint: string | undefined): string | undefined {
+  if (!endpoint) return undefined;
+  // `||`, not `??`: an address that parses with no host (a `file:` URL, or
+  // anything on a runtime whose URL does not throw) answers ''.
+  return hostname(endpoint) || endpoint;
+}
+
+/**
  * The nodes the viewer can send this stream to, in the registry's own order.
  *
  * **Grouped by node, not by endpoint.** One node is commonly two entries — a
@@ -72,6 +87,8 @@ function hostname(baseUrl: string): string | undefined {
 export function playerNodeChoices(
   candidates: readonly EndpointCandidate[],
   activeEndpointId?: string,
+  /** The cluster's name for the node behind an endpoint, where core knows it (the registry's `nodeName`). */
+  nameOf?: (endpointId: string) => string | undefined,
 ): PlayerNodeChoice[] {
   const seen = new Map<string, number>();
   for (const candidate of candidates) {
@@ -95,7 +112,7 @@ export function playerNodeChoices(
     return {
       id,
       endpointIds: group.map((candidate) => candidate.endpoint.id),
-      label: nodeLabel(preferredAddress(group), shared),
+      label: group.map((candidate) => nameOf?.(candidate.endpoint.id)).find(Boolean) ?? nodeLabel(preferredAddress(group), shared),
       detail: active
         ? `${addresses.join(', ')} — serving this stream`
         : ready ? addresses.join(', ') : `${addresses.join(', ')} — cooling down after a failure`,

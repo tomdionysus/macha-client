@@ -7,21 +7,21 @@ import { useArtworkUrl } from '../hooks/useArtworkUrl';
 import { requestTvDefaultFocus } from '../hooks/useTvNavigation';
 import { useElapsedMs } from '../hooks/useElapsedMs';
 import { usePointerIdle } from '../hooks/usePointerIdle';
-import { cardSubtitle, episodeCode, playbackNoticeText, playbackTimeText, streamStatusText } from '../text/viewerText';
+import { cardSubtitle, episodeCode, playbackNoticeText, playbackTimeText, startProgressText, streamStatusText, tooSlowToPlayText } from '../text/viewerText';
 import { TrackFacts } from './player/TrackFacts';
 import { useAsync } from '../hooks/useAsync';
 import type { Platform } from '@machafoundation/core';
 import { platformTraits } from '../platform/traits';
 import type { PlaybackUpdate } from '@machafoundation/core';
-import { isSubtitleOnlyPlaybackUpdate, offeredModes, progressFor, technicalSummary, technicalProfileFromSession, type OfferedMode, type PlaybackCoordinatorSnapshot, type PlaybackPolicyOverrides, type PlaybackSession } from '@machafoundation/core';
+import { isSubtitleOnlyPlaybackUpdate, offeredModes, type PlaybackStartProgress, progressFor, technicalSummary, technicalProfileFromSession, type OfferedMode, type PlaybackCoordinatorSnapshot, type PlaybackPolicyOverrides, type PlaybackSession } from '@machafoundation/core';
 import { PlaybackRuntime, type PlaybackRuntimeRequest, type PlaybackRuntimeSnapshot } from '@machafoundation/core';
 import { uiSettings } from '../settings';
 import { describePlaybackSession } from '@machafoundation/core';
 import { playbackFailureTrail, type PlaybackFailureTrailEntry } from './player/failureTrail';
-import { playerNodeChoices } from './player/nodeChoices';
+import { nodeName, playerNodeChoices } from './player/nodeChoices';
 import { moveStreamToNode } from './player/nodeMove';
 import { nodeStartCosts } from '../playback/nodeStartCosts';
-import { MOVE_LEAD_MARGIN_MS } from '@machafoundation/core';
+import { MOVE_LEAD_MARGIN_MS, playbackFailureCode, TOO_SLOW_TO_PLAY_CODE } from '@machafoundation/core';
 import { failureTrailEnabled } from '../diagnostics/failureTrailSetting';
 import { accountSessionLimitNotice, playbackFailureHeadline } from '../diagnostics/failureCauses';
 import { bufferedTimelineSegments } from '@machafoundation/core';
@@ -51,6 +51,8 @@ interface Props {
   onVolumeChange: (volume: number) => void;
   /** Every node this client knows, so the viewer can send the stream to one. */
   endpoints?: readonly EndpointCandidate[];
+  /** The cluster's name for the node behind an endpoint (the registry's `nodeName`), for the node picker. */
+  nodeNameOf?: (endpointId: string) => string | undefined;
   /**
    * Put this node at the head of the candidate order and keep it there.
    *
@@ -94,13 +96,29 @@ interface Props {
  * going on, and a timer over that would turn every brief hesitation into an
  * announcement.
  *
- * Core says `starting` and not yet which of the three phases it is in; when it
- * does, this is where that belongs — the sentence gets more specific and the
- * number stays where it is.
+ * A node that reports its start's progress (server 0.69.0) says which stage it
+ * is in, and `stage` is that sentence: it replaces the general one, and the
+ * number stays where it is. The delay before anything shows is unchanged,
+ * since a quick start is no more worth announcing for being measured.
  */
-export function startWaitNotice(starting: boolean, elapsedMs: number): string | undefined {
+export function startWaitNotice(starting: boolean, elapsedMs: number, stage?: string): string | undefined {
   if (!starting || elapsedMs < uiSettings.playerStartWaitNoticeMs) return undefined;
-  return `Waiting for the node to start the stream — ${Math.floor(elapsedMs / 1_000)}s`;
+  return `${stage ?? 'Waiting for the node to start the stream'} — ${Math.floor(elapsedMs / 1_000)}s`;
+}
+
+/**
+ * The status line while a new stream is prepared behind the one playing.
+ *
+ * A change (a seek, a mode or quality switch) is built on the node already
+ * serving, so that node is named. A failover also arrives as a *start*, on a
+ * node this line cannot name: the endpoint it holds is the one being
+ * replaced. So a start is worded as a new stream with no node, and a node
+ * that reports no progress keeps the sentence it always had.
+ */
+export function preparingStreamText(progress: PlaybackStartProgress | undefined, endpoint: string | undefined): string {
+  const stage = progress && startProgressText({ ...progress, kind: 'change' }, progress.kind === 'change' ? endpoint : undefined, true);
+  if (stage) return stage;
+  return endpoint ? `Preparing new stream on ${endpoint}…` : 'Preparing new stream…';
 }
 
 export function firstUsableDurationMs(...candidates: (number | undefined)[]): number {
@@ -265,7 +283,7 @@ export function webArrowTargetOwnsKey(target: EventTarget | null): boolean {
 
 export const isSubtitleOnlyUpdate = isSubtitleOnlyPlaybackUpdate;
 
-function PlayerSession({ api, media, platform, runtime, startPositionMs, presentation, onProgress, onPosition, onMinimize, onExpand, onStop, onPrevious, onNext, onEnded, canPrevious, canNext, queuePosition, volume, onVolumeChange, endpoints, onPinEndpoint, offerAll = false }: Omit<Props, 'request'> & { media: MediaSummary; startPositionMs: number }) {
+function PlayerSession({ api, media, platform, runtime, startPositionMs, presentation, onProgress, onPosition, onMinimize, onExpand, onStop, onPrevious, onNext, onEnded, canPrevious, canNext, queuePosition, volume, onVolumeChange, endpoints, nodeNameOf, onPinEndpoint, offerAll = false }: Omit<Props, 'request'> & { media: MediaSummary; startPositionMs: number }) {
   const pageRef = useRef<HTMLElement | null>(null);
   const hostRef = useRef<HTMLDivElement | null>(null);
   const chromeRef = useRef<HTMLDivElement | null>(null);
@@ -383,7 +401,7 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
   }, [onEnded, playback.event.ended]);
 
   const fatalError = runtimeState.fatalError ?? playback.fatalError;
-  const playbackNotice = localNotice ?? (playback.notice && playbackNoticeText(playback.notice));
+  const playbackNotice = localNotice ?? (playback.notice && playbackNoticeText(playback.notice, runtimePlayback?.instruction?.quality));
 
   const hideControls = useCallback(() => {
     if (hideTimerRef.current !== undefined) {
@@ -489,7 +507,7 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
     if (!accepted) {
       releasePicture();
       const notice = runtime.getPlaybackSnapshot()?.notice;
-      setLocalNotice(notice && playbackNoticeText(notice));
+      setLocalNotice(notice && playbackNoticeText(notice, runtime.getPlaybackSnapshot()?.instruction?.quality));
     }
     if (!interactionControlled) showControls();
     return accepted;
@@ -536,8 +554,8 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
    * because `play()` closes before it starts. That is what this replaced.
    */
   const nodeChoices = useMemo(
-    () => playerNodeChoices(endpoints ?? [], playback.session?.endpoint?.id),
-    [endpoints, playback.session?.endpoint?.id],
+    () => playerNodeChoices(endpoints ?? [], playback.session?.endpoint?.id, nodeNameOf),
+    [endpoints, nodeNameOf, playback.session?.endpoint?.id],
   );
   // What this device can decode, asked once per player. It decides what a
   // remux press may ask the node to copy; without it every remux press would
@@ -837,11 +855,14 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
     [api, playingMediaId],
   );
   const described = describePlaybackSession(session, event.streamOrigin);
-  const streamStatus = described && { endpoint: described.endpoint, ...streamStatusText(described) };
+  // The cluster's own name for the serving node where core knows it
+  // ("corvus-fi-1"), else its host: never a URL.
+  const streamStatus = described && { endpoint: described.endpointName ?? nodeName(described.endpoint), ...streamStatusText(described) };
   const mediaSubtitle = playerMediaSubtitle(media);
   const pausedForControl = playerControlShowsPlay(playback.intent.paused, Boolean(fatalError));
   const queueLabel = queuePosition && queuePosition.total > 1 ? `${queuePosition.index + 1} of ${queuePosition.total}` : undefined;
   const playerSubtitle = [mediaSubtitle, queueLabel].filter(Boolean).join(' · ');
+  const tooSlow = Boolean(fatalError) && playbackFailureCode(fatalError) === TOO_SLOW_TO_PLAY_CODE;
   const showBuffering = !fatalError && (playback.starting || Boolean(event.buffering));
   // How long this start has been going on, for telling the viewer. Counted
   // here rather than from a timestamp on the snapshot, because core says
@@ -889,7 +910,11 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
       {showBuffering && (
         <Loading
           delayMs={playback.starting ? 0 : uiSettings.playerSeekSpinnerDelayMs}
-          note={startWaitNotice(playback.starting, startWaitMs)}
+          note={startWaitNotice(
+            playback.starting,
+            startWaitMs,
+            playback.startProgress?.kind === 'start' ? startProgressText(playback.startProgress, streamStatus?.endpoint) : undefined,
+          )}
         />
       )}
 
@@ -899,8 +924,19 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
           {/* Core's sentence, never `.message`: by the time a failure reaches
               here its message is two of core's envelopes and a node address.
               The trail below still carries the whole chain for anyone who
-              switched it on. */}
-          <span>{playbackFailureHeadline(fatalError)}</span>
+              switched it on. A quality no node can keep up with is worded from
+              the facts of what was playing, since those say which. */}
+          <span>{tooSlow ? tooSlowToPlayText(runtimePlayback?.instruction?.quality, session?.transform) : playbackFailureHeadline(fatalError)}</span>
+          {/* Tom: stop "with a try again option". Another quality is the other
+              way on, so the list is offered beside it. */}
+          {tooSlow && (
+            <div className="player-failure-actions">
+              <button type="button" className="secondary-button" data-tv-focusable="true" data-tv-default-focus="true" onClick={() => { void runtime.retry(); }}>Try again</button>
+              {session && (
+                <button type="button" className="secondary-button" data-tv-focusable="true" onClick={() => setOptionsVisible(true)}>Choose another quality</button>
+              )}
+            </div>
+          )}
           {/* **The cap explains why recovery could not finish. It is not what
               went wrong**, and putting it first would tell a viewer their
               account is busy when a node had just died under them. Core's head
@@ -958,7 +994,7 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
               // doing the work during a seek — and it flips to the replacement
               // the moment that generation activates, so watching this line
               // through a failover shows how far round the cluster it has got.
-              <small>{streamStatus?.endpoint ? `Preparing new stream on ${streamStatus.endpoint}…` : 'Preparing new stream…'}</small>
+              <small>{preparingStreamText(playback.startProgress, streamStatus?.endpoint)}</small>
             ) : (
               <>
                 {/* The carriage and the node that served it, on one line as

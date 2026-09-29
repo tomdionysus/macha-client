@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { PlaybackEvent } from '@machafoundation/core';
+import type { KeyframeIndex, PlaybackEvent } from '@machafoundation/core';
 import {
   hlsEventSummary,
   shouldUseManagedHls,
@@ -16,6 +16,8 @@ import {
   webHlsPreflightTargets,
   HLS_PREFLIGHT_TIMEOUT_MS,
   WebPlatform,
+  directPlayBufferedRanges,
+  setKeyframeSource,
 } from './WebPlatform';
 import { ManagedHlsMediaRecoveryBudget } from './ManagedHlsRecovery';
 import { PlaybackSourceError, SERVER_SEGMENT_HOLD_MS, SERVER_STARTUP_TIMEOUT_MS } from '@machafoundation/core';
@@ -409,6 +411,79 @@ describe('What leaves the player is whole milliseconds', () => {
     // have served, and the cost of that is a whole generation negotiation
     // against the sub-frame of media the widening claims.
     expect(event.bufferedRangesMs).toEqual([{ startMs: 40, endMs: 121_000 }]);
+  });
+});
+
+describe('Direct Play buffered ranges', () => {
+  // A ten-second file whose first half is cheap and second half dear: the
+  // first 5 s take 200 of its 1,000 bytes. Holding bytes 200-400 is the start
+  // of the second half, which Chrome's even spread places at 2-4 s.
+  const uneven: KeyframeIndex = {
+    mediaId: 'm1',
+    container: 'mp4',
+    offsets: 'sample',
+    sizeBytes: 1_000,
+    durationMs: 10_000,
+    streams: [
+      { index: 0, type: 'video', codec: 'h264', entries: [[0, 0], [5_000, 200]] },
+      { index: 1, type: 'audio', codec: 'aac', entries: [[0, 0], [5_000, 200]] },
+    ],
+  };
+
+  it('puts the bytes the element holds where the file says they play, not where an even spread would', () => {
+    expect(directPlayBufferedRanges(uneven, [{ startMs: 2_000, endMs: 4_000 }], 10_000))
+      .toEqual([{ startMs: 5_000, endMs: 6_250 }]);
+  });
+
+  it('leaves the ranges to the caller when the element has no duration to invert by', () => {
+    expect(directPlayBufferedRanges(uneven, [{ startMs: 2_000, endMs: 4_000 }], Number.NaN)).toBeUndefined();
+  });
+
+  describe('on the player', () => {
+    afterEach(() => setKeyframeSource(undefined));
+
+    function ranges(pairs: [number, number][]): TimeRanges {
+      return { length: pairs.length, start: (i: number) => pairs[i][0], end: (i: number) => pairs[i][1] } as unknown as TimeRanges;
+    }
+
+    async function playing(index: KeyframeIndex | undefined) {
+      vi.stubGlobal('HTMLMediaElement', { HAVE_FUTURE_DATA: 3 });
+      const video = fakeVideo();
+      vi.stubGlobal('document', { createElement: vi.fn(() => video) });
+      let resolveIndex: (value: KeyframeIndex | undefined) => void = () => undefined;
+      const asked: string[] = [];
+      setKeyframeSource((mediaId) => {
+        asked.push(mediaId);
+        return new Promise((resolve) => { resolveIndex = resolve; });
+      });
+      const player = new WebPlatform().createPlayer();
+      player.attach({ firstChild: null, appendChild: vi.fn() } as unknown as HTMLElement);
+      const events: PlaybackEvent[] = [];
+      player.subscribe?.((event) => events.push(event));
+      await player.play({ mediaId: 'm1', url: 'https://node.test/stream', isManifest: false, mimeType: 'video/mp4', mode: 'direct' }, 0, true);
+      // Playing at 5.5 s, holding bytes 200-400, which Chrome reports as 2-4 s.
+      Object.assign(video, { currentTime: 5.5, duration: 10, buffered: ranges([[2, 4]]), readyState: 4 });
+      emit(video, 'timeupdate');
+      const before = events.at(-1)!;
+      resolveIndex(index);
+      await Promise.resolve();
+      await Promise.resolve();
+      return { asked, before, after: events.at(-1)! };
+    }
+
+    it("reports Chrome's figures until the file's index arrives, then the element's real buffer", async () => {
+      const { asked, before, after } = await playing(uneven);
+      expect(asked).toEqual(['m1']);
+      expect(before.bufferedRangesMs).toEqual([{ startMs: 2_000, endMs: 4_000 }]);
+      expect(before.forwardBufferMs).toBe(0);
+      expect(after.bufferedRangesMs).toEqual([{ startMs: 5_000, endMs: 6_250 }]);
+      expect(after.forwardBufferMs).toBe(750);
+    });
+
+    it("keeps Chrome's figures for a file the node cannot index", async () => {
+      const { after } = await playing(undefined);
+      expect(after.bufferedRangesMs).toEqual([{ startMs: 2_000, endMs: 4_000 }]);
+    });
   });
 });
 

@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { EndpointCandidate } from '@machafoundation/core';
 import type { ClusterNodeStatus, ClusterStatusSnapshot } from '@machafoundation/core';
 import type { IdentityAssociationResetResult, ManageApi } from '@machafoundation/core';
-import { acceptNodeIdentityAssociationReset, availableOfTotal, usedOfTotal, clientEndpointHealth, conditionStatedPerNode, identityResetAcceptanceMessage, nodeInboundCapable, nodeNotYetReady, nodeStatusLabel, StatusHeader, statusSectionVisibility, systemMemoryBytes, TELEMETRY_AGEING_MS, TELEMETRY_STALE_MS, telemetryAge, withoutRetiredNodeIdentity } from './StatusScreen';
+import { acceptNodeIdentityAssociationReset, availableOfTotal, usedOfTotal, clientEndpointHealth, conditionStatedPerNode, identityResetAcceptanceMessage, nodeInboundCapable, nodeNotYetReady, nodeStatusLabel, StatusHeader, statusNodeName, statusSectionVisibility, systemMemoryBytes, TELEMETRY_AGEING_MS, TELEMETRY_STALE_MS, telemetryAge, withoutRetiredNodeIdentity } from './StatusScreen';
 
 function candidate(health: EndpointCandidate['health'], ready = true): EndpointCandidate {
   return {
@@ -241,3 +241,12 @@ describe('the storage and cache tiles (Tom, 2026-09-27)', () => {
 
 });
 
+
+describe('what a node card is called', () => {
+  it("is the operator's name where the server sends one (server 0.70.0), else the host (Tom: show the names the server sends)", () => {
+    expect(statusNodeName({ id: 'fi1-id-0123456789', host: 'corvus-fi-1', node_name: 'Corvus FI-1' } as ClusterNodeStatus)).toBe('Corvus FI-1');
+    expect(statusNodeName({ id: 'fi1-id-0123456789', host: 'corvus-fi-1', node_name: null } as ClusterNodeStatus)).toBe('corvus-fi-1');
+    expect(statusNodeName({ id: 'fi1-id-0123456789', host: 'corvus-fi-1', node_name: '  ' } as ClusterNodeStatus)).toBe('corvus-fi-1');
+    expect(statusNodeName({ id: 'fi1-id-0123456789', host: '' } as ClusterNodeStatus)).toBe('fi1-id-01234');
+  });
+});

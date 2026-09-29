@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { EndpointCandidate } from '@machafoundation/core';
-import { playerNodeChoices } from './nodeChoices';
+import { nodeName, playerNodeChoices } from './nodeChoices';
 
 function candidate(id: string, baseUrl: string, ready = true, nodeId?: string): EndpointCandidate {
   return {
@@ -11,6 +11,16 @@ function candidate(id: string, baseUrl: string, ready = true, nodeId?: string): 
 }
 
 describe('playerNodeChoices', () => {
+  it("labels a node by the cluster's name for it where core knows it, from any of its addresses", () => {
+    const names: Record<string, string> = { lan: 'Corvus GBNI-1' };
+    const choices = playerNodeChoices(
+      [candidate('wan', 'https://macnessa.macha.network', true, 'gbni'), candidate('lan', 'http://10.44.1.50:7438', true, 'gbni'), candidate('fi', 'http://10.35.1.50:7438', true, 'fi')],
+      undefined,
+      (endpointId) => names[endpointId],
+    );
+    expect(choices.map((choice) => choice.label)).toEqual(['10.35.1.50', 'Corvus GBNI-1']);
+  });
+
   it('labels a node by its host, because that is what the Status screen calls it', () => {
     const choices = playerNodeChoices([candidate('a', 'https://macnessa.macha.network:7438')]);
     expect(choices[0].label).toBe('macnessa.macha.network');
@@ -131,5 +141,19 @@ describe('playerNodeChoices', () => {
     ], 'z');
     expect(choices.map((choice) => choice.label)).toEqual(['alpha.test', 'zulu.test']);
     expect(choices[1].active).toBe(true);
+  });
+});
+
+describe('what the player calls the node serving a stream', () => {
+  it('is the host, without the scheme or the port', () => {
+    expect(nodeName('http://10.35.1.50:7438')).toBe('10.35.1.50');
+    expect(nodeName('https://macnessa.macha.network')).toBe('macnessa.macha.network');
+  });
+
+  it('shows an address it cannot parse as it is, and nothing for no address', () => {
+    expect(nodeName('not a url')).toBe('not a url');
+    // Parses, but names no host: never an empty name.
+    expect(nodeName('file:///srv/macha')).toBe('file:///srv/macha');
+    expect(nodeName(undefined)).toBeUndefined();
   });
 });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { endpointFailure, MachaAcquisitionApiError, MachaConnectionError, MachaPlaybackError, NOT_PLAYABLE_CODE, SESSION_PROVENANCE_UNKNOWN_CODE, type MediaSummary, type PlaybackNotice, type PlaybackStatusDescription, type PlaybackStreamInfo } from '@machafoundation/core';
+import { endpointFailure, MachaAcquisitionApiError, MachaConnectionError, MachaPlaybackError, NOT_PLAYABLE_CODE, SESSION_PROVENANCE_UNKNOWN_CODE, START_NO_PROGRESS_CODE, TOO_SLOW_TO_PLAY_CODE, type MediaSummary, type PlaybackNotice, type PlaybackStartProgress, type VersionStep, type PassedOverVersion, type QualityCeiling, type PlaybackStatusDescription, type PlaybackStreamInfo } from '@machafoundation/core';
 import {
   playbackRefusalText,
   diagnosticErrorText,
@@ -7,7 +7,7 @@ import {
   jobErrorText,
   serverStatusText,
   albumLabel, alphabetIndexKeyText, cardSubtitle, episodeCode, episodeLabel, playbackFailureCodeText, playbackNoticeText,
-  playbackTimeText, qualityLimitText, SERVER_UNREACHABLE_TEXT, sortChoiceLabel, streamStatusText, trackNumberLabel, viewerErrorText,
+  playbackTimeText, qualityChoiceText, qualitySteppedDownText, tooSlowToPlayText, SERVER_UNREACHABLE_TEXT, sortChoiceLabel, startProgressText, streamStatusText, trackNumberLabel, viewerErrorText,
 } from './viewerText';
 
 const item = (overrides: Partial<MediaSummary>) => ({ id: 'i', kind: 'movie', title: 'T', mediaIds: [], ...overrides }) as MediaSummary;
@@ -185,15 +185,6 @@ describe('a refused playback change says why (Tom: no more "That change could no
   });
 });
 
-describe('quality wording', () => {
-  it('gives each cap on Play its own reason', () => {
-    expect(qualityLimitText({ quality: 1080, reason: 'ceiling-display' })).toBe('Play chooses up to 1080p, the most this screen shows. Pick a quality to play another.');
-    expect(qualityLimitText({ quality: 720, reason: 'ceiling-preference' })).toBe('Play chooses up to 720p, as set in Settings. Pick a quality to play another.');
-    expect(qualityLimitText({ quality: 720, reason: 'ceiling-cellular' })).toBe('Play chooses up to 720p on mobile data. Pick a quality to play another.');
-    expect(qualityLimitText({ quality: 1080, reason: 'ceiling-device' })).toBe('Play chooses up to 1080p, the most this device plays. Pick a quality to play another.');
-  });
-});
-
 describe('a refusal because the node is busy', () => {
   it('says the node is converting for others rather than quoting the server', () => {
     const error = new MachaPlaybackError('Macha playback request failed: video transcode limit reached', 429, 'resource_limit');
@@ -219,5 +210,115 @@ describe('an acquisition refusal that reached us through the cluster router', ()
   it('words the two torrent faults of server 0.63.0', () => {
     expect(jobErrorText({ error_code: 'duplicate_torrent', error: 'x' })).toMatch(/^Another job already held this torrent/);
     expect(jobErrorText({ error_code: 'torrent_fault', error: 'x' })).toBe('The download engine failed on this torrent. Remove it and add the torrent again.');
+  });
+});
+
+describe('what a start or a change is doing (server 0.69.0)', () => {
+  const progress = (overrides: Partial<PlaybackStartProgress>): PlaybackStartProgress => ({
+    kind: 'start', stage: 'planning', progressSeq: 1, elapsedMs: 0, ...overrides,
+  });
+
+  it('names the stage of a start, and the node only while it is planning', () => {
+    expect(startProgressText(progress({ stage: 'planning' }), 'fi-1')).toBe('Preparing the stream on fi-1');
+    expect(startProgressText(progress({ stage: 'preroll', prerollDecodedMs: 2_000, prerollTotalMs: 5_000 }), 'fi-1'))
+      .toBe('Finding the start point: 40%');
+    expect(startProgressText(progress({ stage: 'encoding', outputMediaMs: 1_200, firstFragmentMs: 2_000 }), 'fi-1'))
+      .toBe('Starting the stream: 60%');
+  });
+
+  it('names the node throughout a change, since another stream is playing meanwhile', () => {
+    expect(startProgressText(progress({ kind: 'change', stage: 'planning' }), 'fi-1', true)).toBe('Preparing new stream on fi-1…');
+    expect(startProgressText(progress({ kind: 'change', stage: 'preroll', prerollDecodedMs: 1, prerollTotalMs: 4 }), 'fi-1', true))
+      .toBe('Finding the start point on fi-1: 25%');
+    expect(startProgressText(progress({ kind: 'change', stage: 'encoding', outputMediaMs: 0, firstFragmentMs: 2_000 }), 'fi-1', true))
+      .toBe('Starting the new stream on fi-1: 0%');
+  });
+
+  it('shows no figure the node did not measure, rather than a zero or a guess', () => {
+    expect(startProgressText(progress({ stage: 'encoding', firstFragmentMs: 2_000 }))).toBe('Starting the stream');
+    expect(startProgressText(progress({ stage: 'preroll', prerollDecodedMs: 3_000, prerollTotalMs: 0 }))).toBe('Finding the start point');
+    expect(startProgressText(progress({ kind: 'change', stage: 'encoding' }), undefined, true)).toBe('Starting the new stream…');
+  });
+
+  it('words a start that stopped progressing, which has no server sentence of its own', () => {
+    expect(playbackFailureCodeText(START_NO_PROGRESS_CODE)).toBe('The node stopped making progress starting this stream.');
+  });
+
+  it('says nothing once the start is over, whichever way it ended', () => {
+    expect(startProgressText(progress({ stage: 'ready' }))).toBeUndefined();
+    expect(startProgressText(progress({ stage: 'failed' }))).toBeUndefined();
+  });
+});
+
+describe('why Play chooses the file it does, as one sentence from every fact', () => {
+  const instruction = (video: 'copy' | 'transcode', audio: 'copy' | 'transcode') =>
+    ({ mode: video === 'transcode' || audio === 'transcode' ? 'transcode' : 'direct', video, audio, reasons: [], assumed: [] }) as VersionStep['instruction'];
+  const file = (quality: VersionStep['quality'], video: 'copy' | 'transcode' = 'copy', audio: 'copy' | 'transcode' = 'copy') =>
+    ({ quality, instruction: instruction(video, audio), index: 0 });
+  // The Martian: a 4K file (HEVC, TrueHD), a 1080p file (HEVC, E-AC-3) and a 720p file (H.264, AAC).
+  const files = [file(2160, 'copy', 'transcode'), file(1080, 'copy', 'transcode'), file(720)];
+  const automatic = (quality: VersionStep['quality'], video: 'copy' | 'transcode' = 'copy', audio: 'copy' | 'transcode' = 'copy') =>
+    ({ quality, source: 'file', mediaId: 'm', instruction: instruction(video, audio) }) as VersionStep;
+  const passedOver = (quality: VersionStep['quality'], video: boolean, audio: boolean): PassedOverVersion =>
+    ({ quality, converts: { video, audio }, reasons: [] });
+
+  it('builds one sentence when a ceiling and a conversion both kept Play off a larger file', () => {
+    // This Mac: the screen caps at 1080p, and Chrome cannot play E-AC-3.
+    expect(qualityChoiceText({ files, automatic: automatic(720), limitedBy: { quality: 1080, reason: 'ceiling-display' }, passedOver: passedOver(1080, false, true) }))
+      .toBe('Play chooses 720p, which plays without converting. 1080p needs its audio converted, and 4K is more than this screen shows. Pick a quality to play another.');
+  });
+
+  it('names only the conversion, where no ceiling applies (the 4K television)', () => {
+    expect(qualityChoiceText({ files, automatic: automatic(1080), passedOver: passedOver(2160, false, true) }))
+      .toBe('Play chooses 1080p, which plays without converting. 4K needs its audio converted. Pick a quality to play another.');
+    expect(qualityChoiceText({ files, automatic: automatic(1080), passedOver: passedOver(2160, true, true) }))
+      .toBe('Play chooses 1080p, which plays without converting. 4K needs its video and audio converted. Pick a quality to play another.');
+  });
+
+  it('names only the ceiling, with its reason, and the largest file it kept out', () => {
+    const only = (reason: QualityCeiling['reason']) => qualityChoiceText({ files, automatic: automatic(1080), limitedBy: { quality: 1080, reason } });
+    expect(only('ceiling-display')).toBe('Play chooses 1080p. 4K is more than this screen shows. Pick a quality to play another.');
+    expect(only('ceiling-device')).toBe('Play chooses 1080p. 4K is more than this device plays. Pick a quality to play another.');
+    expect(only('ceiling-cellular')).toBe('Play chooses 1080p. 4K is more than Play uses on mobile data. Pick a quality to play another.');
+    expect(only('ceiling-preference')).toBe('Play chooses 1080p. 4K is more than the most set in Settings. Pick a quality to play another.');
+  });
+
+  it("says where the conversion is not only needed but too slow for any node to keep up with (server 0.70.0's rates)", () => {
+    const slow: PassedOverVersion = { quality: 2160, converts: { video: true, audio: true }, reasons: ['transcode-below-real-time'] };
+    expect(qualityChoiceText({ files, automatic: automatic(1080), passedOver: slow }))
+      .toBe("Play chooses 1080p, which plays without converting. 4K needs its video and audio converted, which the server can't do fast enough. Pick a quality to play another.");
+  });
+
+  it('never claims the chosen file plays as it is when it does not', () => {
+    expect(qualityChoiceText({ files, automatic: automatic(1080, 'copy', 'transcode'), passedOver: passedOver(2160, true, true) }))
+      .toBe('Play chooses 1080p. 4K needs its video and audio converted. Pick a quality to play another.');
+  });
+
+  it('says nothing when Play chooses the largest file there is', () => {
+    expect(qualityChoiceText({ files, automatic: automatic(2160) })).toBeUndefined();
+  });
+});
+
+describe('a quality no node can convert fast enough', () => {
+  it("says which quality and which streams, from what was playing (Tom: 'Macha can't play this quality because...')", () => {
+    expect(tooSlowToPlayText(2160, { video: 'transcode', audio: 'transcode' }))
+      .toBe("Macha can't play 4K because the server can't convert its video and audio fast enough to keep up.");
+    expect(tooSlowToPlayText(1440, { video: 'transcode', audio: 'copy' }))
+      .toBe("Macha can't play 2K because the server can't convert its video fast enough to keep up.");
+    // An omitted stream (no audio at all) is not one being converted.
+    expect(tooSlowToPlayText(2160, { video: 'transcode', audio: 'omit' }))
+      .toBe("Macha can't play 4K because the server can't convert its video fast enough to keep up.");
+  });
+
+  it('keeps the sentence whole when a fact is missing', () => {
+    expect(tooSlowToPlayText()).toBe("Macha can't play this quality because the server can't convert it fast enough to keep up.");
+    expect(playbackFailureCodeText(TOO_SLOW_TO_PLAY_CODE)).toBe(tooSlowToPlayText());
+  });
+
+  it("says where core stepped its own choice down, naming the quality it chose", () => {
+    expect(qualitySteppedDownText(1080)).toBe("Switched to 1080p: the server can't convert a higher quality fast enough.");
+    expect(playbackNoticeText({ code: 'quality-stepped-down' } as PlaybackNotice, 1080))
+      .toBe("Switched to 1080p: the server can't convert a higher quality fast enough.");
+    expect(qualitySteppedDownText()).toBe("Switched to a lower quality: the server can't convert a higher quality fast enough.");
   });
 });

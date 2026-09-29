@@ -7,6 +7,8 @@ import {
   NOT_PLAYABLE_CODE,
   REGENERATION_ENDPOINT_GONE_CODE,
   SESSION_PROVENANCE_UNKNOWN_CODE,
+  START_NO_PROGRESS_CODE,
+  TOO_SLOW_TO_PLAY_CODE,
   playbackFailureCode,
   playbackFailureDetail,
   qualityLabel,
@@ -18,8 +20,11 @@ import {
   type MusicHierarchyContext,
   type PlaybackNotice,
   type PlaybackRefusal,
+  type PlaybackVersions,
+  type PlaybackStartProgress,
   type PlaybackStatusDescription,
   type QualityCeiling,
+  type QualityClass,
   type SearchCategoryKey,
   type StartupSubsystem,
   type TorrentJobErrorCode,
@@ -338,8 +343,9 @@ export function playbackRefusalText(error: unknown, refusal?: PlaybackRefusal): 
 }
 
 /** The player's passing notice for one of core's notice codes. */
-export function playbackNoticeText(notice: PlaybackNotice): string {
+export function playbackNoticeText(notice: PlaybackNotice, quality?: QualityClass): string {
   switch (notice.code) {
+    case 'quality-stepped-down': return qualitySteppedDownText(quality);
     case 'copy-refused': return 'This node could not copy the original streams, so they are being converted.';
     case 'decode-fallback': return 'This device could not play the original streams, so they are being converted.';
     case 'cannot-seek': return 'This stream cannot seek.';
@@ -362,6 +368,12 @@ export function playbackFailureCodeText(code: string | undefined): string | unde
       return 'This stream is no longer available. Start it again.';
     case NOT_PLAYABLE_CODE:
       return 'This item cannot be played here.';
+    // Core's own code, raised when a start that reports progress (server
+    // 0.69.0) stops reporting any: there is no server sentence behind it.
+    case START_NO_PROGRESS_CODE:
+      return 'The node stopped making progress starting this stream.';
+    case TOO_SLOW_TO_PLAY_CODE:
+      return tooSlowToPlayText();
     default:
       return undefined;
   }
@@ -455,6 +467,37 @@ export function streamStatusText(description: PlaybackStatusDescription | undefi
   };
 }
 
+/** A whole percentage of `done` over `total`, when the node measured both. */
+function measuredPercent(done: number | undefined, total: number | undefined): number | undefined {
+  if (done === undefined || total === undefined || !Number.isFinite(done) || !Number.isFinite(total) || total <= 0) return undefined;
+  return Math.min(100, Math.max(0, Math.floor(done / total * 100)));
+}
+
+/**
+ * What a start or a change is doing, from core's counters (server 0.69.0):
+ * the stage, and how far through it when the node measured that. Never an
+ * estimate — a counter the node did not report shows no figure at all.
+ *
+ * `node` names where the work is happening. A change names it throughout,
+ * because the viewer is watching one stream while another is built; a start
+ * names it only while planning. `standalone` marks an open stage with an
+ * ellipsis, for a line with nothing after it.
+ */
+export function startProgressText(progress: PlaybackStartProgress, node?: string, standalone = false): string | undefined {
+  const on = node ? ` on ${node}` : '';
+  const change = progress.kind === 'change';
+  const words = progress.stage === 'planning' ? `${change ? 'Preparing new stream' : 'Preparing the stream'}${on}`
+    : progress.stage === 'preroll' ? `Finding the start point${change ? on : ''}`
+      : progress.stage === 'encoding' ? (change ? `Starting the new stream${on}` : 'Starting the stream')
+        : undefined;
+  if (!words) return undefined;
+  const percent = progress.stage === 'preroll' ? measuredPercent(progress.prerollDecodedMs, progress.prerollTotalMs)
+    : progress.stage === 'encoding' ? measuredPercent(progress.outputMediaMs, progress.firstFragmentMs)
+      : undefined;
+  if (percent !== undefined) return `${words}: ${percent}%`;
+  return standalone ? `${words}…` : words;
+}
+
 /**
  * The scrubber's clock: "1:23:45", or "4:05" under an hour. Anything not a
  * positive finite duration reads "0:00", since there is no position to show
@@ -478,15 +521,62 @@ export function alphabetIndexKeyDescription(key: string): string {
   return key === 'other' ? 'Titles beginning with a number or symbol' : `Titles beginning with ${key}`;
 }
 
+/** "its video", "its audio", "its video and audio", or undefined for neither. */
+function convertedStreams(video: boolean, audio: boolean): string | undefined {
+  return video && audio ? 'its video and audio' : video ? 'its video' : audio ? 'its audio' : undefined;
+}
+
 /**
- * Why Play will not choose the largest file, for the viewer (Tom: automatic
- * play capped "with context to the user as to why"). Shown only when core
- * says the ceiling kept Play off a larger file.
+ * A quality the viewer chose that no node can convert at real speed (core's
+ * `TOO_SLOW_TO_PLAY_CODE`), built from the facts where they are known: the
+ * quality playing, and which streams the session converts. Tom: "clear,
+ * concise, and visible 'Macha can't play this quality because...'".
  */
-export function qualityLimitText(ceiling: QualityCeiling): string {
-  const label = qualityLabel(ceiling.quality);
-  if (ceiling.reason === 'ceiling-display') return `Play chooses up to ${label}, the most this screen shows. Pick a quality to play another.`;
-  if (ceiling.reason === 'ceiling-device') return `Play chooses up to ${label}, the most this device plays. Pick a quality to play another.`;
-  if (ceiling.reason === 'ceiling-cellular') return `Play chooses up to ${label} on mobile data. Pick a quality to play another.`;
-  return `Play chooses up to ${label}, as set in Settings. Pick a quality to play another.`;
+export function tooSlowToPlayText(quality?: QualityClass, transform?: { video: string; audio: string }): string {
+  const streams = transform && convertedStreams(transform.video === 'transcode', transform.audio === 'transcode');
+  return `Macha can't play ${quality ? qualityLabel(quality) : 'this quality'} because the server can't convert ${streams ?? 'it'} fast enough to keep up.`;
+}
+
+/** Core stepped its own choice down to a quality a node can keep up with. */
+export function qualitySteppedDownText(quality?: QualityClass): string {
+  return `Switched to ${quality ? qualityLabel(quality) : 'a lower quality'}: the server can't convert a higher quality fast enough.`;
+}
+
+/**
+ * Why Play chooses the file it does, as one sentence built from every fact
+ * core gives (`PlaybackVersions`): the file chosen, a larger one passed over
+ * because it would need converting (`passedOver`), and a ceiling that kept a
+ * larger one out (`limitedBy`, with its reason). Tom: automatic play is capped
+ * "with context to the user as to why", and the facts are parsed into one
+ * sentence rather than a line each.
+ *
+ * "Which plays without converting" is said only when a larger file was passed
+ * over for needing it, since only then is it the reason. Undefined when Play
+ * is choosing the largest file there is, which needs no explaining.
+ */
+export function qualityChoiceText(versions: Pick<PlaybackVersions, 'files' | 'automatic' | 'limitedBy' | 'passedOver'>): string | undefined {
+  const { automatic, limitedBy, passedOver } = versions;
+  if (!automatic) return undefined;
+  const clauses: string[] = [];
+  const converted = passedOver && convertedStreams(passedOver.converts.video, passedOver.converts.audio);
+  // A node's measured rate for this kind of picture (server 0.70.0): the
+  // conversion is not only needed but too slow to watch.
+  const tooSlow = passedOver?.reasons.includes('transcode-below-real-time');
+  if (passedOver && converted) {
+    clauses.push(`${qualityLabel(passedOver.quality)} needs ${converted} converted${tooSlow ? ', which the server can\'t do fast enough' : ''}`);
+  }
+  const above = limitedBy
+    ? Math.max(...versions.files.map((file) => file.quality).filter((quality) => quality > limitedBy.quality))
+    : Number.NEGATIVE_INFINITY;
+  if (limitedBy && Number.isFinite(above)) {
+    const larger = qualityLabel(above as QualityCeiling['quality']);
+    clauses.push(limitedBy.reason === 'ceiling-display' ? `${larger} is more than this screen shows`
+      : limitedBy.reason === 'ceiling-device' ? `${larger} is more than this device plays`
+        : limitedBy.reason === 'ceiling-cellular' ? `${larger} is more than Play uses on mobile data`
+          : `${larger} is more than the most set in Settings`);
+  }
+  if (clauses.length === 0) return undefined;
+  const plays = automatic.instruction.video !== 'transcode' && automatic.instruction.audio !== 'transcode';
+  const chosen = `Play chooses ${qualityLabel(automatic.quality)}${passedOver && converted && plays ? ', which plays without converting' : ''}.`;
+  return `${chosen} ${clauses.join(', and ')}. Pick a quality to play another.`;
 }
