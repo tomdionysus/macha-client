@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { EndpointCandidate } from '@machafoundation/core';
 import type { ClusterNodeStatus, ClusterStatusSnapshot } from '@machafoundation/core';
 import type { IdentityAssociationResetResult, ManageApi } from '@machafoundation/core';
-import { acceptNodeIdentityAssociationReset, availableOfTotal, usedOfTotal, clientEndpointHealth, conditionStatedPerNode, identityResetAcceptanceMessage, nodeInboundCapable, nodeNotYetReady, nodeStatusLabel, StatusHeader, statusNodeName, statusSectionVisibility, systemMemoryBytes, TELEMETRY_AGEING_MS, TELEMETRY_STALE_MS, telemetryAge, withoutRetiredNodeIdentity } from './StatusScreen';
+import { acceptNodeIdentityAssociationReset, availableOfTotal, usedOfTotal, clientEndpointHealth, conditionStatedPerNode, identityResetAcceptanceMessage, nodeInboundCapable, nodeNotYetReady, nodeStatusLabel, StatusHeader, clusterTrafficText, statusNodeName, statusSectionVisibility, trafficClassLabel, trafficClassText, systemMemoryBytes, TELEMETRY_AGEING_MS, TELEMETRY_STALE_MS, telemetryAge, withoutRetiredNodeIdentity } from './StatusScreen';
 
 function candidate(health: EndpointCandidate['health'], ready = true): EndpointCandidate {
   return {
@@ -248,5 +248,34 @@ describe('what a node card is called', () => {
     expect(statusNodeName({ id: 'fi1-id-0123456789', host: 'corvus-fi-1', node_name: null } as ClusterNodeStatus)).toBe('corvus-fi-1');
     expect(statusNodeName({ id: 'fi1-id-0123456789', host: 'corvus-fi-1', node_name: '  ' } as ClusterNodeStatus)).toBe('corvus-fi-1');
     expect(statusNodeName({ id: 'fi1-id-0123456789', host: '' } as ClusterNodeStatus)).toBe('fi1-id-01234');
+  });
+});
+
+describe("a node's traffic to and from the other nodes (server 0.73.0)", () => {
+  const traffic = {
+    as_of_unix_ms: 1, window_ms: 6_000,
+    classes: [
+      { class: 'foreground', in_bytes: 0, out_bytes: 0, in_bytes_per_s: 1_048_576, out_bytes_per_s: 0 },
+      { class: 'loader', in_bytes: 0, out_bytes: 0, in_bytes_per_s: 0, out_bytes_per_s: 3_145_728 },
+      { class: 'control', in_bytes: 0, out_bytes: 0, in_bytes_per_s: 512, out_bytes_per_s: 512 },
+    ],
+  };
+
+  it('adds up in and out across its classes, for the card', () => {
+    expect(clusterTrafficText(traffic)).toBe('in 1.00 MB/s · out 3.00 MB/s');
+  });
+
+  it('says nothing it cannot measure: no report, or a first sample with no interval yet', () => {
+    expect(clusterTrafficText(null)).toBeUndefined();
+    expect(clusterTrafficText(undefined)).toBeUndefined();
+    expect(clusterTrafficText({ ...traffic, window_ms: null })).toBeUndefined();
+    expect(clusterTrafficText({ ...traffic, classes: [{ class: 'foreground', in_bytes: 0, out_bytes: 0, in_bytes_per_s: null, out_bytes_per_s: null }] })).toBeUndefined();
+  });
+
+  it('words each class, and shows one it does not know by its code', () => {
+    expect(trafficClassLabel('foreground')).toBe('Playback');
+    expect(trafficClassLabel('speculative')).toBe('Repair and sync');
+    expect(trafficClassLabel('replication_v2')).toBe('replication_v2');
+    expect(trafficClassText(traffic.classes[1])).toBe('in 0 B/s · out 3.00 MB/s');
   });
 });

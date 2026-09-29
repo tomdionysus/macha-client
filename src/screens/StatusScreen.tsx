@@ -9,6 +9,8 @@ import type {
   ClusterStatusSnapshot,
   ConnectivityCheck,
   NodeRuntimeStatus,
+  NodeTrafficClassStatus,
+  NodeTrafficStatus,
   PublicConnectivityStatus,
 } from '@machafoundation/core';
 import { startupReadyCount, startupSubsystems } from '@machafoundation/core';
@@ -398,6 +400,7 @@ function NodeCard({ node, canManage, resetting, onReset }: { node: ClusterNodeSt
               node's footprint — see systemMemoryBytes. */}
           <div><dt>Cores</dt><dd>{node.runtime.cpu_cores ?? '—'}</dd></div>
           <div><dt>Memory</dt><dd>{memory != null ? formatBytes(memory) : '—'}</dd></div>
+          <div><dt>Cluster traffic</dt><dd>{clusterTrafficText(node.traffic) ?? '—'}</dd></div>
           <div><dt>Peers</dt><dd>{node.runtime.peers_active != null ? `${node.runtime.peers_active}/${node.runtime.peers_known ?? node.runtime.peers_active}` : '—'}</dd></div>
         </dl>
       </Link>
@@ -614,6 +617,63 @@ export function StatusScreen({ api, endpointRegistry, manageApi, platform, secti
   );
 }
 
+/** The server's traffic classes (0.73.0), as a viewer reads them; an unknown code shows as itself. */
+const TRAFFIC_CLASS_LABELS: Record<string, string> = {
+  foreground: 'Playback',
+  read_ahead: 'Mounted reads and prefetch',
+  loader: 'Imports and torrents',
+  speculative: 'Repair and sync',
+  control: 'Control',
+};
+
+export function trafficClassLabel(code: string): string {
+  return TRAFFIC_CLASS_LABELS[code] ?? code;
+}
+
+function trafficRateText(bytesPerSecond: number | null): string {
+  return bytesPerSecond == null ? '—' : `${formatBytes(bytesPerSecond)}/s`;
+}
+
+/**
+ * A node's traffic to and from the other nodes (server 0.73.0 `traffic`), in
+ * and out, across its classes: "in 1.2 MB/s · out 3.4 MB/s". Undefined when
+ * the node did not report it or has no interval yet (its first sample). Not
+ * what viewers stream, which is HTTP and not counted, so it is never called
+ * bandwidth. Summed within one node only: across nodes each byte would count
+ * twice, once as one node's out and once as another's in.
+ */
+export function clusterTrafficText(traffic: NodeTrafficStatus | null | undefined): string | undefined {
+  if (!traffic || traffic.window_ms == null) return undefined;
+  let inRate = 0;
+  let outRate = 0;
+  for (const entry of traffic.classes) {
+    if (entry.in_bytes_per_s == null || entry.out_bytes_per_s == null) return undefined;
+    inRate += entry.in_bytes_per_s;
+    outRate += entry.out_bytes_per_s;
+  }
+  return `in ${trafficRateText(inRate)} · out ${trafficRateText(outRate)}`;
+}
+
+/** One class's row on a node's page: "in 1.2 MB/s · out 3.4 MB/s". */
+export function trafficClassText(entry: NodeTrafficClassStatus): string {
+  return `in ${trafficRateText(entry.in_bytes_per_s)} · out ${trafficRateText(entry.out_bytes_per_s)}`;
+}
+
+function TrafficCard({ traffic }: { traffic: NodeTrafficStatus | null | undefined }) {
+  return (
+    <article className="node-detail-card"><h2>Cluster traffic</h2><dl>
+      {/* Between nodes only (server 0.73.0): a node streaming a file from its
+          own disk shows almost no playback here, because what a viewer
+          receives is HTTP and is not counted. */}
+      {traffic ? <>
+        {traffic.classes.map((entry) => <DetailItem key={entry.class} label={trafficClassLabel(entry.class)}>{trafficClassText(entry)}</DetailItem>)}
+        <DetailItem label="Measured">{traffic.window_ms != null ? `Over ${formatDuration(traffic.window_ms)}, at ${presentedTimeOfDay(traffic.as_of_unix_ms)}` : 'First sample: no rate yet'}</DetailItem>
+      </> : <DetailItem label="Traffic">Not reported</DetailItem>}
+      <DetailItem label="Counts">Traffic between nodes. Streams to viewers are not included.</DetailItem>
+    </dl></article>
+  );
+}
+
 function DetailItem({ label, children }: { label: string; children: ReactNode }) {
   return <div><dt>{label}</dt><dd>{children}</dd></div>;
 }
@@ -728,6 +788,7 @@ export function NodeStatusScreen({ api }: { api: ClusterStatusApi }) {
           <DetailItem label="RPC reused">{runtime.rpc_connections_reused ?? '—'}</DetailItem>
           <DetailItem label="RPC canonical">{runtime.rpc_connections_canonical ?? '—'}</DetailItem>
         </dl></article>
+        <TrafficCard traffic={node.traffic} />
         <article className="node-detail-card"><h2>Metadata</h2><dl>
           <DetailItem label="Generation">{node.metadata_generation}</DetailItem>
           <DetailItem label="Voter">{node.roles.includes('metadata-voter') ? 'Yes' : 'No'}</DetailItem>
