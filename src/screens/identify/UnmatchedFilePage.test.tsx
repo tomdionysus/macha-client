@@ -2,7 +2,7 @@
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { describe, expect, it, vi } from 'vitest';
-import type { CatalogueApi, CatalogueItem, ManageApi, ManageCatalogueMatch, MediaProbeCandidate, UnmatchedFile } from '@machafoundation/core';
+import type { CatalogueApi, CatalogueItem, ManageApi, ManageCatalogueMatch, MediaProbeCandidate, ProviderSearchResult, UnmatchedFile } from '@machafoundation/core';
 import { UnmatchedFilePage } from './UnmatchedFilePage';
 import { settle } from '../../test/settle';
 
@@ -21,6 +21,8 @@ const match = (overrides: Partial<ManageCatalogueMatch>): ManageCatalogueMatch =
   season_number: null, episode_number: null, disc_number: null, track_number: null, media_ids: [], revision: 1, updated_ns: 0, ...overrides,
 });
 
+const catalogued = (id: string, title: string, year: number | null) => ({ id, title, year }) as CatalogueItem;
+
 function Where() {
   return <p data-testid="where">{useLocation().pathname}</p>;
 }
@@ -31,11 +33,19 @@ function show(probes: MediaProbeCandidate[], matches: ManageCatalogueMatch[] = [
     prospectiveMatches: vi.fn(async () => ({ query: 'a film', matches })),
     match: vi.fn(async () => undefined),
     manual: vi.fn(async () => ({ leaf_item_id: 'new-item', items: [] })),
+    matchProvider: vi.fn(async () => ({ leaf_item_id: 'tmdb:episode:9', items: [] })),
+    providerSearch: vi.fn(async (): Promise<ProviderSearchResult[]> => [
+      { ref: 'tmdb:tv:42', provider: 'tmdb', kind: 'show', title: 'A Series', year: 2010, overview: 'What it is about.', catalogue_item_id: 'tmdb:tv:42' },
+    ]),
     retry: vi.fn(),
     deleteUnmatched: vi.fn(),
   } as unknown as ManageApi;
   const catalogue = {
     get: vi.fn(async (id: string) => ({ id, artwork: [], effective_artwork: [], ...items[id] }) as unknown as CatalogueItem),
+    search: vi.fn(async (_query: string, _limit: number, _signal: unknown, filter: { kinds: string[] }) => (
+      filter.kinds[0] === 'show' ? [catalogued('tmdb:tv:42', 'A Series', 2010)] : [catalogued('mb:artist:1', 'A Band', null)]
+    )),
+    list: vi.fn(async () => [catalogued('mb:album:7', 'A Record', 1999)]),
     putArtwork: vi.fn(),
   } as unknown as CatalogueApi;
   render(
@@ -102,5 +112,67 @@ describe('identifying an unmatched file', () => {
     await settle();
     expect((screen.getByRole('alert')).textContent).toBe('Season and episode numbers are required.');
     expect(manage.manual).not.toHaveBeenCalled();
+  });
+
+  it('files an episode under a series chosen from the catalogue by its id, not its name', async () => {
+    const { manage, catalogue } = show([probe({ kind: 'episode', title: 'Pilot', series: 'A Series', season_number: 1, episode_number: 2 })]);
+    await settle();
+    fireEvent.click(screen.getByRole('tab', { name: 'Enter manually' }));
+    fireEvent.change(screen.getByLabelText('Search for series in the catalogue'), { target: { value: 'series' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Find' }));
+    await settle();
+    expect(catalogue.search).toHaveBeenCalledWith('series', 8, undefined, { kinds: ['show'] });
+    fireEvent.click(screen.getByRole('button', { name: 'Use' }));
+    expect(screen.queryByLabelText('Series')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Save and create' }));
+    await settle();
+    const sent = vi.mocked(manage.manual).mock.calls[0]?.[1];
+    expect(sent).toEqual({ kind: 'episode', series_id: 'tmdb:tv:42', season_number: 1, episode_number: 2, title: 'Pilot', synopsis: undefined });
+  });
+
+  it('files a track under one of a chosen artist\'s albums, and asks for an album when none is chosen or named', async () => {
+    const { manage, catalogue } = show([probe({ kind: 'track', title: 'A Song', artist: 'A Band', album: '', track_number: 3 })]);
+    await settle();
+    fireEvent.click(screen.getByRole('tab', { name: 'Enter manually' }));
+    fireEvent.change(screen.getByLabelText('Search for artist in the catalogue'), { target: { value: 'band' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Find' }));
+    await settle();
+    fireEvent.click(screen.getByRole('button', { name: 'Use' }));
+    await settle();
+    expect(catalogue.list).toHaveBeenCalledWith('album', 'mb:artist:1');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save and create' }));
+    await settle();
+    expect(screen.getByRole('alert').textContent).toBe('Choose one of the artist\'s albums, or name a new one.');
+    expect(manage.manual).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Use' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save and create' }));
+    await settle();
+    expect(vi.mocked(manage.manual).mock.calls[0]?.[1]).toMatchObject({ kind: 'track', album_id: 'mb:album:7', title: 'A Song', track_number: 3 });
+    expect(vi.mocked(manage.manual).mock.calls[0]?.[1]).not.toHaveProperty('artist');
+  });
+
+  it('matches to a series found online, with the episode this file is', async () => {
+    const { manage } = show([probe({ kind: 'episode', title: 'Pilot', series: 'A Series', season_number: 1, episode_number: null })]);
+    await settle();
+    fireEvent.click(screen.getByRole('tab', { name: 'Search online' }));
+    expect((screen.getByLabelText('Search for') as HTMLInputElement).value).toBe('A Series');
+    fireEvent.click(screen.getByRole('button', { name: 'Search' }));
+    await settle();
+    expect(manage.providerSearch).toHaveBeenCalledWith('A Series', 'show', { year: undefined, artist: undefined });
+    const row = screen.getByText('A Series · 2010').closest('li') as HTMLElement;
+    expect(within(row).getByText('TMDB · already in the catalogue')).toBeTruthy();
+
+    fireEvent.click(within(row).getByRole('button', { name: 'Match' }));
+    await settle();
+    expect(screen.getByRole('alert').textContent).toBe('Enter the season and episode this file is.');
+    expect(manage.matchProvider).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByLabelText('Episode'), { target: { value: '4' } });
+    fireEvent.click(within(row).getByRole('button', { name: 'Match' }));
+    await settle();
+    screen.getByText('the list');
+    expect(manage.matchProvider).toHaveBeenCalledWith('f1', { ref: 'tmdb:tv:42', season_number: 1, episode_number: 4 });
   });
 });

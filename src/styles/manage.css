@@ -78,8 +78,9 @@
 .unmatched-table .col-added { width: 8.4rem; }
 /* A file's page: what it could be, beside what it could be matched to. */
 /*
- * Identifying a file: three tabs (candidates, search, manual), each a list of
- * rows with what the choice is on the left and its actions on the right.
+ * Identifying a file: four tabs (candidates, catalogue search, provider
+ * search, manual), each a list of rows with what the choice is on the left
+ * and its actions on the right.
  */
 .identify-panel { margin-top: .8rem; }
 .identify-tabs { display: flex; flex-wrap: wrap; gap: .35rem; margin: .2rem 0 .9rem; border-bottom: 1px solid #ffffff12; }
@@ -96,5 +97,17 @@
 /* A match's own picture, so a viewer can tell two items of one name apart. */
 .identify-matches .identify-art { flex: 0 0 auto; width: 2.6rem; aspect-ratio: 2 / 3; overflow: hidden; border-radius: .3rem; background: var(--surface-2); }
 .identify-matches .identify-art img { display: block; width: 100%; height: 100%; object-fit: cover; }
+/* A provider result's line is a sentence, not a kind; its overview is held to two lines. */
+.identify-provider { display: grid; gap: .8rem; }
+.identify-provider .identify-matches span { text-transform: none; }
+.identify-overview { display: -webkit-box; margin: .15rem 0 0; overflow: hidden; color: var(--text-dim); font-size: .82rem; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+/* A series, artist or album chosen from the catalogue, or the search for one. */
+.identify-parent { display: grid; gap: .4rem; }
+.identify-parent > span { color: var(--text-dim); font-size: .85rem; }
+.identify-parent-chosen { display: flex; align-items: center; gap: .7rem; }
+.identify-parent-chosen strong { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.identify-parent-chosen button, .identify-parent-options button { margin: 0; }
+.identify-parent-options { display: grid; gap: .3rem; max-height: 14rem; margin: 0; padding: 0; overflow-y: auto; list-style: none; }
+.identify-parent-options li { display: flex; align-items: center; justify-content: space-between; gap: .8rem; padding: .35rem .6rem; border: 1px solid #ffffff0d; border-radius: .45rem; }
 /* The unmatched list and a file's page run the page's full width, as Import's do. */
 .manage-screen.manage-screen-unmatched, .manage-screen.detail-screen { width: 100%; }

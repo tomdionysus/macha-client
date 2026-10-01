@@ -44,9 +44,9 @@ back on 0.73.0, then 0.74.0. GBNI-1 is the only torrent node.
    HEVC title, the stepped-down notice, storing's "no progress" wording, the
    Direct Play bar on the title that showed the phantom range, the failover
    and slow-start progress wording.
-2. **Catalogue management** (section "Identify and edit"): core has now
-   wrapped every server route it needed (`26fe88d`), so steps 2 and 3 are
-   client work.
+2. **Catalogue management** (section "Identify and edit"): steps 2 and 3
+   built 2026-10-01; a Match applied, the parent pickers and an editor save
+   still to see live. Provider artwork is deferred until the experiment ends.
 3. **The playback P0s** as before.
 
 **Open decisions that are Tom's alone:** any push, merge, version bump, tag,
@@ -128,29 +128,39 @@ the gaps, are summarised in the handover.
   Enter manually), all applied through core's `identifyUnmatched`; a Files
   card on the metadata editor listing each file's facts, with Add a file;
   shared fields; editor artwork upload per role. Not seen live.
-- **Step 2, waits on Tom approving the server's proposal:** manual entry with
-  parent ids (ends duplicate series and artists, which today get `manual:`
-  ids by name beside the scanner's `tmdb:` ones), `PUT` validating parents
-  and unable to unbind files by omission, errors as 400/404 not 503, the
-  lock set on hand edits, a search kind filter.
-- **Step 3, waits on Tom:** provider search with free terms returning a list,
-  match to a provider result (the server building the hierarchy, reusing
-  what exists), artwork options with the server fetching the chosen one,
-  richer candidates with embedded art.
+- **Steps 2 and 3, built 2026-10-01** on `experiment/object-ledger`
+  (server 0.67.0 routes, core `26fe88d`), unit-tested, every new test seen
+  red under a mutation (ten mutations):
+  - Manual entry names parents by id: a series, artist or an artist's album
+    chosen from the catalogue (`ParentPicker`, `catalogue.search` with
+    `kinds`, `catalogue.list('album', artist)`) is sent as `series_id`,
+    `artist_id` or `album_id`; one only typed is sent by name as before.
+  - A "Search online" tab (`ProviderMatch`): `manage.providerSearch` with
+    any words, kind, year and artist; a result already catalogued says so;
+    Match goes through `identifyUnmatched(..., { from: 'provider' })` with
+    the season and episode or disc and track asked once, and refuses before
+    sending when they are missing.
+  - The editor saves through `catalogue.patch` with only the changed fields
+    (`itemChanges`; artwork only when the chosen image moved; nothing sent
+    when nothing changed), and words refusals with `viewerErrorText`.
+  - **Seen live** (dev client, as Tom, FI-1/GBNI-1 on 0.74.0): the four
+    tabs, the provider form seeded from the file's candidate, a search with
+    no result worded, and a MusicBrainz search listing results. Nothing was
+    matched. Not yet seen: a Match applied, the parent pickers, an editor
+    save.
+- **Provider artwork choice: deferred by Tom (relayed by Core, 2026-10-01)**
+  until the experiment ends. Listing options needs the item's provider ref,
+  which only the server knows cleanly; Core asked the Server for
+  `GET .../providers/artwork?item_id=&role=` and recorded it (core
+  `6f4c396`). Do not derive refs from item ids here meanwhile.
+- **For the Server, after the experiment:** MusicBrainz release results are
+  indistinguishable (one album search listed the same title, artist and
+  year eight times); a result needs what tells releases apart (country, format, track
+  count, label).
 - **Open design questions for Tom:** one address or both (I proposed both);
   whether a candidate applies directly or is reviewed first (built: complete
-  ones get Create, others Review); the lock on hand edits by default.
-- **The server and core sides have landed** (server 0.67.0, proposals A
-  to G; core `26fe88d`): `manage.providerSearch`, `manage.matchProvider`
-  and `identifyUnmatched(..., { from: 'provider' })`, `ManualMetadata` naming
-  parents by id, `manage.providerArtwork` / `chooseArtwork`, `catalogue.search`
-  with server-side `kinds` and `parent`, and `catalogue.patch` (use it for
-  editor saves in place of `update()`, so nothing unbinds by omission).
-  Refusals: manage calls throw `MachaManageApiError`, catalogue calls
-  `MachaApiError`; read the code with `playbackFailureCode(error)` and the
-  server's sentence with `playbackFailureDetail(error)` (not
-  `acquisitionError`, which is torrents and ingest only). Steps 2 and 3 are
-  now this client's to build.
+  ones get Create, others Review); the lock on hand edits by default (the
+  server now locks every edit unless told otherwise).
 - **Later:** the general catalogue editor (P2 below).
 
 ## Built 2026-09-24 to 30, owed a live look

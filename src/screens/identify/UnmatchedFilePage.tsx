@@ -6,6 +6,7 @@ import {
   routes,
   type CatalogueApi,
   type CatalogueItem,
+  type CatalogueKind,
   type Identification,
   type ManageApi,
   type ManageCatalogueMatch,
@@ -18,6 +19,8 @@ import { ConfirmModal } from '../../components/Modal';
 import { fileName, formatAge, formatBytes, formatTimestamp } from '../ingest/format';
 import { hintResultLabel, viewerErrorText } from '../../text/viewerText';
 import { NumberField, TextAreaField, TextField, wholeNumber } from './fields';
+import { ParentPicker } from './ParentPicker';
+import { likelyKind, ProviderMatch } from './ProviderMatch';
 
 type ManualKind = ManualMetadata['kind'];
 
@@ -85,8 +88,9 @@ const ARTWORK_ROLE: Record<ManualKind, string> = { movie: 'poster', episode: 'st
 /**
  * Manual entry: the kind's fields, seeded from a candidate when one was being
  * reviewed, and artwork uploaded to what it creates. Applied through core,
- * which routes it; the series, season, artist or album are named, and the
- * server finds or creates them by name until it can take them by id.
+ * which routes it. A series, artist or album chosen from the catalogue is
+ * sent by id, so the file joins the hierarchy already there; one only typed
+ * is sent by name, and the server finds or creates it.
  */
 function ManualEntry({ detail, probe, manage, catalogue, onResolved }: {
   detail: UnmatchedDetail;
@@ -95,8 +99,7 @@ function ManualEntry({ detail, probe, manage, catalogue, onResolved }: {
   catalogue: CatalogueApi;
   onResolved: () => void;
 }) {
-  const initialKind: ManualKind = probe?.kind ?? (detail.item.provider === 'tv' ? 'episode' : detail.item.provider === 'music' ? 'track' : 'movie');
-  const [kind, setKind] = useState<ManualKind>(initialKind);
+  const [kind, setKind] = useState<ManualKind>(() => likelyKind(detail, probe));
   const [title, setTitle] = useState(probe?.title ?? '');
   const [year, setYear] = useState(probe?.year?.toString() ?? '');
   const [synopsis, setSynopsis] = useState('');
@@ -108,6 +111,9 @@ function ManualEntry({ detail, probe, manage, catalogue, onResolved }: {
   const [album, setAlbum] = useState(probe?.album ?? '');
   const [discNumber, setDiscNumber] = useState(probe?.disc_number?.toString() ?? '');
   const [trackNumber, setTrackNumber] = useState(probe?.track_number?.toString() ?? '');
+  const [seriesItem, setSeriesItem] = useState<CatalogueItem>();
+  const [artistItem, setArtistItem] = useState<CatalogueItem>();
+  const [albumItem, setAlbumItem] = useState<CatalogueItem>();
   const [artwork, setArtwork] = useState<File | undefined>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
@@ -121,18 +127,19 @@ function ManualEntry({ detail, probe, manage, catalogue, onResolved }: {
       if (season == null || episode == null) return 'Season and episode numbers are required.';
       return {
         kind,
-        series: series.trim(),
-        series_year: wholeNumber(seriesYear),
+        ...(seriesItem ? { series_id: seriesItem.id } : { series: series.trim(), series_year: wholeNumber(seriesYear) }),
         season_number: season,
         episode_number: episode,
         title: title.trim() || undefined,
         synopsis: synopsis.trim() || undefined,
       };
     }
+    if (artistItem && !albumItem && !album.trim()) return 'Choose one of the artist\'s albums, or name a new one.';
     return {
       kind,
-      artist: artist.trim(),
-      album: album.trim(),
+      ...(albumItem ? { album_id: albumItem.id }
+        : artistItem ? { artist_id: artistItem.id, album: album.trim() }
+          : { artist: artist.trim(), album: album.trim() }),
       title: title.trim(),
       year: wholeNumber(year),
       disc_number: wholeNumber(discNumber),
@@ -140,6 +147,8 @@ function ManualEntry({ detail, probe, manage, catalogue, onResolved }: {
       synopsis: synopsis.trim() || undefined,
     };
   };
+
+  const findIn = (kinds: CatalogueKind[]) => (query: string) => catalogue.search(query, 8, undefined, { kinds });
 
   const save = async () => {
     const entered = metadata();
@@ -172,9 +181,10 @@ function ManualEntry({ detail, probe, manage, catalogue, onResolved }: {
       </label>
       {kind === 'episode' && (
         <>
-          <TextField label="Series" value={series} onChange={setSeries} disabled={busy} />
+          <ParentPicker label="Series in the catalogue" find={findIn(['show'])} chosen={seriesItem} onChoose={setSeriesItem} disabled={busy} />
+          {!seriesItem && <TextField label="Series" value={series} onChange={setSeries} disabled={busy} />}
           <div className="manage-field-row">
-            <NumberField label="Series year" value={seriesYear} onChange={setSeriesYear} disabled={busy} />
+            {!seriesItem && <NumberField label="Series year" value={seriesYear} onChange={setSeriesYear} disabled={busy} />}
             <NumberField label="Season" value={seasonNumber} onChange={setSeasonNumber} disabled={busy} />
             <NumberField label="Episode" value={episodeNumber} onChange={setEpisodeNumber} disabled={busy} />
           </div>
@@ -182,8 +192,11 @@ function ManualEntry({ detail, probe, manage, catalogue, onResolved }: {
       )}
       {kind === 'track' && (
         <>
-          <TextField label="Artist" value={artist} onChange={setArtist} disabled={busy} />
-          <TextField label="Album" value={album} onChange={setAlbum} disabled={busy} />
+          <ParentPicker label="Artist in the catalogue" find={findIn(['artist'])} chosen={artistItem} onChoose={(item) => { setArtistItem(item); setAlbumItem(undefined); }} disabled={busy} />
+          {!artistItem && <TextField label="Artist" value={artist} onChange={setArtist} disabled={busy} />}
+          {/* An artist chosen offers its albums; keyed on it, so another artist reads afresh. */}
+          {artistItem && <ParentPicker key={artistItem.id} label="Album in the catalogue" browse find={() => catalogue.list('album', artistItem.id)} chosen={albumItem} onChoose={setAlbumItem} disabled={busy} />}
+          {!albumItem && <TextField label={artistItem ? 'Or a new album' : 'Album'} value={album} onChange={setAlbum} disabled={busy} />}
         </>
       )}
       <TextField label={kind === 'episode' ? 'Episode title' : kind === 'track' ? 'Track title' : 'Title'} value={title} onChange={setTitle} disabled={busy} />
@@ -204,13 +217,13 @@ function ManualEntry({ detail, probe, manage, catalogue, onResolved }: {
   );
 }
 
-type Tab = 'candidates' | 'search' | 'manual';
+type Tab = 'candidates' | 'search' | 'provider' | 'manual';
 
 /**
- * One unmatched file: what it is, and three ways to say what it should be —
+ * One unmatched file: what it is, and four ways to say what it should be —
  * one of the candidates inferred from it, an item already in the catalogue
- * (which gains it as another version if it has files), or metadata entered by
- * hand. Every one is applied through core's `identifyUnmatched`, which routes
+ * (which gains it as another version if it has files), a record found at the
+ * metadata provider, or metadata entered by hand. Every one is applied through core's `identifyUnmatched`, which routes
  * it; this screen calls no match or manual route itself. Whatever resolves the
  * file returns to the list.
  */
@@ -295,7 +308,8 @@ export function UnmatchedFilePage({ api, catalogueApi }: { api: ManageApi; catal
     .slice(0, 4);
   const now = Date.now();
   const review = (index: number) => { setReviewing(index); setTab('manual'); };
-  const tabs: ReadonlyArray<readonly [Tab, string]> = [['candidates', 'Candidates'], ['search', 'Search the catalogue'], ['manual', 'Enter manually']];
+  const tabs: ReadonlyArray<readonly [Tab, string]> = [['candidates', 'Candidates'], ['search', 'Search the catalogue'], ['provider', 'Search online'], ['manual', 'Enter manually']];
+  const reviewed = reviewing === undefined ? detail.probes[0] : detail.probes[reviewing];
 
   return (
     <section className="manage-screen detail-screen">
@@ -386,6 +400,12 @@ export function UnmatchedFilePage({ api, catalogueApi }: { api: ManageApi; catal
           </div>
         )}
 
+        {tab === 'provider' && (
+          <div role="tabpanel" id="identify-provider" aria-labelledby="identify-tab-provider">
+            <ProviderMatch detail={detail} probe={reviewed} manage={api} onResolved={() => navigate(back)} />
+          </div>
+        )}
+
         {tab === 'manual' && (
           <div role="tabpanel" id="identify-manual" aria-labelledby="identify-tab-manual">
             {/* Keyed on the candidate under review: the form seeds its fields
@@ -393,7 +413,7 @@ export function UnmatchedFilePage({ api, catalogueApi }: { api: ManageApi; catal
             <ManualEntry
               key={`manual-${reviewing ?? 'blank'}`}
               detail={detail}
-              probe={reviewing === undefined ? detail.probes[0] : detail.probes[reviewing]}
+              probe={reviewed}
               manage={api}
               catalogue={catalogueApi}
               onResolved={() => navigate(back)}

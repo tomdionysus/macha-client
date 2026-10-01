@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState, type ChangeEvent } from 'react';
-import type { CatalogueApi, CatalogueArtwork, CatalogueItem, CatalogueKind, ManageApi, PlaybackFactsApi } from '@machafoundation/core';
+import type { CatalogueApi, CatalogueArtwork, CatalogueItem, CatalogueItemPatch, CatalogueKind, ManageApi, PlaybackFactsApi } from '@machafoundation/core';
 import { ItemFiles } from './identify/ItemFiles';
 import { NumberField, numberText, TextAreaField, TextField, wholeNumber } from './identify/fields';
 import { ErrorMessage, Loading } from '../components/Status';
 import { useAsync } from '../hooks/useAsync';
+import { viewerErrorText } from '../text/viewerText';
 
 interface Props {
   api: CatalogueApi;
@@ -70,6 +71,25 @@ function reorderArtwork(items: CatalogueArtwork[], selected: Record<string, stri
     }
   }
   return output;
+}
+
+/** The fields this editor changes; everything else on an item it leaves alone. */
+const EDITED_FIELDS = ['title', 'sort_title', 'year', 'season_number', 'episode_number', 'disc_number', 'track_number', 'synopsis', 'aliases'] as const;
+
+/**
+ * Only what the edit changed, for a partial save: a field left as it was is
+ * not sent, so the save cannot overwrite what something else wrote meanwhile
+ * or drop what this form never showed. Artwork is sent only when the choice
+ * of image changed its order.
+ */
+export function itemChanges(initial: CatalogueItem, edited: CatalogueItem): CatalogueItemPatch {
+  const changes: Record<string, unknown> = {};
+  for (const field of EDITED_FIELDS) {
+    if (JSON.stringify(edited[field]) !== JSON.stringify(initial[field])) changes[field] = edited[field];
+  }
+  const order = (artwork: CatalogueArtwork[]) => artwork.map((art) => `${art.role}:${art.id}`).join('\n');
+  if (order(edited.artwork) !== order(initial.artwork)) changes.artwork = edited.artwork;
+  return changes as CatalogueItemPatch;
 }
 
 function ArtworkPreview({ api, artwork, selected, onSelect }: {
@@ -168,7 +188,7 @@ function MetadataForm({ api, facts, manage, initial, onBack, onSaved, onCleared,
       await api.putArtwork(initial.id, role, image.type || 'image/jpeg', image);
       onReload();
     } catch (cause) {
-      setError(cause instanceof Error ? cause : new Error(String(cause)));
+      setError(new Error(viewerErrorText(cause)));
       setUploading(undefined);
     }
   };
@@ -177,11 +197,6 @@ function MetadataForm({ api, facts, manage, initial, onBack, onSaved, onCleared,
     setDraft((current) => ({ ...current, [key]: value }));
   };
 
-  const lockExternalIds = (externalIds: Record<string, string>) => ({
-    ...externalIds,
-    [METADATA_LOCK_KEY]: '1',
-  });
-
   const clearMetadata = async () => {
     setSaving(true);
     setError(undefined);
@@ -189,7 +204,7 @@ function MetadataForm({ api, facts, manage, initial, onBack, onSaved, onCleared,
       await api.clearMetadata(initial.id, initial.revision);
       onCleared(initial);
     } catch (caught) {
-      setError(caught instanceof Error ? caught : new Error(String(caught)));
+      setError(new Error(viewerErrorText(caught)));
       setConfirmClear(false);
     } finally {
       setSaving(false);
@@ -205,18 +220,18 @@ function MetadataForm({ api, facts, manage, initial, onBack, onSaved, onCleared,
     setSaving(true);
     setError(undefined);
     try {
-      const payload: CatalogueItem = {
+      const changes = itemChanges(initial, {
         ...draft,
         title,
         sort_title: draft.sort_title.trim() || title,
         aliases: aliasesText.split('\n').map((alias) => alias.trim()).filter(Boolean),
         artwork: reorderArtwork(draft.artwork, selectedArtwork),
-        external_ids: lockExternalIds(draft.external_ids),
-      };
-      await api.update(payload, initial.revision);
+      });
+      // The server locks what it saves against the scanner; nothing changed is nothing to save.
+      if (Object.keys(changes).length > 0) await api.patch(initial.id, changes, initial.revision);
       onSaved();
     } catch (caught) {
-      setError(caught instanceof Error ? caught : new Error(String(caught)));
+      setError(new Error(viewerErrorText(caught)));
     } finally {
       setSaving(false);
     }
