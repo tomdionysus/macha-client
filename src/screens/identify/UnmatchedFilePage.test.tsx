@@ -159,6 +159,54 @@ describe('suggestions, where identifying a file starts', () => {
     expect((within(row).getByRole('button', { name: 'Match with this picture' }) as HTMLButtonElement).disabled).toBe(true);
   });
 
+  it('shows releases no one could tell apart as one record, matched by the release whose cover it shows', async () => {
+    const bare = { ...record, ref: 'musicbrainz:release:bare' };
+    const reissue = { ...record, ref: 'musicbrainz:release:reissue' };
+    const { manage } = show([track], { providerResults: [bare, record, reissue], artwork: pictures });
+    vi.mocked(manage.providerArtwork).mockImplementation(async (ref: string) => (ref.endsWith('bare') ? [] : pictures));
+    await settle();
+    expect(suggestions().getAllByRole('listitem')).toHaveLength(1);
+    const row = rowOf('A Record · 1999', suggestions());
+    expect(within(row).getByText('A Band · MusicBrainz · 3 releases')).toBeTruthy();
+    expect(row.querySelector('img')?.getAttribute('src')).toBe('https://provider/o1.jpg');
+    fireEvent.click(within(row).getByRole('button', { name: 'Use this' }));
+    await settle();
+    fireEvent.click(within(row).getByRole('button', { name: 'Match' }));
+    await settle();
+    expect(manage.matchProvider).toHaveBeenCalledWith('f1', { ref: 'musicbrainz:release:r1', track_number: 2 });
+  });
+
+  it('matches the album\'s other unmatched files in the folder too, when asked, and names the ones it could not', async () => {
+    const { manage } = show([track], { providerResults: [record] });
+    const sibling = (id: string, name: string): UnmatchedFile => ({ ...file, id, path: `/incoming/${name}` });
+    const elsewhereFile = { ...file, id: 'f9', path: '/other/03.mp3' };
+    vi.mocked(manage).unmatched = vi.fn(async () => [file, sibling('f2', '02.mp3'), sibling('f3', '03.mp3'), sibling('f4', 'notes.mp3'), elsewhereFile]);
+    const details: Record<string, MediaProbeCandidate[]> = {
+      f1: [track],
+      f2: [probe({ kind: 'track', title: 'Two', artist: 'A Band', album: 'A Record', track_number: 3 })],
+      f3: [probe({ kind: 'track', title: 'Three', artist: 'A Band', album: 'A Record', track_number: null })],
+      f4: [probe({ kind: 'track', title: 'Other', artist: 'A Band', album: 'Another Record', track_number: 1 })],
+    };
+    vi.mocked(manage.unmatchedDetail).mockImplementation(async (id: string) => ({ item: file, probes: details[id] ?? [] }));
+    await settle();
+    const row = rowOf('A Record · 1999', suggestions());
+    fireEvent.click(within(row).getByRole('button', { name: 'Use this' }));
+    await settle();
+    const also = within(row).getByLabelText(/Also match the album's 2 other unmatched files in this folder/) as HTMLInputElement;
+    expect(also.checked).toBe(false);
+    expect(within(row).getByText(/1 does not say which track/)).toBeTruthy();
+    fireEvent.click(also);
+    fireEvent.click(within(row).getByRole('button', { name: 'Match' }));
+    await settle();
+    expect(vi.mocked(manage.matchProvider).mock.calls).toEqual([
+      ['f1', { ref: 'musicbrainz:release:r1', track_number: 2 }],
+      ['f2', { ref: 'musicbrainz:release:r1', track_number: 3 }],
+    ]);
+    expect(within(row).getByRole('alert').textContent).toContain('03.mp3: it does not say which track it is.');
+    fireEvent.click(within(row).getByRole('button', { name: 'Back to the list' }));
+    screen.getByText('the list');
+  });
+
   it('says when nothing on TMDB or MusicBrainz matches what the file says', async () => {
     show([track], { providerResults: [elsewhere] });
     await settle();

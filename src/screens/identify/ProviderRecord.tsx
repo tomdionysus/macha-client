@@ -7,10 +7,13 @@ import {
   type ProviderArtworkRole,
   type ProviderMatchRef,
   type ProviderSearchResult,
+  type UnmatchedFile,
 } from '@machafoundation/core';
+import { fileName } from '../ingest/format';
+import { albumSiblings, type Sibling } from './folderSiblings';
 import { viewerErrorText } from '../../text/viewerText';
 import { NumberField, numberText, wholeNumber } from './fields';
-import { pacedArtwork, recordThumbnail } from './providerLookup';
+import { pacedArtwork, pictureRelease } from './providerLookup';
 
 export const PROVIDER_LABEL: Record<string, string> = { tmdb: 'TMDB', musicbrainz: 'MusicBrainz' };
 
@@ -60,15 +63,17 @@ export function providerMatchTarget(result: Pick<ProviderSearchResult, 'ref' | '
  * fetches the record, builds its hierarchy (reusing what the catalogue
  * holds), stages its artwork and binds the file, as a scan match does.
  */
-export function ProviderRecord({ result, fileId, manage, numbers: initial, disabled, onResolved }: {
-  result: ProviderSearchResult;
-  fileId: string;
+export function ProviderRecord({ releases, file, manage, numbers: initial, disabled, onResolved }: {
+  /** One record, or several releases no one could tell apart, shown and matched as one. */
+  releases: ProviderSearchResult[];
+  file: UnmatchedFile;
   manage: ManageApi;
   numbers: RecordNumbers;
   disabled?: boolean;
   onResolved: () => void;
 }) {
   const [thumbnail, setThumbnail] = useState<string>();
+  const [result, setResult] = useState(releases[0]);
   const [open, setOpen] = useState(false);
   const [season, setSeason] = useState(numberText(initial.season));
   const [episode, setEpisode] = useState(numberText(initial.episode));
@@ -79,12 +84,21 @@ export function ProviderRecord({ result, fileId, manage, numbers: initial, disab
   const [busy, setBusy] = useState(false);
   const [matched, setMatched] = useState(false);
   const [error, setError] = useState<string>();
+  // The album's other files in this folder: undefined while looked for.
+  const [siblings, setSiblings] = useState<Sibling[]>();
+  const [withSiblings, setWithSiblings] = useState(false);
+  const [progress, setProgress] = useState<string>();
+  const [unmatchedSiblings, setUnmatchedSiblings] = useState<Array<{ name: string; reason: string }>>();
 
   useEffect(() => {
     let cancelled = false;
-    void recordThumbnail(manage, result).then((url) => { if (!cancelled) setThumbnail(url); });
+    void pictureRelease(manage, releases).then((shown) => {
+      if (cancelled) return;
+      setResult(shown.release);
+      setThumbnail(shown.thumbnail);
+    });
     return () => { cancelled = true; };
-  }, [manage, result]);
+  }, [manage, releases]);
 
   const numbers: RecordNumbers = { season: wholeNumber(season), episode: wholeNumber(episode), disc: wholeNumber(disc), track: wholeNumber(track) };
   const target = providerMatchTarget(result, numbers);
@@ -104,6 +118,41 @@ export function ProviderRecord({ result, fileId, manage, numbers: initial, disab
     // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the numbers the pictures depend on
   }, [manage, result, picturesKey]);
 
+  useEffect(() => {
+    if (!open || result.kind !== 'album' || siblings !== undefined) return undefined;
+    let cancelled = false;
+    void albumSiblings(manage, file, result.title, result.artist)
+      .catch(() => [])
+      .then((found) => { if (!cancelled) setSiblings(found); });
+    return () => { cancelled = true; };
+  }, [open, result, siblings, manage, file]);
+
+  /**
+   * The album's other files, one after another, against the same release:
+   * each by the track its own candidates state. One with no track number is
+   * not guessed at; every file left unmatched is named with why.
+   */
+  const matchSiblings = async (ref: string): Promise<Array<{ name: string; reason: string }>> => {
+    const left: Array<{ name: string; reason: string }> = [];
+    for (const [index, sibling] of (siblings ?? []).entries()) {
+      const name = fileName(sibling.file.path);
+      setProgress(`Matching the album's other files: ${index + 1} of ${siblings?.length ?? 0}…`);
+      if (sibling.track == null) {
+        left.push({ name, reason: 'it does not say which track it is.' });
+        continue;
+      }
+      try {
+        await identifyUnmatched(manage, sibling.file.id, {
+          from: 'provider', target: { ref, track_number: sibling.track, ...(sibling.disc != null ? { disc_number: sibling.disc } : {}) },
+        });
+      } catch (cause) {
+        left.push({ name, reason: viewerErrorText(cause) });
+      }
+    }
+    setProgress(undefined);
+    return left;
+  };
+
   const match = async () => {
     if (typeof target === 'string') {
       setError(target);
@@ -113,7 +162,7 @@ export function ProviderRecord({ result, fileId, manage, numbers: initial, disab
     setError(undefined);
     let applied;
     try {
-      applied = await identifyUnmatched(manage, fileId, { from: 'provider', target });
+      applied = await identifyUnmatched(manage, file.id, { from: 'provider', target });
     } catch (cause) {
       setError(viewerErrorText(cause));
       setBusy(false);
@@ -131,6 +180,16 @@ export function ProviderRecord({ result, fileId, manage, numbers: initial, disab
         return;
       }
     }
+    if (withSiblings && siblings?.length) {
+      const left = await matchSiblings(target.ref);
+      if (left.length > 0) {
+        // This file is matched, so nothing here can be done again; what is left is said, and the way back offered.
+        setMatched(true);
+        setBusy(false);
+        setUnmatchedSiblings(left);
+        return;
+      }
+    }
     onResolved();
   };
 
@@ -142,7 +201,12 @@ export function ProviderRecord({ result, fileId, manage, numbers: initial, disab
       </span>
       <div>
         <strong>{[result.title, result.year].filter(Boolean).join(' · ')}</strong>
-        <span>{[result.artist, PROVIDER_LABEL[result.provider] ?? result.provider, result.catalogue_item_id ? 'already in the catalogue' : undefined].filter(Boolean).join(' · ')}</span>
+        <span className="identify-record-meta">{[
+          result.artist,
+          PROVIDER_LABEL[result.provider] ?? result.provider,
+          releases.length > 1 ? `${releases.length} releases` : undefined,
+          releases.some((release) => release.catalogue_item_id) ? 'already in the catalogue' : undefined,
+        ].filter(Boolean).join(' · ')}</span>
         {result.overview && <p className="identify-overview">{result.overview}</p>}
         {open && (
           <div className="identify-artwork-choice manage-manual-form">
@@ -159,7 +223,16 @@ export function ProviderRecord({ result, fileId, manage, numbers: initial, disab
               </div>
             )}
             <Pictures options={picturesKey === undefined ? [] : options} optionId={optionId} disabled={held} onChoose={setOptionId} />
+            {result.kind === 'album' && <SiblingChoice siblings={siblings} checked={withSiblings} disabled={held} onChange={setWithSiblings} />}
+            {progress && <p className="ingest-loading" role="status">{progress}</p>}
             {error && <p className="manage-error" role="alert">{error}</p>}
+            {unmatchedSiblings && (
+              <div className="manage-error" role="alert">
+                <p>{`Matched this file and ${(siblings?.length ?? 0) - unmatchedSiblings.length} of the album's other ${siblings?.length ?? 0}. Still unmatched:`}</p>
+                <ul>{unmatchedSiblings.map(({ name, reason }) => <li key={name}>{`${name}: ${reason}`}</li>)}</ul>
+                <button className="secondary-button" type="button" onClick={onResolved} data-tv-focusable="true">Back to the list</button>
+              </div>
+            )}
             <div className="identify-actions">
               <button className="secondary-button" type="button" disabled={held} onClick={() => { setOpen(false); setError(undefined); }} data-tv-focusable="true">Cancel</button>
               <button className="primary-button" type="button" disabled={held} onClick={() => void match()} data-tv-focusable="true">
@@ -206,5 +279,24 @@ function Pictures({ options, optionId, disabled, onChoose }: {
         ))}
       </div>
     </>
+  );
+}
+
+/** The option to match the album's other unmatched files in this folder too. */
+function SiblingChoice({ siblings, checked, disabled, onChange }: {
+  siblings?: Sibling[];
+  checked: boolean;
+  disabled: boolean;
+  onChange: (checked: boolean) => void;
+}) {
+  if (siblings === undefined) return <p className="list-note">Looking for this album's other unmatched files in this folder…</p>;
+  if (siblings.length === 0) return null;
+  const unnumbered = siblings.filter((sibling) => sibling.track == null).length;
+  return (
+    <label className="identify-siblings">
+      <input type="checkbox" checked={checked} disabled={disabled} onChange={(event) => onChange(event.target.checked)} data-tv-focusable="true" />
+      {`Also match the album's ${siblings.length === 1 ? 'other unmatched file' : `${siblings.length} other unmatched files`} in this folder, each by the track it says it is`}
+      {unnumbered > 0 && <span className="list-note">{` (${unnumbered} ${unnumbered === 1 ? 'does' : 'do'} not say which track, and will be left)`}</span>}
+    </label>
   );
 }

@@ -188,6 +188,24 @@ the gaps, are summarised in the handover.
   and would name the exact release; the file's detail route stalls for
   8 s+ on every node at times (it holds `config_mutex_`, which the
   scanner's own work takes), seen three times today.
+- **Why the scanner did not match what a suggestion finds easily (Tom,
+  2026-10-02; server, investigate after the experiment):** its MusicBrainz
+  lookups ask `release:"<album>" AND artist:"<artist>"` and the same for a
+  recording (`find_release`, `media_catalogue.cpp:1910`, and :1991). The
+  artist phrase is exact, so a file tagged "DJ Tiësto" finds nothing where
+  MusicBrainz credits "Tiësto", and every candidate fails. The suggestions
+  compare the artist loosely, after the search, and find it.
+- **A MusicBrainz match takes over a minute (server):** `POST
+  .../unmatched/{id}/match` with a release ref had not answered at 40 s, and
+  the file was still unmatched a minute later. Core gives a change 8 s and
+  never retries it; the web now says the server did not answer in time and
+  may still finish (it said "Something went wrong"). Until this is quick,
+  Match on a MusicBrainz suggestion fails.
+- **Built 2026-10-02:** releases no one could tell apart (provider, kind,
+  title, artist, year) are one record, "5 releases", shown and matched by
+  the first with a cover; an album record offers to match the album's
+  other unmatched files in the same folder, each by the track its own
+  candidates state, unticked by default, naming the ones it could not.
 - **Candidates cannot show artwork yet: needs the server.** A candidate
   carries no picture, and the server records only that a file has an
   attached picture (`attached_picture` on its stream), with no route to

@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import type { ManageApi, MediaProbeCandidate, ProviderSearchKind, ProviderSearchResult, UnmatchedDetail } from '@machafoundation/core';
 import { viewerErrorText } from '../../text/viewerText';
 import { NumberField, numberText, TextField, wholeNumber } from './fields';
-import { sameTitle } from './providerLookup';
+import { groupRecords, sameTitle } from './providerLookup';
 import { ProviderRecord, type RecordNumbers } from './ProviderRecord';
 
 const KIND_LABEL: Record<ProviderSearchKind, string> = { movie: 'Movie', show: 'TV series', album: 'Music album' };
@@ -52,6 +52,7 @@ export function ProviderMatch({ detail, probe, manage, onResolved }: {
   const [artist, setArtist] = useState(probe?.artist ?? '');
   const [results, setResults] = useState<ProviderSearchResult[]>();
   const [busy, setBusy] = useState(false);
+  const grouped = useMemo(() => results && groupRecords(results), [results]);
   const [error, setError] = useState<string>();
 
   const search = async () => {
@@ -92,8 +93,8 @@ export function ProviderMatch({ detail, probe, manage, onResolved }: {
         ? <p className="list-note">Nothing found for that search.</p>
         : (
           <ul className="identify-matches">
-            {results.map((result) => (
-              <ProviderRecord key={result.ref} result={result} fileId={detail.item.id} manage={manage} numbers={candidateNumbers(probe)} disabled={busy} onResolved={onResolved} />
+            {grouped?.map((releases) => (
+              <ProviderRecord key={releases[0].ref} releases={releases} file={detail.item} manage={manage} numbers={candidateNumbers(probe)} disabled={busy} onResolved={onResolved} />
             ))}
           </ul>
         ))}

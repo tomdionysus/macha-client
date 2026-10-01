@@ -4,6 +4,7 @@ import {
   CHOICE_REQUIRED_CODE,
   MachaPlaybackError,
   MachaClusterRouteError,
+  MachaEndpointError,
   MachaConnectionError,
   NOT_PLAYABLE_CODE,
   REGENERATION_ENDPOINT_GONE_CODE,
@@ -299,6 +300,14 @@ export const SERVER_UNREACHABLE_TEXT = 'The Macha server cannot be reached. Chec
 export const NO_NODE_ANSWERED_TEXT = 'No Macha server answered. Try again in a moment; if it keeps happening, check that the servers are running.';
 
 /**
+ * One node was asked to change something and did not answer in time. A
+ * change is never retried on another node, and the node may still be doing
+ * it (a MusicBrainz match ran past a minute, seen 2026-10-01), so the viewer
+ * is told to look before asking again.
+ */
+export const CHANGE_UNANSWERED_TEXT = 'The server did not answer in time. It may still finish: refresh in a minute before trying again.';
+
+/**
  * What a viewer is told about a thrown error. An error's `message` is core's
  * log text and never shown. In order: this client's sentence for a code core
  * states, the server's own sentence from wherever in the chain it was said,
@@ -314,6 +323,7 @@ export function viewerErrorText(error: unknown, fallback = 'Something went wrong
   if (detail) return detail;
   if (error instanceof MachaConnectionError) return SERVER_UNREACHABLE_TEXT;
   if (error instanceof MachaClusterRouteError && error.unreachable) return NO_NODE_ANSWERED_TEXT;
+  if (error instanceof MachaEndpointError && error.kind === 'transport') return CHANGE_UNANSWERED_TEXT;
   return fallback;
 }
 

@@ -30,11 +30,11 @@ export function Suggestions({ detail, manage, onResolved }: {
       {suggestions?.length === 0 && <p className="list-note">Nothing on TMDB or MusicBrainz matches what this file says. Search for it below.</p>}
       {suggestions && suggestions.length > 0 && (
         <ul className="identify-matches">
-          {suggestions.map(({ result, lookup }) => (
+          {suggestions.map(({ releases, lookup }) => (
             <ProviderRecord
-              key={result.ref}
-              result={result}
-              fileId={detail.item.id}
+              key={releases[0].ref}
+              releases={releases}
+              file={detail.item}
               manage={manage}
               numbers={{ season: lookup.season_number, episode: lookup.episode_number, disc: lookup.disc_number, track: lookup.track_number }}
               onResolved={onResolved}

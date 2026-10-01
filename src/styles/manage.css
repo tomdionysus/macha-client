@@ -103,7 +103,7 @@
 .identify-group h3 { margin: 0 0 .4rem; color: var(--text-dim); font-size: .8rem; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
 /* A provider result's line is a sentence, not a kind; its overview is held to two lines. */
 .identify-provider { display: grid; gap: .8rem; }
-.identify-provider .identify-matches span { text-transform: none; }
+.identify-matches .identify-record-meta { text-transform: none; }
 .identify-overview { display: -webkit-box; margin: .15rem 0 0; overflow: hidden; color: var(--text-dim); font-size: .82rem; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 /* A picked provider result opens its pictures under it, to choose one before the match. */
 .identify-matches li.identify-choosing { align-items: flex-start; border-color: #ffffff24; }
@@ -117,6 +117,8 @@
 .identify-offered-picture { display: flex; flex-wrap: wrap; align-items: center; gap: .8rem; }
 .identify-offered-picture img { width: 5.5rem; border-radius: .4rem; background: var(--surface-2); }
 .identify-offered-picture label { display: flex; align-items: center; gap: .5rem; }
+/* The option to match an album's other files in the folder too. */
+.identify-siblings { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
 /* Where a new track or episode goes, as a choice of three or two. */
 .identify-placement { display: grid; gap: .35rem; margin: 0; padding: .6rem .8rem; border: 1px solid #ffffff12; border-radius: .55rem; }
 .identify-placement legend { padding: 0 .3rem; color: var(--text-dim); font-size: .85rem; }

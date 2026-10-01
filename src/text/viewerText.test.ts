@@ -7,7 +7,7 @@ import {
   jobErrorText,
   serverStatusText,
   albumLabel, alphabetIndexKeyText, cardSubtitle, episodeCode, episodeLabel, playbackFailureCodeText, playbackNoticeText,
-  playbackTimeText, qualityChoiceText, qualitySteppedDownText, tooSlowToPlayText, NO_NODE_ANSWERED_TEXT, SERVER_UNREACHABLE_TEXT, sortChoiceLabel, startProgressText, streamStatusText, trackNumberLabel, viewerErrorText,
+  playbackTimeText, qualityChoiceText, qualitySteppedDownText, tooSlowToPlayText, CHANGE_UNANSWERED_TEXT, NO_NODE_ANSWERED_TEXT, SERVER_UNREACHABLE_TEXT, sortChoiceLabel, startProgressText, streamStatusText, trackNumberLabel, viewerErrorText,
 } from './viewerText';
 
 const item = (overrides: Partial<MediaSummary>) => ({ id: 'i', kind: 'movie', title: 'T', mediaIds: [], ...overrides }) as MediaSummary;
@@ -80,6 +80,11 @@ describe('what a viewer is told about an error', () => {
   it('says no server answered when every node was tried and none did, rather than that something went wrong', () => {
     const timedOut = new MachaConnectionError('Request to http://node/api/v1/manage/unmatched exceeded 8000 ms.');
     expect(viewerErrorText(new MachaClusterRouteError(['fi-1', 'gbni-1'], true, timedOut))).toBe(NO_NODE_ANSWERED_TEXT);
+  });
+
+  it('says a change one node did not answer may still finish, rather than that something went wrong', () => {
+    const timedOut = endpointFailure('fi-1', 'http://fi-1', new MachaConnectionError('Request exceeded 8000 ms.'));
+    expect(viewerErrorText(timedOut)).toBe(CHANGE_UNANSWERED_TEXT);
   });
 
   it('gives the server\'s own sentence when the nodes answered and refused', () => {

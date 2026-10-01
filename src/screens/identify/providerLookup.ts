@@ -100,9 +100,28 @@ export async function agreeingRecords(manage: ManageApi, lookup: Lookup): Promis
     && (!lookup.artist || !result.artist || sameTitle(lookup.artist, result.artist)));
 }
 
-/** A record suggested for a file, with the numbers its candidate stated. */
+/**
+ * Records a person could not tell apart, as one: a MusicBrainz album is
+ * often several releases (countries, formats, reissues) that the provider
+ * answers with the same title, artist and year (five of one album, seen
+ * live), and choosing among them by eye is choosing blind. Grouped in the
+ * provider's order; each group is shown once and matched by one of its
+ * releases.
+ */
+export function groupRecords(results: readonly ProviderSearchResult[]): ProviderSearchResult[][] {
+  const groups = new Map<string, ProviderSearchResult[]>();
+  for (const result of results) {
+    const key = [result.provider, result.kind, comparable(result.title), comparable(result.artist ?? ''), result.year ?? ''].join('|');
+    const group = groups.get(key);
+    if (group) group.push(result);
+    else groups.set(key, [result]);
+  }
+  return [...groups.values()];
+}
+
+/** A record suggested for a file (its indistinguishable releases together), with the numbers its candidate stated. */
 export interface Suggestion {
-  result: ProviderSearchResult;
+  releases: ProviderSearchResult[];
   lookup: Lookup;
 }
 
@@ -120,9 +139,11 @@ export async function findSuggestions(manage: ManageApi, candidates: readonly Me
     const lookup = recordLookup(candidate);
     if (lookup && !lookups.has(lookup.key)) lookups.set(lookup.key, lookup);
   }
-  const found = await Promise.all([...lookups.values()].map(async (lookup) => (await agreeingRecords(manage, lookup)).map((result) => ({ result, lookup }))));
+  const found = await Promise.all([...lookups.values()].map(async (lookup) => (
+    groupRecords(await agreeingRecords(manage, lookup)).map((releases) => ({ releases, lookup }))
+  )));
   const seen = new Set<string>();
-  return found.flat().filter(({ result }) => !seen.has(result.ref) && seen.add(result.ref)).slice(0, SUGGESTIONS_SHOWN);
+  return found.flat().filter(({ releases }) => !seen.has(releases[0].ref) && seen.add(releases[0].ref)).slice(0, SUGGESTIONS_SHOWN);
 }
 
 const queues = new WeakMap<ManageApi, Promise<unknown>>();
@@ -142,6 +163,18 @@ export function pacedArtwork(manage: ManageApi, ref: string, role: ProviderArtwo
 }
 
 const thumbnails = new WeakMap<ManageApi, Map<string, Promise<string | undefined>>>();
+
+/**
+ * The release of a group to show and match by: the first, among the first
+ * few, that has a picture, so the picture shown is the one the match brings.
+ */
+export async function pictureRelease(manage: ManageApi, releases: readonly ProviderSearchResult[]): Promise<{ release: ProviderSearchResult; thumbnail?: string }> {
+  for (const release of releases.slice(0, RECORDS_TRIED)) {
+    const thumbnail = await recordThumbnail(manage, release);
+    if (thumbnail) return { release, thumbnail };
+  }
+  return { release: releases[0] };
+}
 
 /**
  * The small picture a record is shown with: a movie's or series' poster, an
