@@ -1,6 +1,104 @@
 # Completed and tested
 
-Last updated: 2026-09-27, at a break for a clear: finished work moved here, the backlog rationalised
+Last updated: 2026-10-01, at a break for a clear: finished work moved here, the backlog rationalised
+
+## Releases 0.19.0 and 0.20.0 — 2026-09-28 and 2026-09-29
+
+- **0.19.0** (`ed77bdc`, tag `0.19.0`): `main` on published core **0.20.0**
+  (registry, gitHead `d7b4057`, no link entries), merged from develop with
+  the test-determinism work below; suite 629, typecheck and build clean
+  against the registry copy. Pushed on Tom's word.
+- **0.20.0** (`1fa0bc4`, tag `0.20.0`): `main` on published core **0.21.0**
+  (gitHead `5569ddd`); suite 668, build `index-Duc7vXyp.js`, and the same in
+  a fresh clone with `npm ci`. Develop merged back (`2b9d01e`) on the link.
+  Pushed on Tom's "do a full release in the usual way". The client's own
+  version is 0.20.0; 0.21.0 is the core it ships against.
+
+## No test's verdict depends on the clock — 2026-09-28
+
+Two tests failed only on a loaded machine (the Ingest paging test at load
+170-340, a 240 ms PlayerOptions test at load 390). Tom: "Tests that fail on
+external factors aren't tests." `03d331a`: no per-test time limit;
+`settle()` (`src/test/settle.ts`) in place of every `findBy`/`waitFor`; the
+Ingest poll and the read-ahead worker's timers on fake time; the 60-row
+render replaced by small pager and address tests. Two tests had passed on
+timing and were corrected (`useArtworkUrl`'s per-render api looped for ever;
+the login roles arrived on a real 20 ms timer). Every rewritten test seen
+red; three full runs 629, 19.5-20.6 s against 22-24 s before.
+
+## Direct Play's buffered bar from the bytes the element holds — 2026-09-28
+
+Chrome's `video.buffered` for a file served whole is `byte / size ×
+duration` (Chromium `BufferedDataSourceHostImpl::AddBufferedTimeRanges`).
+Seen live on GBNI-1: a Direct Play MP4 playing smoothly at 3000 s reported a
+phantom range 95 s behind the playhead. Server 0.68.0 publishes each file's
+keyframe byte index; core maps byte ranges to time (`bufferedTimeRanges`);
+`d7fca3b` inverts Chrome's ranges with the element's own duration and maps
+them, for the bar, the runway and the stall watchdog. A file with no index
+keeps Chrome's estimate (Tom: "No index? Best guess."). Unit-tested and
+mutation-checked; the live look on the same title is owed (`ACTIVE.md`).
+
+## A starting stream says what it is doing, and nodes are named — 2026-09-28
+
+Server 0.69.0 `start=async`, core `snapshot.startProgress`. `e4eae8f`,
+`fc40335`, `f512cdc`: the spinner note and the status line name the stage
+with a measured percentage only; a failover start names no node; core's
+`START_NO_PROGRESS_CODE` is worded. Seen live on FI-1: a seek showed
+"Starting the new stream on ... 0%", 19%, 90%, swapping in 4.8 s. Nodes are
+named by the server's name (`endpointName`, then `node_name` from 0.70.0:
+"Corvus FI-1"), else by host, never by URL (Tom: every client). The TV and
+phone ported the wording word for word.
+
+## One sentence for why Play chooses a file — 2026-09-28/29
+
+`f512cdc`, `5a36769`: `qualityChoiceText` builds one sentence from the
+chosen file, a passed-over file and what it would convert (and, from server
+0.70.0 rates, that no node converts it fast enough), and a ceiling with its
+reason. Tom: "parse all the facts and build a sentence". Seen live on The
+Martian's page on this Mac: "Play chooses 720p, which plays without
+converting. 1080p needs its audio converted, and 4K is more than this
+screen shows. Pick a quality to play another." The TV ported it and saw it.
+
+## A quality no node can keep up with stops, with a reason — 2026-09-29
+
+Found live: a 4K HEVC 10-bit transcode resumed at 34:27 looped between FI-1
+and GBNI-1 every ~9 s. Core `d1069d2` (Tom's ruling) stops cycling; `5a36769`
+words `TOO_SLOW_TO_PLAY_CODE` from what was playing ("Macha can't play 4K
+because the server can't convert its video and audio fast enough to keep
+up.") with Try again and Choose another quality, and core's own step-down
+("Switched to 1080p: ..."). Unit-tested, mutation-checked; not yet seen live
+(`ACTIVE.md`).
+
+## Torrents: Start paused, held torrents, and storing — 2026-09-29
+
+`5a36769`, `1456884`, server 0.71.0, core `8614a09` to `71972bc`. Start
+paused on the add, with a confirmation read from the job the server answers
+(never claiming a pause that did not happen; core pauses at once on an older
+node). **Seen live on 0.71.0**: an unseeded test magnet added paused was
+recorded paused; the list first said "Waiting for a node" with Pause and no
+Resume, fixed in `1456884` by reading `desired` ("Paused, waiting for a
+node", Resume); the test job was then removed cleanly. Storing between the
+download and the import ("Storing 39.4%", "984 MB of 2.43 GB stored"), from
+the server's `waiting_reason`: **seen live** ("Storing 82.5%" moving to
+86.1% on three torrents). The stall wording is owed.
+
+## Cluster traffic by class on Status — 2026-09-29
+
+Server 0.73.0 `nodes[].traffic`, core `1217429`. `e543e0e`: each node card
+shows "Cluster traffic: in ... · out ...", and each node's page a card per
+class (Playback, Mounted reads and prefetch, Imports and torrents, Repair
+and sync, Control), with the sample's window and time and a note that
+viewer streams are not counted. Never summed across nodes (each byte would
+count twice). **Seen live**: GBNI-1 out 847 KB/s against FI-1 in 850 KB/s,
+all of it repair and sync.
+
+## Client deploys, 2026-09-29
+
+Both to FI-1 and GBNI-1 (macnessa is GBNI-1's public front), additive, each
+with a backup under `/etc/macha/web.bak-*`: `index-Brec8DWy.js` from develop
+`1456884` at 01:28 local (backup `20260929-012802`), and
+`index-TzVBSVlb.js` from develop `e543e0e` at 18:59 (backup
+`20260929-185903`), after FI-1's hardware error.
 
 ## Quality selection: a Play button per quality, and a Maximum quality — 2026-09-25
 

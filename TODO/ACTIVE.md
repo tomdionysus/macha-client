@@ -1,8 +1,8 @@
 # Active tasks and concepts to explore
 
-Last updated: 2026-09-27, at a break for a clear, rationalised against the
-code, `git log`, core `482bbb1` (the 0.20.0 candidate code `ae82922`) and
-server 0.64.1. Read [2026-09-27-handover.md](2026-09-27-handover.md) first,
+Last updated: 2026-10-01, at a break for a clear, rationalised against the
+code, `git log`, core `1217429` (develop, after the published 0.21.0) and
+server 0.74.0. Read [2026-10-01-handover.md](2026-10-01-handover.md) first,
 for what is running, what is in flight with the sibling sessions, Tom's
 rulings and the method; where this file and a dated document in this
 directory disagree, this file is current and the dated document is the
@@ -20,173 +20,53 @@ are related. Core is addressed as the `Macha Client Core` session.
 
 ## Start here
 
-**Read [2026-09-27-handover.md](2026-09-27-handover.md) first.**
+**Read [2026-10-01-handover.md](2026-10-01-handover.md) first.**
 
-**First thing: the release (Tom, 2026-09-27: "first thing we'll do is the
-release").** Core 0.20.0 is prepared and waits on Tom; this client's part
-follows it. Steps, in order, each push only on Tom's word:
+**Where the repo is.** `main` is `1fa0bc4`, **0.20.0**, released and pushed
+(tag `0.20.0`), resolving published core **0.21.0** from npm. `develop` is
+`e543e0e`, linked to core's tree (`1217429`), **one commit ahead of
+`origin/develop`** (the cluster traffic cards), nothing uncommitted. Suite
+**671**, typecheck and build clean. That commit needs core's `traffic` type,
+which is on core develop only, so it reaches `main` with the next core
+release (about weekly; never ask for an early cut).
 
-1. **Push `develop`** (Core asked for it before the cut; 48 commits ahead
-   of `origin/develop`, last pushed `cc094dd`). Needs Tom's yes.
-2. **Core cuts 0.20.0 and Tom publishes it** (core's session does this;
-   the candidate is core `ae82922`, and this client answered GO against
-   it: typecheck, build, 623 tests).
-3. **When Core says it is on npm, move `main` onto it** by the gate in
-   "Core is linked during development" below: merge `develop` into `main`;
-   `package.json` to `"@machafoundation/core": "^0.20.0"`; remove the
-   lockfile's `"link": true` and `../macha-ts` entries; `npm install`;
-   `test -L node_modules/@machafoundation/core` must fail; `rm -rf
-   node_modules/.vite`; `npm run typecheck`, `npm test`, `npm run build`
-   against the registry copy (and ideally a fresh clone with `npm ci`).
-   Then commit, push `main` (Tom's word), return to `develop` and restore
-   `file:../macha-ts` with `npm install`.
-4. **The web client's own release is Tom's question.** Version is still
-   0.18.0, and `CHANGELOG.md`'s Unreleased section stops before 25-27
-   September: quality selection and the device limit, the page-exit close,
-   media lines, Continue Watching resume state, the torrent work for server
-   0.61.0 to 0.64.1, and Status's storage lines are not in it (see
-   `COMPLETED.md` for each, with commits). Write them before any bump or
-   tag. Two old questions ride with it: whether the node picker whose entry
-   says "Not releasable until the handover arrives" ships, and the paging
-   test (below).
-
-**Where the repo is.** `main` is `26e8bcc`, pushed, resolving published core
-**0.19.0**; it cannot start playback against server 0.58.0 and later (core
-0.19.0 sends `item_id`), which Tom accepted until the next core publish.
-`develop` is linked to core's tree (clean at `482bbb1`), 48 commits ahead of
-`origin/develop`, nothing uncommitted. Suite **623**, typecheck and build
-clean.
-
-**The cluster.** fi-1 (10.35.1.50, also .10) and gbni-1 (10.44.1.50,
-`macnessa`) run server **0.64.1**; es-1 and `ramaroja` have been down since
-2026-09-24. Both live nodes serve `develop`'s `index-DT7YOjdl.js` (deploy
-section). fi-1 runs no torrents; gbni-1 is the only torrent node.
+**The cluster.** Corvus FI-1 (10.35.1.50:7438, also .10) and Corvus GBNI-1
+(10.44.1.50:7438; **macnessa.macha.network is GBNI-1's public front, not a
+third node**) run server **0.74.0**. Node names come from the server
+(`node_name`, 0.70.0). es-1 and `ramaroja` have been down since 2026-09-24.
+Both nodes serve `index-TzVBSVlb.js` from `develop` `e543e0e` (deployed
+2026-09-29 18:59 local). FI-1 had a hardware error on 2026-09-29 and came
+back on 0.73.0, then 0.74.0. GBNI-1 is the only torrent node.
 
 **Then, in order:**
 
-1. **Catalogue management** (section "Identify and edit"): step 1 built and
-   owed a live look; steps 2 and 3 wait on Tom approving the server's
-   proposals. The trailer filed as one of The Martian's files (TV's
-   finding) is a case for it.
-2. **Owed live looks** (section below), mostly needing a sign-in as Tom.
+1. **Owed live looks** (section below): the too-slow screen on the 4K
+   HEVC title, the stepped-down notice, storing's "no progress" wording, the
+   Direct Play bar on the title that showed the phantom range, the failover
+   and slow-start progress wording.
+2. **Catalogue management** (section "Identify and edit"): core has now
+   wrapped every server route it needed (`26fe88d`), so steps 2 and 3 are
+   client work.
 3. **The playback P0s** as before.
 
 **Open decisions that are Tom's alone:** any push, merge, version bump, tag,
-deploy or core publish; the server's catalogue proposals and multi-file
-fixes; the artwork lost with es-1 and the replication capacity (with the
-server); the paging-test remedy; the ~15 s artwork hang on a silently dead
-node; the player options panel's sideways move; sized artwork variants;
-core's "Plan A" and "Season 0 Episode 1". A television is needed for the
-Samsung items and the TVs' saved endpoints; reading a Samsung panel's
-resolution needs `webapis.productinfo`, not yet loaded.
-
-**The paging test and its neighbours** (`IngestScreen.test.tsx`): they time
-out at vitest's 5 s limit when the Server session's C++ builds push this
-machine's load past 300 (27 September: load 323 to 572; every one passed
-alone and in a rerun). Not the code. Tom to choose: accept, raise
-`testTimeout`, or cut their cost. Record the load with any failure.
+deploy or core publish; driven playback for the Server's soak (Server will
+send a concrete request only once Tom agrees); a per-node "repair is being
+paced" flag (Server offered to put it to him); the artwork lost with es-1
+and the replication capacity (with the server); the ~15 s artwork hang on a
+silently dead node; the player options panel's sideways move; sized artwork
+variants; core's "Plan A" and "Season 0 Episode 1". A television is needed
+for the Samsung items and the TVs' saved endpoints.
 
 **Two business P0s outrank the rest:** slow artwork (host choice and caching
 fixed 2026-09-24; the server's slow first read and poster size remain, and
-now the posters lost with es-1), and scope-ratio titles playing small in a
-black window (burnt-in bars; the fix is an ingest/server one,
+the posters lost with es-1), and scope-ratio titles playing small in a black
+window (burnt-in bars; the fix is an ingest/server one,
 [evidence](2026-09-16-video-fit-mode.md)).
 
 **The P0s, as they stand.** The scope title (the server's). A player at
 `readyState` 0 (instrumented, no mechanism). Seek misbehaviour. A handover
 with no lead. Failover from an https page onto an http node (core's).
-
-## Direct Play buffered bar (2026-09-28; waiting on Server, then Core)
-
-Tom saw the pink buffered bar start ahead of the playhead with a gap on Direct
-Play. **Cause: Chrome's `video.buffered` is not residency for a plain-URL
-video.** Chromium's `BufferedDataSourceHostImpl::AddBufferedTimeRanges` maps
-each buffered byte range to time as byte / total_bytes x duration. Our path is
-faithful: `WebPlatform.publish()` passes the element's ranges untouched, and
-core adds no offset on direct (`PlaybackCoordinator.ts:3056-3090`).
-
-Seen live on gbni-1, deployed client, visible tab, a Direct Play MP4 (2.0
-Mb/s, 6443.5 s). With currentTime set to 3000, readyState 4 and playing, the
-element reported `[2997.5 -> 3021]` plus a phantom `[2902 -> 2940]` 95 s
-behind, growing in step with playback. Nothing sought there: two byte regions
-(likely video and audio chunks) read at once, each mapped linearly.
-
-**Tom's choice: the server mod.** Hiding the bar on Direct Play was refused.
-Server builds `GET /api/v1/catalogue/media/{id}/keyframes`, per its workup:
-immutable per media id, an immutable DATA object referenced from the profile,
-computed at profile time or on first request and never on the create path
-(Direct Play create stays instant). MP4 offsets are exact per sample; MKV
-offsets are cluster-level; sparse Cues bound the interpolation error. Asked
-for per-stream entries (audio as well as video) and a precision flag.
-
-Core then adds the fetch and a pure byte-to-time mapping. It agreed on
-2026-09-28: `MediaApi.keyframes(mediaId)` cached per id, and
-`bufferedTimeRanges(index, sizeBytes, byteRanges)` returning the intersection
-across streams, as a utility this client calls, not in the coordinator. It
-builds once Server announces the shape. Relayed to Server: entries must be
-sorted by byte offset too, and the tail needs an end anchor so it maps to the
-duration.
-
-**Server built it: 0.68.0, `8135c66`, docs `d8cd5d5`, not deployed.** The
-response carries `container`, `offsets` ("sample" for MP4, "cluster" for
-Matroska), `size_bytes`, `duration_ms`, and `streams[{index, type, codec,
-entries[[t_ms, byte]]}]`. Each stream is sorted by offset, and past the last
-entry the file ends at `(duration_ms, size_bytes)`. Audio keeps at most one
-entry per second; Matroska audio may have none. `streams[].index` is the
-session's `selected.video_stream` / `selected.audio_stream`, so intersect the
-video stream with the selected audio stream only, and drop a stream with no
-entries. Times are decode times: B-frame keyframes read early by their
-composition offset, which is fine for a bar. Errors: 400 `bad_media_id`, 404
-`not_found`, 422 `keyframes_not_supported`, 422 `keyframes_failed`. A file
-with no index (neither MP4 nor Matroska) keeps Chrome's estimate: Tom,
-2026-09-28, "No index? Best guess."
-
-**Core built its side** (develop `7dfa518`): `catalogue.keyframes(mediaId)` and
-`bufferedTimeRanges(index, heldBytes, playing)`. **This client is wired, on
-develop, uncommitted.** `App.tsx` hands `setKeyframeSource` the catalogue. For
-each Direct Play generation, `WebPlatform.loadKeyframeIndex` fetches the index
-off the start path. `publish()` then inverts Chrome's ranges to bytes with the
-element's own duration (`directPlayBufferedRanges`) and maps them through the
-index. `bufferedRangesMs`, `forwardBufferMs` and the stall watchdog's buffered
-end all use the result. Until the index arrives, or for a file the node cannot
-index, Chrome's figures stand. On Direct Play the browser picks the audio track
-from the file, so core's default (the first audio stream) is right. The
-worker's cache is **not** folded in: `forwardBufferMs` is documented as the
-element's own buffer, and core already counts the worker's cover through
-`readAheadBytes`, so folding it in would count it twice. Showing the worker's
-cover on the bar would need a separate field from core. Four tests, each
-mutation-checked; suite 633. **Owed: a live look once server 0.68.0 is
-deployed**, on the same title (gbni-1, set to 3000 s): the phantom 2902-2940 s
-range must be gone and the bar must start at the playhead. This
-client supplies byte ranges from two sources: Chrome's ranges inverted exactly
-(byte = time / element duration x size) and the read-ahead worker's own cache.
-It draws the playable minimum across streams. HLS is unaffected.
-
-## Playback start reports progress (server 0.69.0, planned; not built)
-
-This is the server's plan `TODO/2026-09-27-playback-start-progress-plan.md`.
-Opt-in `?start=async` on create and PATCH answers 202 with a `start` object:
-`stage` (planning, preroll, encoding, ready, failed) and measured counters. An
-absent counter means the stage cannot measure it, never zero. The client
-long-polls `GET .../sessions/{id}?after=&wait_ms=`. The node fails a start only
-when progress stops (`startup_no_progress_ms`), never on elapsed time. A
-pending PATCH keeps the current generation serving until the replacement is
-ready.
-
-Agreed with Server on 2026-09-28, after the web client's review:
-- Direct Play is never pending: 201 with URLs, as blocking.
-- A replacement's URLs arrive on the same long-poll the moment it is ready,
-  so the handover can buffer beside the playing generation.
-- DELETE of a pending start frees its transcode slot at once, so Core can
-  race or abandon a slow start on its own budget ("never make the viewer
-  wait").
-- Viewer text stays this client's: once core names the stage,
-  `startWaitNotice` can state it with `output_media_ms / first_fragment_ms`
-  as a measured fraction.
-
-Server sends the final shape and version when built. Its plan says clients
-enter release lockdown after this; confirm with Tom what that means for this
-client.
 
 ## Cards with no artwork (investigated 2026-09-27; let go, waiting on es-1)
 
@@ -260,9 +140,20 @@ the gaps, are summarised in the handover.
 - **Open design questions for Tom:** one address or both (I proposed both);
   whether a candidate applies directly or is reviewed first (built: complete
   ones get Create, others Review); the lock on hand edits by default.
+- **The server and core sides have landed** (server 0.67.0, proposals A
+  to G; core `26fe88d`): `manage.providerSearch`, `manage.matchProvider`
+  and `identifyUnmatched(..., { from: 'provider' })`, `ManualMetadata` naming
+  parents by id, `manage.providerArtwork` / `chooseArtwork`, `catalogue.search`
+  with server-side `kinds` and `parent`, and `catalogue.patch` (use it for
+  editor saves in place of `update()`, so nothing unbinds by omission).
+  Refusals: manage calls throw `MachaManageApiError`, catalogue calls
+  `MachaApiError`; read the code with `playbackFailureCode(error)` and the
+  server's sentence with `playbackFailureDetail(error)` (not
+  `acquisitionError`, which is torrents and ingest only). Steps 2 and 3 are
+  now this client's to build.
 - **Later:** the general catalogue editor (P2 below).
 
-## Built 2026-09-24 to 27, owed a live look
+## Built 2026-09-24 to 30, owed a live look
 
 All committed and unit-tested, each test seen red under a mutation. Most
 needs a sign-in as Tom (the test account lacks `importer` and `manager`).
@@ -295,6 +186,31 @@ needs a sign-in as Tom (the test account lacks `importer` and `manager`).
 - [ ] **The track line beside the artwork on a narrow or portrait screen**
       (`8535bca`), and a paused torrent's headline, which says "Downloading
       20.6%" (seen, not changed).
+- [ ] **A quality no node keeps up with stops with a reason** (`5a36769`,
+      core `d1069d2`): 4K on the 4K HEVC 10-bit title in the dev client
+      should fail over once, then show "Macha can't play 4K because the
+      server can't convert its video and audio fast enough to keep up." with
+      Try again and Choose another quality, instead of looping. Never seen:
+      the tab was closed when it was ready to run.
+- [ ] **Core's own choice steps down** and the status line keeps "Switched
+      to 1080p: ...". Needs an automatic start that cannot keep up.
+- [ ] **Storing stall wording**: "no progress for N min" once a torrent's
+      publication stands still a minute or more (`5a36769`). Storing itself
+      was seen live on 2026-09-29 ("Storing 82.5%" moving to 86.1%).
+- [ ] **The Direct Play bar on the title that showed the phantom range**
+      (`d7fca3b`, server 0.68.0): at 3000 s the range 95 s behind the
+      playhead must be gone and the bar start at the playhead.
+- [ ] **Start-progress wording not yet seen**: the spinner note on a start
+      over 5 s, and the failover line (no node named; core `ce31561`). The
+      change line was seen live (0% to 19% to 90%, 4.8 s).
+- [ ] **The quality sentence's "which the server can't do fast enough"**
+      (server 0.70.0 rates): it appears only once a node has recorded a
+      transcode of a minute or more.
+- [ ] **The web's TV builds: can the D-pad reach the failure screen's two
+      buttons?** The Android TV client gave them their own focus scope
+      because a key that re-shows the controls took the D-pad away. On the
+      web, they sit outside the player chrome that Samsung's focus code
+      targets. Needs a television.
 
 ## How the test cluster behaves, and how to read it
 
@@ -410,18 +326,15 @@ tar -czf /etc/macha/web.bak-$(date +%Y%m%d-%H%M%S).tar.gz -C /etc/macha web
 rsync -a --omit-dir-times --chown=1000:50 dist/ root@<node>:/etc/macha/web/
 ```
 
-**Latest: develop on fi-1 and gbni-1, 2026-09-27 21:24 (local), on Tom's
-"Deploy to everywhere"; es-1 did not answer (ssh timed out, down since
-2026-09-24).** Commit `4ac6ef0`, bundle `index-DT7YOjdl.js`, 719,182 bytes,
-`shasum` `c96c289bf82d`, built against core `482bbb1` (the 0.20.0
-candidate code `ae82922`; clean; dist hash `f7fd989fe6e8`). Suite 623 in a
-full run; the run before had three Import-page timeouts at load 180 to 230
-(see Start here). Backups `web.bak-20260927-212437` (and
-`web.bak-20260927-211808` for `index-BltD7CmH.js` on core `c41c819`, ten
-minutes earlier); additive, 24 files each; served on `127.0.0.1:7438` with
-a matching `shasum`, `hls-Bt6kO1A0.js` and the previous bundle `200`, and on
-`macnessa`. Earlier deploys are summarised in `COMPLETED.md` ("Client
-deploys"), with their backups on each node under `/etc/macha/web.bak-*`.
+**Latest: develop on FI-1 and GBNI-1, 2026-09-29 18:59 (local), on Tom's
+"Deploy please".** Commit `e543e0e`, bundle `index-TzVBSVlb.js`, built
+against core develop `1217429` (clean), after both nodes answered healthy on
+0.73.0 following FI-1's hardware error. Backups `web.bak-20260929-185903`
+on each node; additive. Verified on `10.35.1.50:7438`, `10.44.1.50:7438`
+and GBNI-1's public front `macnessa.macha.network` (the same node, checked
+twice, not a third). Earlier deploys are summarised in `COMPLETED.md`
+("Client deploys"), with their backups on each node under
+`/etc/macha/web.bak-*`.
 
 **Deploy additively — no `--delete`.** The hashed assets of the previous build
 stay, so a session still running it does not 404 on a lazily-loaded chunk. The
@@ -453,12 +366,11 @@ would disagree about the same generation.
 
 **Read `package.json` rather than this paragraph** — this section has been
 wrong about the resolution three times, which is the failure mode the rest of
-it is about. As this is written, 2026-09-24, `main` has `@machafoundation/core`
-as `^0.19.0` and installs a real directory from the registry (merge
-`26e8bcc`); `develop` has `file:../macha-ts` and a symlink to core's working
-tree, which is at `afa30d0` (core's `0.19.0` commit `4e1746a` plus one that
-records the publish) and therefore the same code the registry holds, for now.
-The registry's `latest` is **0.19.0**.
+it is about. As this is written, 2026-10-01, `main` has `@machafoundation/core`
+as `^0.21.0` and installs a real directory from the registry (release
+`1fa0bc4`, 0.20.0); `develop` has `file:../macha-ts` and a symlink to core's
+working tree at `1217429`, which is ahead of the registry (it adds the
+`traffic` type). The registry's `latest` is **0.21.0** (gitHead `5569ddd`).
 
 **The two branches differ in `package.json` and `package-lock.json` by
 design**, so a merge between them touches those files every time. Going to
@@ -1322,50 +1234,6 @@ generation that starts at 93,671) and asks for it, and the node has produced
       and node, with the same three timings: PATCH duration, blank duration and
       whether a failover happens at all. The target is no failover and no blank.
 
-## P1 — The wait is now told; which phase it is in is still core's
-
-**Half done 2026-09-20, and the heading used to say "when it arrives".** Part
-of it had already arrived and this session said otherwise: core 0.14.0 exports
-`PlaybackRuntimePhase` (`idle | starting | playing | paused | stopping |
-failed`) and this client has always consumed it —
-`PlayerScreen.tsx` drives the spinner off `phase === 'starting'` and
-`usePlaybackController` gates the player's visibility on `'stopping'`. There
-is a second one as well, `NodePhase`/`StartupPhase` with `startupPhaseLabel()`
-from cluster status, rendered on the Status screen. Tom caught the claim that
-there was none. The three
-budgets bound three sequential phases — negotiating a generation, waiting for
-its first fragment, and starvation after a URL is attached — and nothing
-bounds the sum: a cold node can spend 12 s + 30 s + 20 s before anything is
-declared wrong, every budget behaving exactly as written. Core's answer,
-agreed 2026-09-18, is not a cap (which would be a guess at where to cut) but
-**visibility**: expose which phase playback is in and for how long through the
-snapshot, and let the host decide what a viewer sees. The principle that work
-is bounded and event-driven: failure and degraded states must be visible and
-actionable rather than becoming indefinite waiting.
-
-- [x] **The number needed no core change and is in.** `starting` is one word
-      covering all three phases, but *how long it has been going on* is
-      knowable from here: `useElapsedMs` times the phase and
-      `startWaitNotice()` puts "Waiting for the node to start the stream —
-      12s" under the spinner after five seconds. Below that it says nothing,
-      because most starts are a second or two and a message that appears and
-      vanishes reads as a fault of its own. Only a start, never a rebuffer: a
-      rebuffer has the picture behind it to say what is going on, and a timer
-      over that would announce every brief hesitation.
-
-      **The elapsed figure reads the clock rather than counting ticks**, and
-      the test for that had to be rewritten before it meant anything. The first
-      version advanced the timer and the clock together, which passes against a
-      tick-counter as happily as against a clock — a check that agrees with
-      whatever was written. Driving the clock independently of the timer —
-      30 s of wall time against a single firing, which is a throttled
-      background tab in miniature — distinguishes them: the tick-counter
-      answers 1,000 and was watched doing it.
-- [ ] **Which of the three phases, which is core's half.** When the snapshot
-      says whether it is negotiating, waiting for a first fragment, or starved,
-      the sentence gets more specific and the number stays where it is —
-      `startWaitNotice()` is where that lands.
-
 ## P1 — The relocation hold has run on a seek and a failover; its abandon paths and a slow node never
 
 Shipped in 0.17.2. On a seek that needs a new generation, the outgoing element
@@ -2073,6 +1941,16 @@ promotes a stored alternate on second evidence, which reloads the element.
 Turning a 17 ms invisible swap into a visible reload would be a regression no
 test currently catches. Measure before and after, same cluster, same title.
 
+**Partly answered 2026-09-28 (core `d1069d2`, Tom's ruling).** A stall
+before a transformed generation has played 15 s is failed over once; if the
+replacement stalls the same way, core stops cycling: the viewer's own choice
+ends in `TOO_SLOW_TO_PLAY_CODE` with Try again and Choose another quality,
+and core's own choice steps down a version. Found live: a 4K HEVC 10-bit
+transcode resumed at 34:27 looped between FI-1 and GBNI-1 every ~9 s, each
+node producing ~1.9 s then nothing within the 7 s budget. Still open: core
+reads the session's `production` only at create, so after ready it still
+cannot tell "producing slowly" from "producing nothing".
+
 ## P1 — `levelLoadError` evicts a healthy node, with no server error behind it
 
 Observed twice on 2026-09-08, unprompted, on **wired gbni-1** during a
@@ -2470,56 +2348,21 @@ core wrote that, and every node in the field sends `resource_limit` bare.
       repo's failover measurements produced, and it is reachable on these
       nodes.
 
-## P1 — Choose the node a torrent downloads to
+## P1 — Torrent node choices are named by host, not by the operator's name
 
-**Tom asked for this through the `Macha Server` session, 2026-09-21. The
-server shipped it in 0.51.0 (`f648418`, 2026-09-22), and both live nodes run
-0.58.0 (2026-09-25).** Contract feedback was sent the night of 2026-09-21.
+The node control on the magnet form exists ("Download on", `9f57f73`, server
+0.64.0), with each node's load and staging room. It labels a node from
+`GET /api/v1/torrents/nodes`, which carries `host` and `node_id` but no name
+(`torrentNodeLabel` in `src/screens/ingest/clusterTorrents.ts`). Since server
+0.70.0 every other place shows the operator's name ("Corvus GBNI-1"), from
+status `node_name` or core's `endpointRegistry.nodeName`.
 
-**The contract.** `POST /api/v1/torrents/jobs` takes an optional `node_id`
-(32 hex characters) beside `magnet` or `acquisition_ref`. Omitted or null
-keeps today's behaviour — the job runs on whichever node served the request.
-The `202` now **always** carries `{id, node_id}`, including when no node was
-asked for. `400 bad_request` is a malformed id; `409 placement_failed` is a
-node that is not an active member or is unreachable, with the message saying
-which. It is never quietly downloaded somewhere else, so a 409 means nothing
-started.
-
-**Most of the display already exists.** A torrent's page renders the job's
-`node_id` (`TorrentDetailScreen.tsx`), and `GET /api/v1/torrents/jobs`
-already returns the field per job, so showing placement needs no new call.
-**Core's `submitMagnet(magnet)` takes no node yet**, so the control needs core
-first.
-
-- [ ] **A node control on the magnet form**, in this client's existing idiom:
-      the same grouping and labelling the player's node pills use, plus an
-      explicit "any node" that sends no `node_id`. Not a silent default —
-      the operator should be able to see which they chose. Every control
-      needs `data-tv-focusable="true"`.
-- [ ] **Show what the choice costs.** The nodes are deliberately unequal and
-      the server session put a number on it: a download on the four-core,
-      4 GB, spinning-disk box takes it to load 13 while the other two idle.
-      `/api/v1/status` already carries `runtime.load1`,
-      `process_cpu_percent` and `storage` per node, and this client already
-      fetches it. Showing load and free space beside each choice is the
-      difference between a control and a guess.
-- [x] **`409 placement_failed` is its own sentence**, worded by reason in
-      `viewerErrorText` (`fe9c042`), distinct from `400`. Unit-tested, not
-      seen live.
-- [ ] **Blocked on the server, and asked for:** a human `name` on each
-      `nodes[]` entry of `/api/v1/status`. There is none today, and the only
-      human-ish label, `host`, is inconsistent across this cluster — two
-      nodes report public DNS names and the third its machine name — as well
-      as being the RPC bind address rather than an identity (see the identity
-      P2 below). Until it lands, label a node by a short id prefix and say so;
-      do not invent a name from `host`.
-
-**Two questions are open with the server session.** Whether a node reporting
-`hosts_extents: false` can accept a torrent job at all — `corvus-fi-1` reports
-exactly that on the live cluster — because if it can and the data then lands
-elsewhere, the guarantee that makes this contract worth building is broken.
-And whether `node_id` is accepted exactly as status reports `id`, since this
-client will pass it straight through without normalising.
+- [ ] Label the choices by the operator's name: join `node_id` with status
+      `nodes[].node_name` (the torrents API says to join with status), or
+      ask core for a name lookup by node id. Keep the host where no name
+      is set.
+- [ ] Whether a node reporting `hosts_extents: false` can take a torrent
+      job at all is still an open question with the server.
 
 ## P1 — Android TV: what is still unverified on the set
 
@@ -2641,6 +2484,16 @@ both measured, neither this client's to build.
       a slow link, and a ~15 s freeze. Core has asked the server what it can
       state about a node's start cost without a stream request; the
       one-byte probe is ruled out (Tom, 2026-09-23).
+
+## P1 — The Server's soak may want driven playback (Tom's call)
+
+Server 0.74.0 adds an `observation` thread (a local file on the node; the
+web does not read Status threads, so nothing changes here). For the soak,
+Server may ask for playback starts and seeks driven from browser tabs
+against each node, to measure start and seek latency if no real viewer
+produces them. It will send a concrete request (titles, modes, seeks,
+duration per node) only once Tom agrees. Run nothing until both have
+happened, and use a visible tab: a hidden one loads no media.
 
 ## P2 — A general metadata editor over the whole catalogue (Tom, 2026-09-24: "later")
 
@@ -2813,11 +2666,10 @@ the server's replacement of those two is safe here; discovery is core's alone.
 
 ## P2 — Repo conventions
 
-Tom set these 2026-09-13 and asked every session be told. `0.18.0` is the
-last tag, at `ce74408`. `main` is at `26e8bcc`, still version 0.18.0 and
-resolving published core `^0.19.0`; `develop` is the working branch, ahead
-with the core link in it, and the two differ in `package.json` and the
-lockfile by design (see the core section).
+Tom set these 2026-09-13 and asked every session be told. `0.20.0` is the
+last tag, at `1fa0bc4` on `main`, resolving published core `^0.21.0`;
+`develop` is the working branch, ahead with the core link in it, and the two
+differ in `package.json` and the lockfile by design (see the core section).
 
 - Work happens on a long-lived **`develop`**; releases are tags on `main`,
   with a merge commit on `main` named for the version.
@@ -2897,9 +2749,12 @@ Sizing: ~20–25 KB gzipped for a dense three-hour film, ~4–10 KB for this
 library's density — one to two percent of a single Original-quality segment,
 and immutable per file so it is fetched once and cached indefinitely.
 
-- [ ] Server: expose the random access points for a title, cacheable per
-  source file. (Server-side; tracked here only because the client waits on it.)
-- [ ] Core: model them so the platform and coordinator can read them.
+- [x] Server: the keyframe index is exposed per file since 0.68.0
+  (`GET /api/v1/catalogue/media/{id}/keyframes`), immutable and cacheable,
+  for MP4 and Matroska. Its times are decode times (DTS): a B-frame
+  keyframe reads early by its composition offset, so check that before
+  snapping to them.
+- [x] Core: `catalogue.keyframes(mediaId)`, cached per id (core 0.21.0).
 - [ ] Client: snap a seek target to the nearest point at or before the request
   before sending, so `seek_offset_ms` is zero, nothing is skipped, and the
   node's seek fast path becomes reachable.
