@@ -23,6 +23,19 @@ export function Loading({ delayMs = uiSettings.loadingIndicatorDelayMs, note }: 
   );
 }
 
+/**
+ * A wait inside a panel, as a line: the small spinner and what is being
+ * waited for. For the page-sized wait, `Loading`.
+ */
+export function Waiting({ children }: { children: string }) {
+  return (
+    <p className="waiting-note" role="status" aria-live="polite">
+      <span className="button-spinner" aria-hidden="true" />
+      {children}
+    </p>
+  );
+}
+
 export function ErrorMessage({ error }: { error: Error }) {
   return (
     <div className="status-screen error-status" role="alert">

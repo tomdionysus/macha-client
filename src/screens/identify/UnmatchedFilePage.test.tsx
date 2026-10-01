@@ -176,7 +176,7 @@ describe('suggestions, where identifying a file starts', () => {
     expect(manage.matchProvider).toHaveBeenCalledWith('f1', { ref: 'musicbrainz:release:r1', track_number: 2 });
   });
 
-  it('matches the album\'s other unmatched files in the folder too, when asked, and names the ones it could not', async () => {
+  it('lists the album\'s files in the folder with their match, chosen one by one or all, and says how each went', async () => {
     const { manage } = show([track], { providerResults: [record] });
     const sibling = (id: string, name: string): UnmatchedFile => ({ ...file, id, path: `/incoming/${name}` });
     const elsewhereFile = { ...file, id: 'f9', path: '/other/03.mp3' };
@@ -192,17 +192,31 @@ describe('suggestions, where identifying a file starts', () => {
     const row = rowOf('A Record · 1999', suggestions());
     fireEvent.click(within(row).getByRole('button', { name: 'Use this' }));
     await settle();
-    const also = within(row).getByLabelText(/Also match the album's 2 other unmatched files in this folder/) as HTMLInputElement;
-    expect(also.checked).toBe(false);
-    expect(within(row).getByText(/1 does not say which track/)).toBeTruthy();
-    fireEvent.click(also);
+    const files = within(row.querySelector('.identify-album-files') as HTMLElement);
+    expect(files.getAllByRole('row').map((tr) => tr.textContent)).toEqual([
+      'some.file.mkv (this file)A Record · track 2',
+      '02.mp3A Record · track 3',
+      '03.mp3A Record · no track number',
+    ]);
+    const two = files.getByLabelText('Match 02.mp3') as HTMLInputElement;
+    const three = files.getByLabelText('Match 03.mp3') as HTMLInputElement;
+    expect([two.checked, three.checked, three.disabled]).toEqual([true, false, true]);
+    fireEvent.click(files.getByRole('button', { name: 'Select none' }));
+    expect(two.checked).toBe(false);
+    fireEvent.click(files.getByRole('button', { name: 'Select all' }));
+    expect(two.checked).toBe(true);
+
+    vi.mocked(manage.matchProvider).mockImplementation(async (id: string) => {
+      if (id === 'f2') throw Object.assign(new Error('log'), { detail: 'No track 3 on that release.' });
+      return { leaf_item_id: 'leaf-1', items: [] };
+    });
     fireEvent.click(within(row).getByRole('button', { name: 'Match' }));
     await settle();
     expect(vi.mocked(manage.matchProvider).mock.calls).toEqual([
       ['f1', { ref: 'musicbrainz:release:r1', track_number: 2 }],
       ['f2', { ref: 'musicbrainz:release:r1', track_number: 3 }],
     ]);
-    expect(within(row).getByRole('alert').textContent).toContain('03.mp3: it does not say which track it is.');
+    expect(files.getAllByRole('row').map((tr) => tr.lastChild?.textContent)).toEqual(['Matched', 'Not matched: No track 3 on that release.', '']);
     fireEvent.click(within(row).getByRole('button', { name: 'Back to the list' }));
     screen.getByText('the list');
   });

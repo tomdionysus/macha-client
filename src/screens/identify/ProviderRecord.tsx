@@ -9,7 +9,8 @@ import {
   type ProviderSearchResult,
   type UnmatchedFile,
 } from '@machafoundation/core';
-import { fileName } from '../ingest/format';
+import { Waiting } from '../../components/Status';
+import { AlbumFiles, type FileStatus } from './AlbumFiles';
 import { albumSiblings, type Sibling } from './folderSiblings';
 import { viewerErrorText } from '../../text/viewerText';
 import { NumberField, numberText, wholeNumber } from './fields';
@@ -86,9 +87,10 @@ export function ProviderRecord({ releases, file, manage, numbers: initial, disab
   const [error, setError] = useState<string>();
   // The album's other files in this folder: undefined while looked for.
   const [siblings, setSiblings] = useState<Sibling[]>();
-  const [withSiblings, setWithSiblings] = useState(false);
-  const [progress, setProgress] = useState<string>();
-  const [unmatchedSiblings, setUnmatchedSiblings] = useState<Array<{ name: string; reason: string }>>();
+  // The album's other files to match too: every one that says which track it is, until unchosen.
+  const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
+  const [statuses, setStatuses] = useState<Record<string, FileStatus>>({});
+  const [someLeft, setSomeLeft] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -123,33 +125,35 @@ export function ProviderRecord({ releases, file, manage, numbers: initial, disab
     let cancelled = false;
     void albumSiblings(manage, file, result.title, result.artist)
       .catch(() => [])
-      .then((found) => { if (!cancelled) setSiblings(found); });
+      .then((found) => {
+        if (cancelled) return;
+        setSiblings(found);
+        setSelected(new Set(found.filter((sibling) => sibling.track != null).map((sibling) => sibling.file.id)));
+      });
     return () => { cancelled = true; };
   }, [open, result, siblings, manage, file]);
 
+  const mark = (id: string, status: FileStatus) => setStatuses((current) => ({ ...current, [id]: status }));
+
   /**
-   * The album's other files, one after another, against the same release:
-   * each by the track its own candidates state. One with no track number is
-   * not guessed at; every file left unmatched is named with why.
+   * The chosen files of the album, one after another, against the same
+   * release, each by the track its own candidates state; each row says how
+   * it went. Answers whether any was left unmatched.
    */
-  const matchSiblings = async (ref: string): Promise<Array<{ name: string; reason: string }>> => {
-    const left: Array<{ name: string; reason: string }> = [];
-    for (const [index, sibling] of (siblings ?? []).entries()) {
-      const name = fileName(sibling.file.path);
-      setProgress(`Matching the album's other files: ${index + 1} of ${siblings?.length ?? 0}…`);
-      if (sibling.track == null) {
-        left.push({ name, reason: 'it does not say which track it is.' });
-        continue;
-      }
+  const matchSiblings = async (ref: string): Promise<boolean> => {
+    let left = false;
+    for (const sibling of (siblings ?? []).filter((candidate) => selected.has(candidate.file.id) && candidate.track != null)) {
+      mark(sibling.file.id, 'matching');
       try {
         await identifyUnmatched(manage, sibling.file.id, {
-          from: 'provider', target: { ref, track_number: sibling.track, ...(sibling.disc != null ? { disc_number: sibling.disc } : {}) },
+          from: 'provider', target: { ref, track_number: sibling.track!, ...(sibling.disc != null ? { disc_number: sibling.disc } : {}) },
         });
+        mark(sibling.file.id, 'matched');
       } catch (cause) {
-        left.push({ name, reason: viewerErrorText(cause) });
+        mark(sibling.file.id, { left: viewerErrorText(cause) });
+        left = true;
       }
     }
-    setProgress(undefined);
     return left;
   };
 
@@ -161,9 +165,12 @@ export function ProviderRecord({ releases, file, manage, numbers: initial, disab
     setBusy(true);
     setError(undefined);
     let applied;
+    mark(file.id, 'matching');
     try {
       applied = await identifyUnmatched(manage, file.id, { from: 'provider', target });
+      mark(file.id, 'matched');
     } catch (cause) {
+      setStatuses({});
       setError(viewerErrorText(cause));
       setBusy(false);
       return;
@@ -180,15 +187,12 @@ export function ProviderRecord({ releases, file, manage, numbers: initial, disab
         return;
       }
     }
-    if (withSiblings && siblings?.length) {
-      const left = await matchSiblings(target.ref);
-      if (left.length > 0) {
-        // This file is matched, so nothing here can be done again; what is left is said, and the way back offered.
-        setMatched(true);
-        setBusy(false);
-        setUnmatchedSiblings(left);
-        return;
-      }
+    if (await matchSiblings(target.ref)) {
+      // This file is matched, so nothing here can be done again; each row says what was left, and the way back is offered.
+      setMatched(true);
+      setBusy(false);
+      setSomeLeft(true);
+      return;
     }
     onResolved();
   };
@@ -209,27 +213,38 @@ export function ProviderRecord({ releases, file, manage, numbers: initial, disab
         ].filter(Boolean).join(' · ')}</span>
         {result.overview && <p className="identify-overview">{result.overview}</p>}
         {open && (
-          <div className="identify-artwork-choice manage-manual-form">
+          <div className="identify-artwork-choice">
+            {/* The form's field styling for the numbers alone: it would restyle the picture buttons too. */}
             {result.kind === 'show' && (
-              <div className="manage-field-row">
+              <div className="manage-manual-form manage-field-row">
                 <NumberField label="Season" value={season} onChange={setSeason} disabled={held} />
                 <NumberField label="Episode" value={episode} onChange={setEpisode} disabled={held} />
               </div>
             )}
             {result.kind === 'album' && (
-              <div className="manage-field-row">
+              <div className="manage-manual-form manage-field-row">
                 <NumberField label="Disc" value={disc} onChange={setDisc} disabled={held} />
                 <NumberField label="Track" value={track} onChange={setTrack} disabled={held} />
               </div>
             )}
             <Pictures options={picturesKey === undefined ? [] : options} optionId={optionId} disabled={held} onChoose={setOptionId} />
-            {result.kind === 'album' && <SiblingChoice siblings={siblings} checked={withSiblings} disabled={held} onChange={setWithSiblings} />}
-            {progress && <p className="ingest-loading" role="status">{progress}</p>}
+            {result.kind === 'album' && (
+              <AlbumFiles
+                release={result}
+                file={file}
+                track={numbers.track}
+                disc={numbers.disc}
+                siblings={siblings}
+                selected={selected}
+                statuses={statuses}
+                disabled={held}
+                onSelect={setSelected}
+              />
+            )}
             {error && <p className="manage-error" role="alert">{error}</p>}
-            {unmatchedSiblings && (
+            {someLeft && (
               <div className="manage-error" role="alert">
-                <p>{`Matched this file and ${(siblings?.length ?? 0) - unmatchedSiblings.length} of the album's other ${siblings?.length ?? 0}. Still unmatched:`}</p>
-                <ul>{unmatchedSiblings.map(({ name, reason }) => <li key={name}>{`${name}: ${reason}`}</li>)}</ul>
+                <p>Some of the album's files could not be matched; each says why above.</p>
                 <button className="secondary-button" type="button" onClick={onResolved} data-tv-focusable="true">Back to the list</button>
               </div>
             )}
@@ -257,7 +272,7 @@ function Pictures({ options, optionId, disabled, onChoose }: {
   disabled: boolean;
   onChoose: (optionId: string | undefined) => void;
 }) {
-  if (options === undefined) return <p className="list-note">Asking the provider for pictures…</p>;
+  if (options === undefined) return <Waiting>Asking the provider for pictures…</Waiting>;
   if (options.length === 0) return <p className="list-note">No pictures to choose from; the provider's default is used.</p>;
   return (
     <>
@@ -279,24 +294,5 @@ function Pictures({ options, optionId, disabled, onChoose }: {
         ))}
       </div>
     </>
-  );
-}
-
-/** The option to match the album's other unmatched files in this folder too. */
-function SiblingChoice({ siblings, checked, disabled, onChange }: {
-  siblings?: Sibling[];
-  checked: boolean;
-  disabled: boolean;
-  onChange: (checked: boolean) => void;
-}) {
-  if (siblings === undefined) return <p className="list-note">Looking for this album's other unmatched files in this folder…</p>;
-  if (siblings.length === 0) return null;
-  const unnumbered = siblings.filter((sibling) => sibling.track == null).length;
-  return (
-    <label className="identify-siblings">
-      <input type="checkbox" checked={checked} disabled={disabled} onChange={(event) => onChange(event.target.checked)} data-tv-focusable="true" />
-      {`Also match the album's ${siblings.length === 1 ? 'other unmatched file' : `${siblings.length} other unmatched files`} in this folder, each by the track it says it is`}
-      {unnumbered > 0 && <span className="list-note">{` (${unnumbered} ${unnumbered === 1 ? 'does' : 'do'} not say which track, and will be left)`}</span>}
-    </label>
   );
 }

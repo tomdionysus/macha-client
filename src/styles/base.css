@@ -176,6 +176,8 @@ a { text-decoration: none; }
   animation: button-spinner 700ms linear infinite;
 }
 @keyframes button-spinner { to { transform: rotate(360deg); } }
+.waiting-note { display: flex; align-items: center; gap: .55rem; margin: 0; color: var(--text-dim); font-size: .85rem; }
+.waiting-note .button-spinner { flex: 0 0 auto; width: .95rem; height: .95rem; }
 @media (prefers-reduced-motion: reduce) {
   .button-spinner { animation-duration: 1400ms; }
 }

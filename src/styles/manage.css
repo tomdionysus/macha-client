@@ -117,8 +117,17 @@
 .identify-offered-picture { display: flex; flex-wrap: wrap; align-items: center; gap: .8rem; }
 .identify-offered-picture img { width: 5.5rem; border-radius: .4rem; background: var(--surface-2); }
 .identify-offered-picture label { display: flex; align-items: center; gap: .5rem; }
-/* The option to match an album's other files in the folder too. */
-.identify-siblings { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
+/* The album's files in the folder and their MusicBrainz match: a checkbox on the left of each. */
+.identify-album-files { display: grid; gap: .5rem; }
+.identify-album-heading span { text-transform: none; }
+.identify-album-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .5rem; color: var(--text-dim); font-size: .85rem; }
+.identify-album-heading button { margin: 0; }
+.identify-album-files table { width: 100%; border-collapse: collapse; font-size: .85rem; }
+.identify-album-files td { padding: .3rem .5rem; border-top: 1px solid #ffffff0d; vertical-align: middle; }
+.identify-album-files td:first-child { width: 1.6rem; padding-left: 0; }
+.identify-album-file { overflow-wrap: anywhere; }
+.identify-album-status { color: var(--text-dim); white-space: nowrap; }
+.identify-album-left .identify-album-status { color: var(--red-400); white-space: normal; }
 /* Where a new track or episode goes, as a choice of three or two. */
 .identify-placement { display: grid; gap: .35rem; margin: 0; padding: .6rem .8rem; border: 1px solid #ffffff12; border-radius: .55rem; }
 .identify-placement legend { padding: 0 .3rem; color: var(--text-dim); font-size: .85rem; }
