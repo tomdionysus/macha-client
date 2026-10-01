@@ -56,7 +56,7 @@ function show(probes: MediaProbeCandidate[], options: {
       leaf_item_id: 'leaf-1',
       items: [{ id: 'leaf-1', kind: 'track' }, { id: 'album-1', kind: 'album' }] as ManageCatalogueMatch[],
     })),
-    providerSearch: vi.fn(async () => options.providerResults ?? [series]),
+    providerSearch: vi.fn(async () => options.providerResults ?? []),
     providerArtwork: vi.fn(async () => options.artwork ?? []),
     chooseArtwork: vi.fn(async () => ({})),
     retry: vi.fn(),
@@ -85,6 +85,10 @@ const sent = (manage: ManageApi) => vi.mocked(manage.manual).mock.calls[0]?.[1];
 const save = () => fireEvent.click(screen.getByRole('button', { name: 'Save and create' }));
 const alert = () => screen.getByRole('alert').textContent;
 
+const suggestions = () => within(screen.getByRole('region', { name: 'Suggestions' }));
+const fromFile = () => fireEvent.click(screen.getByRole('tab', { name: 'What the file says' }));
+const rowOf = (text: string, scope: Pick<typeof screen, 'getByText'> = screen) => scope.getByText(text).closest('li') as HTMLElement;
+
 async function find(label: string, words: string) {
   fireEvent.change(screen.getByLabelText(`Search for ${label}`), { target: { value: words } });
   fireEvent.click(screen.getByRole('button', { name: 'Find' }));
@@ -92,12 +96,100 @@ async function find(label: string, words: string) {
   fireEvent.click(screen.getByRole('button', { name: 'Use' }));
 }
 
-describe('identifying an unmatched file', () => {
+describe('suggestions, where identifying a file starts', () => {
+  const track = probe({ kind: 'track', title: 'A Song', artist: 'A Band', album: 'A Record', track_number: 2 });
+  const elsewhere: ProviderSearchResult = { ...record, ref: 'musicbrainz:release:other', artist: 'Another Band' };
+
+  it('lists the records the file most likely is, by what it names, leaving out another artist\'s album of the same name', async () => {
+    const { manage } = show([track], { providerResults: [elsewhere, record] });
+    await settle();
+    expect(manage.providerSearch).toHaveBeenCalledWith('A Record', 'album', { year: undefined, limit: 8 });
+    expect(suggestions().getAllByRole('listitem')).toHaveLength(1);
+    expect(suggestions().getByText('A Band · MusicBrainz')).toBeTruthy();
+    expect(screen.getByRole('tab', { name: 'Search online' }).getAttribute('aria-selected')).toBe('true');
+  });
+
+  it('uses a record with the track the file says it is, and the picture chosen from the record\'s', async () => {
+    const { manage } = show([track], { providerResults: [record], artwork: pictures });
+    await settle();
+    const row = rowOf('A Record · 1999', suggestions());
+    fireEvent.click(within(row).getByRole('button', { name: 'Use this' }));
+    await settle();
+    expect((within(row).getByLabelText('Track') as HTMLInputElement).value).toBe('2');
+    fireEvent.click(within(row).getByRole('button', { name: 'Picture 2, 1200 by 1200' }));
+    fireEvent.click(within(row).getByRole('button', { name: 'Match with this picture' }));
+    await settle();
+    expect(manage.matchProvider).toHaveBeenCalledWith('f1', { ref: 'musicbrainz:release:r1', track_number: 2 });
+    expect(manage.chooseArtwork).toHaveBeenCalledWith('album-1', 'cover', 'o2');
+    screen.getByText('the list');
+  });
+
+  it('asks for the episode a series record needs when the file did not say, and its stills once it has it', async () => {
+    const { manage } = show([probe({ kind: 'episode', title: 'Pilot', series: 'A Series', season_number: 1, episode_number: null })], { providerResults: [series] });
+    await settle();
+    const row = rowOf('A Series · 2010', suggestions());
+    expect(within(row).getByText('TMDB · already in the catalogue')).toBeTruthy();
+    fireEvent.click(within(row).getByRole('button', { name: 'Use this' }));
+    fireEvent.click(within(row).getByRole('button', { name: 'Match' }));
+    await settle();
+    expect(within(row).getByRole('alert').textContent).toBe('Enter the season and episode this file is.');
+    expect(manage.matchProvider).not.toHaveBeenCalled();
+
+    fireEvent.change(within(row).getByLabelText('Episode'), { target: { value: '4' } });
+    await settle();
+    expect(manage.providerArtwork).toHaveBeenCalledWith('tmdb:tv:42', 'still', { season_number: 1, episode_number: 4 });
+    fireEvent.click(within(row).getByRole('button', { name: 'Match' }));
+    await settle();
+    expect(manage.matchProvider).toHaveBeenCalledWith('f1', { ref: 'tmdb:tv:42', season_number: 1, episode_number: 4 });
+    expect(manage.chooseArtwork).not.toHaveBeenCalled();
+  });
+
+  it('says so, and stays, when the match is made but the picture is refused', async () => {
+    const { manage } = show([track], { providerResults: [record], artwork: pictures });
+    vi.mocked(manage.chooseArtwork).mockRejectedValueOnce(new Error('gone'));
+    await settle();
+    const row = rowOf('A Record · 1999', suggestions());
+    fireEvent.click(within(row).getByRole('button', { name: 'Use this' }));
+    await settle();
+    fireEvent.click(within(row).getByRole('button', { name: 'Picture 1, 500 by 500' }));
+    fireEvent.click(within(row).getByRole('button', { name: 'Match with this picture' }));
+    await settle();
+    expect(within(row).getByRole('alert').textContent).toMatch(/^Matched, but the chosen picture could not be used/);
+    expect(screen.queryByText('the list')).toBeNull();
+    expect((within(row).getByRole('button', { name: 'Match with this picture' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('says when nothing on TMDB or MusicBrainz matches what the file says', async () => {
+    show([track], { providerResults: [elsewhere] });
+    await settle();
+    expect(suggestions().getByText(/Nothing on TMDB or MusicBrainz matches/)).toBeTruthy();
+  });
+});
+
+describe('searching online when the suggestions are not it', () => {
+  it('searches with any words, and each result is a record to use', async () => {
+    const { manage } = show([probe({ kind: 'episode', title: 'Pilot', series: 'A Series', season_number: 1, episode_number: 3 })]);
+    await settle();
+    vi.mocked(manage.providerSearch).mockResolvedValueOnce([series]);
+    const panel = within(screen.getByRole('tabpanel'));
+    expect((panel.getByLabelText('Search for') as HTMLInputElement).value).toBe('A Series');
+    fireEvent.click(panel.getByRole('button', { name: 'Search' }));
+    await settle();
+    expect(manage.providerSearch).toHaveBeenLastCalledWith('A Series', 'show', { year: undefined, limit: 20 });
+    const row = rowOf('A Series · 2010', panel);
+    fireEvent.click(within(row).getByRole('button', { name: 'Use this' }));
+    fireEvent.click(within(row).getByRole('button', { name: 'Match' }));
+    await settle();
+    expect(manage.matchProvider).toHaveBeenCalledWith('f1', { ref: 'tmdb:tv:42', season_number: 1, episode_number: 3 });
+  });
+});
+
+describe('what the file says about itself', () => {
   it('creates a candidate that says enough, in one press, through core', async () => {
     const { manage } = show([probe({})]);
     await settle();
-    const row = (screen.getByText('A Film · 2001')).closest('li') as HTMLElement;
-    fireEvent.click(within(row).getByRole('button', { name: 'Create' }));
+    fromFile();
+    fireEvent.click(within(rowOf('A Film · 2001')).getByRole('button', { name: 'Create' }));
     await settle();
     screen.getByText('the list');
     expect(manage.manual).toHaveBeenCalledWith('f1', expect.objectContaining({ kind: 'movie', title: 'A Film', year: 2001 }));
@@ -106,9 +198,9 @@ describe('identifying an unmatched file', () => {
   it('offers only a review for a candidate that does not, and fills the manual form from it', async () => {
     show([probe({ kind: 'episode', title: 'Pilot', series: 'A Series', season_number: 1, episode_number: null })]);
     await settle();
-    const row = (screen.getByText(/A Series/)).closest('li') as HTMLElement;
+    fromFile();
+    const row = rowOf('A Series · Pilot');
     expect(within(row).queryByRole('button', { name: 'Create' })).toBeNull();
-
     fireEvent.click(within(row).getByRole('button', { name: 'Review' }));
     expect(screen.getByRole('tab', { name: 'Enter manually' }).getAttribute('aria-selected')).toBe('true');
     expect((screen.getByLabelText('Series') as HTMLInputElement).value).toBe('A Series');
@@ -118,15 +210,17 @@ describe('identifying an unmatched file', () => {
   it('shows the file without waiting for the server\'s catalogue suggestions', async () => {
     show([probe({})], { suggestionsPending: true });
     await settle();
+    fromFile();
     expect(screen.getByText('A Film · 2001')).toBeTruthy();
   });
 
   it('offers to try again when the file could not be read', async () => {
     show([probe({})], { detailFails: true });
     await settle();
-    expect(screen.queryByText('A Film · 2001')).toBeNull();
+    expect(screen.queryByRole('tab')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
     await settle();
+    fromFile();
     expect(screen.getByText('A Film · 2001')).toBeTruthy();
   });
 
@@ -143,15 +237,20 @@ describe('identifying an unmatched file', () => {
   });
 });
 
-describe('a candidate\'s picture on the page', () => {
+describe('a candidate\'s picture', () => {
   const film = probe({});
   const poster = { ...pictures[0], option_id: 'p1', role: 'poster', preview_url: 'https://provider/p1.jpg' };
   const filmResult: ProviderSearchResult = { ref: 'tmdb:movie:5', provider: 'tmdb', kind: 'movie', title: 'A Film', year: 2001 };
 
-  it('shows the provider\'s picture on the candidate and puts it on what Create makes', async () => {
-    const { manage } = show([film], { providerResults: [filmResult], artwork: [poster] });
+  async function candidates(options: Parameters<typeof show>[1]) {
+    const shown = show([film], options);
     await settle();
-    const row = screen.getByText('A Film · 2001').closest('li') as HTMLElement;
+    fromFile();
+    return { ...shown, row: rowOf('A Film · 2001', within(screen.getByRole('tabpanel'))) };
+  }
+
+  it('shows the provider\'s picture on the candidate and puts it on what Create makes', async () => {
+    const { manage, row } = await candidates({ providerResults: [filmResult], artwork: [poster] });
     expect(row.querySelector('img')?.getAttribute('src')).toBe('https://provider/p1.jpg');
     fireEvent.click(within(row).getByRole('button', { name: 'Create' }));
     await settle();
@@ -160,9 +259,8 @@ describe('a candidate\'s picture on the page', () => {
   });
 
   it('carries it into review, where it can be declined', async () => {
-    const { manage } = show([film], { providerResults: [filmResult], artwork: [poster] });
-    await settle();
-    fireEvent.click(within(screen.getByText('A Film · 2001').closest('li') as HTMLElement).getByRole('button', { name: 'Review' }));
+    const { manage, row } = await candidates({ providerResults: [filmResult], artwork: [poster] });
+    fireEvent.click(within(row).getByRole('button', { name: 'Review' }));
     const use = screen.getByLabelText('Use this poster from TMDB') as HTMLInputElement;
     expect(use.checked).toBe(true);
     fireEvent.click(use);
@@ -173,18 +271,16 @@ describe('a candidate\'s picture on the page', () => {
   });
 
   it('puts the reviewed picture on what the entry creates', async () => {
-    const { manage } = show([film], { providerResults: [filmResult], artwork: [poster] });
-    await settle();
-    fireEvent.click(within(screen.getByText('A Film · 2001').closest('li') as HTMLElement).getByRole('button', { name: 'Review' }));
+    const { manage, row } = await candidates({ providerResults: [filmResult], artwork: [poster] });
+    fireEvent.click(within(row).getByRole('button', { name: 'Review' }));
     save();
     await settle();
     expect(manage.chooseArtwork).toHaveBeenCalledWith('new-item', 'poster', 'p1', expect.objectContaining({ ref: 'tmdb:movie:5' }));
   });
 
-  it('shows no picture when the provider\'s first result is another title', async () => {
-    show([film], { providerResults: [{ ...filmResult, title: 'Something Else' }], artwork: [poster] });
-    await settle();
-    expect((screen.getByText('A Film · 2001').closest('li') as HTMLElement).querySelector('img')).toBeNull();
+  it('shows no picture when the provider\'s result is another title', async () => {
+    const { row } = await candidates({ providerResults: [{ ...filmResult, title: 'Something Else' }], artwork: [poster] });
+    expect(row.querySelector('img')).toBeNull();
   });
 });
 
@@ -296,67 +392,5 @@ describe('where a manual entry goes', () => {
     save();
     await settle();
     expect(sent(manage)).toEqual({ kind: 'episode', series_id: 'tmdb:tv:42', season_number: 1, episode_number: 2, title: 'Pilot', synopsis: undefined });
-  });
-});
-
-describe('matching to a record found online', () => {
-  async function online(probes: MediaProbeCandidate[], options: Parameters<typeof show>[1] = {}) {
-    const shown = show(probes, options);
-    await settle();
-    fireEvent.click(screen.getByRole('tab', { name: 'Search online' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Search' }));
-    await settle();
-    return shown;
-  }
-
-  it('asks for the episode before picking a series, then matches with it', async () => {
-    const { manage } = await online([probe({ kind: 'episode', title: 'Pilot', series: 'A Series', season_number: 1, episode_number: null })]);
-    expect(manage.providerSearch).toHaveBeenCalledWith('A Series', 'show', { year: undefined, artist: undefined });
-    const row = screen.getByText('A Series · 2010').closest('li') as HTMLElement;
-    expect(within(row).getByText('TMDB · already in the catalogue')).toBeTruthy();
-
-    fireEvent.click(within(row).getByRole('button', { name: 'Match' }));
-    await settle();
-    expect(alert()).toBe('Enter the season and episode this file is.');
-    expect(manage.providerArtwork).not.toHaveBeenCalled();
-
-    fireEvent.change(screen.getByLabelText('Episode'), { target: { value: '4' } });
-    fireEvent.click(within(row).getByRole('button', { name: 'Match' }));
-    await settle();
-    expect(manage.providerArtwork).toHaveBeenCalledWith('tmdb:tv:42', 'still', { season_number: 1, episode_number: 4 });
-    expect(within(row).getByText(/no pictures to choose from/)).toBeTruthy();
-    fireEvent.click(within(row).getByRole('button', { name: 'Match' }));
-    await settle();
-    screen.getByText('the list');
-    expect(manage.matchProvider).toHaveBeenCalledWith('f1', { ref: 'tmdb:tv:42', season_number: 1, episode_number: 4 });
-    expect(manage.chooseArtwork).not.toHaveBeenCalled();
-  });
-
-  it('puts the cover chosen from the provider\'s pictures on the album the match wrote', async () => {
-    const { manage } = await online([probe({ kind: 'track', title: 'A Song', album: 'A Record', track_number: 2 })], { providerResults: [record], artwork: pictures });
-    const row = screen.getByText('A Record · 1999').closest('li') as HTMLElement;
-    fireEvent.click(within(row).getByRole('button', { name: 'Match' }));
-    await settle();
-    expect(manage.providerArtwork).toHaveBeenCalledWith('musicbrainz:release:r1', 'cover', { season_number: undefined, episode_number: undefined });
-    fireEvent.click(within(row).getByRole('button', { name: 'Picture 2, 1200 by 1200' }));
-    fireEvent.click(within(row).getByRole('button', { name: 'Match with this picture' }));
-    await settle();
-    expect(manage.matchProvider).toHaveBeenCalledWith('f1', { ref: 'musicbrainz:release:r1', track_number: 2 });
-    expect(manage.chooseArtwork).toHaveBeenCalledWith('album-1', 'cover', 'o2');
-    screen.getByText('the list');
-  });
-
-  it('says so, and stays, when the match is made but the picture is refused', async () => {
-    const { manage } = await online([probe({ kind: 'track', title: 'A Song', album: 'A Record', track_number: 2 })], { providerResults: [record], artwork: pictures });
-    vi.mocked(manage.chooseArtwork).mockRejectedValueOnce(new Error('gone'));
-    const row = screen.getByText('A Record · 1999').closest('li') as HTMLElement;
-    fireEvent.click(within(row).getByRole('button', { name: 'Match' }));
-    await settle();
-    fireEvent.click(within(row).getByRole('button', { name: 'Picture 1, 500 by 500' }));
-    fireEvent.click(within(row).getByRole('button', { name: 'Match with this picture' }));
-    await settle();
-    expect(alert()).toMatch(/^Matched, but the chosen picture could not be used/);
-    expect(screen.queryByText('the list')).toBeNull();
-    expect((within(row).getByRole('button', { name: 'Match with this picture' }) as HTMLButtonElement).disabled).toBe(true);
   });
 });

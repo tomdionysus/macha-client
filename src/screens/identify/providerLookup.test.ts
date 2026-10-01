@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { ManageApi, MediaProbeCandidate } from '@machafoundation/core';
-import { applyCandidatePicture, findCandidatePictures, pictureLookup, sameTitle, type CandidatePicture } from './candidatePicture';
+import { applyCandidatePicture, findCandidatePictures, recordLookup, sameTitle, type CandidatePicture } from './providerLookup';
 
 const probe = (overrides: Partial<MediaProbeCandidate>): MediaProbeCandidate => ({
   kind: 'track', score: 80, generator: 'tags', title: 'A Song', year: null, series: '', season_number: null, episode_number: null,
@@ -10,13 +10,12 @@ const probe = (overrides: Partial<MediaProbeCandidate>): MediaProbeCandidate => 
 const option = { option_id: 'o1', role: 'cover', width: 250, height: 250, language: null, preview_url: 'https://provider/o1.jpg' };
 
 describe('a candidate\'s picture', () => {
-  it('asks for what the candidate names: a movie\'s poster, an episode\'s still, a track\'s album cover', () => {
-    expect(pictureLookup(probe({ kind: 'movie', title: 'A Film', year: 2001 }))).toMatchObject({ query: 'A Film', searchKind: 'movie', role: 'poster', year: 2001 });
-    expect(pictureLookup(probe({ kind: 'episode', series: 'A Series', season_number: 1, episode_number: 2 })))
-      .toMatchObject({ query: 'A Series', searchKind: 'show', role: 'still', season_number: 1, episode_number: 2 });
-    expect(pictureLookup(probe({}))).toMatchObject({ query: 'A Record', searchKind: 'album', role: 'cover', artist: 'A Band' });
-    expect(pictureLookup(probe({ album: '' }))).toBeUndefined();
-    expect(pictureLookup(probe({ kind: 'episode', series: 'A Series', season_number: 1, episode_number: null }))).toBeUndefined();
+  it('asks for what the candidate names: a movie by its title, an episode by its series, a track by its album', () => {
+    expect(recordLookup(probe({ kind: 'movie', title: 'A Film', year: 2001 }))).toMatchObject({ query: 'A Film', searchKind: 'movie', year: 2001 });
+    expect(recordLookup(probe({ kind: 'episode', series: 'A Series', season_number: 1, episode_number: null })))
+      .toMatchObject({ query: 'A Series', searchKind: 'show', season_number: 1, episode_number: undefined });
+    expect(recordLookup(probe({ track_number: 3 }))).toMatchObject({ query: 'A Record', searchKind: 'album', artist: 'A Band', track_number: 3 });
+    expect(recordLookup(probe({ album: '' }))).toBeUndefined();
   });
 
   it('takes the provider\'s first result only when its title is the one named', () => {
@@ -33,7 +32,7 @@ describe('a candidate\'s picture', () => {
       providerArtwork: vi.fn(async () => [option]),
     } as unknown as ManageApi;
     const [found] = await Promise.all(findCandidatePictures(manage, [probe({ artist: 'DJ Band' })]));
-    expect(manage.providerSearch).toHaveBeenCalledWith('A Record', 'album', { year: undefined, limit: 5 });
+    expect(manage.providerSearch).toHaveBeenCalledWith('A Record', 'album', { year: undefined, limit: 8 });
     expect(found?.ref).toBe('musicbrainz:release:r1');
   });
 

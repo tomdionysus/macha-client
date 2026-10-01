@@ -169,6 +169,25 @@ the gaps, are summarised in the handover.
   - Seen live: grouped search (Albums and Tracks for one word), "Add a
     track to this album" into the placement form, a cover offered from the
     Cover Art Archive. Nothing matched.
+- **Redesigned 2026-10-01 night, on Tom's word: "the general case for an
+  unmatched file is that the user would select the full info from an
+  entire tmdb/musicbrainz entry ... start with suggestions."** A file's
+  page now opens on Suggestions: the TMDB and MusicBrainz records found
+  from what its candidates name (a movie's title, an episode's series, a
+  track's album), kept when title and artist agree, each with its picture.
+  "Use this" asks only for the numbers the file did not state, offers the
+  record's pictures, and matches the whole record. Search online, the
+  catalogue, what the file says and manual entry sit below under "Not one
+  of these?". MusicBrainz picture requests go one at a time (the server
+  paces it at one a second and five at once ran past core's 8 s limit).
+  Seen live: five releases of one album suggested, two with covers, the
+  confirm step with the track filled in. Not yet seen: a match applied.
+- **Open, after the experiment (server):** releases of one album are still
+  told apart only by their covers; a candidate's MusicBrainz ids from the
+  file's own tags are not sent, though the server's probe holds them,
+  and would name the exact release; the file's detail route stalls for
+  8 s+ on every node at times (it holds `config_mutex_`, which the
+  scanner's own work takes), seen three times today.
 - **Candidates cannot show artwork yet: needs the server.** A candidate
   carries no picture, and the server records only that a file has an
   attached picture (`attached_picture` on its stream), with no route to

@@ -17,7 +17,8 @@ import { DetailCard, DetailHeader, Facts } from '../../components/ListParts';
 import { ConfirmModal } from '../../components/Modal';
 import { fileName, formatAge, formatBytes, formatTimestamp } from '../ingest/format';
 import { hintResultLabel, viewerErrorText } from '../../text/viewerText';
-import { applyCandidatePicture, findCandidatePictures, type CandidatePicture } from './candidatePicture';
+import { applyCandidatePicture, findCandidatePictures, type CandidatePicture } from './providerLookup';
+import { Suggestions } from './Suggestions';
 import { ManualEntry } from './ManualEntry';
 import { likelyKind, ProviderMatch } from './ProviderMatch';
 
@@ -113,12 +114,14 @@ function displayArtworkUrl(item: CatalogueItem | undefined): string | undefined 
 type Tab = 'candidates' | 'search' | 'provider' | 'manual';
 
 /**
- * One unmatched file: what it is, and four ways to say what it should be —
- * one of the candidates inferred from it, an item already in the catalogue
- * (which gains it as another version if it has files), a record found at the
- * metadata provider, or metadata entered by hand. Every one is applied through core's `identifyUnmatched`, which routes
- * it; this screen calls no match or manual route itself. Whatever resolves the
- * file returns to the list.
+ * One unmatched file: what it is, the TMDB and MusicBrainz records it most
+ * likely is (the usual answer: a whole record), and, for when none is, four
+ * other ways to say what it should be — a provider search with any words, an
+ * item already in the catalogue (which gains it as another version, or is
+ * the parent it goes under), what the file says about itself, or metadata
+ * entered by hand. Every one is applied through core's `identifyUnmatched`,
+ * which routes it; this screen calls no match or manual route itself.
+ * Whatever resolves the file returns to the list.
  */
 export function UnmatchedFilePage({ api, catalogueApi }: { api: ManageApi; catalogueApi: CatalogueApi }) {
   const { fileId = '' } = useParams();
@@ -136,7 +139,7 @@ export function UnmatchedFilePage({ api, catalogueApi }: { api: ManageApi; catal
   const [parent, setParent] = useState<CatalogueItem>();
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [tab, setTab] = useState<Tab>('candidates');
+  const [tab, setTab] = useState<Tab>('provider');
   const [reviewing, setReviewing] = useState<number>();
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [error, setError] = useState<string>();
@@ -254,7 +257,7 @@ export function UnmatchedFilePage({ api, catalogueApi }: { api: ManageApi; catal
     .slice(0, 4);
   const now = Date.now();
   const review = (index: number) => { setReviewing(index); setParent(undefined); setTab('manual'); };
-  const tabs: ReadonlyArray<readonly [Tab, string]> = [['candidates', 'Candidates'], ['search', 'Search the catalogue'], ['provider', 'Search online'], ['manual', 'Enter manually']];
+  const tabs: ReadonlyArray<readonly [Tab, string]> = [['provider', 'Search online'], ['search', 'Search the catalogue'], ['candidates', 'What the file says'], ['manual', 'Enter manually']];
   const reviewed = reviewing === undefined ? detail.probes[0] : detail.probes[reviewing];
 
   return (
@@ -284,8 +287,10 @@ export function UnmatchedFilePage({ api, catalogueApi }: { api: ManageApi; catal
         ]} />
       </DetailCard>
 
+      <Suggestions detail={detail} manage={api} onResolved={() => navigate(back)} />
+
       <section className="detail-card identify-panel" aria-labelledby="identify-heading">
-        <h2 id="identify-heading">Identify this file</h2>
+        <h2 id="identify-heading">Not one of these?</h2>
         <div className="identify-tabs" role="tablist" aria-label="Ways to identify this file">
           {tabs.map(([key, label]) => (
             <button key={key} type="button" role="tab" id={`identify-tab-${key}`} aria-selected={tab === key} aria-controls={`identify-${key}`} className={tab === key ? 'active' : undefined} onClick={() => setTab(key)} data-tv-focusable="true">{label}</button>

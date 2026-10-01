@@ -10,7 +10,7 @@ import {
   type UnmatchedDetail,
 } from '@machafoundation/core';
 import { viewerErrorText } from '../../text/viewerText';
-import { applyCandidatePicture, pictureSource, type CandidatePicture } from './candidatePicture';
+import { applyCandidatePicture, pictureSource, type CandidatePicture } from './providerLookup';
 import { NumberField, TextAreaField, TextField, wholeNumber } from './fields';
 import { ParentPicker } from './ParentPicker';
 import { likelyKind } from './ProviderMatch';
