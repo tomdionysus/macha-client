@@ -195,6 +195,18 @@ the gaps, are summarised in the handover.
   artist phrase is exact, so a file tagged "DJ Tiësto" finds nothing where
   MusicBrainz credits "Tiësto", and every candidate fails. The suggestions
   compare the artist loosely, after the search, and find it.
+- **Why Match fails: FI-1 cannot write the catalogue (server; found
+  2026-10-02 from FI-1's own journal, read only).** Every match went to
+  FI-1, core's first node for a change, and each ended `409` after 184 s,
+  163 s and 27 s (`POST .../match status=409`), almost certainly
+  `catalogue_conflict` "catalogue changed concurrently": FI-1 has logged
+  `media information publication failed: catalogue changed concurrently`
+  31 times since 17:29Z on 2026-10-01, two minutes after its process
+  restarted (same 0.74.0 binary as GBNI-1, built 2026-09-30), and never in
+  the 42 hours before; GBNI-1 twice. Core gave up at 8 s each time, so the
+  viewer saw the "did not answer in time" line, never the refusal. The web
+  now stops an album's batch after one unanswered change, rather than
+  piling more onto the stuck node.
 - **A MusicBrainz match takes over a minute (server):** `POST
   .../unmatched/{id}/match` with a release ref had not answered at 40 s, and
   the file was still unmatched a minute later. Core gives a change 8 s and

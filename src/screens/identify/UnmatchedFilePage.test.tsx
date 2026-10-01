@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type {
   CatalogueApi, CatalogueItem, CatalogueKind, ManageApi, ManageCatalogueMatch, MediaProbeCandidate, ProviderArtworkOption, ProviderSearchResult, UnmatchedFile,
 } from '@machafoundation/core';
+import { endpointFailure, MachaConnectionError } from '@machafoundation/core';
 import { UnmatchedFilePage } from './UnmatchedFilePage';
 import { settle } from '../../test/settle';
 
@@ -219,6 +220,27 @@ describe('suggestions, where identifying a file starts', () => {
     expect(files.getAllByRole('row').map((tr) => tr.lastChild?.textContent)).toEqual(['Matched', 'Not matched: No track 3 on that release.', '']);
     fireEvent.click(within(row).getByRole('button', { name: 'Back to the list' }));
     screen.getByText('the list');
+  });
+
+  it('stops sending the album\'s files once the server leaves one unanswered', async () => {
+    const { manage } = show([track], { providerResults: [record] });
+    const sibling = (id: string, name: string): UnmatchedFile => ({ ...file, id, path: `/incoming/${name}` });
+    vi.mocked(manage).unmatched = vi.fn(async () => [file, sibling('f2', '02.mp3'), sibling('f3', '03.mp3')]);
+    const numbered = (n: number) => [probe({ kind: 'track', title: `T${n}`, artist: 'A Band', album: 'A Record', track_number: n })];
+    vi.mocked(manage.unmatchedDetail).mockImplementation(async (id: string) => ({ item: file, probes: id === 'f1' ? [track] : numbered(id === 'f2' ? 3 : 4) }));
+    vi.mocked(manage.matchProvider).mockImplementation(async (id: string) => {
+      if (id === 'f2') throw endpointFailure('fi-1', 'http://fi-1', new MachaConnectionError('exceeded 8000 ms'));
+      return { leaf_item_id: 'leaf-1', items: [] };
+    });
+    await settle();
+    const row = rowOf('A Record · 1999', suggestions());
+    fireEvent.click(within(row).getByRole('button', { name: 'Use this' }));
+    await settle();
+    fireEvent.click(within(row).getByRole('button', { name: 'Match' }));
+    await settle();
+    expect(vi.mocked(manage.matchProvider).mock.calls.map(([id]) => id)).toEqual(['f1', 'f2']);
+    const statuses = within(row.querySelector('.identify-album-files') as HTMLElement).getAllByRole('row').map((tr) => tr.lastChild?.textContent);
+    expect(statuses[2]).toBe('Not matched: not tried, because the server did not answer the one before.');
   });
 
   it('says when nothing on TMDB or MusicBrainz matches what the file says', async () => {
