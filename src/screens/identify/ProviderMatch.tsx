@@ -2,7 +2,10 @@ import { useState } from 'react';
 import {
   identifyUnmatched,
   type ManageApi,
+  type ManualMetadataResult,
   type MediaProbeCandidate,
+  type ProviderArtworkOption,
+  type ProviderArtworkRole,
   type ProviderMatchRef,
   type ProviderSearchKind,
   type ProviderSearchResult,
@@ -13,6 +16,27 @@ import { NumberField, numberText, TextField, wholeNumber } from './fields';
 
 const KIND_LABEL: Record<ProviderSearchKind, string> = { movie: 'Movie', show: 'TV series', album: 'Music album' };
 const PROVIDER_LABEL: Record<string, string> = { tmdb: 'TMDB', musicbrainz: 'MusicBrainz' };
+
+/**
+ * The picture a match is chosen with, by what it matches: a movie's poster,
+ * the episode's still (a series result names the episode by its numbers), an
+ * album's cover. The cover goes on the album the match writes, the others on
+ * the file's own item.
+ */
+const ARTWORK_ROLE: Record<ProviderSearchResult['kind'], ProviderArtworkRole> = { movie: 'poster', show: 'still', album: 'cover' };
+
+/** The item a chosen picture goes on, from what the match wrote. */
+export function artworkItemId(kind: ProviderSearchResult['kind'], written: ManualMetadataResult): string | undefined {
+  return kind === 'album' ? written.items.find((item) => item.kind === 'album')?.id : written.leaf_item_id;
+}
+
+interface Choosing {
+  result: ProviderSearchResult;
+  target: ProviderMatchRef;
+  /** Undefined while the provider is asked. */
+  options?: ProviderArtworkOption[];
+  optionId?: string;
+}
 
 /** What a file most likely is: what its candidate says, else the library it came in through. */
 export function likelyKind(detail: UnmatchedDetail, probe?: MediaProbeCandidate): MediaProbeCandidate['kind'] {
@@ -74,6 +98,8 @@ export function ProviderMatch({ detail, probe, manage, onResolved }: {
   const [disc, setDisc] = useState(numberText(probe?.disc_number));
   const [track, setTrack] = useState(numberText(probe?.track_number));
   const [results, setResults] = useState<ProviderSearchResult[]>();
+  const [choosing, setChoosing] = useState<Choosing>();
+  const [matched, setMatched] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
 
@@ -82,6 +108,7 @@ export function ProviderMatch({ detail, probe, manage, onResolved }: {
     setBusy(true);
     setError(undefined);
     try {
+      setChoosing(undefined);
       setResults(await manage.providerSearch(query.trim(), kind, {
         year: wholeNumber(year),
         artist: kind === 'album' ? artist.trim() || undefined : undefined,
@@ -93,7 +120,8 @@ export function ProviderMatch({ detail, probe, manage, onResolved }: {
     }
   };
 
-  const match = async (result: ProviderSearchResult) => {
+  /** Pick a result: check the numbers, then ask the provider what pictures it has for it. */
+  const pick = async (result: ProviderSearchResult) => {
     const target = providerMatchTarget(result, {
       season: wholeNumber(season), episode: wholeNumber(episode), disc: wholeNumber(disc), track: wholeNumber(track),
     });
@@ -101,15 +129,41 @@ export function ProviderMatch({ detail, probe, manage, onResolved }: {
       setError(target);
       return;
     }
+    setError(undefined);
+    setChoosing({ result, target });
+    let options: ProviderArtworkOption[] = [];
+    try {
+      options = await manage.providerArtwork(result.ref, ARTWORK_ROLE[result.kind], { season_number: target.season_number, episode_number: target.episode_number });
+    } catch {
+      // No pictures to choose from is no reason not to match: the provider's default is staged anyway.
+    }
+    setChoosing((current) => (current?.result === result ? { ...current, options } : current));
+  };
+
+  const match = async ({ result, target, optionId }: Choosing) => {
     setBusy(true);
     setError(undefined);
+    let applied;
     try {
-      await identifyUnmatched(manage, detail.item.id, { from: 'provider', target });
-      onResolved();
+      applied = await identifyUnmatched(manage, detail.item.id, { from: 'provider', target });
     } catch (cause) {
       setError(viewerErrorText(cause));
       setBusy(false);
+      return;
     }
+    const itemId = applied.applied === 'provider' ? artworkItemId(result.kind, applied.result) : undefined;
+    if (optionId && itemId) {
+      try {
+        await manage.chooseArtwork(itemId, ARTWORK_ROLE[result.kind], optionId);
+      } catch (cause) {
+        // The file is matched; only the picture failed, so say that and go no further.
+        setMatched(true);
+        setBusy(false);
+        setError(`Matched, but the chosen picture could not be used: ${viewerErrorText(cause)}`);
+        return;
+      }
+    }
+    onResolved();
   };
 
   return (
@@ -147,17 +201,73 @@ export function ProviderMatch({ detail, probe, manage, onResolved }: {
         : (
           <ul className="identify-matches">
             {results.map((result) => (
-              <li key={result.ref}>
+              <li key={result.ref} className={choosing?.result === result ? 'identify-choosing' : undefined}>
                 <div>
                   <strong>{[result.title, result.year].filter(Boolean).join(' · ')}</strong>
                   <span>{[result.artist, PROVIDER_LABEL[result.provider] ?? result.provider, result.catalogue_item_id ? 'already in the catalogue' : undefined].filter(Boolean).join(' · ')}</span>
                   {result.overview && <p className="identify-overview">{result.overview}</p>}
+                  {choosing?.result === result && (
+                    <ArtworkChoice
+                      choosing={choosing}
+                      busy={busy || matched}
+                      onChoose={(optionId) => setChoosing({ ...choosing, optionId })}
+                      onMatch={() => void match(choosing)}
+                      onCancel={() => setChoosing(undefined)}
+                    />
+                  )}
                 </div>
-                <button className="secondary-button" type="button" disabled={busy} onClick={() => void match(result)} data-tv-focusable="true">Match</button>
+                {choosing?.result !== result && <button className="secondary-button" type="button" disabled={busy || matched} onClick={() => void pick(result)} data-tv-focusable="true">Match</button>}
               </li>
             ))}
           </ul>
         ))}
+    </div>
+  );
+}
+
+/**
+ * The pictures the provider has for a picked result, to choose one of before
+ * the match is made; none chosen keeps the one the server stages by default.
+ */
+function ArtworkChoice({ choosing, busy, onChoose, onMatch, onCancel }: {
+  choosing: Choosing;
+  busy: boolean;
+  onChoose: (optionId: string | undefined) => void;
+  onMatch: () => void;
+  onCancel: () => void;
+}) {
+  const { options, optionId } = choosing;
+  return (
+    <div className="identify-artwork-choice">
+      {options === undefined && <p className="list-note">Asking the provider for pictures…</p>}
+      {options?.length === 0 && <p className="list-note">The provider has no pictures to choose from; it will use its default.</p>}
+      {options && options.length > 0 && (
+        <>
+          <p className="list-note">{options.length === 1 ? 'The provider has one picture.' : `Choose one of ${options.length} pictures, or keep the provider's default.`}</p>
+          <div className="identify-artwork-options" role="group" aria-label="Pictures to choose from">
+            {options.map((option, index) => (
+              <button
+                key={option.option_id}
+                type="button"
+                className={option.option_id === optionId ? 'selected' : undefined}
+                aria-pressed={option.option_id === optionId}
+                aria-label={`Picture ${index + 1}${option.width && option.height ? `, ${option.width} by ${option.height}` : ''}${option.language ? `, ${option.language}` : ''}`}
+                disabled={busy}
+                onClick={() => onChoose(option.option_id === optionId ? undefined : option.option_id)}
+                data-tv-focusable="true"
+              >
+                <img src={option.preview_url} alt="" loading="lazy" />
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+      <div className="identify-actions">
+        <button className="secondary-button" type="button" disabled={busy} onClick={onCancel} data-tv-focusable="true">Cancel</button>
+        <button className="primary-button" type="button" disabled={busy} onClick={onMatch} data-tv-focusable="true">
+          {optionId ? 'Match with this picture' : 'Match'}
+        </button>
+      </div>
     </div>
   );
 }

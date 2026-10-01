@@ -148,11 +148,36 @@ the gaps, are summarised in the handover.
     no result worded, and a MusicBrainz search listing results. Nothing was
     matched. Not yet seen: a Match applied, the parent pickers, an editor
     save.
-- **Provider artwork choice: deferred by Tom (relayed by Core, 2026-10-01)**
-  until the experiment ends. Listing options needs the item's provider ref,
-  which only the server knows cleanly; Core asked the Server for
-  `GET .../providers/artwork?item_id=&role=` and recorded it (core
-  `6f4c396`). Do not derive refs from item ids here meanwhile.
+- **Tom's second pass, 2026-10-01 evening, built:**
+  - *"Search the catalogue doesn't work at all"*: it called the server's
+    `/unmatched/{id}/matches`, which keeps only the file's own kind, so a
+    music file searched by artist or album found nothing, and offered only
+    "another version". Now one `catalogue.search` per kind (albums,
+    artists, tracks; seasons, series, episodes; movies), grouped, parents
+    first; a track or episode still takes the file as another version, an
+    album, artist, series or season opens manual entry with it chosen.
+    Per kind because one shared limit was filled by twenty remixes (seen).
+  - Manual entry says where a track goes, as three choices: an album in the
+    catalogue, a new album by an artist in the catalogue, or a new artist
+    and album; an episode, a series in the catalogue or a new one
+    (`ManualEntry.tsx`).
+  - Choosing among several pictures: a picked provider result lists the
+    provider's pictures for it (poster, the episode's still, the album's
+    cover); the one chosen is put on the item the match wrote (the album,
+    for a cover) with `chooseArtwork`. A failure there says the match was
+    made and stops.
+  - Seen live: grouped search (Albums and Tracks for one word), "Add a
+    track to this album" into the placement form, a cover offered from the
+    Cover Art Archive. Nothing matched.
+- **Candidates cannot show artwork yet: needs the server.** A candidate
+  carries no picture, and the server records only that a file has an
+  attached picture (`attached_picture` on its stream), with no route to
+  read it. Tom's call whether to ask for one now or after the experiment.
+- **Item-based provider artwork deferred by Tom (relayed by Core,
+  2026-10-01)** until the experiment ends: choosing again on an item
+  already catalogued needs its provider ref, which only the server knows
+  cleanly; Core asked for `GET .../providers/artwork?item_id=&role=` (core
+  `6f4c396`). The match-time choice above uses the result's own ref.
 - **For the Server, after the experiment:** MusicBrainz release results are
   indistinguishable (one album search listed the same title, artist and
   year eight times); a result needs what tells releases apart (country, format, track

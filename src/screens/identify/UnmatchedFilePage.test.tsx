@@ -2,7 +2,9 @@
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { describe, expect, it, vi } from 'vitest';
-import type { CatalogueApi, CatalogueItem, ManageApi, ManageCatalogueMatch, MediaProbeCandidate, ProviderSearchResult, UnmatchedFile } from '@machafoundation/core';
+import type {
+  CatalogueApi, CatalogueItem, CatalogueKind, ManageApi, ManageCatalogueMatch, MediaProbeCandidate, ProviderArtworkOption, ProviderSearchResult, UnmatchedFile,
+} from '@machafoundation/core';
 import { UnmatchedFilePage } from './UnmatchedFilePage';
 import { settle } from '../../test/settle';
 
@@ -16,36 +18,50 @@ const probe = (overrides: Partial<MediaProbeCandidate>): MediaProbeCandidate => 
   artist: '', album: '', disc_number: null, track_number: null, evidence: [], ...overrides,
 } as MediaProbeCandidate);
 
-const match = (overrides: Partial<ManageCatalogueMatch>): ManageCatalogueMatch => ({
-  id: 'item-1', kind: 'movie', title: 'Another Film', sort_title: 'Another Film', synopsis: '', parent_id: null, year: 1999,
-  season_number: null, episode_number: null, disc_number: null, track_number: null, media_ids: [], revision: 1, updated_ns: 0, ...overrides,
-});
+const item = (id: string, kind: CatalogueKind, title: string, overrides: Partial<CatalogueItem> = {}) => (
+  { id, kind, title, year: null, artwork: [], effective_artwork: [], media_ids: [], ...overrides }
+) as unknown as CatalogueItem;
 
-const catalogued = (id: string, title: string, year: number | null) => ({ id, title, year }) as CatalogueItem;
+const SERIES = item('tmdb:tv:42', 'show', 'A Series', { year: 2010 });
+const ARTIST = item('mb:artist:1', 'artist', 'A Band');
+const ALBUM = item('mb:album:7', 'album', 'A Record', { year: 1999 });
+
+const series: ProviderSearchResult = { ref: 'tmdb:tv:42', provider: 'tmdb', kind: 'show', title: 'A Series', year: 2010, overview: 'What it is about.', catalogue_item_id: 'tmdb:tv:42' };
+const record: ProviderSearchResult = { ref: 'musicbrainz:release:r1', provider: 'musicbrainz', kind: 'album', title: 'A Record', year: 1999, artist: 'A Band' };
+const pictures: ProviderArtworkOption[] = [
+  { option_id: 'o1', role: 'cover', width: 500, height: 500, language: null, preview_url: 'https://provider/o1.jpg' },
+  { option_id: 'o2', role: 'cover', width: 1200, height: 1200, language: null, preview_url: 'https://provider/o2.jpg' },
+];
 
 function Where() {
   return <p data-testid="where">{useLocation().pathname}</p>;
 }
 
-function show(probes: MediaProbeCandidate[], matches: ManageCatalogueMatch[] = [], items: Record<string, Partial<CatalogueItem>> = {}) {
+function show(probes: MediaProbeCandidate[], options: {
+  matches?: ManageCatalogueMatch[];
+  found?: CatalogueItem[];
+  providerResults?: ProviderSearchResult[];
+  artwork?: ProviderArtworkOption[];
+} = {}) {
   const manage = {
     unmatchedDetail: vi.fn(async () => ({ item: file, probes })),
-    prospectiveMatches: vi.fn(async () => ({ query: 'a film', matches })),
+    prospectiveMatches: vi.fn(async () => ({ query: 'a film', matches: options.matches ?? [] })),
     match: vi.fn(async () => undefined),
     manual: vi.fn(async () => ({ leaf_item_id: 'new-item', items: [] })),
-    matchProvider: vi.fn(async () => ({ leaf_item_id: 'tmdb:episode:9', items: [] })),
-    providerSearch: vi.fn(async (): Promise<ProviderSearchResult[]> => [
-      { ref: 'tmdb:tv:42', provider: 'tmdb', kind: 'show', title: 'A Series', year: 2010, overview: 'What it is about.', catalogue_item_id: 'tmdb:tv:42' },
-    ]),
+    matchProvider: vi.fn(async () => ({
+      leaf_item_id: 'leaf-1',
+      items: [{ id: 'leaf-1', kind: 'track' }, { id: 'album-1', kind: 'album' }] as ManageCatalogueMatch[],
+    })),
+    providerSearch: vi.fn(async () => options.providerResults ?? [series]),
+    providerArtwork: vi.fn(async () => options.artwork ?? []),
+    chooseArtwork: vi.fn(async () => ({})),
     retry: vi.fn(),
     deleteUnmatched: vi.fn(),
   } as unknown as ManageApi;
   const catalogue = {
-    get: vi.fn(async (id: string) => ({ id, artwork: [], effective_artwork: [], ...items[id] }) as unknown as CatalogueItem),
-    search: vi.fn(async (_query: string, _limit: number, _signal: unknown, filter: { kinds: string[] }) => (
-      filter.kinds[0] === 'show' ? [catalogued('tmdb:tv:42', 'A Series', 2010)] : [catalogued('mb:artist:1', 'A Band', null)]
+    search: vi.fn(async (_query: string, _limit: number, _signal: unknown, filter: { kinds: CatalogueKind[] }) => (
+      (options.found ?? [SERIES, ARTIST, ALBUM]).filter((candidate) => filter.kinds.includes(candidate.kind))
     )),
-    list: vi.fn(async () => [catalogued('mb:album:7', 'A Record', 1999)]),
     putArtwork: vi.fn(),
   } as unknown as CatalogueApi;
   render(
@@ -58,6 +74,17 @@ function show(probes: MediaProbeCandidate[], matches: ManageCatalogueMatch[] = [
     </MemoryRouter>,
   );
   return { manage, catalogue };
+}
+
+const sent = (manage: ManageApi) => vi.mocked(manage.manual).mock.calls[0]?.[1];
+const save = () => fireEvent.click(screen.getByRole('button', { name: 'Save and create' }));
+const alert = () => screen.getByRole('alert').textContent;
+
+async function find(label: string, words: string) {
+  fireEvent.change(screen.getByLabelText(`Search for ${label}`), { target: { value: words } });
+  fireEvent.click(screen.getByRole('button', { name: 'Find' }));
+  await settle();
+  fireEvent.click(screen.getByRole('button', { name: 'Use' }));
 }
 
 describe('identifying an unmatched file', () => {
@@ -83,16 +110,42 @@ describe('identifying an unmatched file', () => {
     expect((screen.getByLabelText('Episode title') as HTMLInputElement).value).toBe('Pilot');
   });
 
-  it('shows what each catalogue match looks like, and adds the file as another version to one that has files', async () => {
-    const withFile = match({ id: 'item-2', title: 'A Film', year: 2001, media_ids: ['m-existing'] });
-    const { manage } = show([], [match({}), withFile], { 'item-2': { effective_artwork: [{ role: 'poster', id: 'a', mime_type: 'image/jpeg', url: 'https://node/art/a?sig=1' }] } });
+  it('asks for the numbers an episode needs before sending anything', async () => {
+    const { manage } = show([]);
+    await settle();
+    fireEvent.click(screen.getByRole('tab', { name: 'Enter manually' }));
+    fireEvent.change(screen.getByLabelText('Type'), { target: { value: 'episode' } });
+    fireEvent.change(screen.getByLabelText('Series'), { target: { value: 'A Series' } });
+    save();
+    await settle();
+    expect(alert()).toBe('Season and episode numbers are required.');
+    expect(manage.manual).not.toHaveBeenCalled();
+  });
+});
+
+describe('searching the catalogue for a file', () => {
+  it('looks for a track, and every album and artist it could go under, with the server\'s suggested words', async () => {
+    const { catalogue } = show([probe({ kind: 'track', title: 'A Song', artist: 'A Band' })]);
     await settle();
     fireEvent.click(screen.getByRole('tab', { name: 'Search the catalogue' }));
+    await settle();
+    // One search per kind, so tracks cannot crowd albums and artists out of a shared limit.
+    for (const kind of ['album', 'artist', 'track']) expect(catalogue.search).toHaveBeenCalledWith('a film', 8, undefined, { kinds: [kind] });
+    expect(screen.getAllByRole('heading', { level: 3 }).map((heading) => heading.textContent)).toEqual(['Albums', 'Artists']);
+    expect(within(screen.getByRole('region', { name: 'Albums' })).getByRole('button', { name: 'Add a track to this album' })).toBeTruthy();
+    expect(within(screen.getByRole('region', { name: 'Artists' })).getByRole('button', { name: 'Add a new album by this artist' })).toBeTruthy();
+  });
 
+  it('adds the file as another version of an item that has files, with its picture', async () => {
+    const withFile = item('item-2', 'movie', 'A Film', {
+      year: 2001, media_ids: ['m-existing'], effective_artwork: [{ role: 'poster', id: 'a', mime_type: 'image/jpeg', url: 'https://node/art/a?sig=1' }],
+    });
+    const { manage } = show([], { found: [item('item-1', 'movie', 'Another Film'), withFile] });
+    await settle();
+    fireEvent.click(screen.getByRole('tab', { name: 'Search the catalogue' }));
     await settle();
     const row = (screen.getByText('A Film')).closest('li') as HTMLElement;
     expect(within(row).getByText(/1 file/)).toBeTruthy();
-    await settle();
     expect(row.querySelector('img')?.getAttribute('src')).toBe('https://node/art/a?sig=1');
     expect(within(screen.getByText('Another Film').closest('li') as HTMLElement).getByRole('button', { name: 'Use this' })).toBeTruthy();
 
@@ -102,77 +155,143 @@ describe('identifying an unmatched file', () => {
     expect(manage.match).toHaveBeenCalledWith('f1', 'item-2');
   });
 
-  it('asks for the numbers an episode needs before sending anything', async () => {
-    const { manage } = show([]);
+  it('files a track under an album found there, by its id', async () => {
+    const { manage } = show([probe({ kind: 'track', title: 'A Song', artist: 'A Band', album: 'A Record', track_number: 3 })]);
+    await settle();
+    fireEvent.click(screen.getByRole('tab', { name: 'Search the catalogue' }));
+    await settle();
+    fireEvent.click(screen.getByRole('button', { name: 'Add a track to this album' }));
+    expect(screen.getByRole('tab', { name: 'Enter manually' }).getAttribute('aria-selected')).toBe('true');
+    expect((screen.getByLabelText('An album in the catalogue') as HTMLInputElement).checked).toBe(true);
+    save();
+    await settle();
+    expect(sent(manage)).toMatchObject({ kind: 'track', album_id: 'mb:album:7', title: 'A Song', track_number: 3 });
+    expect(sent(manage)).not.toHaveProperty('artist');
+    expect(sent(manage)).not.toHaveProperty('album');
+  });
+});
+
+describe('where a manual entry goes', () => {
+  async function manually(probes: MediaProbeCandidate[]) {
+    const shown = show(probes);
     await settle();
     fireEvent.click(screen.getByRole('tab', { name: 'Enter manually' }));
-    fireEvent.change(screen.getByLabelText('Type'), { target: { value: 'episode' } });
-    fireEvent.change(screen.getByLabelText('Series'), { target: { value: 'A Series' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save and create' }));
+    return shown;
+  }
+
+  it('creates a new artist and album by name, and asks for both', async () => {
+    const { manage } = await manually([probe({ kind: 'track', title: 'A Song', artist: '', album: '' })]);
+    expect((screen.getByLabelText('A new artist and album') as HTMLInputElement).checked).toBe(true);
+    save();
     await settle();
-    expect((screen.getByRole('alert')).textContent).toBe('Season and episode numbers are required.');
+    expect(alert()).toBe('Name the album.');
+    fireEvent.change(screen.getByLabelText('Album'), { target: { value: 'A Record' } });
+    save();
+    await settle();
+    expect(alert()).toBe('Name the artist.');
     expect(manage.manual).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByLabelText('Artist'), { target: { value: 'A Band' } });
+    save();
+    await settle();
+    expect(sent(manage)).toMatchObject({ kind: 'track', artist: 'A Band', album: 'A Record', title: 'A Song' });
   });
 
-  it('files an episode under a series chosen from the catalogue by its id, not its name', async () => {
-    const { manage, catalogue } = show([probe({ kind: 'episode', title: 'Pilot', series: 'A Series', season_number: 1, episode_number: 2 })]);
+  it('creates a new album under an artist chosen from the catalogue', async () => {
+    const { manage, catalogue } = await manually([probe({ kind: 'track', title: 'A Song', artist: 'A Band', album: 'A New Record' })]);
+    fireEvent.click(screen.getByLabelText('A new album, by an artist in the catalogue'));
+    save();
     await settle();
-    fireEvent.click(screen.getByRole('tab', { name: 'Enter manually' }));
-    fireEvent.change(screen.getByLabelText('Search for series in the catalogue'), { target: { value: 'series' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Find' }));
+    expect(alert()).toBe('Choose the artist this album is by.');
+    await find('artist', 'band');
+    expect(catalogue.search).toHaveBeenCalledWith('band', 8, undefined, { kinds: ['artist'] });
+    expect((screen.getByLabelText('New album') as HTMLInputElement).value).toBe('A New Record');
+    save();
     await settle();
-    expect(catalogue.search).toHaveBeenCalledWith('series', 8, undefined, { kinds: ['show'] });
-    fireEvent.click(screen.getByRole('button', { name: 'Use' }));
-    expect(screen.queryByLabelText('Series')).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'Save and create' }));
-    await settle();
-    const sent = vi.mocked(manage.manual).mock.calls[0]?.[1];
-    expect(sent).toEqual({ kind: 'episode', series_id: 'tmdb:tv:42', season_number: 1, episode_number: 2, title: 'Pilot', synopsis: undefined });
+    expect(sent(manage)).toMatchObject({ kind: 'track', artist_id: 'mb:artist:1', album: 'A New Record' });
+    expect(sent(manage)).not.toHaveProperty('artist');
   });
 
-  it('files a track under one of a chosen artist\'s albums, and asks for an album when none is chosen or named', async () => {
-    const { manage, catalogue } = show([probe({ kind: 'track', title: 'A Song', artist: 'A Band', album: '', track_number: 3 })]);
+  it('adds a track to an album chosen from the catalogue', async () => {
+    const { manage } = await manually([probe({ kind: 'track', title: 'A Song', artist: 'A Band', album: 'A Record' })]);
+    fireEvent.click(screen.getByLabelText('An album in the catalogue'));
+    save();
     await settle();
-    fireEvent.click(screen.getByRole('tab', { name: 'Enter manually' }));
-    fireEvent.change(screen.getByLabelText('Search for artist in the catalogue'), { target: { value: 'band' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Find' }));
+    expect(alert()).toBe('Choose the album this track belongs to.');
+    await find('album', 'record');
+    save();
     await settle();
-    fireEvent.click(screen.getByRole('button', { name: 'Use' }));
-    await settle();
-    expect(catalogue.list).toHaveBeenCalledWith('album', 'mb:artist:1');
-
-    fireEvent.click(screen.getByRole('button', { name: 'Save and create' }));
-    await settle();
-    expect(screen.getByRole('alert').textContent).toBe('Choose one of the artist\'s albums, or name a new one.');
-    expect(manage.manual).not.toHaveBeenCalled();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Use' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Save and create' }));
-    await settle();
-    expect(vi.mocked(manage.manual).mock.calls[0]?.[1]).toMatchObject({ kind: 'track', album_id: 'mb:album:7', title: 'A Song', track_number: 3 });
-    expect(vi.mocked(manage.manual).mock.calls[0]?.[1]).not.toHaveProperty('artist');
+    expect(sent(manage)).toMatchObject({ kind: 'track', album_id: 'mb:album:7', title: 'A Song' });
   });
 
-  it('matches to a series found online, with the episode this file is', async () => {
-    const { manage } = show([probe({ kind: 'episode', title: 'Pilot', series: 'A Series', season_number: 1, episode_number: null })]);
+  it('files an episode under a series chosen from the catalogue, with its season number', async () => {
+    const { manage } = await manually([probe({ kind: 'episode', title: 'Pilot', series: 'A Series', season_number: 1, episode_number: 2 })]);
+    fireEvent.click(screen.getByLabelText('A series in the catalogue'));
+    await find('series', 'series');
+    expect(screen.queryByLabelText('Series year')).toBeNull();
+    save();
+    await settle();
+    expect(sent(manage)).toEqual({ kind: 'episode', series_id: 'tmdb:tv:42', season_number: 1, episode_number: 2, title: 'Pilot', synopsis: undefined });
+  });
+});
+
+describe('matching to a record found online', () => {
+  async function online(probes: MediaProbeCandidate[], options: Parameters<typeof show>[1] = {}) {
+    const shown = show(probes, options);
     await settle();
     fireEvent.click(screen.getByRole('tab', { name: 'Search online' }));
-    expect((screen.getByLabelText('Search for') as HTMLInputElement).value).toBe('A Series');
     fireEvent.click(screen.getByRole('button', { name: 'Search' }));
     await settle();
+    return shown;
+  }
+
+  it('asks for the episode before picking a series, then matches with it', async () => {
+    const { manage } = await online([probe({ kind: 'episode', title: 'Pilot', series: 'A Series', season_number: 1, episode_number: null })]);
     expect(manage.providerSearch).toHaveBeenCalledWith('A Series', 'show', { year: undefined, artist: undefined });
     const row = screen.getByText('A Series · 2010').closest('li') as HTMLElement;
     expect(within(row).getByText('TMDB · already in the catalogue')).toBeTruthy();
 
     fireEvent.click(within(row).getByRole('button', { name: 'Match' }));
     await settle();
-    expect(screen.getByRole('alert').textContent).toBe('Enter the season and episode this file is.');
-    expect(manage.matchProvider).not.toHaveBeenCalled();
+    expect(alert()).toBe('Enter the season and episode this file is.');
+    expect(manage.providerArtwork).not.toHaveBeenCalled();
 
     fireEvent.change(screen.getByLabelText('Episode'), { target: { value: '4' } });
     fireEvent.click(within(row).getByRole('button', { name: 'Match' }));
     await settle();
+    expect(manage.providerArtwork).toHaveBeenCalledWith('tmdb:tv:42', 'still', { season_number: 1, episode_number: 4 });
+    expect(within(row).getByText(/no pictures to choose from/)).toBeTruthy();
+    fireEvent.click(within(row).getByRole('button', { name: 'Match' }));
+    await settle();
     screen.getByText('the list');
     expect(manage.matchProvider).toHaveBeenCalledWith('f1', { ref: 'tmdb:tv:42', season_number: 1, episode_number: 4 });
+    expect(manage.chooseArtwork).not.toHaveBeenCalled();
+  });
+
+  it('puts the cover chosen from the provider\'s pictures on the album the match wrote', async () => {
+    const { manage } = await online([probe({ kind: 'track', title: 'A Song', album: 'A Record', track_number: 2 })], { providerResults: [record], artwork: pictures });
+    const row = screen.getByText('A Record · 1999').closest('li') as HTMLElement;
+    fireEvent.click(within(row).getByRole('button', { name: 'Match' }));
+    await settle();
+    expect(manage.providerArtwork).toHaveBeenCalledWith('musicbrainz:release:r1', 'cover', { season_number: undefined, episode_number: undefined });
+    fireEvent.click(within(row).getByRole('button', { name: 'Picture 2, 1200 by 1200' }));
+    fireEvent.click(within(row).getByRole('button', { name: 'Match with this picture' }));
+    await settle();
+    expect(manage.matchProvider).toHaveBeenCalledWith('f1', { ref: 'musicbrainz:release:r1', track_number: 2 });
+    expect(manage.chooseArtwork).toHaveBeenCalledWith('album-1', 'cover', 'o2');
+    screen.getByText('the list');
+  });
+
+  it('says so, and stays, when the match is made but the picture is refused', async () => {
+    const { manage } = await online([probe({ kind: 'track', title: 'A Song', album: 'A Record', track_number: 2 })], { providerResults: [record], artwork: pictures });
+    vi.mocked(manage.chooseArtwork).mockRejectedValueOnce(new Error('gone'));
+    const row = screen.getByText('A Record · 1999').closest('li') as HTMLElement;
+    fireEvent.click(within(row).getByRole('button', { name: 'Match' }));
+    await settle();
+    fireEvent.click(within(row).getByRole('button', { name: 'Picture 1, 500 by 500' }));
+    fireEvent.click(within(row).getByRole('button', { name: 'Match with this picture' }));
+    await settle();
+    expect(alert()).toMatch(/^Matched, but the chosen picture could not be used/);
+    expect(screen.queryByText('the list')).toBeNull();
+    expect((within(row).getByRole('button', { name: 'Match with this picture' }) as HTMLButtonElement).disabled).toBe(true);
   });
 });

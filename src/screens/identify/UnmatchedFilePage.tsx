@@ -10,7 +10,6 @@ import {
   type Identification,
   type ManageApi,
   type ManageCatalogueMatch,
-  type ManualMetadata,
   type MediaProbeCandidate,
   type UnmatchedDetail,
 } from '@machafoundation/core';
@@ -18,11 +17,8 @@ import { DetailCard, DetailHeader, Facts } from '../../components/ListParts';
 import { ConfirmModal } from '../../components/Modal';
 import { fileName, formatAge, formatBytes, formatTimestamp } from '../ingest/format';
 import { hintResultLabel, viewerErrorText } from '../../text/viewerText';
-import { NumberField, TextAreaField, TextField, wholeNumber } from './fields';
-import { ParentPicker } from './ParentPicker';
+import { ManualEntry } from './ManualEntry';
 import { likelyKind, ProviderMatch } from './ProviderMatch';
-
-type ManualKind = ManualMetadata['kind'];
 
 export function candidateSummary(candidate: MediaProbeCandidate): string {
   if (candidate.kind === 'movie') return [candidate.title, candidate.year].filter(Boolean).join(' · ');
@@ -64,13 +60,41 @@ export function candidateAlreadyCatalogued(candidate: MediaProbeCandidate, match
     && sameStatedNumber(match.track_number, candidate.track_number));
 }
 
-function matchSubtitle(match: ManageCatalogueMatch): string {
-  const parts: string[] = [match.kind];
+const KIND_NAME: Record<CatalogueKind, string> = {
+  movie: 'movie', show: 'series', season: 'season', episode: 'episode', artist: 'artist', album: 'album', track: 'track',
+};
+
+/**
+ * What a catalogue search looks for, by what the file most likely is:
+ * everything it could be filed under, then the item it could be another
+ * version of. Each kind is its own search, so twenty remixes of a track
+ * cannot crowd its album and artist out of one shared limit.
+ */
+const SEARCH_KINDS: Record<MediaProbeCandidate['kind'], CatalogueKind[]> = {
+  movie: ['movie'],
+  episode: ['season', 'show', 'episode'],
+  track: ['album', 'artist', 'track'],
+};
+const PER_KIND = 8;
+
+const GROUP_NAME: Record<CatalogueKind, string> = {
+  movie: 'Movies', show: 'Series', season: 'Seasons', episode: 'Episodes', artist: 'Artists', album: 'Albums', track: 'Tracks',
+};
+
+type Found = ReadonlyArray<readonly [CatalogueKind, CatalogueItem[]]>;
+
+/** What a search result offers: a playable item takes the file; a parent opens manual entry with itself chosen. */
+const PLACE_UNDER: Partial<Record<CatalogueKind, string>> = {
+  album: 'Add a track to this album', artist: 'Add a new album by this artist', show: 'Add an episode to this series', season: 'Add an episode to this season',
+};
+
+function matchSubtitle(match: CatalogueItem): string {
+  const parts: string[] = [KIND_NAME[match.kind]];
   if (match.year != null) parts.push(String(match.year));
   if (match.season_number != null && match.episode_number != null) {
     parts.push(`S${String(match.season_number).padStart(2, '0')}E${String(match.episode_number).padStart(2, '0')}`);
   }
-  if (match.media_ids.length > 0) parts.push(match.media_ids.length === 1 ? '1 file' : `${match.media_ids.length} files`);
+  if (match.media_ids?.length) parts.push(match.media_ids.length === 1 ? '1 file' : `${match.media_ids.length} files`);
   return parts.join(' · ');
 }
 
@@ -80,141 +104,6 @@ function displayArtworkUrl(item: CatalogueItem | undefined): string | undefined 
   const all = [...item.artwork, ...(item.effective_artwork ?? [])];
   const pick = (role: string) => all.find((art) => art.role === role && art.url)?.url;
   return pick('poster') ?? pick('thumbnail') ?? pick('cover') ?? all.find((art) => art.url)?.url;
-}
-
-/** The roles the server's own cataloguer uses for each kind's picture. */
-const ARTWORK_ROLE: Record<ManualKind, string> = { movie: 'poster', episode: 'still', track: 'cover' };
-
-/**
- * Manual entry: the kind's fields, seeded from a candidate when one was being
- * reviewed, and artwork uploaded to what it creates. Applied through core,
- * which routes it. A series, artist or album chosen from the catalogue is
- * sent by id, so the file joins the hierarchy already there; one only typed
- * is sent by name, and the server finds or creates it.
- */
-function ManualEntry({ detail, probe, manage, catalogue, onResolved }: {
-  detail: UnmatchedDetail;
-  probe?: MediaProbeCandidate;
-  manage: ManageApi;
-  catalogue: CatalogueApi;
-  onResolved: () => void;
-}) {
-  const [kind, setKind] = useState<ManualKind>(() => likelyKind(detail, probe));
-  const [title, setTitle] = useState(probe?.title ?? '');
-  const [year, setYear] = useState(probe?.year?.toString() ?? '');
-  const [synopsis, setSynopsis] = useState('');
-  const [series, setSeries] = useState(probe?.series ?? '');
-  const [seriesYear, setSeriesYear] = useState(probe?.year?.toString() ?? '');
-  const [seasonNumber, setSeasonNumber] = useState(probe?.season_number?.toString() ?? '');
-  const [episodeNumber, setEpisodeNumber] = useState(probe?.episode_number?.toString() ?? '');
-  const [artist, setArtist] = useState(probe?.artist ?? '');
-  const [album, setAlbum] = useState(probe?.album ?? '');
-  const [discNumber, setDiscNumber] = useState(probe?.disc_number?.toString() ?? '');
-  const [trackNumber, setTrackNumber] = useState(probe?.track_number?.toString() ?? '');
-  const [seriesItem, setSeriesItem] = useState<CatalogueItem>();
-  const [artistItem, setArtistItem] = useState<CatalogueItem>();
-  const [albumItem, setAlbumItem] = useState<CatalogueItem>();
-  const [artwork, setArtwork] = useState<File | undefined>();
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string>();
-
-  /** What the form says, or a sentence for what it is missing. */
-  const metadata = (): ManualMetadata | string => {
-    if (kind === 'movie') return { kind, title: title.trim(), year: wholeNumber(year), synopsis: synopsis.trim() || undefined };
-    if (kind === 'episode') {
-      const season = wholeNumber(seasonNumber);
-      const episode = wholeNumber(episodeNumber);
-      if (season == null || episode == null) return 'Season and episode numbers are required.';
-      return {
-        kind,
-        ...(seriesItem ? { series_id: seriesItem.id } : { series: series.trim(), series_year: wholeNumber(seriesYear) }),
-        season_number: season,
-        episode_number: episode,
-        title: title.trim() || undefined,
-        synopsis: synopsis.trim() || undefined,
-      };
-    }
-    if (artistItem && !albumItem && !album.trim()) return 'Choose one of the artist\'s albums, or name a new one.';
-    return {
-      kind,
-      ...(albumItem ? { album_id: albumItem.id }
-        : artistItem ? { artist_id: artistItem.id, album: album.trim() }
-          : { artist: artist.trim(), album: album.trim() }),
-      title: title.trim(),
-      year: wholeNumber(year),
-      disc_number: wholeNumber(discNumber),
-      track_number: wholeNumber(trackNumber),
-      synopsis: synopsis.trim() || undefined,
-    };
-  };
-
-  const findIn = (kinds: CatalogueKind[]) => (query: string) => catalogue.search(query, 8, undefined, { kinds });
-
-  const save = async () => {
-    const entered = metadata();
-    if (typeof entered === 'string') {
-      setError(entered);
-      return;
-    }
-    setBusy(true);
-    setError(undefined);
-    try {
-      const applied = await identifyUnmatched(manage, detail.item.id, { from: 'manual', metadata: entered });
-      if (artwork && applied.applied === 'created') {
-        await catalogue.putArtwork(applied.result.leaf_item_id, ARTWORK_ROLE[kind], artwork.type || 'image/jpeg', artwork);
-      }
-      onResolved();
-    } catch (cause) {
-      setError(viewerErrorText(cause));
-      setBusy(false);
-    }
-  };
-
-  return (
-    <form className="manage-manual-form" aria-label="Manual catalogue metadata" onSubmit={(event) => { event.preventDefault(); void save(); }}>
-      <label>Type
-        <select value={kind} onChange={(event) => setKind(event.target.value as ManualKind)} disabled={busy} data-tv-focusable="true">
-          <option value="movie">Movie</option>
-          <option value="episode">TV episode</option>
-          <option value="track">Music track</option>
-        </select>
-      </label>
-      {kind === 'episode' && (
-        <>
-          <ParentPicker label="Series in the catalogue" find={findIn(['show'])} chosen={seriesItem} onChoose={setSeriesItem} disabled={busy} />
-          {!seriesItem && <TextField label="Series" value={series} onChange={setSeries} disabled={busy} />}
-          <div className="manage-field-row">
-            {!seriesItem && <NumberField label="Series year" value={seriesYear} onChange={setSeriesYear} disabled={busy} />}
-            <NumberField label="Season" value={seasonNumber} onChange={setSeasonNumber} disabled={busy} />
-            <NumberField label="Episode" value={episodeNumber} onChange={setEpisodeNumber} disabled={busy} />
-          </div>
-        </>
-      )}
-      {kind === 'track' && (
-        <>
-          <ParentPicker label="Artist in the catalogue" find={findIn(['artist'])} chosen={artistItem} onChoose={(item) => { setArtistItem(item); setAlbumItem(undefined); }} disabled={busy} />
-          {!artistItem && <TextField label="Artist" value={artist} onChange={setArtist} disabled={busy} />}
-          {/* An artist chosen offers its albums; keyed on it, so another artist reads afresh. */}
-          {artistItem && <ParentPicker key={artistItem.id} label="Album in the catalogue" browse find={() => catalogue.list('album', artistItem.id)} chosen={albumItem} onChoose={setAlbumItem} disabled={busy} />}
-          {!albumItem && <TextField label={artistItem ? 'Or a new album' : 'Album'} value={album} onChange={setAlbum} disabled={busy} />}
-        </>
-      )}
-      <TextField label={kind === 'episode' ? 'Episode title' : kind === 'track' ? 'Track title' : 'Title'} value={title} onChange={setTitle} disabled={busy} />
-      {kind !== 'episode' && <NumberField label="Year" value={year} onChange={setYear} disabled={busy} />}
-      {kind === 'track' && (
-        <div className="manage-field-row">
-          <NumberField label="Disc" value={discNumber} onChange={setDiscNumber} disabled={busy} />
-          <NumberField label="Track" value={trackNumber} onChange={setTrackNumber} disabled={busy} />
-        </div>
-      )}
-      <TextAreaField label="Description" value={synopsis} onChange={setSynopsis} disabled={busy} />
-      <label>Artwork<input type="file" accept="image/*" onChange={(event) => setArtwork(event.target.files?.[0])} disabled={busy} data-tv-focusable="true" /></label>
-      {error && <p className="manage-error" role="alert">{error}</p>}
-      <button className="primary-button" type="submit" disabled={busy} data-tv-focusable="true">
-        {busy ? 'Saving…' : 'Save and create'}
-      </button>
-    </form>
-  );
 }
 
 type Tab = 'candidates' | 'search' | 'provider' | 'manual';
@@ -234,22 +123,15 @@ export function UnmatchedFilePage({ api, catalogueApi }: { api: ManageApi; catal
   const back = `${routes.manageUnmatched}${search}`;
   const [detail, setDetail] = useState<UnmatchedDetail>();
   const [matches, setMatches] = useState<ManageCatalogueMatch[]>([]);
-  const [matchItems, setMatchItems] = useState<Record<string, CatalogueItem>>({});
   const [query, setQuery] = useState('');
+  const [found, setFound] = useState<Found>();
+  const [parent, setParent] = useState<CatalogueItem>();
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [tab, setTab] = useState<Tab>('candidates');
   const [reviewing, setReviewing] = useState<number>();
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [error, setError] = useState<string>();
-
-  const showMatches = useCallback((next: ManageCatalogueMatch[]) => {
-    setMatches(next);
-    // The match list carries no artwork URLs; the catalogue's own record of
-    // each does. Read alongside, and a match without one simply shows none.
-    void Promise.all(next.map((match) => catalogueApi.get(match.id).then((item) => [match.id, item] as const, () => undefined)))
-      .then((entries) => setMatchItems(Object.fromEntries(entries.filter((entry): entry is readonly [string, CatalogueItem] => Boolean(entry)))));
-  }, [catalogueApi]);
 
   useEffect(() => {
     let cancelled = false;
@@ -259,13 +141,15 @@ export function UnmatchedFilePage({ api, catalogueApi }: { api: ManageApi; catal
       .then(([nextDetail, result]) => {
         if (cancelled) return;
         setDetail(nextDetail);
-        showMatches(result.matches);
+        // The server's own match list, of leaf items only, says which
+        // candidates are already catalogued; its query seeds the search.
+        setMatches(result.matches);
         setQuery(result.query);
       })
       .catch((cause) => { if (!cancelled) setError(viewerErrorText(cause)); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [api, fileId, showMatches]);
+  }, [api, fileId]);
 
   const resolve = useCallback(async (action: () => Promise<unknown>) => {
     setBusy(true);
@@ -281,14 +165,26 @@ export function UnmatchedFilePage({ api, catalogueApi }: { api: ManageApi; catal
 
   const apply = (identification: Identification) => resolve(() => identifyUnmatched(api, fileId, identification));
 
-  const searchMatches = async () => {
+  const fileKind = detail ? likelyKind(detail, detail.probes[0]) : undefined;
+  const searchCatalogue = useCallback(async (words: string) => {
+    if (!fileKind || !words.trim()) return;
+    setError(undefined);
     try {
-      const result = await api.prospectiveMatches(fileId, query.trim() || undefined);
-      showMatches(result.matches);
+      const kinds = SEARCH_KINDS[fileKind];
+      const results = await Promise.all(kinds.map((kind) => catalogueApi.search(words.trim(), PER_KIND, undefined, { kinds: [kind] })));
+      setFound(kinds.map((kind, index) => [kind, results[index] ?? []] as const).filter(([, items]) => items.length > 0));
     } catch (cause) {
       setError(viewerErrorText(cause));
     }
-  };
+  }, [catalogueApi, fileKind]);
+
+  // The search runs once with the server's suggested words when its tab is first opened.
+  useEffect(() => {
+    if (tab === 'search' && found === undefined) void searchCatalogue(query);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only on opening the tab
+  }, [tab]);
+
+  const placeUnder = (item: CatalogueItem) => { setParent(item); setReviewing(undefined); setTab('manual'); };
 
   const backLink = <Link className="back-button" to={back} data-tv-focusable="true">← Unmatched</Link>;
   if (!detail) {
@@ -307,7 +203,7 @@ export function UnmatchedFilePage({ api, catalogueApi }: { api: ManageApi; catal
     .filter(({ candidate }) => !candidateAlreadyCatalogued(candidate, matches))
     .slice(0, 4);
   const now = Date.now();
-  const review = (index: number) => { setReviewing(index); setTab('manual'); };
+  const review = (index: number) => { setReviewing(index); setParent(undefined); setTab('manual'); };
   const tabs: ReadonlyArray<readonly [Tab, string]> = [['candidates', 'Candidates'], ['search', 'Search the catalogue'], ['provider', 'Search online'], ['manual', 'Enter manually']];
   const reviewed = reviewing === undefined ? detail.probes[0] : detail.probes[reviewing];
 
@@ -375,28 +271,37 @@ export function UnmatchedFilePage({ api, catalogueApi }: { api: ManageApi; catal
 
         {tab === 'search' && (
           <div role="tabpanel" id="identify-search" aria-labelledby="identify-tab-search">
-            <form className="manage-search-row" onSubmit={(event) => { event.preventDefault(); void searchMatches(); }}>
+            <form className="manage-search-row" onSubmit={(event) => { event.preventDefault(); void searchCatalogue(query); }}>
               <input value={query} onChange={(event) => setQuery(event.target.value)} aria-label="Search the catalogue" data-tv-focusable="true" />
               <button className="secondary-button" type="submit" disabled={busy} data-tv-focusable="true">Search</button>
             </form>
-            {matches.length === 0 ? <p className="list-note">No existing catalogue items match this search.</p> : (
-              <ul className="identify-matches">
-                {matches.map((match) => {
-                  const art = displayArtworkUrl(matchItems[match.id]);
-                  return (
-                    <li key={match.id}>
-                      <span className="identify-art" aria-hidden="true">{art ? <img src={art} alt="" loading="lazy" /> : null}</span>
-                      <div><strong>{match.title}</strong><span>{matchSubtitle(match)}</span></div>
-                      {/* An item that already has a file gains this one beside it, as another version;
-                          the server never replaces what the item holds. */}
-                      <button className="secondary-button" type="button" disabled={busy} onClick={() => void apply({ from: 'catalogue', catalogueItemId: match.id })} data-tv-focusable="true">
-                        {match.media_ids.length > 0 ? 'Add as another version' : 'Use this'}
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
+            {found?.length === 0 && <p className="list-note">Nothing in the catalogue matches this search.</p>}
+            {found?.map(([kind, items]) => (
+              <section key={kind} className="identify-group" aria-label={GROUP_NAME[kind]}>
+                {found.length > 1 && <h3>{GROUP_NAME[kind]}</h3>}
+                <ul className="identify-matches">
+                  {items.map((match) => {
+                    const art = displayArtworkUrl(match);
+                    const under = PLACE_UNDER[match.kind];
+                    return (
+                      <li key={match.id}>
+                        <span className="identify-art" aria-hidden="true">{art ? <img src={art} alt="" loading="lazy" /> : null}</span>
+                        <div><strong>{match.title}</strong><span>{matchSubtitle(match)}</span></div>
+                        {under
+                          ? <button className="secondary-button" type="button" disabled={busy} onClick={() => placeUnder(match)} data-tv-focusable="true">{under}</button>
+                          // An item that already has a file gains this one beside it, as another
+                          // version; the server never replaces what the item holds.
+                          : (
+                            <button className="secondary-button" type="button" disabled={busy} onClick={() => void apply({ from: 'catalogue', catalogueItemId: match.id })} data-tv-focusable="true">
+                              {match.media_ids?.length ? 'Add as another version' : 'Use this'}
+                            </button>
+                          )}
+                      </li>
+                    );
+                  })}
+                </ul>
+              </section>
+            ))}
           </div>
         )}
 
@@ -408,12 +313,13 @@ export function UnmatchedFilePage({ api, catalogueApi }: { api: ManageApi; catal
 
         {tab === 'manual' && (
           <div role="tabpanel" id="identify-manual" aria-labelledby="identify-tab-manual">
-            {/* Keyed on the candidate under review: the form seeds its fields
-                once, at mount, so reviewing another builds a new form. */}
+            {/* Keyed on the candidate under review and the parent chosen: the form
+                seeds its fields once, at mount, so either change builds a new form. */}
             <ManualEntry
-              key={`manual-${reviewing ?? 'blank'}`}
+              key={`manual-${reviewing ?? 'blank'}-${parent?.id ?? 'none'}`}
               detail={detail}
               probe={reviewed}
+              parent={parent}
               manage={api}
               catalogue={catalogueApi}
               onResolved={() => navigate(back)}
