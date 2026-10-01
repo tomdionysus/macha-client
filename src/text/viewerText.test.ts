@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { endpointFailure, MachaAcquisitionApiError, MachaConnectionError, MachaPlaybackError, NOT_PLAYABLE_CODE, SESSION_PROVENANCE_UNKNOWN_CODE, START_NO_PROGRESS_CODE, TOO_SLOW_TO_PLAY_CODE, type MediaSummary, type PlaybackNotice, type PlaybackStartProgress, type VersionStep, type PassedOverVersion, type QualityCeiling, type PlaybackStatusDescription, type PlaybackStreamInfo } from '@machafoundation/core';
+import { endpointFailure, MachaAcquisitionApiError, MachaClusterRouteError, MachaConnectionError, MachaPlaybackError, NOT_PLAYABLE_CODE, SESSION_PROVENANCE_UNKNOWN_CODE, START_NO_PROGRESS_CODE, TOO_SLOW_TO_PLAY_CODE, type MediaSummary, type PlaybackNotice, type PlaybackStartProgress, type VersionStep, type PassedOverVersion, type QualityCeiling, type PlaybackStatusDescription, type PlaybackStreamInfo } from '@machafoundation/core';
 import {
   playbackRefusalText,
   diagnosticErrorText,
@@ -7,7 +7,7 @@ import {
   jobErrorText,
   serverStatusText,
   albumLabel, alphabetIndexKeyText, cardSubtitle, episodeCode, episodeLabel, playbackFailureCodeText, playbackNoticeText,
-  playbackTimeText, qualityChoiceText, qualitySteppedDownText, tooSlowToPlayText, SERVER_UNREACHABLE_TEXT, sortChoiceLabel, startProgressText, streamStatusText, trackNumberLabel, viewerErrorText,
+  playbackTimeText, qualityChoiceText, qualitySteppedDownText, tooSlowToPlayText, NO_NODE_ANSWERED_TEXT, SERVER_UNREACHABLE_TEXT, sortChoiceLabel, startProgressText, streamStatusText, trackNumberLabel, viewerErrorText,
 } from './viewerText';
 
 const item = (overrides: Partial<MediaSummary>) => ({ id: 'i', kind: 'movie', title: 'T', mediaIds: [], ...overrides }) as MediaSummary;
@@ -75,6 +75,16 @@ describe('what a viewer is told about an error', () => {
 
   it('says an unreachable server is unreachable', () => {
     expect(viewerErrorText(new MachaConnectionError())).toBe(SERVER_UNREACHABLE_TEXT);
+  });
+
+  it('says no server answered when every node was tried and none did, rather than that something went wrong', () => {
+    const timedOut = new MachaConnectionError('Request to http://node/api/v1/manage/unmatched exceeded 8000 ms.');
+    expect(viewerErrorText(new MachaClusterRouteError(['fi-1', 'gbni-1'], true, timedOut))).toBe(NO_NODE_ANSWERED_TEXT);
+  });
+
+  it('gives the server\'s own sentence when the nodes answered and refused', () => {
+    const refused = Object.assign(new Error('log'), { detail: 'That file changed since matching failed.' });
+    expect(viewerErrorText(new MachaClusterRouteError(['fi-1'], false, refused))).toBe('That file changed since matching failed.');
   });
 });
 

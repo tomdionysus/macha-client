@@ -42,10 +42,14 @@ function show(probes: MediaProbeCandidate[], options: {
   found?: CatalogueItem[];
   providerResults?: ProviderSearchResult[];
   artwork?: ProviderArtworkOption[];
+  /** The first read of the file fails. */
+  detailFails?: boolean;
+  /** The server's catalogue suggestions never arrive. */
+  suggestionsPending?: boolean;
 } = {}) {
   const manage = {
     unmatchedDetail: vi.fn(async () => ({ item: file, probes })),
-    prospectiveMatches: vi.fn(async () => ({ query: 'a film', matches: options.matches ?? [] })),
+    prospectiveMatches: vi.fn(() => (options.suggestionsPending ? new Promise(() => undefined) : Promise.resolve({ query: 'a film', matches: options.matches ?? [] }))),
     match: vi.fn(async () => undefined),
     manual: vi.fn(async () => ({ leaf_item_id: 'new-item', items: [] })),
     matchProvider: vi.fn(async () => ({
@@ -58,6 +62,7 @@ function show(probes: MediaProbeCandidate[], options: {
     retry: vi.fn(),
     deleteUnmatched: vi.fn(),
   } as unknown as ManageApi;
+  if (options.detailFails) vi.mocked(manage.unmatchedDetail).mockRejectedValueOnce(new Error('log'));
   const catalogue = {
     search: vi.fn(async (_query: string, _limit: number, _signal: unknown, filter: { kinds: CatalogueKind[] }) => (
       (options.found ?? [SERIES, ARTIST, ALBUM]).filter((candidate) => filter.kinds.includes(candidate.kind))
@@ -108,6 +113,21 @@ describe('identifying an unmatched file', () => {
     expect(screen.getByRole('tab', { name: 'Enter manually' }).getAttribute('aria-selected')).toBe('true');
     expect((screen.getByLabelText('Series') as HTMLInputElement).value).toBe('A Series');
     expect((screen.getByLabelText('Episode title') as HTMLInputElement).value).toBe('Pilot');
+  });
+
+  it('shows the file without waiting for the server\'s catalogue suggestions', async () => {
+    show([probe({})], { suggestionsPending: true });
+    await settle();
+    expect(screen.getByText('A Film · 2001')).toBeTruthy();
+  });
+
+  it('offers to try again when the file could not be read', async () => {
+    show([probe({})], { detailFails: true });
+    await settle();
+    expect(screen.queryByText('A Film · 2001')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    await settle();
+    expect(screen.getByText('A Film · 2001')).toBeTruthy();
   });
 
   it('asks for the numbers an episode needs before sending anything', async () => {

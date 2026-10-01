@@ -6,10 +6,11 @@ import { useEffect, useState, type ReactNode } from 'react';
  */
 
 /** A list's heading: its name and count, with its controls (sort, bulk actions) to the right. */
-export function ListHeading({ id, title, count, children }: { id: string; title: string; count: number; children?: ReactNode }) {
+/** A list's heading and its count; no count where there is no list to count, rather than a false 0. */
+export function ListHeading({ id, title, count, children }: { id: string; title: string; count?: number; children?: ReactNode }) {
   return (
     <div className="list-heading">
-      <h2 id={id}>{title} <span>{count}</span></h2>
+      <h2 id={id}>{title}{count !== undefined && <> <span>{count}</span></>}</h2>
       {children}
     </div>
   );

@@ -61,6 +61,9 @@ function unmatchedSortValue(item: UnmatchedFile, key: UnmatchedSortKey): number 
 }
 
 /** The unmatched files in the order asked for, stable for the same files. */
+/** One empty list, so a list not yet loaded is the same value on every render. */
+const NO_FILES: readonly UnmatchedFile[] = [];
+
 export function sortUnmatched(items: readonly UnmatchedFile[], sort: ListSort<UnmatchedSortKey>): UnmatchedFile[] {
   return sortRows(items, sort, unmatchedSortValue, (item) => fileName(item.path), (item) => item.id);
 }
@@ -79,8 +82,9 @@ function folderOf(path: string): string {
 function UnmatchedManager({ api }: { api: ManageApi }) {
   const navigate = useNavigate();
   const { sort, setSort, sortBy, page, setPage, search } = useListSort(UNMATCHED_SORT_KEYS, DEFAULT_UNMATCHED_SORT);
-  const [items, setItems] = useState<UnmatchedFile[]>([]);
-  const selection = useListSelection(items);
+  // Undefined until a list has arrived: a first load that fails has no list to show, not an empty one.
+  const [items, setItems] = useState<UnmatchedFile[]>();
+  const selection = useListSelection(items ?? NO_FILES);
   const { checked } = selection;
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -131,12 +135,23 @@ function UnmatchedManager({ api }: { api: ManageApi }) {
     setBusy(false);
   }, [api, deleteIds, reload]);
 
-  const sorted = useMemo(() => sortUnmatched(items, sort), [items, sort]);
+  const sorted = useMemo(() => sortUnmatched(items ?? NO_FILES, sort), [items, sort]);
   const paged = pageSlice(sorted, page);
   const rows = paged.items;
   const now = Date.now();
 
   if (loading) return <p className="ingest-loading">Loading unmatched files…</p>;
+  if (!items) {
+    return (
+      <section className="unmatched-list" aria-labelledby="unmatched-heading">
+        <ListHeading id="unmatched-heading" title="Unmatched files" />
+        <p className="manage-error" role="alert">{error}</p>
+        <button className="secondary-button" type="button" disabled={refreshing} onClick={() => void refresh()} data-tv-focusable="true">
+          {refreshing ? 'Trying again…' : 'Try again'}
+        </button>
+      </section>
+    );
+  }
 
   /** The whole row opens the file, except where a control inside it was the target. */
   const openRow = (event: MouseEvent<HTMLTableRowElement>, item: UnmatchedFile) => {

@@ -124,6 +124,8 @@ export function UnmatchedFilePage({ api, catalogueApi }: { api: ManageApi; catal
   const [detail, setDetail] = useState<UnmatchedDetail>();
   const [matches, setMatches] = useState<ManageCatalogueMatch[]>([]);
   const [query, setQuery] = useState('');
+  const [suggested, setSuggested] = useState<string>();
+  const [reloads, setReloads] = useState(0);
   const [found, setFound] = useState<Found>();
   const [parent, setParent] = useState<CatalogueItem>();
   const [loading, setLoading] = useState(true);
@@ -137,19 +139,25 @@ export function UnmatchedFilePage({ api, catalogueApi }: { api: ManageApi; catal
     let cancelled = false;
     setLoading(true);
     setError(undefined);
-    void Promise.all([api.unmatchedDetail(fileId), api.prospectiveMatches(fileId)])
-      .then(([nextDetail, result]) => {
-        if (cancelled) return;
-        setDetail(nextDetail);
-        // The server's own match list, of leaf items only, says which
-        // candidates are already catalogued; its query seeds the search.
-        setMatches(result.matches);
-        setQuery(result.query);
-      })
+    // The page needs only the file. Both calls make the server probe it, and
+    // the second can be slow, so the page does not wait for it.
+    void api.unmatchedDetail(fileId)
+      .then((nextDetail) => { if (!cancelled) setDetail(nextDetail); })
       .catch((cause) => { if (!cancelled) setError(viewerErrorText(cause)); })
       .finally(() => { if (!cancelled) setLoading(false); });
+    // The server's own match list, of leaf items only, says which candidates
+    // are already catalogued, and its query seeds the search. Without it every
+    // candidate is offered and the search starts empty: nothing to report.
+    void api.prospectiveMatches(fileId)
+      .then((result) => {
+        if (cancelled) return;
+        setMatches(result.matches);
+        setSuggested(result.query);
+        setQuery((typed) => typed || result.query);
+      })
+      .catch(() => undefined);
     return () => { cancelled = true; };
-  }, [api, fileId]);
+  }, [api, fileId, reloads]);
 
   const resolve = useCallback(async (action: () => Promise<unknown>) => {
     setBusy(true);
@@ -178,11 +186,11 @@ export function UnmatchedFilePage({ api, catalogueApi }: { api: ManageApi; catal
     }
   }, [catalogueApi, fileKind]);
 
-  // The search runs once with the server's suggested words when its tab is first opened.
+  // The search runs once with the server's suggested words, when its tab is open and they have arrived.
   useEffect(() => {
-    if (tab === 'search' && found === undefined) void searchCatalogue(query);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- only on opening the tab
-  }, [tab]);
+    if (tab === 'search' && found === undefined && suggested) void searchCatalogue(suggested);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only on opening the tab or the words arriving
+  }, [tab, suggested]);
 
   const placeUnder = (item: CatalogueItem) => { setParent(item); setReviewing(undefined); setTab('manual'); };
 
@@ -192,6 +200,7 @@ export function UnmatchedFilePage({ api, catalogueApi }: { api: ManageApi; catal
       <section className="manage-screen detail-screen">
         {backLink}
         {error && <p className="manage-error" role="alert">{error}</p>}
+        {error && !loading && <button className="secondary-button" type="button" onClick={() => setReloads((count) => count + 1)} data-tv-focusable="true">Try again</button>}
         {loading ? <p className="ingest-loading">Loading file…</p> : !error && <p className="list-empty">This file is no longer unmatched.</p>}
       </section>
     );

@@ -3,6 +3,7 @@ import {
   CHOICE_NOT_AVAILABLE_CODE,
   CHOICE_REQUIRED_CODE,
   MachaPlaybackError,
+  MachaClusterRouteError,
   MachaConnectionError,
   NOT_PLAYABLE_CODE,
   REGENERATION_ENDPOINT_GONE_CODE,
@@ -291,6 +292,13 @@ export const SIGN_OUT_UNCONFIRMED_TEXT = 'You are signed out on this device, but
 export const SERVER_UNREACHABLE_TEXT = 'The Macha server cannot be reached. Check that the server is running and that the API address is correct.';
 
 /**
+ * Every node was tried and none answered: refused, gone, or slower than core
+ * waits for one (8 s each). Usually a passing slowness, so it says to try
+ * again before it says to check anything.
+ */
+export const NO_NODE_ANSWERED_TEXT = 'No Macha server answered. Try again in a moment; if it keeps happening, check that the servers are running.';
+
+/**
  * What a viewer is told about a thrown error. An error's `message` is core's
  * log text and never shown. In order: this client's sentence for a code core
  * states, the server's own sentence from wherever in the chain it was said,
@@ -305,6 +313,7 @@ export function viewerErrorText(error: unknown, fallback = 'Something went wrong
   const detail = playbackFailureDetail(error);
   if (detail) return detail;
   if (error instanceof MachaConnectionError) return SERVER_UNREACHABLE_TEXT;
+  if (error instanceof MachaClusterRouteError && error.unreachable) return NO_NODE_ANSWERED_TEXT;
   return fallback;
 }
 
