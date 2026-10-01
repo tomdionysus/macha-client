@@ -143,6 +143,51 @@ describe('identifying an unmatched file', () => {
   });
 });
 
+describe('a candidate\'s picture on the page', () => {
+  const film = probe({});
+  const poster = { ...pictures[0], option_id: 'p1', role: 'poster', preview_url: 'https://provider/p1.jpg' };
+  const filmResult: ProviderSearchResult = { ref: 'tmdb:movie:5', provider: 'tmdb', kind: 'movie', title: 'A Film', year: 2001 };
+
+  it('shows the provider\'s picture on the candidate and puts it on what Create makes', async () => {
+    const { manage } = show([film], { providerResults: [filmResult], artwork: [poster] });
+    await settle();
+    const row = screen.getByText('A Film · 2001').closest('li') as HTMLElement;
+    expect(row.querySelector('img')?.getAttribute('src')).toBe('https://provider/p1.jpg');
+    fireEvent.click(within(row).getByRole('button', { name: 'Create' }));
+    await settle();
+    expect(manage.chooseArtwork).toHaveBeenCalledWith('new-item', 'poster', 'p1', { ref: 'tmdb:movie:5', season_number: undefined, episode_number: undefined });
+    screen.getByText('the list');
+  });
+
+  it('carries it into review, where it can be declined', async () => {
+    const { manage } = show([film], { providerResults: [filmResult], artwork: [poster] });
+    await settle();
+    fireEvent.click(within(screen.getByText('A Film · 2001').closest('li') as HTMLElement).getByRole('button', { name: 'Review' }));
+    const use = screen.getByLabelText('Use this poster from TMDB') as HTMLInputElement;
+    expect(use.checked).toBe(true);
+    fireEvent.click(use);
+    save();
+    await settle();
+    expect(manage.manual).toHaveBeenCalled();
+    expect(manage.chooseArtwork).not.toHaveBeenCalled();
+  });
+
+  it('puts the reviewed picture on what the entry creates', async () => {
+    const { manage } = show([film], { providerResults: [filmResult], artwork: [poster] });
+    await settle();
+    fireEvent.click(within(screen.getByText('A Film · 2001').closest('li') as HTMLElement).getByRole('button', { name: 'Review' }));
+    save();
+    await settle();
+    expect(manage.chooseArtwork).toHaveBeenCalledWith('new-item', 'poster', 'p1', expect.objectContaining({ ref: 'tmdb:movie:5' }));
+  });
+
+  it('shows no picture when the provider\'s first result is another title', async () => {
+    show([film], { providerResults: [{ ...filmResult, title: 'Something Else' }], artwork: [poster] });
+    await settle();
+    expect((screen.getByText('A Film · 2001').closest('li') as HTMLElement).querySelector('img')).toBeNull();
+  });
+});
+
 describe('searching the catalogue for a file', () => {
   it('looks for a track, and every album and artist it could go under, with the server\'s suggested words', async () => {
     const { catalogue } = show([probe({ kind: 'track', title: 'A Song', artist: 'A Band' })]);

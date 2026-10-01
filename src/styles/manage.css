@@ -89,14 +89,15 @@
 .identify-tabs button:focus-visible { outline: 1px solid var(--focus); outline-offset: 2px; }
 .identify-candidates, .identify-matches { display: grid; gap: .5rem; margin: 0; padding: 0; list-style: none; }
 .identify-candidates li, .identify-matches li { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: .6rem .8rem; border: 1px solid #ffffff0d; border-radius: .55rem; }
-.identify-candidates li > div:first-child, .identify-matches li > div { display: grid; flex: 1; gap: .18rem; min-width: 0; }
+.identify-candidates li > div:not(.identify-actions), .identify-matches li > div { display: grid; flex: 1; gap: .18rem; min-width: 0; }
 .identify-candidates strong, .identify-matches strong { overflow-wrap: anywhere; }
 .identify-candidates span, .identify-matches span { color: var(--text-faint); font-size: .78rem; text-transform: capitalize; }
 .identify-actions { display: flex; flex: 0 0 auto; gap: .4rem; }
 .identify-actions button, .identify-matches button { margin: 0; }
-/* A match's own picture, so a viewer can tell two items of one name apart. */
-.identify-matches .identify-art { flex: 0 0 auto; width: 2.6rem; aspect-ratio: 2 / 3; overflow: hidden; border-radius: .3rem; background: var(--surface-2); }
-.identify-matches .identify-art img { display: block; width: 100%; height: 100%; object-fit: cover; }
+/* A match's or candidate's picture, so a viewer can tell two items of one name apart. */
+.identify-matches .identify-art, .identify-candidates .identify-art { flex: 0 0 auto; width: 2.6rem; aspect-ratio: 2 / 3; overflow: hidden; border-radius: .3rem; background: var(--surface-2); }
+.identify-art.identify-art-square { width: 3rem; aspect-ratio: 1; }
+.identify-matches .identify-art img, .identify-candidates .identify-art img { display: block; width: 100%; height: 100%; object-fit: cover; }
 /* A catalogue search's results, one group per kind. */
 .identify-group { margin-top: .8rem; }
 .identify-group h3 { margin: 0 0 .4rem; color: var(--text-dim); font-size: .8rem; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
@@ -112,6 +113,10 @@
 .identify-artwork-options button.selected { border-color: var(--red-400); }
 .identify-artwork-options button:focus-visible { outline: 1px solid var(--focus); outline-offset: 2px; }
 .identify-artwork-options img { display: block; width: 100%; height: auto; }
+/* The provider's picture found for the candidate under review, offered for what it creates. */
+.identify-offered-picture { display: flex; flex-wrap: wrap; align-items: center; gap: .8rem; }
+.identify-offered-picture img { width: 5.5rem; border-radius: .4rem; background: var(--surface-2); }
+.identify-offered-picture label { display: flex; align-items: center; gap: .5rem; }
 /* Where a new track or episode goes, as a choice of three or two. */
 .identify-placement { display: grid; gap: .35rem; margin: 0; padding: .6rem .8rem; border: 1px solid #ffffff12; border-radius: .55rem; }
 .identify-placement legend { padding: 0 .3rem; color: var(--text-dim); font-size: .85rem; }

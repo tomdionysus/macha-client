@@ -10,6 +10,7 @@ import {
   type UnmatchedDetail,
 } from '@machafoundation/core';
 import { viewerErrorText } from '../../text/viewerText';
+import { applyCandidatePicture, pictureSource, type CandidatePicture } from './candidatePicture';
 import { NumberField, TextAreaField, TextField, wholeNumber } from './fields';
 import { ParentPicker } from './ParentPicker';
 import { likelyKind } from './ProviderMatch';
@@ -44,11 +45,13 @@ const PLACEMENT_OF: Partial<Record<CatalogueKind, Placement>> = { album: 'album'
  * reviewed, the place it goes in the catalogue, and artwork uploaded to what
  * it creates. Applied through core, which routes it. `parent` arrives chosen
  * when the viewer picked an album, artist, series or season from a catalogue
- * search.
+ * search; `picture` is the provider's picture found for the candidate under
+ * review, offered for what this creates.
  */
-export function ManualEntry({ detail, probe, parent, manage, catalogue, onResolved }: {
+export function ManualEntry({ detail, probe, picture, parent, manage, catalogue, onResolved }: {
   detail: UnmatchedDetail;
   probe?: MediaProbeCandidate;
+  picture?: CandidatePicture;
   parent?: CatalogueItem;
   manage: ManageApi;
   catalogue: CatalogueApi;
@@ -73,6 +76,8 @@ export function ManualEntry({ detail, probe, parent, manage, catalogue, onResolv
   const [discNumber, setDiscNumber] = useState(probe?.disc_number?.toString() ?? '');
   const [trackNumber, setTrackNumber] = useState(probe?.track_number?.toString() ?? '');
   const [artwork, setArtwork] = useState<File | undefined>();
+  const [usePicture, setUsePicture] = useState(true);
+  const [created, setCreated] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
 
@@ -124,8 +129,16 @@ export function ManualEntry({ detail, probe, parent, manage, catalogue, onResolv
     setError(undefined);
     try {
       const applied = await identifyUnmatched(manage, detail.item.id, { from: 'manual', metadata: entered });
-      if (artwork && applied.applied === 'created') {
-        await catalogue.putArtwork(applied.result.leaf_item_id, ARTWORK_ROLE[kind], artwork.type || 'image/jpeg', artwork);
+      if (applied.applied === 'created') {
+        try {
+          if (artwork) await catalogue.putArtwork(applied.result.leaf_item_id, ARTWORK_ROLE[kind], artwork.type || 'image/jpeg', artwork);
+          else if (offered && usePicture) await applyCandidatePicture(manage, offered, applied.result);
+        } catch (cause) {
+          // The file is catalogued; only its picture failed, so say that and hold the form.
+          setCreated(true);
+          setError(`Created, but the picture could not be used: ${viewerErrorText(cause)}`);
+          return;
+        }
       }
       onResolved();
     } catch (cause) {
@@ -133,6 +146,10 @@ export function ManualEntry({ detail, probe, parent, manage, catalogue, onResolv
       setBusy(false);
     }
   };
+
+  // The candidate's picture fits only what it was found for, and a cover is
+  // never put on an album the catalogue already holds: that album has its own.
+  const offered = picture && picture.kind === kind && !(kind === 'track' && placement === 'album') ? picture : undefined;
 
   const placements = kind === 'track' ? TRACK_PLACEMENTS : kind === 'episode' ? EPISODE_PLACEMENTS : [];
   const changeKind = (next: ManualKind) => { setKind(next); setPlacement('new'); setError(undefined); };
@@ -190,9 +207,19 @@ export function ManualEntry({ detail, probe, parent, manage, catalogue, onResolv
         </div>
       )}
       <TextAreaField label="Description" value={synopsis} onChange={setSynopsis} disabled={busy} />
-      <label>Artwork<input type="file" accept="image/*" onChange={(event) => setArtwork(event.target.files?.[0])} disabled={busy} data-tv-focusable="true" /></label>
+      {offered && (
+        <div className="identify-offered-picture">
+          <img src={offered.option.preview_url} alt="" />
+          <label>
+            <input type="checkbox" checked={usePicture && !artwork} disabled={busy || Boolean(artwork)} onChange={(event) => setUsePicture(event.target.checked)} data-tv-focusable="true" />
+            {`Use this ${offered.role} from ${pictureSource(offered)}`}
+          </label>
+          {artwork && <span className="list-note">The uploaded image is used instead.</span>}
+        </div>
+      )}
+      <label>{offered ? 'Or upload artwork' : 'Artwork'}<input type="file" accept="image/*" onChange={(event) => setArtwork(event.target.files?.[0])} disabled={busy} data-tv-focusable="true" /></label>
       {error && <p className="manage-error" role="alert">{error}</p>}
-      <button className="primary-button" type="submit" disabled={busy} data-tv-focusable="true">
+      <button className="primary-button" type="submit" disabled={busy || created} data-tv-focusable="true">
         {busy ? 'Saving…' : 'Save and create'}
       </button>
     </form>

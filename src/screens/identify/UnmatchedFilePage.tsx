@@ -17,6 +17,7 @@ import { DetailCard, DetailHeader, Facts } from '../../components/ListParts';
 import { ConfirmModal } from '../../components/Modal';
 import { fileName, formatAge, formatBytes, formatTimestamp } from '../ingest/format';
 import { hintResultLabel, viewerErrorText } from '../../text/viewerText';
+import { applyCandidatePicture, findCandidatePictures, type CandidatePicture } from './candidatePicture';
 import { ManualEntry } from './ManualEntry';
 import { likelyKind, ProviderMatch } from './ProviderMatch';
 
@@ -77,6 +78,9 @@ const SEARCH_KINDS: Record<MediaProbeCandidate['kind'], CatalogueKind[]> = {
 };
 const PER_KIND = 8;
 
+/** Kinds whose picture is a square cover, not a tall poster. */
+const SQUARE_ART: ReadonlySet<CatalogueKind> = new Set(['artist', 'album', 'track']);
+
 const GROUP_NAME: Record<CatalogueKind, string> = {
   movie: 'Movies', show: 'Series', season: 'Seasons', episode: 'Episodes', artist: 'Artists', album: 'Albums', track: 'Tracks',
 };
@@ -126,6 +130,8 @@ export function UnmatchedFilePage({ api, catalogueApi }: { api: ManageApi; catal
   const [query, setQuery] = useState('');
   const [suggested, setSuggested] = useState<string>();
   const [reloads, setReloads] = useState(0);
+  // Each candidate's picture by its index: undefined while asked, null for none found.
+  const [pictures, setPictures] = useState<Record<number, CandidatePicture | null>>({});
   const [found, setFound] = useState<Found>();
   const [parent, setParent] = useState<CatalogueItem>();
   const [loading, setLoading] = useState(true);
@@ -142,7 +148,15 @@ export function UnmatchedFilePage({ api, catalogueApi }: { api: ManageApi; catal
     // The page needs only the file. Both calls make the server probe it, and
     // the second can be slow, so the page does not wait for it.
     void api.unmatchedDetail(fileId)
-      .then((nextDetail) => { if (!cancelled) setDetail(nextDetail); })
+      .then((nextDetail) => {
+        if (cancelled) return;
+        setDetail(nextDetail);
+        setPictures({});
+        // Pictures arrive behind the page, each as the provider answers.
+        findCandidatePictures(api, nextDetail.probes).forEach((found, index) => {
+          void found.then((picture) => { if (!cancelled) setPictures((current) => ({ ...current, [index]: picture ?? null })); });
+        });
+      })
       .catch((cause) => { if (!cancelled) setError(viewerErrorText(cause)); })
       .finally(() => { if (!cancelled) setLoading(false); });
     // The server's own match list, of leaf items only, says which candidates
@@ -172,6 +186,33 @@ export function UnmatchedFilePage({ api, catalogueApi }: { api: ManageApi; catal
   }, [back, navigate]);
 
   const apply = (identification: Identification) => resolve(() => identifyUnmatched(api, fileId, identification));
+
+  /**
+   * Create a candidate as it stands, with its picture when one was found. A
+   * picture refused after the file is catalogued says so and stays, with
+   * every action held: the file is no longer unmatched.
+   */
+  const create = async (candidate: MediaProbeCandidate, picture: CandidatePicture | undefined) => {
+    setBusy(true);
+    setError(undefined);
+    let applied;
+    try {
+      applied = await identifyUnmatched(api, fileId, { from: 'candidate', probe: candidate });
+    } catch (cause) {
+      setError(viewerErrorText(cause));
+      setBusy(false);
+      return;
+    }
+    if (picture && applied.applied === 'created') {
+      try {
+        await applyCandidatePicture(api, picture, applied.result);
+      } catch (cause) {
+        setError(`Created, but the picture could not be used: ${viewerErrorText(cause)}`);
+        return;
+      }
+    }
+    navigate(back);
+  };
 
   const fileKind = detail ? likelyKind(detail, detail.probes[0]) : undefined;
   const searchCatalogue = useCallback(async (words: string) => {
@@ -265,10 +306,13 @@ export function UnmatchedFilePage({ api, catalogueApi }: { api: ManageApi; catal
                       const complete = manualFromCandidate(candidate) !== undefined;
                       return (
                         <li key={`${candidate.generator}-${index}`}>
+                          <span className={`identify-art${candidate.kind === 'track' ? ' identify-art-square' : ''}`} aria-hidden="true">
+                            {pictures[index] ? <img src={pictures[index].option.preview_url} alt="" loading="lazy" /> : null}
+                          </span>
                           <div><strong>{candidateSummary(candidate)}</strong><span>{candidate.kind} · {candidate.generator} · score {candidate.score}</span></div>
                           <div className="identify-actions">
                             <button className="secondary-button" type="button" disabled={busy} onClick={() => review(index)} data-tv-focusable="true">Review</button>
-                            {complete && <button className="primary-button" type="button" disabled={busy} onClick={() => void apply({ from: 'candidate', probe: candidate })} data-tv-focusable="true">Create</button>}
+                            {complete && <button className="primary-button" type="button" disabled={busy} onClick={() => void create(candidate, pictures[index] ?? undefined)} data-tv-focusable="true">Create</button>}
                           </div>
                         </li>
                       );
@@ -294,7 +338,7 @@ export function UnmatchedFilePage({ api, catalogueApi }: { api: ManageApi; catal
                     const under = PLACE_UNDER[match.kind];
                     return (
                       <li key={match.id}>
-                        <span className="identify-art" aria-hidden="true">{art ? <img src={art} alt="" loading="lazy" /> : null}</span>
+                        <span className={`identify-art${SQUARE_ART.has(match.kind) ? ' identify-art-square' : ''}`} aria-hidden="true">{art ? <img src={art} alt="" loading="lazy" /> : null}</span>
                         <div><strong>{match.title}</strong><span>{matchSubtitle(match)}</span></div>
                         {under
                           ? <button className="secondary-button" type="button" disabled={busy} onClick={() => placeUnder(match)} data-tv-focusable="true">{under}</button>
@@ -328,6 +372,7 @@ export function UnmatchedFilePage({ api, catalogueApi }: { api: ManageApi; catal
               key={`manual-${reviewing ?? 'blank'}-${parent?.id ?? 'none'}`}
               detail={detail}
               probe={reviewed}
+              picture={pictures[reviewing ?? 0] ?? undefined}
               parent={parent}
               manage={api}
               catalogue={catalogueApi}
