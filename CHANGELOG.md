@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.20.1
+
+Tagged on `experiment/object-ledger`, not merged into `develop` or `main`. Built and tested against core's linked tree on its own `experiment/object-ledger` (`f794364`), not against a published core: it uses core types and errors that 0.21.0 does not carry, so it cannot resolve core from the registry until core's next release.
+
+- **Identifying an unmatched file starts with suggestions.** A file's page opens on the TMDB and MusicBrainz records it most likely is, found from what its candidates name and kept when title and artist agree, each with its picture. Use this matches the whole record: it asks only for the numbers the file did not state, offers the record's pictures, and the server builds the hierarchy. Releases no one could tell apart are one record ("5 releases"). An album record lists the album's other unmatched files in the folder with the track each would take, one checkbox each with Select all and Select none, and says how each went. Search online, the catalogue, what the file says, and manual entry follow under "Not one of these?".
+- **Searching the catalogue finds what a file could go under.** One search per kind (albums, artists and tracks; seasons, series and episodes; movies), grouped; an album, artist, series or season opens manual entry with it chosen.
+- **Manual entry says where a track or episode goes**: an album in the catalogue, a new album by an artist in the catalogue, or a new artist and album; a series in the catalogue or a new one. Parents chosen are sent by id. A candidate's provider picture is offered and applied.
+- **The metadata editor saves only what changed**, as a partial edit.
+- **Failures are worded, never "Something went wrong" for a known cause:** no server answered; the server is taking too long; a change the server did not answer in time may still finish. A list that could not load says so with Try again, rather than showing 0.
+- **Status shows each node's traffic to and from the other nodes, by class.**
+- Dead code removed; every code comment states what the code does now.
+
 ## 0.20.0
 
 Released against `@machafoundation/core` **0.21.0** from the registry (published gitHead `5569ddd`). Everything below was built and tested against core's linked tree; `main` resolves the published package, and the suite, typecheck and build were run against that copy before the merge. Deployed to fi-1 and gbni-1 as bundle `index-Brec8DWy.js` from develop on 2026-09-29, before the release.
