@@ -11,6 +11,7 @@ function candidate(health: EndpointCandidate['health'], ready = true): EndpointC
     endpoint: { id: 'http://node', baseUrl: 'http://node', source: 'bootstrap' },
     health,
     ready,
+    lapsed: false,
   };
 }
 

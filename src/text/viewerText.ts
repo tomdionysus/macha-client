@@ -299,6 +299,9 @@ export const SERVER_UNREACHABLE_TEXT = 'The Macha server cannot be reached. Chec
  */
 export const NO_NODE_ANSWERED_TEXT = 'No Macha server answered. Try again in a moment; if it keeps happening, check that the servers are running.';
 
+/** A node in good standing was still working when core's budget for the read ran out: slow, not gone. */
+export const SERVER_SLOW_TEXT = 'The server is taking too long to answer. Try again in a moment.';
+
 /**
  * One node was asked to change something and did not answer in time. A
  * change is never retried on another node, and the node may still be doing
@@ -322,6 +325,7 @@ export function viewerErrorText(error: unknown, fallback = 'Something went wrong
   const detail = playbackFailureDetail(error);
   if (detail) return detail;
   if (error instanceof MachaConnectionError) return SERVER_UNREACHABLE_TEXT;
+  if (error instanceof MachaClusterRouteError && error.slow) return SERVER_SLOW_TEXT;
   if (error instanceof MachaClusterRouteError && error.unreachable) return NO_NODE_ANSWERED_TEXT;
   if (error instanceof MachaEndpointError && error.kind === 'transport') return CHANGE_UNANSWERED_TEXT;
   return fallback;
