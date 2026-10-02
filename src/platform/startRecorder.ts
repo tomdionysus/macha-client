@@ -1,12 +1,10 @@
 /**
  * One line that says what a start did before its first frame.
  *
- * Written for the `readyState` 0 P0: an element that accepts a source and
- * then never leaves HAVE_NOTHING, with no error until something else gives
- * up. Nine explanations for it have died to measurement, and each died late,
- * because nothing was recording at the moment it mattered and every account
- * was reassembled from scattered event lines afterwards. This is armed before
- * the source is set and reports once, so the next occurrence arrives already
+ * For an element that accepts a source and then never leaves HAVE_NOTHING,
+ * with no error until something else gives up: a fault that cannot be
+ * reassembled afterwards from scattered event lines. This is armed before the
+ * source is set and reports once, so an occurrence arrives already
  * diagnosable: what the element said and when, what its state was each
  * second, what hls.js complained about, and whether the browser sent any
  * request for this session at all.

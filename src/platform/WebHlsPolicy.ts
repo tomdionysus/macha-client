@@ -44,8 +44,8 @@ export type ManagedHlsErrorAction =
  *
  * **500, and deliberately not 503, which reads backwards on purpose.** The
  * obvious assignment is the other way round: 503 is "temporarily unavailable",
- * which is precisely what a hold is. It was specified that way and reversed
- * before deploying, because the two mistakes are not the same size.
+ * which is precisely what a hold is. It is not, because the two mistakes are
+ * not the same size.
  *
  * 503 is what every intermediary — proxy, gateway, load balancer — emits when
  * a service is genuinely down, and none of them will ever emit
@@ -56,8 +56,6 @@ export type ManagedHlsErrorAction =
  * costs one pointless retry and then behaves. Given an asymmetry like that,
  * the recoverable fault is the one to take, so the node speaks the
  * counter-intuitive dialect and the intermediaries keep the intuitive one.
- * (Not hypothetical: haproxy is installed and running on the WAN-facing node,
- * one configuration change from fronting it.)
  *
  * Server contract: `500` carries `segment_not_ready`; a broken generation is
  * `503` (`stream_failed`) and does fail over. Both are 5xx deliberately, so
@@ -77,12 +75,11 @@ export const SEGMENT_NOT_READY_STATUS = coreSegmentNotReadyStatus;
  * The status a node answers for a source it will not serve: the session it
  * names does not exist, or the fragment is past the end of the plan.
  *
- * **Both, and the client cannot tell which.** Measured against the same node in
- * the same run on 2026-09-17: a segment past the end of a live session's plan
- * answers `404 {"code":"not_found","message":"stream object not found"}`, and a
- * session the node has reaped answers `404 {"code":"not_found","message":"stream
- * not found"}`. Same status, same machine-readable code, one word of English
- * apart — and the body never arrives anyway, because hls.js reports
+ * **Both, and the client cannot tell which.** A segment past the end of a live
+ * session's plan answers `404 {"code":"not_found","message":"stream object not
+ * found"}`, and a session the node has reaped answers `404
+ * {"code":"not_found","message":"stream not found"}`. Same status, same
+ * machine-readable code, one word of English apart — and the body never arrives anyway, because hls.js reports
  * `{ code, text }` and drops it (see the constant above).
  *
  * So this says only what the node said. Deciding *which* 404 it is takes a
@@ -91,14 +88,10 @@ export const SEGMENT_NOT_READY_STATUS = coreSegmentNotReadyStatus;
  * session was reaped" would regenerate forever against a player that simply
  * asked for a fragment beyond the end.
  *
- * Core's number, not a copy of it — as is the one above. Both statuses were
- * private to this file until 2026-09-17, for the good reason that core did not
- * export either; `SERVER_SEGMENT_HOLD_MS` is a duration, which is a different
- * thing. Core exports them now and this file takes them from there, because two
- * clients holding private copies of a server constant is how the stall budget
- * went wrong. They stay exported from here so the names read the same at the
- * call sites, and so this file remains the one place the web adapter's HLS
- * status vocabulary is explained.
+ * Core's number, not a copy of it — as is the one above — because a server
+ * constant must not drift between clients. They are re-exported from here so
+ * the names read the same at the call sites, and so this file remains the one
+ * place the web adapter's HLS status vocabulary is explained.
  */
 export const SOURCE_NOT_FOUND_STATUS = coreSourceNotFoundStatus;
 
@@ -106,11 +99,7 @@ export const SOURCE_NOT_FOUND_STATUS = coreSourceNotFoundStatus;
  * `410 generation_superseded`: the generation has been replaced, and the node
  * saying so is working perfectly.
  *
- * From core, like its sibling above, and for the same reason: two clients
- * holding private copies of a server constant is how the stall budget went
- * wrong. It was briefly local here — this client had to carry the tolerance
- * before any node answers 410, which is the sequencing in the server's plan —
- * and that lasted exactly as long as it took to link core's tree.
+ * From core, like its sibling above, and for the same reason.
  */
 export const SOURCE_SUPERSEDED_STATUS = coreSourceSupersededStatus;
 
@@ -125,9 +114,8 @@ export const SOURCE_SUPERSEDED_STATUS = coreSourceSupersededStatus;
  * not be read as a gone source.
  *
  * Written as a question about the *kind* rather than a list of statuses so the
- * next one core adds arrives here for free — which is exactly what did not
- * happen when `410` was added, and what left this classifier condemning healthy
- * nodes until it was found by hand.
+ * next one core adds arrives here for free; a list here would go on condemning
+ * healthy nodes for any status it had not been told about.
  */
 export function isSourceGoneStatus(status: unknown): boolean {
   return typeof status === 'number' && playbackFailureKindForStatus(status) === 'not-found';
@@ -154,8 +142,7 @@ export function isHlsSegmentHold(data: HlsErrorShape): boolean {
  *
  * Reached on the *nonfatal* events, which is the point: `response.code` is
  * populated on the very first one, so a source that has gone away is knowable
- * while the buffer built before it still has a minute to run. Measured on
- * 2026-09-17 the first of these arrived 3.7 s before the viewer pressed play.
+ * while the buffer built before it still has a minute to run.
  */
 export function isHlsSourceNotFound(data: HlsErrorShape): boolean {
   return data.type === HLS_NETWORK_ERROR && isSourceGoneStatus(data.response?.code);
@@ -169,13 +156,9 @@ export function isHlsSourceNotFound(data: HlsErrorShape): boolean {
  * Note what the default costs if this is wrong in the permissive direction:
  * `@machafoundation/core` treats a `'stream'` failure as endpoint evidence, so an
  * unclassified hold prepares a standby elsewhere and can escalate to failover
- * off a node that was working correctly.
- *
- * That is not hypothetical for the 404, which was unclassified until
- * 2026-09-17: a session reaped during a pause raised one, this returned true,
- * and the coordinator answered `alternate-preparation-start` — a standby on a
- * different node — 3.7 s before the viewer had even pressed play. The node was
- * healthy throughout and was the only one holding the title's pipeline.
+ * off a node that was working correctly. A 404 from a session reaped during a
+ * pause, read as degradation, would start a standby on a different node before
+ * the viewer had even pressed play.
  */
 export function isHlsNetworkDegradation(data: HlsErrorShape): boolean {
   return data.type === HLS_NETWORK_ERROR && !isHlsSegmentHold(data) && !isHlsSourceNotFound(data);
@@ -193,7 +176,7 @@ export function managedHlsErrorAction(
   // `response` is part of the contract, not an incidental extra: the 404 branch
   // reads it, and an `HlsErrorShape` without one classifies as an ordinary
   // network error. Declared so a caller that drops it fails to compile rather
-  // than quietly getting the old behaviour back.
+  // than quietly misclassifying.
   data: HlsErrorShape & { fatal?: boolean; details?: unknown },
   recovery: ManagedHlsMediaRecoveryBudget,
   positionMs: number,
@@ -222,7 +205,7 @@ export function managedHlsErrorAction(
   // Fatal, and nobody is watching. Judging here spends the one network restart
   // the viewer will need when they come back, and a second fatal error during a
   // long pause tears down a generation nothing was using — which is how a pause
-  // ends on a failure screen naming a node the viewer never asked for. Stop
+  // could end on a failure screen naming a node the viewer never asked for. Stop
   // asking, and ask again on resume with the viewer actually present.
   //
   // Deliberately every fatal class and not just the network one. A media
@@ -236,8 +219,8 @@ export function managedHlsErrorAction(
   }
   // A node that answered 404 will answer 404 again. The network restart exists
   // for a transport that might recover, and this is not one: the source is
-  // gone, and no amount of reloading the same URL brings it back. Spending the
-  // budget here cost 33 s and then failed anyway. Reported straight away
+  // gone, and no amount of reloading the same URL brings it back; spending the
+  // budget here only delays a certain failure. Reported straight away
   // instead, while the buffer built before the source went away still has time
   // left to run — which is the whole margin a recovery has to be invisible in.
   //

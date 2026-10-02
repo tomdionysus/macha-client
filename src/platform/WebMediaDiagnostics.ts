@@ -116,12 +116,10 @@ export function videoState(video: HTMLVideoElement): Record<string, unknown> {
     // fragment loading loop as well as decoding — Chrome drops a background
     // tab's timers to roughly one firing a minute, and hls.js drives its loop
     // on a timer — so the player looks hung from here and the client looks
-    // dead from the node, with `readyState 0`, nothing buffered and no error.
-    // Measured 2026-09-18: 113 s between `hls-manifest-parsed` and the first
-    // `hls-fragment-loading`, during which the node was asked for nothing and
-    // reclaimed the idle pipeline out from under it. Three sessions spent an
-    // hour on it. One field makes it self-evident rather than deduced, and it
-    // has to be here rather than in a sampler someone remembers to add.
+    // dead from the node, with `readyState 0`, nothing buffered and no error;
+    // a node asked for nothing that long reclaims the idle pipeline. One field
+    // makes that self-evident rather than deduced, and it has to be here
+    // rather than in a sampler someone remembers to add.
     hidden: typeof document === 'undefined' ? undefined : document.hidden,
     error,
   };
@@ -194,9 +192,7 @@ export class WebMediaDiagnostics {
    * stopped emits nothing at all: `currentTime` advances, the buffer fills,
    * `readyState` stays at HAVE_ENOUGH_DATA, no `error`, no `stalled`. The
    * stall watchdog is explicitly built not to fire while things are moving,
-   * which is correct and also means it will never see this. Reported on the
-   * Android TV build 2026-09-09 — sound gone about two minutes into every
-   * title, picture unaffected — with no client-side evidence of any kind.
+   * which is correct and also means it will never see this.
    *
    * This does not fix it and deliberately does not act on it: whether the
    * decoder stopped or the audio simply stopped being audible are different
@@ -236,9 +232,8 @@ export class WebMediaDiagnostics {
 
   /**
    * The same fault the other way round: the picture holds while the clock,
-   * and so the sound, runs on. Measured 5.40 s after a seek on 2026-09-18 and
-   * never explained, because the reading that separates the two candidates was
-   * never taken at the moment. A video track with nothing buffered at the
+   * and so the sound, runs on. Two causes fit, and only a reading taken at
+   * the moment separates them. A video track with nothing buffered at the
    * playhead is a node still producing; one that holds the playhead while no
    * frame advances is the decoder. So the report carries each track's ranges
    * and the frame counters, taken when the freeze is established and again

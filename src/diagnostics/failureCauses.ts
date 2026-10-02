@@ -8,9 +8,8 @@ import { playbackFailureCodeText } from '../text/viewerText';
  * needs: by the time a playback failure has crossed `endpointFailure`, its
  * message reads *"Macha endpoint http://10.35.1.50:7438 failed: Macha
  * playback request failed: ..."* -- two envelopes and a node address in front
- * of somebody trying to watch a film. This client displayed exactly that, and
- * then grew a walk down the `cause` chain to say the rest of it, which was
- * the same fault one layer deeper. `playbackFailureDetail` carries the
+ * of somebody trying to watch a film, and walking the `cause` chain only
+ * finds the same fault one layer deeper. `playbackFailureDetail` carries the
  * server's own sentence from the moment it was parsed, from whichever layer
  * knew it, and is not reconstructed by stripping prefixes -- stripping means
  * matching on core's wording, which goes quiet the first time it is reworded.

@@ -105,8 +105,8 @@ describe('Web player source reassignment', () => {
     // Two plays share one reused <video> element (the second exercises the
     // "existingVideo" reset path). Assigning a new src already runs the media
     // element load algorithm; a redundant removeAttribute('src')/load() call
-    // immediately beforehand was observed live to race that reassignment and
-    // leave the element stuck loading forever under an active Service Worker.
+    // immediately beforehand races that reassignment and can leave the element
+    // stuck loading forever under an active Service Worker.
     await player.play(source, 0, true);
     await player.play(source, 0, true);
 
@@ -118,10 +118,9 @@ describe('Web player source reassignment', () => {
   it('registers a Direct Play alternative without touching the media element', async () => {
     // The seamless swap's whole value is that the element never reloads: the
     // read-ahead worker changes the bytes underneath it and the viewer sees
-    // nothing (measured at 17 ms, `alternate-promoted-silently`). Registration
-    // is a `postMessage` today, so this cannot fail as written — it is here to
-    // stop a later change quietly adding a reload to this path, which would
-    // turn an invisible swap into a visible one with nothing to catch it.
+    // nothing. Registration is a `postMessage`, so this guards against a
+    // reload being added to this path, which would turn an invisible swap
+    // into a visible one with nothing to catch it.
     const video = fakeVideo();
     vi.stubGlobal('document', { createElement: vi.fn(() => video) });
     const player = new WebPlatform().createPlayer();
@@ -165,8 +164,8 @@ describe('Web player source reassignment', () => {
     });
 
     it('attaches the URL at once, and asks the node for nothing', async () => {
-      // The zero-byte probe that used to gate this is gone: core now waits on
-      // the session route before handing the source over.
+      // Core waits on the session route before handing the source over, so
+      // there is nothing left here to probe.
       const video = fakeVideo();
       const player = nativePlayer(video);
       const fetch = vi.fn();
@@ -352,20 +351,18 @@ describe('Web player source reassignment', () => {
 
 describe('What leaves the player is whole milliseconds', () => {
   /**
-   * The rule, and the fault behind it. A position that leaves this client
+   * A position that leaves this client
    * becomes the resume position, the `seekMs` sent to a node, and the record in
    * storage, and the seek contract is stated in integer milliseconds with no
-   * rounding slack. Measured live 2026-09-18: a request for 2,018,389.921 ms
-   * against a node that answered with a generation starting at 2,018,390 —
-   * core read `absolute < generationStart`, refused to activate, re-asked with
-   * the same fraction, and 25 rounds later nothing had played at all.
+   * rounding slack. A fractional request against a generation starting at the
+   * next whole millisecond reads as `absolute < generationStart` in core, which
+   * refuses to activate and re-asks with the same fraction indefinitely.
    *
-   * `positionMs` was rounded when that was found. These are the others: the
-   * duration reaches `localStorage` through Continue Watching and sets the
-   * scrubber's maximum, which is the one value an `<input type="range">` hands
-   * back off its own step grid; and the buffered ranges are what core admits a
-   * local seek against, where a whole-millisecond target and a fractional
-   * boundary decide differently.
+   * Beyond `positionMs`: the duration reaches `localStorage` through Continue
+   * Watching and sets the scrubber's maximum, which is the one value an
+   * `<input type="range">` hands back off its own step grid; and the buffered
+   * ranges are what core admits a local seek against, where a whole-millisecond
+   * target and a fractional boundary decide differently.
    */
   const directSource = {
     mediaId: 'm1', url: 'https://node.test/stream', isManifest: false,
@@ -588,7 +585,7 @@ describe('Web HLS standby preflight', () => {
 
   it('reads the initial media bytes on a browser with no response streams', async () => {
     // Chromium 47 (Tizen 3) has fetch and no `response.body`. Reading that as
-    // "no bytes arrived" rejected every standby the Samsung ever prepared,
+    // "no bytes arrived" would reject every standby the Samsung prepares,
     // leaving the one set that most needs a warm alternate without any.
     const unstreamed = (bytes: number[]) => ({
       ok: true,
@@ -609,12 +606,10 @@ describe('Web HLS standby preflight', () => {
 
   it('waits longer than a healthy node is entitled to take to start a cold pipeline', async () => {
     // A standby is a freshly created transcode generation, and the server's
-    // pipeline is lazy: nothing is produced until something asks. Measured
-    // against `es-1` on 2026-09-17, the first fragment of such a generation
-    // took **9.0 s** to arrive — and the node's own `startup_timeout_ms` is
-    // 15 s, so it is entitled to take three times the old 5 s budget and still
-    // be working correctly. Every one of those was being read as "that node
-    // cannot serve it" and the rescue thrown away.
+    // pipeline is lazy: nothing is produced until something asks. The first
+    // fragment of such a generation can take many seconds, and the node's own
+    // `startup_timeout_ms` is 15 s, so anything shorter reads a node working
+    // correctly as "that node cannot serve it" and throws the rescue away.
     vi.useFakeTimers();
     try {
       const slowFirstFragment = (init?: RequestInit) => new Promise<Response>((resolve, reject) => {
@@ -638,10 +633,9 @@ describe('Web HLS standby preflight', () => {
   });
 
   it('derives the preflight budget from the server contract rather than picking one', () => {
-    // Two independently chosen numbers that were never compared is the fault
-    // this repo keeps writing down, and a 5 s client gate against a 15 s server
-    // startup was exactly that. Asserted so the budget cannot drift back under
-    // the thing it has to clear.
+    // A client gate chosen independently of the server's startup budget can
+    // fall below it unnoticed. Asserted so the budget cannot drift under the
+    // thing it has to clear.
     expect(HLS_PREFLIGHT_TIMEOUT_MS).toBeGreaterThan(SERVER_STARTUP_TIMEOUT_MS + SERVER_SEGMENT_HOLD_MS);
     expect(SERVER_STARTUP_TIMEOUT_MS).toBe(15_000);
   });
@@ -661,10 +655,9 @@ describe('Web HLS standby preflight', () => {
 });
 
 describe('the stream route is the server\'s to choose', () => {
-  // The server moved streams under their session on 2026-09-21 and removed the
-  // old top-level route outright, with no dual-serve window. That is a no-op
-  // for this client only for as long as it composes no path of its own and
-  // resolves what the node hands it. Asserted rather than believed: a future
+  // The server can move its stream route without a dual-serve window. That
+  // costs this client nothing only as long as it composes no path of its own
+  // and resolves what the node hands it. Asserted rather than believed: a
   // hardcoded path fails here instead of on a node.
   const playlist = ['#EXTM3U', '#EXT-X-MAP:URI="init.mp4"', '#EXTINF:4,', 'segment-0.m4s'].join('\n');
 
@@ -736,17 +729,15 @@ describe('The media in front of a position', () => {
 });
 
 describe('Handover join convergence', () => {
-  // The live measurement this exists for, 2026-09-20: a transcode replacement
-  // holding ~2 s against a join at 33.9 s, still diverging when the 25 s budget
-  // expired, after which the viewer was rewound 20 s. The node encodes a
-  // generation sequentially from its own start, so a replacement only arrives
-  // at the join if it produces media faster than the viewer consumes it — and
-  // the join recedes at the rate the viewer is watching.
+  // The node encodes a generation sequentially from its own start, so a
+  // transcode replacement can still be diverging from the join when the whole
+  // budget expires. A replacement only arrives at the join if it produces
+  // media faster than the viewer consumes it, and the join recedes at the rate
+  // the viewer is watching.
 
   it('declares the join lost when the replacement is losing ground to it', () => {
-    // The measured shape, in miniature: the gap opened over the window rather
-    // than closing, so no amount of remaining budget brings the join within
-    // reach. This is the case that waits 25 s today.
+    // The gap opened over the window rather than closing, so no amount of
+    // remaining budget brings the join within reach.
     expect(handoverJoinLost({
       startDeficitMs: 20_000, deficitMs: 26_000, observedMs: 6_000, remainingMs: 19_000,
     })).toBe(true);
@@ -770,7 +761,7 @@ describe('Handover join convergence', () => {
   it('says nothing before a segment has had time to arrive', () => {
     // Too early to be a measurement. A segment arrives whole, so a sample taken
     // inside one reads as zero production for a source that is perfectly
-    // healthy — and abandoning on that would break handovers that work today.
+    // healthy — and abandoning on that would break handovers that work.
     expect(handoverJoinLost({
       startDeficitMs: 20_000, deficitMs: 26_000, observedMs: 900, remainingMs: 24_000,
     })).toBe(false);
@@ -779,11 +770,10 @@ describe('Handover join convergence', () => {
 
 describe('Handover fallback position', () => {
   it('attaches where the viewer got to, not where core asked before the attempt', () => {
-    // The measured shape, 2026-09-20: core asked for 3,718 ms into a
-    // replacement while the viewer sat at 29,561 ms on the outgoing generation,
-    // so the clocks differ by -25,843 ms. Thirty seconds later the viewer is at
-    // 59,561 ms on the old clock — 33,718 ms on the new one. Falling back to
-    // 3,718 is the 30 s rewind that was measured.
+    // Core asked for 3,718 ms into a replacement while the viewer sat at
+    // 29,561 ms on the outgoing generation, so the clocks differ by -25,843 ms.
+    // Thirty seconds later the viewer is at 59,561 ms on the old clock, which
+    // is 33,718 ms on the new one. Falling back to 3,718 would rewind them 30 s.
     expect(handoverFallbackPositionMs(3_718, -25_843, 59_561)).toBe(33_718);
   });
 
@@ -805,7 +795,7 @@ describe('Handover fallback position', () => {
 });
 
 describe('Joining a generation that starts ahead of the viewer', () => {
-  // Core's lead move (d58375a): the node produces from intent + lead, so the
+  // Core's lead move: the node produces from intent + lead, so the
   // join lies before the incoming generation until the viewer, still watching
   // the outgoing element, reaches its start. That wait is the point of the
   // lead, not a race being lost.
@@ -824,11 +814,10 @@ describe('Joining a generation that starts ahead of the viewer', () => {
 });
 
 describe('Holding the picture through a relocation', () => {
-  // The live measurement this exists for, 2026-09-20: selecting Transcode from
-  // Direct Play mid-playback blanked the element for 16.5 s. It is a
-  // representation change, so the handover path is never reached; the hold that
-  // would have kept the frame up declined because the *outgoing* source was not
-  // a manifest, which is a fact about media the hold never touches.
+  // Selecting Transcode from Direct Play mid-playback is a representation
+  // change, so the handover path is never reached and only this hold keeps the
+  // frame up. Whether the *outgoing* source is a manifest must not decide it:
+  // that is a fact about media the hold never touches.
 
   it('holds a Direct Play frame while a transcode replacement is built', () => {
     expect(canHoldThroughRelocation({

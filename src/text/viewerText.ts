@@ -34,15 +34,12 @@ import {
 } from '@machafoundation/core';
 
 /**
- * Every word this client shows a viewer about the media and the player that
- * core used to compose for it.
+ * Every word this client shows a viewer about the media and the player.
  *
- * Tom's ruling, 2026-09-24: core handles no viewer text at all. It hands over
- * structured facts (season, episode, disc and track numbers, the series,
- * album and artist an item belongs to, sort and category keys) and codes in
- * place of sentences, and each client words them. Wording carried over from
- * core keeps what viewers already read, except where Tom has ruled
- * otherwise; the rulings are noted where they apply.
+ * Core handles no viewer text at all. It hands over structured facts (season,
+ * episode, disc and track numbers, the series, album and artist an item
+ * belongs to, sort and category keys) and codes in place of sentences, and
+ * each client words them.
  */
 
 const pad = (value: number) => String(value).padStart(2, '0');
@@ -54,14 +51,9 @@ export function episodeCode(item: Pick<MediaSummary, 'seasonNumber' | 'episodeNu
 }
 
 /**
- * "Season 1 Episode 4", or "Episode 4" with no season. Tom's ruling for an
- * episode shown away from its season: search and Continue Watching.
- */
-/**
  * An episode's mark where it is shown away from its season (search,
  * Continue Watching), taking the season from its context where the item
- * lacks one. Tom, 2026-09-27: "S04E08 in all cases", on every client; this
- * read "Season 4 Episode 8" before.
+ * lacks one. It reads "S04E08" in all cases, on every client.
  */
 export function episodeLabel(item: Pick<MediaSummary, 'seasonNumber' | 'episodeNumber' | 'playbackContext'>): string | undefined {
   return episodeCode({ episodeNumber: item.episodeNumber, seasonNumber: item.playbackContext?.season.seasonNumber ?? item.seasonNumber });
@@ -77,7 +69,7 @@ export function trackNumberLabel(item: Pick<MediaSummary, 'discNumber' | 'trackN
   return item.discNumber !== undefined && item.discNumber > 1 ? `Disc ${item.discNumber} · Track ${item.trackNumber}` : `Track ${item.trackNumber}`;
 }
 
-/** "Homogenic (1997)", or the title alone with no year and no brackets. */
+/** "Album (1997)", or the title alone with no year and no brackets. */
 export function albumLabel(context: MusicHierarchyContext): string {
   return context.album.year ? `${context.album.title} (${context.album.year})` : context.album.title;
 }
@@ -85,8 +77,8 @@ export function albumLabel(context: MusicHierarchyContext): string {
 /**
  * The second line of an ordinary card: what distinguishes this item from
  * others of its name. A movie or show its year; an episode its code; a
- * season found outside its series that series; an album its artist (Tom:
- * on Music the artist sits below the album name); a track its number.
+ * season found outside its series that series; an album its artist (on
+ * Music the artist sits below the album name); a track its number.
  */
 export function cardSubtitle(item: MediaSummary): string | undefined {
   switch (item.kind) {
@@ -110,7 +102,7 @@ const SORT_LABELS: Record<MediaSortKey, string> = {
   recent: 'Recently added',
 };
 
-/** Tom: a sort control has no separate heading; each option reads "Sort By <X>". */
+/** A sort control has no separate heading; each option reads "Sort By <X>". */
 export function sortChoiceLabel(key: MediaSortKey): string {
   return `Sort By ${SORT_LABELS[key]}`;
 }
@@ -150,12 +142,12 @@ export function startupSubsystemLabel(key: StartupSubsystem['key']): string {
 }
 
 /**
- * Server 0.56.0 puts a code beside every sentence it sends, and the code is
+ * The server puts a code beside every sentence it sends, and the code is
  * what this client words. One rule for all of them: a code this client knows
  * gets its sentence here; a code that says only that something went wrong
  * underneath (libtorrent's error, a storage error) gets its sentence and then
  * the server's, which is where the substance is; a code this client does not
- * know, or none from a node older than 0.56.0, shows the server's sentence.
+ * know, or no code at all (an older node), shows the server's sentence.
  */
 function coded<C extends string>(words: Partial<Record<C, string>>, generic: ReadonlySet<string>, code: string | null | undefined, detail: string | null | undefined): string | undefined {
   const sentence = code ? words[code as C] : undefined;
@@ -221,7 +213,7 @@ export function codeWords(code: string): string {
   return code.replace(/_/g, ' ').replace(/^./, (first) => first.toUpperCase());
 }
 
-/** What catalogue matching made of a file. A node older than 0.56.0 sends a sentence, shown as it is. */
+/** What catalogue matching made of a file. A result that is not a code (an older node sends a sentence) is shown as it is. */
 export function hintResultLabel(result: string): string {
   if (result in HINT_RESULTS) return HINT_RESULTS[result as CatalogueHintResult];
   return /^[a-z0-9]+(_[a-z0-9]+)*$/.test(result) ? codeWords(result) : result;
@@ -256,10 +248,8 @@ const PLACEMENT_REASONS: Record<string, string> = {
 };
 
 /**
- * Server 0.63.0: a node holds a torrent in one job, and a second add of the
- * same torrent is refused while that job exists, in whatever state. Before,
- * it made a second job on the same download, and cancelling either destroyed
- * the other.
+ * A node holds a torrent in one job, and a second add of the same torrent is
+ * refused while that job exists, in whatever state.
  */
 const TORRENT_ALREADY_ADDED_CODE = 'torrent_already_added';
 
@@ -305,8 +295,8 @@ export const SERVER_SLOW_TEXT = 'The server is taking too long to answer. Try ag
 /**
  * One node was asked to change something and did not answer in time. A
  * change is never retried on another node, and the node may still be doing
- * it (a MusicBrainz match ran past a minute, seen 2026-10-01), so the viewer
- * is told to look before asking again.
+ * it (a MusicBrainz match can run past a minute), so the viewer is told to
+ * look before asking again.
  */
 export const CHANGE_UNANSWERED_TEXT = 'The server did not answer in time. It may still finish: refresh in a minute before trying again.';
 
@@ -339,20 +329,19 @@ const CHOICE_NAMES: Record<string, string> = {
 };
 
 /**
- * Why the node refused a playback change, as specifically as it said. A
- * stream choice (server 0.58.0) is worded from its code; anything else is the
- * server's own sentence; and where nothing said why, it says so plainly
- * rather than inventing a reason (Tom, 2026-09-25: "That change could not be
- * made" was "worse than 'something has gone wrong'").
- */
-/**
- * The node is converting as much as it is allowed to. From server 0.60.0 a
- * change back into a transcode reacquires the node's slot and can meet this
- * when another viewer took it meanwhile; the server's own sentence ("video
- * transcode limit reached") is the operator's, not the viewer's.
+ * The node is converting as much as it is allowed to. A change back into a
+ * transcode reacquires the node's slot and can meet this when another viewer
+ * took it meanwhile; the server's own sentence ("video transcode limit
+ * reached") is the operator's, not the viewer's.
  */
 const RESOURCE_LIMIT_CODE = 'resource_limit';
 
+/**
+ * Why the node refused a playback change, as specifically as it said. A
+ * stream choice is worded from its code; anything else is the server's own
+ * sentence; and where nothing said why, it says so plainly rather than
+ * inventing a reason.
+ */
 export function playbackRefusalText(error: unknown, refusal?: PlaybackRefusal): string {
   const code = refusal?.code ?? (error instanceof MachaPlaybackError ? error.code : undefined);
   if (code === RESOURCE_LIMIT_CODE) return 'This node is already converting as much as it can for other viewers. Try again shortly.';
@@ -391,8 +380,8 @@ export function playbackFailureCodeText(code: string | undefined): string | unde
       return 'This stream is no longer available. Start it again.';
     case NOT_PLAYABLE_CODE:
       return 'This item cannot be played here.';
-    // Core's own code, raised when a start that reports progress (server
-    // 0.69.0) stops reporting any: there is no server sentence behind it.
+    // Core's own code, raised when a start that reports progress stops
+    // reporting any: there is no server sentence behind it.
     case START_NO_PROGRESS_CODE:
       return 'The node stopped making progress starting this stream.';
     case TOO_SLOW_TO_PLAY_CODE:
@@ -404,7 +393,7 @@ export function playbackFailureCodeText(code: string | undefined): string | unde
 
 /**
  * The player's stream-status lines, from core's description of the session.
- * Worded exactly as core used to word them, so a viewer sees no change:
+ * For example:
  * "DIRECT · HEVC · 1920×1080 · 7.5 Mb/s", "AUDIO TRANSCODE · SOURCE · … → …".
  */
 const CONTAINER_LABELS: Record<string, string> = { fmp4: 'FMP4', mpegts: 'MPEG-TS' };
@@ -497,9 +486,9 @@ function measuredPercent(done: number | undefined, total: number | undefined): n
 }
 
 /**
- * What a start or a change is doing, from core's counters (server 0.69.0):
- * the stage, and how far through it when the node measured that. Never an
- * estimate — a counter the node did not report shows no figure at all.
+ * What a start or a change is doing, from core's counters: the stage, and
+ * how far through it when the node measured that. Never an estimate — a
+ * counter the node did not report shows no figure at all.
  *
  * `node` names where the work is happening. A change names it throughout,
  * because the viewer is watching one stream while another is built; a start
@@ -524,7 +513,7 @@ export function startProgressText(progress: PlaybackStartProgress, node?: string
 /**
  * The scrubber's clock: "1:23:45", or "4:05" under an hour. Anything not a
  * positive finite duration reads "0:00", since there is no position to show
- * yet; that is a placeholder carried over from core, not a decision.
+ * yet; that is a placeholder, not a decision.
  */
 export function playbackTimeText(ms: number): string {
   if (!Number.isFinite(ms) || ms <= 0) return '0:00';
@@ -535,7 +524,7 @@ export function playbackTimeText(ms: number): string {
   return hours > 0 ? `${hours}:${String(minutes).padStart(2, '0')}:${seconds}` : `${minutes}:${seconds}`;
 }
 
-/** The alphabet index's catch-all key reads "#", as it always has. */
+/** The alphabet index's catch-all key reads "#". */
 export function alphabetIndexKeyText(key: string): string {
   return key === 'other' ? '#' : key;
 }
@@ -552,8 +541,8 @@ function convertedStreams(video: boolean, audio: boolean): string | undefined {
 /**
  * A quality the viewer chose that no node can convert at real speed (core's
  * `TOO_SLOW_TO_PLAY_CODE`), built from the facts where they are known: the
- * quality playing, and which streams the session converts. Tom: "clear,
- * concise, and visible 'Macha can't play this quality because...'".
+ * quality playing, and which streams the session converts, as one clear,
+ * concise sentence: "Macha can't play this quality because...".
  */
 export function tooSlowToPlayText(quality?: QualityClass, transform?: { video: string; audio: string }): string {
   const streams = transform && convertedStreams(transform.video === 'transcode', transform.audio === 'transcode');
@@ -569,8 +558,8 @@ export function qualitySteppedDownText(quality?: QualityClass): string {
  * Why Play chooses the file it does, as one sentence built from every fact
  * core gives (`PlaybackVersions`): the file chosen, a larger one passed over
  * because it would need converting (`passedOver`), and a ceiling that kept a
- * larger one out (`limitedBy`, with its reason). Tom: automatic play is capped
- * "with context to the user as to why", and the facts are parsed into one
+ * larger one out (`limitedBy`, with its reason). Automatic play is capped
+ * with the reason given to the viewer, and the facts are parsed into one
  * sentence rather than a line each.
  *
  * "Which plays without converting" is said only when a larger file was passed
@@ -582,8 +571,8 @@ export function qualityChoiceText(versions: Pick<PlaybackVersions, 'files' | 'au
   if (!automatic) return undefined;
   const clauses: string[] = [];
   const converted = passedOver && convertedStreams(passedOver.converts.video, passedOver.converts.audio);
-  // A node's measured rate for this kind of picture (server 0.70.0): the
-  // conversion is not only needed but too slow to watch.
+  // A node's measured rate for this kind of picture: the conversion is not
+  // only needed but too slow to watch.
   const tooSlow = passedOver?.reasons.includes('transcode-below-real-time');
   if (passedOver && converted) {
     clauses.push(`${qualityLabel(passedOver.quality)} needs ${converted} converted${tooSlow ? ', which the server can\'t do fast enough' : ''}`);

@@ -53,9 +53,9 @@ export function ConnectionForm({ bootstrapEndpoints, onSave, submitLabel = 'Save
     <button className="primary-button" type="submit" disabled={saving} data-tv-focusable="true">
       {saving ? 'Saving…' : submitLabel}
     </button>
-    {/* No longer "each endpoint is checked before it is saved". It never was,
-        and saying so invited a viewer to read a saved endpoint as a verified
-        one. The client reports what it can actually reach once it tries. */}
+    {/* Endpoints are not checked before they are saved, so nothing here may
+        let a viewer read a saved endpoint as a verified one. The client
+        reports what it can actually reach once it tries. */}
     <p>Endpoints are tried in order, and whichever answers is used. The client can learn additional node APIs after connecting.</p>
     {usingHost && <p className="connection-form-origin">
       Nothing is configured, so this client is using the host it was served from: <code>{usingHost}</code>.

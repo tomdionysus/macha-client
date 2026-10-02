@@ -34,12 +34,10 @@ describe('Direct Play read-ahead client', () => {
   afterEach(() => vi.unstubAllGlobals());
 
   /**
-   * The worker's failure message is the only channel Direct Play has, and until
-   * 2026-09-17 it carried a string and nothing else. A node that no longer has
-   * the source answers `404`, and the worker used to hand that response to the
-   * media element as though the error envelope were media — so the element
-   * raised a generic decode/unsupported error and a session that only needed
-   * re-creating became a terminal failure on the wrong node.
+   * The worker's failure message is the only channel Direct Play has. A node
+   * that no longer has the source answers `404`, and without that status the
+   * media element raises only a generic decode/unsupported error, so a session
+   * that needs re-creating becomes a terminal failure on the wrong node.
    *
    * Fresh module per test: the listener installs once per module instance and
    * latches, so a stub registered after an earlier test's install would never

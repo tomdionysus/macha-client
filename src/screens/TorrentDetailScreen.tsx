@@ -49,12 +49,12 @@ function TorrentBody({ job, linkedIngest }: { job: TorrentJob; linkedIngest?: In
   // bytes, progress and rate in the torrent's own fields. So the download's
   // figures are only read while the download is what is running.
   const downloadProgress = downloaded ? 100 : percent(job.progress, job.bytes_completed, job.bytes_total);
-  // Unknown while the owning node is out of view (server 0.64.0): nothing is said to remain.
+  // Unknown while the owning node is out of view: nothing is said to remain.
   const remaining = downloaded || job.bytes_total === null || job.bytes_completed === null ? 0 : Math.max(0, job.bytes_total - job.bytes_completed);
   const catalogue = job.catalogue;
   const catalogueDone = catalogue ? catalogue.catalogued + catalogue.no_match + catalogue.failed : 0;
   // Between the download and the import the owner stores the download in the
-  // cluster (server 0.71.0); the import stage shows that until the import starts.
+  // cluster; the import stage shows that until the import starts.
   const storing = linkedIngest ? undefined : storingOf(job);
   const storingStall = storing && storingStallText(storing);
   const storedText = storing && `${formatBytes(storing.published_bytes)} of ${formatBytes(storing.bytes)} stored${storingStall ? `, ${storingStall}` : ''}`;
@@ -141,7 +141,7 @@ function TorrentBody({ job, linkedIngest }: { job: TorrentJob; linkedIngest?: In
       <DetailCard id="torrent-identity-heading" title="Torrent">
         <Facts rows={[
           ['Info hash', <code>{job.info_hash || 'Not yet known'}</code>],
-          // From 0.64.0 a torrent is the cluster's until a node claims it.
+          // A torrent is the cluster's until a node claims it.
           ['Node', job.node_id ? <code>{job.node_id}</code> : 'Not yet claimed by a node'],
           ...(job.pinned_node_id ? [['Pinned to', <code>{job.pinned_node_id}</code>] as const] : []),
           ...(job.remove_at_unix_ms ? [['Removed at', formatTimestamp(job.remove_at_unix_ms)] as const] : []),
@@ -154,11 +154,9 @@ function TorrentBody({ job, linkedIngest }: { job: TorrentJob; linkedIngest?: In
   );
 }
 
-/** One torrent's own page. The list carries its sort in the address, and so does the way back. */
 /**
- * What the first stage is doing, from the torrent's state. From server
- * 0.61.0 a torrent checks the data it already has before downloading, one
- * torrent at a time: `verify_queued` waits for another's check, and
+ * What the first stage is doing, from the torrent's state. A torrent checks
+ * the data it already has before downloading, one torrent at a time: `verify_queued` waits for another's check, and
  * `verifying` is its own, with `eta_seconds` for the check. `progress` is
  * valid pieces over the total throughout.
  */
@@ -169,6 +167,7 @@ export function downloadStageText(job: Pick<TorrentJob, 'state' | 'bytes_complet
   return { doing: 'Downloading', detail: `${of}${remaining > 0 ? ` · ${formatBytes(remaining)} to go · ETA ${formatEta(job.eta_seconds)}` : ''}` };
 }
 
+/** One torrent's own page. The list carries its sort in the address, and so does the way back. */
 export function TorrentDetailScreen({ api }: { api: AcquisitionApi }) {
   const { torrentId = '' } = useParams();
   const { search } = useLocation();

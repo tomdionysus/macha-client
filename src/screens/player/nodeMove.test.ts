@@ -15,17 +15,17 @@ function runtime(moved: boolean): NodeMoveRuntime & { calls: string[] } {
 
 describe('moving a stream to the node a viewer picked', () => {
   it('asks core to move a live generation, and never closes it first', async () => {
-    // `play()` closes before it starts: 13.2 s of black, measured between
-    // fi-1 and gbni-1. `moveTo` builds there, promotes, then releases here.
+    // `play()` closes before it starts, which is seconds of black. `moveTo`
+    // builds there, promotes, then releases here.
     const live = runtime(true);
     await expect(moveStreamToNode(live, 'https://macnessa.macha.network', false)).resolves.toBe('moved');
     expect(live.calls).toEqual(['moveTo https://macnessa.macha.network']);
   });
 
   it("leads the move by this viewer's measured start cost for that node", async () => {
-    // Measured 2026-09-23: gbni-1 took 20.3 s from create to first fragment.
-    // Asked for the viewer's own position, the node starts that far behind a
-    // join receding at 1x and never catches it.
+    // A slow node can take tens of seconds from create to first fragment.
+    // Asked for the viewer's own position, it starts that far behind a join
+    // receding at 1x and never catches it.
     const live = runtime(true);
     await moveStreamToNode(live, 'http://10.44.1.50:7438', false, 25_342);
     expect(live.calls).toEqual(['moveTo http://10.44.1.50:7438 lead 25342']);

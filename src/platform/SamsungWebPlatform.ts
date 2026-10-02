@@ -15,8 +15,8 @@ export class SamsungWebPlatform implements Platform {
   private readonly web = new WebPlatform({
     directPlayReadAhead: false,
     legacyMediaElement: true,
-    // The native player, paired with the MPEG-TS preference below. Measured on
-    // this set, per stream inside fMP4 segments:
+    // The native player, paired with the MPEG-TS preference below. Inside fMP4
+    // segments this set behaves as follows, per stream:
     //
     //             native player          hls.js / MediaSource
     //   h264      plays                  —
@@ -24,15 +24,13 @@ export class SamsungWebPlatform implements Platform {
     //   E-AC-3    0.2s every ~20s        stream rejected outright
     //   AAC       silent                 plays
     //
-    // hls.js was tried and is worse: it fails both HLS titles outright, since
-    // MediaSource rejects E-AC-3 here. The one arrangement that worked was
-    // hls.js with E-AC-3 excluded, forcing an AAC transcode — functional, but
-    // re-encoding audio and HEVC that need no re-encoding, on every title.
+    // hls.js is worse, since MediaSource rejects E-AC-3 here; it works only
+    // with E-AC-3 excluded, forcing a needless audio transcode on every title.
     //
-    // None of those faults are the container's fault in general: they are
-    // fMP4's. MPEG-TS is what this vintage of native HLS player was built for,
-    // and the server emits it with both streams copied. So the native path
-    // returns, and the segment preference below is what keeps it off fMP4.
+    // Every one of those faults is fMP4's. MPEG-TS is what this vintage of
+    // native HLS player was built for, and the server emits it with both
+    // streams copied, so the native player is used and the segment preference
+    // below keeps it off fMP4.
     forceNativeHls: true,
   });
   private readonly log = createClientLogger('playback.capabilities.samsung');
@@ -43,12 +41,11 @@ export class SamsungWebPlatform implements Platform {
    *
    * `webm`: ffmpeg reports every Matroska file as `matroska,webm` — its
    * demuxer family, not the file's identity. This set decodes WebM and says
-   * so honestly, and that honest claim is what let a matcher testing "is any
-   * of these names listed" hand it a Matroska file, which it renders corrupt.
-   * The real fix is resolving that string to a container family before
-   * matching, and the chooser now does. This is belt and braces for anywhere
-   * else the string is read: the library contains no WebM at all, so refusing
-   * to instruct it costs nothing and removes the ambiguity entirely.
+   * so honestly, which would let a matcher testing "is any of these names
+   * listed" hand it a Matroska file, which it renders corrupt. The chooser
+   * resolves that string to a container family before matching; this is belt
+   * and braces for anywhere else the string is read. Refusing to instruct WebM
+   * costs nothing and removes the ambiguity entirely.
    *
    * Deliberately a policy and not a narrowed `containers` list: the
    * capability describes what the hardware decodes, the policy describes what
@@ -75,7 +72,7 @@ export class SamsungWebPlatform implements Platform {
     // rewrite — no re-encode, no quality lost, no decoder asked anything new.
     //
     // Stated as policy rather than by narrowing `containers`, for the same
-    // reason as `webm` below: the capability describes what the hardware
+    // reason as `webm` above: the capability describes what the hardware
     // decodes, the policy describes what we will ask for.
     neverDirect: true,
     excludeContainers: ['webm'],
@@ -84,11 +81,10 @@ export class SamsungWebPlatform implements Platform {
     // the codecs involved are at fault anywhere else: the same HEVC direct
     // plays, the same E-AC-3 plays progressively, and h264 in fMP4 is fine.
     //
-    // Deliberately no codec exclusions to accompany this. Excluding E-AC-3 was
-    // tried twice tonight, once on each delivery path, and both times it moved
-    // the failure rather than removing it — a policy stated at the codec level
-    // against a fault at the container level narrows the choice into a worse
-    // branch, which the chooser then faithfully defends. TS carries both
+    // Deliberately no codec exclusions to accompany this. Excluding E-AC-3
+    // moves the failure rather than removing it: a policy stated at the codec
+    // level against a fault at the container level narrows the choice into a
+    // worse branch, which the chooser then faithfully defends. TS carries both
     // streams copied, so there is nothing left to exclude.
     preferSegmentContainer: 'mpegts',
   };

@@ -11,8 +11,8 @@ import {
  *
  * The traits themselves are platform-independent; deciding *which* target we
  * are is a Vite concern, so `import.meta.env.MODE` stops here rather than
- * going into the package. Everything above imports the same two names as
- * before, with the target already applied.
+ * going into the package. Everything above imports these names with the
+ * target already applied.
  */
 const target: PlatformTarget = ((): PlatformTarget => {
   const mode = import.meta.env.MODE;

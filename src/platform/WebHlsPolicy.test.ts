@@ -59,9 +59,8 @@ describe('managed HLS error policy', () => {
   });
 
   describe('a 404 is what the node says, not what the node is', () => {
-    // Measured live 2026-09-17, against a session the node had reaped after
-    // `streaming.session_idle_ms` (30 min) of a pause. The payload below is
-    // the real one, trimmed:
+    // What a session the node reaped after `streaming.session_idle_ms` of a
+    // pause raises, trimmed:
     //
     //   {"type":"networkError","details":"fragLoadError","fatal":false,
     //    "error":{"message":"HTTP Error 404 "},"sn":33,
@@ -81,20 +80,18 @@ describe('managed HLS error policy', () => {
     });
 
     it('keeps a 404 out of node-health evidence, which it never was', () => {
-      // This assertion is the inverse of the one this suite carried until
-      // 2026-09-17. A 404 says the node did not serve *this source*; it says
-      // nothing about the node, which is answering perfectly well. Scoring it
-      // as degradation is what prepared a standby elsewhere and then failed
-      // over onto a node that was never serving the title.
+      // A 404 says the node did not serve *this source*; it says nothing about
+      // the node, which is answering perfectly well. Scoring it as degradation
+      // would prepare a standby elsewhere and then fail over onto a node that
+      // was never serving the title.
       expect(isHlsNetworkDegradation(notFound)).toBe(false);
       expect(isHlsNetworkDegradation({ type: Hls.ErrorTypes.NETWORK_ERROR, response: { code: 502 } })).toBe(true);
     });
 
     it('fails a fatal 404 at once and spends no network restart on it', () => {
       // A node that answered 404 will answer 404 again: the restart exists for
-      // a transport that might recover, and this is not one. Spending it here
-      // is what cost 33 seconds and then failed anyway. Reported immediately
-      // instead, so the recovery happens inside the buffered cover.
+      // a transport that might recover, and this is not one. Reported
+      // immediately instead, so the recovery happens inside the buffered cover.
       const recovery = new ManagedHlsMediaRecoveryBudget();
       expect(managedHlsErrorAction({ fatal: true, ...notFound, details: 'fragLoadError' }, recovery, 0)).toEqual({
         action: 'fail-not-found',
@@ -109,7 +106,7 @@ describe('managed HLS error policy', () => {
     });
 
     it('still parks a fatal 404 raised while nobody is watching', () => {
-      // The pause rule is unchanged and outranks this: with no viewer waiting
+      // The pause rule outranks this: with no viewer waiting
       // there is nothing to recover for, and the nonfatal 404s have already
       // told the coordinator on the degradation channel anyway.
       const recovery = new ManagedHlsMediaRecoveryBudget();
@@ -153,9 +150,9 @@ describe('managed HLS error policy', () => {
     // hls.js recovers from an append against an ended MediaSource on its own,
     // by rebuilding the MediaSource, and calls the error nonfatal. When the
     // browser cannot parse the stream at all, that recovery reaches the same
-    // wall forever: a real title refetched the same 2.4 MB segment 58 times in
-    // 46 seconds behind an unchanging spinner. Repetition with nothing
-    // buffered is the evidence that "nonfatal" is wrong.
+    // wall forever, refetching the same segment behind an unchanging spinner.
+    // Repetition with nothing buffered is the evidence that "nonfatal" is
+    // wrong.
     const recovery = new ManagedHlsMediaRecoveryBudget();
     const error = { fatal: false, type: Hls.ErrorTypes.MEDIA_ERROR, details: 'bufferAppendingError' };
     for (let attempt = 1; attempt < 6; attempt += 1) {
@@ -194,8 +191,8 @@ describe('managed HLS error policy', () => {
   it('does not judge a node while the viewer has playback paused', () => {
     // Nobody is waiting, so a fatal error here is not evidence about anything
     // the viewer wants. Spending the one network restart while paused leaves
-    // nothing for the resume, and the second fatal tore down a generation that
-    // was only ever filling a buffer — a pause that ended in a failure screen.
+    // nothing for the resume, and a second fatal would tear down a generation
+    // that was only ever filling a buffer, ending the pause on a failure screen.
     const recovery = new ManagedHlsMediaRecoveryBudget();
     const error = { fatal: true, type: Hls.ErrorTypes.NETWORK_ERROR, details: 'fragLoadError' };
     for (let attempt = 0; attempt < 5; attempt += 1) {
@@ -251,9 +248,8 @@ describe('managed HLS error policy', () => {
 });
 
 describe('a superseded generation is gone, not a sick node', () => {
-  // The server is moving playback sessions to a REST resource and will answer
-  // `410 generation_superseded` for a generation that has been replaced. Core
-  // maps 410 onto its existing `not-found` kind rather than adding a seventh:
+  // A node answers `410 generation_superseded` for a generation that has been
+  // replaced. Core maps 410 onto its existing `not-found` kind rather than adding a seventh:
   // the required action is identical — the object is gone, the node is fine,
   // ask the session route — and a new kind would put that obligation behind a
   // value existing hosts meet as `default`.

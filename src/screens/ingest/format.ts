@@ -9,8 +9,8 @@ export function fileName(path: string): string {
 }
 
 /**
- * From server 0.64.0 a job whose node is not in view reports its live
- * figures as null: unknown, which reads "—", not "0 B".
+ * A job whose node is not in view reports its live figures as null: unknown,
+ * which reads "—", not "0 B".
  */
 export function formatBytes(value: number | null): string {
   if (value === null) return '—';
@@ -54,8 +54,8 @@ export function formatTimestamp(value: number): string {
 }
 
 // Elapsed time, floored: an ETA rounds up because it promises no earlier than
-// it says, while an age counts what has actually gone by. Sharing formatEta
-// here reported a job created 3600.4s ago as "1h 1m old".
+// it says, while an age counts what has actually gone by, so formatEta would
+// call a job created 3600.4s ago "1h 1m old".
 export function formatAge(value: number, now: number): string {
   if (!value) return '—';
   const seconds = Math.floor((now - value) / 1000);
@@ -70,11 +70,11 @@ export function formatAge(value: number, now: number): string {
 /** States whose code does not read as words. */
 const STATE_LABELS: Record<string, string> = {
   verify_queued: 'Waiting to verify',
-  // Server 0.64.0: added to the cluster, not yet claimed by a node.
+  // Added to the cluster, not yet claimed by a node.
   awaiting_node: 'Waiting for a node',
 };
 
-/** A count the server may not know (null from 0.64.0), as "—". */
+/** A count the server may not know (null), as "—". */
 export function formatCount(value: number | null): string {
   return value === null ? '—' : String(value);
 }

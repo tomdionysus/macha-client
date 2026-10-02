@@ -7,8 +7,8 @@ function probeFrom(supported: readonly string[]): (mime: string) => boolean {
 }
 
 describe('detectMatroskaSupport', () => {
-  // Chrome 151, measured 2026-09-13: both spellings answer for a real codec
-  // and refuse a nonsense one.
+  // Chrome's answers: both spellings accept a real codec and refuse a
+  // nonsense one.
   const chrome = [
     'video/x-matroska',
     'video/x-matroska; codecs="avc1.42E01E"',
@@ -27,8 +27,7 @@ describe('detectMatroskaSupport', () => {
     // The Samsung's shape of failure: accepts Matroska, renders it corrupt.
     // A host that says yes to everything has said nothing, so it gets no claim
     // — and this is the assertion that has to be able to fail, because it is
-    // the only thing standing between an honest probe and the corrupt picture
-    // the old hardcoded exclusion was written to prevent.
+    // the only thing standing between an honest probe and a corrupt picture.
     const blanket = (mime: string) => mime.startsWith('video/x-matroska') || mime.startsWith('video/matroska');
     expect(detectMatroskaSupport(blanket)).toBe(false);
     expect(detectWebMediaCodecCapabilities(blanket).containers).not.toContain('matroska');
@@ -156,10 +155,10 @@ describe('detectWebMediaCodecCapabilities', () => {
   });
 
   describe('when MediaSource is the decoder', () => {
-    // The Last of Us S02E07: HEVC Main 10, bt709. The TV decodes it natively
-    // and refuses it through MSE, so once hls.js drove playback the element's
-    // answer produced "Web media decode failure" on a stream the server had
-    // every reason to believe was playable.
+    // An HEVC Main 10, bt709 title that a TV decodes natively and refuses
+    // through MSE: with hls.js driving, the element's answer ends in "Web
+    // media decode failure" on a stream the server has every reason to
+    // believe is playable.
     const element = probeFrom([
       'video/mp4; codecs="avc1.42E01E"',
       'video/mp4; codecs="hev1.1.6.L93.B0"',
@@ -229,7 +228,7 @@ describe('HLS delivery codec lists', () => {
   it('narrows audio to what the delivery decoder accepts, not what the element plays', () => {
     // The shape of the Samsung fault: the element plays E-AC-3 in a
     // progressive file, the HLS pipeline does not, and copying it into fMP4
-    // produced sound that was present but broken.
+    // gives sound that is present but broken.
     const probe = probeFrom([
       'video/mp4',
       'audio/mp4; codecs="mp4a.40.2"',

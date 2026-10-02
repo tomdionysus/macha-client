@@ -12,11 +12,10 @@ function fakeStorage(seed?: Record<string, string>) {
 
 describe('VolumeStore', () => {
   /**
-   * The whole reason the move needed no migration. This store came out of
-   * `@machafoundation/core` on 2026-09-13 keeping the same storage, the same
-   * origin and the same client id — so a viewer's existing volume is still
-   * there. A renamed key would silently reset every viewer to full volume on
-   * their next launch, with nothing on screen explaining why.
+   * The key is the one `@machafoundation/core` wrote, in the same storage,
+   * origin and client id, so a viewer's existing volume is still there. A
+   * renamed key would silently reset every viewer to full volume on their
+   * next launch, with nothing on screen explaining why.
    */
   it('reads the key core wrote, so a viewer keeps the volume they had', () => {
     const storage = fakeStorage({ 'macha.volume.v1.viewer-1': '0.25' });
@@ -47,12 +46,9 @@ describe('VolumeStore', () => {
    * store exists to prevent. An empty string is not a volume; it is a
    * corrupted or half-written entry.
    *
-   * Copied faithfully from `@machafoundation/core` first and recorded as a
-   * test before being changed, so the move and the behaviour change are not
-   * the same commit. Agreed with the `Macha NPM Core` session 2026-09-13 and
-   * Android TV is matching it — this client and Android TV hold separate
-   * copies now, so divergence here would be invisible until a viewer's storage
-   * reached that state.
+   * Android TV holds its own copy of this store with the same rule, so a
+   * divergence here would be invisible until a viewer's storage reached that
+   * state.
    */
   it('treats an empty or whitespace-only entry as absent, not as silence', () => {
     expect(new VolumeStore('v', fakeStorage({ 'macha.volume.v1.v': '' })).load()).toBe(1);

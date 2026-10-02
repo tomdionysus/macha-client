@@ -61,24 +61,13 @@ interface Props {
    */
   onPinEndpoint?: (endpointIds: readonly string[]) => string | undefined;
   /**
-   * The viewer's "offer everything" setting. Tom, 2026-09-25: limit to the
-   * device's capabilities on all clients, with a setting to turn that off.
+   * The viewer's "offer everything" setting: the options are limited to the
+   * device's capabilities unless this is on.
    */
   offerAll?: boolean;
 }
 
 
-/**
- * A duration the scrubber can divide by and render.
- *
- * This replaces `a || b || c || 1`, which was doing two jobs and only one of
- * them deliberately: it skipped a missing duration, and it *also* skipped
- * `NaN`, because `NaN` is falsy — which is the only reason nothing has ever
- * rendered `NaN:NaN` on the bar. `Infinity` is truthy and went straight
- * through, so an unknown-duration or live source would have reached the
- * formatter intact. Stating the requirement makes the fallback a decision
- * rather than a side effect of truthiness.
- */
 /**
  * What to tell a viewer whose title has not started yet.
  *
@@ -86,9 +75,8 @@ interface Props {
  * that bound a start — negotiating a generation, waiting for its first
  * fragment, and starvation once a URL is attached — are sequential and nothing
  * bounds their sum, so a cold node can spend the better part of a minute with
- * every budget behaving exactly as written. The principle that work is bounded
- * and event-driven: a degraded state must be visible and actionable rather than
- * becoming indefinite waiting, and a viewer told what is being waited for and
+ * every budget behaving exactly as written. A degraded state must be visible
+ * rather than indefinite waiting: a viewer told what is being waited for and
  * for how long is in a different position from one watching a spinner, even
  * though the wait is identical.
  *
@@ -96,10 +84,10 @@ interface Props {
  * going on, and a timer over that would turn every brief hesitation into an
  * announcement.
  *
- * A node that reports its start's progress (server 0.69.0) says which stage it
- * is in, and `stage` is that sentence: it replaces the general one, and the
- * number stays where it is. The delay before anything shows is unchanged,
- * since a quick start is no more worth announcing for being measured.
+ * A node that reports its start's progress says which stage it is in, and
+ * `stage` is that sentence: it replaces the general one, and the number stays
+ * where it is. The delay before anything shows is the same either way, since
+ * a quick start is no more worth announcing for being measured.
  */
 export function startWaitNotice(starting: boolean, elapsedMs: number, stage?: string): string | undefined {
   if (!starting || elapsedMs < uiSettings.playerStartWaitNoticeMs) return undefined;
@@ -113,7 +101,7 @@ export function startWaitNotice(starting: boolean, elapsedMs: number, stage?: st
  * serving, so that node is named. A failover also arrives as a *start*, on a
  * node this line cannot name: the endpoint it holds is the one being
  * replaced. So a start is worded as a new stream with no node, and a node
- * that reports no progress keeps the sentence it always had.
+ * that reports no progress gets the general sentence.
  */
 export function preparingStreamText(progress: PlaybackStartProgress | undefined, endpoint: string | undefined): string {
   const stage = progress && startProgressText({ ...progress, kind: 'change' }, progress.kind === 'change' ? endpoint : undefined, true);
@@ -374,7 +362,7 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
     }
     if (shouldTrackProgress(media) && (event.ended || now - lastReportRef.current >= 10_000)) {
       lastReportRef.current = now;
-      // The title, the file and how it was playing (Tom, 2026-09-27).
+      // The title, the file and how it was playing.
       lastPlayingRef.current = runtimePlayback;
       onProgress(progressFor(media, event.positionMs, event.durationMs, runtimePlayback));
     }
@@ -548,8 +536,8 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
    * anything resolves; leaving it there is what keeps the next seek, mode
    * change and recovery on the node the viewer asked for.
    *
-   * **Restarting was 13.2 s of black**, measured between fi-1 and gbni-1,
-   * because `play()` closes before it starts. That is what this replaced.
+   * **Not a restart**: `play()` closes before it starts, which is seconds of
+   * black.
    */
   const nodeChoices = useMemo(
     () => playerNodeChoices(endpoints ?? [], playback.session?.endpoint?.id, nodeNameOf),
@@ -763,11 +751,10 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
         keyEvent.preventDefault();
         keyEvent.stopPropagation();
         if (optionsVisible) { setOptionsVisible(false); return; }
-        // Non-web here means Android: only reachable today via a keyboard
-        // in a dev build — a real device intercepts its hardware back
-        // button natively before any JS runs (see platforms/android's
-        // MainActivity), so this is dev/keyboard-testing parity, not yet
-        // the actual on-device fix.
+        // Non-web here means Android, reachable only via a keyboard in a dev
+        // build: a real device intercepts its hardware back button natively
+        // before any JS runs (see platforms/android's MainActivity), so this
+        // is keyboard-testing parity, not the on-device path.
         if (playerBackAction(webControls) === 'minimize') onMinimize();
         else onStop();
         return;
@@ -839,10 +826,10 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
     </span>
   );
   const audio = media.kind === 'track';
-  // The playing track's format line, from its file's catalogue profile. Tom,
-  // 2026-09-27: music shows the same line as a title page, in the player
-  // beside the artwork. Only the file actually playing, once the session
-  // names it; a profile that cannot be read shows nothing.
+  // The playing track's format line, from its file's catalogue profile: the
+  // same line as a title page, beside the artwork. Only the file actually
+  // playing, once the session names it; a profile that cannot be read shows
+  // nothing.
   const playingMediaId = audio ? session?.mediaId : undefined;
   const trackFormat = useAsync(
     async (signal) => {
@@ -925,8 +912,8 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
               switched it on. A quality no node can keep up with is worded from
               the facts of what was playing, since those say which. */}
           <span>{tooSlow ? tooSlowToPlayText(runtimePlayback?.instruction?.quality, session?.transform) : playbackFailureHeadline(fatalError)}</span>
-          {/* Tom: stop "with a try again option". Another quality is the other
-              way on, so the list is offered beside it. */}
+          {/* Try again, and beside it the list: another quality is the other
+              way on. */}
           {tooSlow && (
             <div className="player-failure-actions">
               <button type="button" className="secondary-button" data-tv-focusable="true" data-tv-default-focus="true" onClick={() => { void runtime.retry(); }}>Try again</button>
@@ -997,9 +984,9 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
               <>
                 {/* The carriage and the node that served it, on one line as
                     `CONTAINER : endpoint`. They are read together — "what was
-                    I served, and by whom" is a single question — and two lines
-                    spent on it pushed the per-stream transforms down the
-                    panel. Either half is omitted rather than defaulted when
+                    I served, and by whom" is a single question — and a second
+                    line would push the per-stream transforms down the panel.
+                    Either half is omitted rather than defaulted when
                     absent: this is the one place a segment container the
                     client asked for and did not get can show, and a default
                     would read as an answer. */}
@@ -1158,7 +1145,7 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
 
 /**
  * Which modes this device can play the playing file in, so the options offer
- * only those unless the viewer asked for everything (Tom, 2026-09-25). Core's
+ * only those unless the viewer asked for everything. Core's
  * answer carries the node's operations and is preferred; until its facts
  * arrive, the session's profile answers without them, which can offer a
  * remux the node's build then refuses.

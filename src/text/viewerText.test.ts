@@ -15,7 +15,7 @@ const item = (overrides: Partial<MediaSummary>) => ({ id: 'i', kind: 'movie', ti
 describe('media wording, now this client\'s', () => {
   it('names an episode compactly inside its season, and in full away from it', () => {
     expect(episodeCode(item({ kind: 'episode', seasonNumber: 1, episodeNumber: 4 }))).toBe('S01E04');
-    // Tom, 2026-09-27: "S04E08 in all cases", on every client.
+    // The label is the compact code wherever the season is known.
     expect(episodeLabel(item({ kind: 'episode', seasonNumber: 1, episodeNumber: 4 }))).toBe('S01E04');
     expect(episodeLabel(item({ kind: 'episode', episodeNumber: 4, playbackContext: { series: { id: 's', title: 'S' }, season: { id: 'x', title: 'Season 4', seasonNumber: 4 } } }))).toBe('S04E04');
     expect(episodeLabel(item({ kind: 'episode', episodeNumber: 4 }))).toBe('Episode 4');
@@ -98,7 +98,6 @@ describe('what a viewer is told about an error', () => {
 });
 
 describe('the player\'s stream-status lines, as core used to word them', () => {
-  // Expected strings taken from core's own tests before the cut (8db0a12^).
   const hevc: PlaybackStreamInfo = { index: 0, type: 'video', codec: 'hevc', profile: 'Main', language: '', default: true, forced: false, width: 1920, height: 1080, bitrate: 7_500_000 };
   const eac3: PlaybackStreamInfo = { index: 1, type: 'audio', codec: 'eac3', profile: '', language: 'eng', default: true, forced: false, channels: 6, sampleRate: 48000, bitrate: 640_000 };
   const described = (overrides: Partial<PlaybackStatusDescription>): PlaybackStatusDescription => ({
@@ -274,7 +273,7 @@ describe('why Play chooses the file it does, as one sentence from every fact', (
     ({ mode: video === 'transcode' || audio === 'transcode' ? 'transcode' : 'direct', video, audio, reasons: [], assumed: [] }) as VersionStep['instruction'];
   const file = (quality: VersionStep['quality'], video: 'copy' | 'transcode' = 'copy', audio: 'copy' | 'transcode' = 'copy') =>
     ({ quality, instruction: instruction(video, audio), index: 0 });
-  // The Martian: a 4K file (HEVC, TrueHD), a 1080p file (HEVC, E-AC-3) and a 720p file (H.264, AAC).
+  // A title with a 4K file (HEVC, TrueHD), a 1080p file (HEVC, E-AC-3) and a 720p file (H.264, AAC).
   const files = [file(2160, 'copy', 'transcode'), file(1080, 'copy', 'transcode'), file(720)];
   const automatic = (quality: VersionStep['quality'], video: 'copy' | 'transcode' = 'copy', audio: 'copy' | 'transcode' = 'copy') =>
     ({ quality, source: 'file', mediaId: 'm', instruction: instruction(video, audio) }) as VersionStep;
@@ -282,7 +281,7 @@ describe('why Play chooses the file it does, as one sentence from every fact', (
     ({ quality, converts: { video, audio }, reasons: [] });
 
   it('builds one sentence when a ceiling and a conversion both kept Play off a larger file', () => {
-    // This Mac: the screen caps at 1080p, and Chrome cannot play E-AC-3.
+    // A screen that caps at 1080p, in a browser that cannot play E-AC-3.
     expect(qualityChoiceText({ files, automatic: automatic(720), limitedBy: { quality: 1080, reason: 'ceiling-display' }, passedOver: passedOver(1080, false, true) }))
       .toBe('Play chooses 720p, which plays without converting. 1080p needs its audio converted, and 4K is more than this screen shows. Pick a quality to play another.');
   });

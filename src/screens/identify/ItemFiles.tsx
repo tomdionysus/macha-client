@@ -26,7 +26,7 @@ export function fileSummary(file: PlaybackMediaFacts): string {
 /**
  * The files an item plays from, each with what it is, and a way to add
  * another: a second cut, a better encode, another resolution. Which one plays
- * is the client's choice, made from these same facts (Tom, 2026-09-24).
+ * is the client's choice, made from these same facts.
  *
  * Adding picks an unmatched file and attaches it through core, which adds it
  * beside the item's files and never replaces them.

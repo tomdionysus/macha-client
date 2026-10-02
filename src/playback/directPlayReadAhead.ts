@@ -165,13 +165,11 @@ export type MediaTransferListener = (origin: string, bytes: number, durationMs: 
 /**
  * Report media throughput to whoever ranks endpoints.
  *
- * This is the only place the client measures the traffic that actually
- * matters. `EndpointBandwidth` is otherwise fed exclusively from JSON response
- * bodies, so its record describes catalogue payloads — the one kind of
- * transfer whose speed nobody cares about — while byte-range media, which is
- * every byte a viewer waits on, contributed nothing. A node that only ever
- * served media therefore had no throughput evidence at all, and endpoint
- * ranking had nothing to prefer it or reject it with.
+ * This is where the client measures the traffic that actually matters.
+ * `EndpointBandwidth` is otherwise fed only from JSON response bodies, which
+ * describe catalogue payloads, so without byte-range media a node that only
+ * serves media would have no throughput evidence for endpoint ranking to
+ * prefer it or reject it with.
  *
  * Injected rather than imported for the same reason the HTTP layer's recorder
  * is: playback has no business reaching into cluster bookkeeping.
@@ -184,17 +182,14 @@ export function setMediaTransferListener(listener: MediaTransferListener | undef
 /**
  * One hls.js fragment, reported through the same listener as Direct Play.
  *
- * **Without it a transcode or remux session produced no media evidence at
- * all**, and core's throughput record for a node served only that way was
- * its JSON reads: measured on 2026-09-23, the one question that record would
- * be asked, whether a node can carry a stream to this viewer, was being
- * answered from catalogue payloads.
+ * **Without it a transcode or remux session produces no media evidence at
+ * all**, and core's throughput record for a node served only that way would
+ * answer whether it can carry a stream to this viewer from catalogue payloads.
  *
  * Timed from the first byte to the last, not from the request: the wait
- * before the first byte is the node deciding, and the rest is the link. On
- * that day gbni-1 answered every fragment in 0.1-0.35 s and then delivered
- * at 0.26-1.32 MB/s against a 0.63 MB/s stream, and only the second figure
- * says whether it can keep up.
+ * before the first byte is the node deciding, and the rest is the link. A
+ * node can answer quickly and still deliver slower than the stream, and only
+ * the second figure says whether it can keep up.
  */
 export function reportFragmentTransfer(url: string, bytes: number, firstByteAtMs: number, endAtMs: number): void {
   if (!transferListener || !(bytes > 0)) return;

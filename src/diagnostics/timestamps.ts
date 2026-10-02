@@ -1,20 +1,16 @@
 /**
  * Times in, times out: **UTC everywhere except the last inch.**
  *
- * Tom, 2026-09-21: *"times should be presented in local, but backend we
- * always deal in UTC. Timezones are a presentation problem."* So every
- * instant this client holds, compares, logs or hands to another machine is
- * epoch milliseconds or Zulu, and the only place a zone appears is the pixel
- * a person reads.
+ * Timezones are a presentation problem. Every instant this client holds,
+ * compares, logs or hands to another machine is epoch milliseconds or Zulu,
+ * and the only place a zone appears is the pixel a person reads.
  *
  * **Why the presented form still names its zone.** Macha deploys across
- * sites and the nodes tonight ran EEST, CEST and BST. A viewer reading
- * `18:51:52` on a screen in one zone, beside a journal written in another,
- * cannot tell a correct reading from an hour's error — which is exactly what
- * happened when a session timeline went to the server session stamped from
- * this machine's clock. Local answers "when was that, for me"; the zone
- * label is what stops it being mistaken for the node's own time. Presented
- * local, labelled, and never used as the interchange format.
+ * sites whose nodes run in different zones. A viewer reading `18:51:52` on a
+ * screen in one zone, beside a journal written in another, cannot tell a
+ * correct reading from an hour's error. Local answers "when was that, for
+ * me"; the zone label is what stops it being mistaken for the node's own
+ * time. Presented local, labelled, and never used as the interchange format.
  */
 
 function twoDigits(value: number): string {

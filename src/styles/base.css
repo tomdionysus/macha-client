@@ -242,8 +242,8 @@ h2 { font-size: clamp(1.2rem, 2vw, 1.75rem); letter-spacing: -.01em; margin: 1.1
 /*
  * Cards start at the top rather than stretch to their row: a <button> centres
  * its content in whatever height it is given, so one taller card (a search
- * episode with its series and season links) pushed every button card in its
- * row down by half the difference, and their titles off the line.
+ * episode with its series and season links) would push every button card in
+ * its row down by half the difference, and their titles off the line.
  */
 .media-grid > * { align-self: start; }
 .catalogue-indexed { padding-right: 2.35rem; }
@@ -800,7 +800,7 @@ h2 { font-size: clamp(1.2rem, 2vw, 1.75rem); letter-spacing: -.01em; margin: 1.1
 }
 .player-option-group-node > span { grid-column: 1; padding-top: 0; }
 /* Stacked, one node per line: they are alternatives to each other, and a
-   wrapping row of them read as a sentence rather than a list. */
+   wrapping row of them reads as a sentence rather than a list. */
 .player-option-group-node > div {
   grid-column: 1;
   /* Pills wrap and justify against the right edge rather than running down
@@ -883,9 +883,9 @@ h2 { font-size: clamp(1.2rem, 2vw, 1.75rem); letter-spacing: -.01em; margin: 1.1
 .audio-player-facts .audio-player-format { margin-top: .6rem; color: var(--text-dim); font-size: .9rem; letter-spacing: .02em; }
 /* A media line wraps only between its fields; see MediaLine. */
 .media-line-field { white-space: nowrap; }
-/* Beside the artwork where the screen has room across (Tom, 2026-09-27), under
-   it otherwise. --art, --gap and --facts size the pair, which is centred as
-   one block so neither half drifts off a wide screen. */
+/* Beside the artwork where the screen has room across, under it otherwise.
+   --art, --gap and --facts size the pair, which is centred as one block so
+   neither half drifts off a wide screen. */
 @media (min-width: 760px) and (min-aspect-ratio: 1/1) {
   .audio-player { --art: min(42vh, 38vw, 420px); --gap: 2.5rem; --facts: min(28rem, 36vw); }
   .audio-player .audio-player-art { left: calc(50% - (var(--art) + var(--gap) + var(--facts)) / 2); width: var(--art); transform: translateY(-50%); }
@@ -1073,8 +1073,6 @@ h2 { font-size: clamp(1.2rem, 2vw, 1.75rem); letter-spacing: -.01em; margin: 1.1
   .player-option-group { grid-template-columns: 1fr; gap: .25rem; }
   .player-option-group > span { padding-top: 0; }
   .player-option-note { grid-column: 1; }
-  /* One column leaves no right-hand side to sit on, so the node group stops
-     pretending there is one and reads like every other group. */
   /* One column leaves no right-hand side to sit on, so the node group stops
      pretending there is one and reads like every other group. */
   .player-options { flex-direction: column; gap: .65rem; }

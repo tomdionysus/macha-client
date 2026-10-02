@@ -107,7 +107,7 @@ describe('LazyArtwork', () => {
     // A plain <img> never retries a failed load on its own. A different node
     // is a different failure domain, so there is nothing to wait for before
     // trying it; and once every node has refused, the Blob path carries the
-    // bearer token and its own recovery. No timers, no 60-second placeholder.
+    // bearer token and its own recovery. No timers are involved.
     const artworkFetch = vi.fn(() => Promise.resolve(new Blob(['poster-bytes'], { type: 'image/jpeg' })));
     const ref = { id: 'poster-1', mimeType: 'image/jpeg', url: `http://a/api/v1/catalogue/artwork/poster-1${FUTURE}` };
     render(

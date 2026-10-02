@@ -30,8 +30,8 @@ describe('Samsung Return hierarchy', () => {
     await expect(samsungBackTarget('/manage/files', api)).resolves.toBe('/manage');
     await expect(samsungBackTarget('/manage/users', api)).resolves.toBe('/manage');
     await expect(samsungBackTarget('/manage', api)).resolves.toBe('/');
-    // Settings left Manage and is now reached from the top bar, so Return
-    // goes Home rather than into a section a viewer may have no role for.
+    // Settings is reached from the top bar, not from Manage, so Return goes
+    // Home rather than into a section a viewer may have no role for.
     await expect(samsungBackTarget('/settings', api)).resolves.toBe('/');
     await expect(samsungBackTarget('/settings/connection', api)).resolves.toBe('/settings');
     await expect(samsungBackTarget('/account', api)).resolves.toBe('/');

@@ -39,8 +39,7 @@ interface Props {
    * application, and then it is not optional politeness: with no guest button
    * and no top bar, a viewer whose cluster has stopped granting roles has no
    * control of any kind. On a desk they could type the URL. On a television
-   * there is no URL to type, so without this the only way out is a reinstall
-   * — which is the shape of lockout 0.13.0 already shipped once.
+   * there is no URL to type, so without this the only way out is a reinstall.
    */
   connectionReachable?: boolean;
 }

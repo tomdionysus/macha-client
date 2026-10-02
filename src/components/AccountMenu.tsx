@@ -73,10 +73,9 @@ export function AccountMenu({ session, onSignOut }: Props) {
 
   return (
     <div className="account-menu">
-      {/* The identity *is* the control. It used to sit beside a `⋯` button,
-          which made two adjacent targets for one idea and left the account
-          icon looking pressable while doing nothing — and on a remote it cost
-          a D-pad stop to reach the half that worked. */}
+      {/* The identity *is* the control: one target for one idea, so nothing
+          beside it looks pressable while doing nothing, and on a remote it
+          costs no extra D-pad stop. */}
       <OverflowMenu
         className="account-overflow"
         label={`Account options for ${who}`}
@@ -101,19 +100,14 @@ export function AccountMenu({ session, onSignOut }: Props) {
         onCancel={() => setConfirming(false)}
         onConfirm={() => void signOut()}
       >
-        {/* What logout actually does, measured rather than assumed: `logout()`
-            is `DELETE /api/v1/session`, which revokes this one token. Two
-            sessions were minted for one account against gbni-1 and one
-            revoked; the other kept answering 200.
-
-            This said "ends the session for <who> everywhere, not just on this
-            device", which was a misreading of core's own wording — the
-            revocation "propagates to every node", meaning this token cannot be
-            used against a different node, not that every session the account
-            holds is ended. Signing out everywhere is what a *password or role
-            change* does, by bumping `credential_generation`. Telling someone
-            their other devices have been signed out when they have not is the
-            kind of wrong that stops them doing the thing they actually needed. */}
+        {/* What logout actually does: `logout()` is `DELETE /api/v1/session`,
+            which revokes this one token, and the account's other sessions
+            keep working. Core's "propagates to every node" means this token
+            cannot be used against a different node, not that every session
+            the account holds is ended; signing out everywhere is what a
+            *password or role change* does, by bumping `credential_generation`.
+            Telling someone their other devices have been signed out when they
+            have not stops them doing the thing they actually needed. */}
         <p>
           This signs <strong>{who}</strong> out on this device only — anywhere else stays signed in.
           Anything playing here will stop.

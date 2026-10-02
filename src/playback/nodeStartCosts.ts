@@ -6,16 +6,15 @@ import type { PlaybackResolver } from '@machafoundation/core';
  * **Session create to first fragment.** A node produces a generation
  * sequentially from the position it was asked for at create, so everything
  * between the request and the first fragment is time the viewer travels while
- * the node has produced nothing. Measured live 2026-09-23 on gbni-1: create
- * 3.3 s, first fragment a further 12.3 s, and a handover that asked for the
- * viewer's position started 15.6 s behind a join receding at 1x. No node
- * states this figure, and its start timeout is a ceiling rather than an
- * expectation (core, 2026-09-23), so it is measured here.
+ * the node has produced nothing, and a handover that asks for the viewer's
+ * position starts that far behind a join receding at 1x. No node states this
+ * figure, and its start timeout is a ceiling rather than an expectation, so
+ * it is measured here.
  *
  * **The latest figure, and only while it is fresh.** A node under load is
  * slower now than it was, so the newest measurement wins, and one older than
  * `START_COST_STALE_MS` answers nothing rather than a guess. Never a
- * constant: a figure frozen in a client is the `look_ahead_ms` fault.
+ * constant: a figure frozen in a client goes wrong as soon as the node changes.
  *
  * Keyed by origin, because that is what a session URL and an endpoint share.
  * A node reachable at two addresses is asked about by all of them.

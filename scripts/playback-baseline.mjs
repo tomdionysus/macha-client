@@ -28,10 +28,10 @@ const NODE = arg('node', 'http://10.44.1.50:7438');
 const LIMIT = Number(arg('limit', '400'));
 
 /**
- * Chrome 151 on macOS, probed live from the running client. `matroska` joined
- * the list on 2026-09-13, when `canPlayType` was measured to discriminate on
- * it properly: `video/x-matroska; codecs="avc1.42E01E"` answers `probably`
- * and the same container with a nonsense codec answers `""`.
+ * Chrome on macOS, as the running client probes it. `matroska` is listed
+ * because `canPlayType` discriminates on it properly:
+ * `video/x-matroska; codecs="avc1.42E01E"` answers `probably` and the same
+ * container with a nonsense codec answers `""`.
  */
 const CHROME = {
   platform: 'web',
@@ -58,10 +58,9 @@ configureMachaHost({ origin: NODE });
 
 /**
  * The cluster gives an unauthenticated session no roles, so this signs in as
- * the test account the way any client does. Core stopped exporting a mint
- * helper in 0.10.0 — "one account model, no special anonymous" — and the
- * endpoint is two lines, so this asks the node directly rather than standing
- * up a `SessionManager` for one token.
+ * the test account the way any client does. Core exports no mint helper,
+ * and the endpoint is two lines, so this asks the node directly rather than
+ * standing up a `SessionManager` for one token.
  */
 async function mint(node) {
   const username = process.env.MACHA_TEST_USER;

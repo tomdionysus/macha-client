@@ -4,10 +4,8 @@ import { MediaLine } from '../../components/MediaLine';
 
 /**
  * What a track is, beside its artwork: the artist, the album with its year,
- * where it sits on the album, and its file's format line. Tom's request; the
- * format line and the place beside the artwork from 2026-09-27. A track
- * restored from a queue saved before core 0.19.0 may carry no music context;
- * it shows what it has.
+ * where it sits on the album, and its file's format line. A track restored
+ * from an older saved queue may carry no music context; it shows what it has.
  */
 export function TrackFacts({ track, format }: { track: MediaSummary; format?: readonly string[] }) {
   const artist = track.musicContext?.artist?.title;

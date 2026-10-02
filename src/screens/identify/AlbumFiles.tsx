@@ -27,8 +27,7 @@ function statusText(status: FileStatus | undefined): string | undefined {
  *
  * The match is the release and the track number the file's own tags give;
  * the track's title on the release is not checked here, because no route
- * gives a release's tracklist yet (asked of the server for after the
- * experiment).
+ * gives a release's tracklist.
  */
 export function AlbumFiles({ release, file, track, disc, siblings, selected, statuses, disabled, onSelect }: {
   release: ProviderSearchResult;

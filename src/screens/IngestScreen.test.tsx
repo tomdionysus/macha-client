@@ -24,9 +24,8 @@ function torrentJob(overrides: Partial<TorrentJob> = {}): TorrentJob {
     eta_seconds: 1_200,
     progress: 0.25,
     ingest_job_id: null,
-    // A real node id, as `GET /api/v1/status` reports it. The fixture used to
-    // say `gbni-2`, which is not a thing the server has ever sent, and it made
-    // this assertion agree that the Node row is readable when it is not.
+    // A real node id, as `GET /api/v1/status` reports it: an opaque hash, not
+    // a host name, so the Node row's assertion tests the shape the server sends.
     node_id: '855716bd8bb0ad12b0c4f876386699de',
     created_unix_ms: Date.now() - 3_600_000,
     updated_unix_ms: Date.now() - 2_000,
@@ -64,7 +63,7 @@ function fakeApi(value: AcquisitionSnapshot | (() => AcquisitionSnapshot), overr
     retryTorrent: unused,
     cancelTorrent: unused,
     clearTorrent: unused,
-    // As the cluster is today: one node that runs torrents (server 0.64.0).
+    // One node that runs torrents.
     torrentNodes: () => Promise.resolve({ nodes: [{ node_id: 'gbni', host: 'gbni-1', local: false, reachable: true, as_of_unix_ms: 1, max_active: 4, active_jobs: 0, accepting: true, not_accepting_reason: null, staging: { limit_bytes: 1, disk_bytes: 1, reserved_bytes: 0, free_bytes: 1 } }] }),
     ...overrides,
   } as unknown as AcquisitionApi;

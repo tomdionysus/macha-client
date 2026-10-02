@@ -12,9 +12,9 @@ function clock() {
 
 describe("a node's measured cost of starting a stream", () => {
   it('is session create to first fragment, for the node that served it', () => {
-    // Measured live 2026-09-23 on gbni-1: create 3.3 s, first fragment a
-    // further 12.3 s. Both are the node's cost, because the node starts
-    // producing from the position it was asked for at create.
+    // Both create and the wait for the first fragment are the node's cost,
+    // because the node starts producing from the position it was asked for at
+    // create.
     const time = clock();
     const costs = new NodeStartCosts(time.now);
     costs.requested(SOURCE, time.now());
@@ -73,8 +73,8 @@ describe("a node's measured cost of starting a stream", () => {
   });
 
   it('forgets a figure too old to describe the node now, and invents nothing in its place', () => {
-    // Never a constant: a figure frozen in a client is the `look_ahead_ms`
-    // fault, a client sized against a node that had since changed.
+    // Never a constant: a figure frozen in a client sizes it against a node
+    // that may since have changed.
     const time = clock();
     const costs = new NodeStartCosts(time.now);
     costs.requested(SOURCE, time.now());

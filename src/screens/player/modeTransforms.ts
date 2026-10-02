@@ -33,16 +33,13 @@ function decodableOverHls(capabilities: PlaybackCapabilities | undefined, codec:
  * mode=transcode with video=copy"*. So a press that cannot copy the audio
  * has to become a transcode that copies the video — which is precisely the
  * plan the server's own chooser produces for these titles, `VIDEO COPY` plus
- * `AUDIO TRANSCODE`, and precisely what the press used to throw away.
+ * `AUDIO TRANSCODE`.
  *
  * **Why it may not copy the audio.** Remux is delivered as fragmented MP4,
- * and this device has to decode what arrives in it. Pressing remux on an
- * AC-3 title asked a node to copy audio the browser has no decoder for, and
- * that request has two endings, both measured on 2026-09-21 against `fi-1`:
- * the node never produces a first fragment — `readyState` 0, six non-fatal
- * HLS errors then two fatal at 59 s — or, if it ever served it, a silent
- * film. The mobile client reached the same table from the other end the same
- * afternoon.
+ * and this device has to decode what arrives in it. Asking a node to copy
+ * audio the browser has no decoder for (AC-3, say) ends one of two ways: no
+ * first fragment ever arrives and HLS errors turn fatal, or the film plays
+ * silent.
  *
  * **Direct and transcode have no decision to make.** Direct serves the source
  * file untouched, and transcode as a viewer's explicit choice means

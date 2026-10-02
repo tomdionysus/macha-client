@@ -24,14 +24,12 @@ describe('client API endpoint status', () => {
   });
 
   it('takes the cooldown answer from the registry rather than recomputing it', () => {
-    // This used to compare `health.retryAt` against `Date.now()`, which was
-    // right only because App.tsx happens to inject `Date.now` as the registry's
-    // clock. The registry's default is a duration clock whose origin restarts
-    // near zero every load, so the comparison was one constructor argument away
-    // from silently inverting — and inverting plausibly, on the screen someone
-    // reads when a node is misbehaving.
-    //
-    // `ready` now decides, so a `retryAt` from any clock at all changes nothing.
+    // Comparing `health.retryAt` against `Date.now()` would be right only
+    // while App.tsx injects `Date.now` as the registry's clock; the registry's
+    // default is a duration clock whose origin restarts near zero every load,
+    // and the label would invert silently, on the screen someone reads when a
+    // node is misbehaving. `ready` decides, so a `retryAt` from any clock at
+    // all changes nothing.
     const cooling = candidate({ consecutiveFailures: 2, retryAt: Number.MAX_SAFE_INTEGER }, false);
     const eligible = candidate({ consecutiveFailures: 2, retryAt: Number.MAX_SAFE_INTEGER }, true);
 
@@ -115,18 +113,17 @@ describe('a node that accepts no inbound connections', () => {
   const node = (fields: Record<string, unknown>) => fields as unknown as ClusterNodeStatus;
 
   /**
-   * The case this was originally got wrong, kept as the first test because it
-   * is the only one that distinguishes the two plausible implementations.
+   * The first test because it is the only one that distinguishes the two
+   * plausible implementations.
    *
    * They are two planes, not two names for one. `api_endpoint` is the HTTP URL
    * a client dials; `inbound_capable` is whether peers can dial this node's
    * RPC plane. A node behind CGNAT refuses peer connections and still serves
-   * its API to clients that can route to it. Measured on the deployed cluster
-   * 2026-09-15, `corvus-fi-1` reports `inbound_capable: false` while
-   * advertising `http://10.35.1.50:7438` — usable from inside that building,
-   * dead from anywhere else. Deriving one from the other calls that node
-   * inbound-capable, which is backwards, on the one node in the cluster the
-   * label exists for.
+   * its API to clients that can route to it, as here: `inbound_capable: false`
+   * while advertising a LAN address usable from inside that building and dead
+   * from anywhere else. Deriving one from the other calls such a node
+   * inbound-capable, which is backwards, on exactly the node the label exists
+   * for.
    */
   it('does not mistake an advertised API endpoint for inbound peer capability', () => {
     expect(nodeInboundCapable(node({ inbound_capable: false, api_endpoint: 'http://10.35.1.50:7438' }))).toBe(false);
@@ -214,9 +211,9 @@ describe('telemetry age, coloured rather than merely printed', () => {
 
 describe('machine memory reported separately from the node process footprint', () => {
   it('never answers with the process resident set, and says nothing rather than nothing-at-all', () => {
-    // The whole reason this helper exists. `rss_bytes` is the only byte count
-    // the server sent for most of this project's life, and it is the node's
-    // own footprint — a few hundred MB on a machine with 64 GB. Rendering it
+    // The whole reason this helper exists. `rss_bytes` may be the only byte
+    // count a node sends, and it is the node's own process footprint — a few
+    // hundred MB on a machine with 64 GB. Rendering it
     // under "Memory" would be wrong by two orders of magnitude and look
     // entirely plausible.
     expect(systemMemoryBytes({ rss_bytes: 402_653_184 })).toBeUndefined();

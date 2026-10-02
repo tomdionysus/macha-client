@@ -107,9 +107,9 @@ describe('byStanding', () => {
   });
 
   it('puts root above anonymous, which alphabetical order would not', () => {
-    // The ordering Tom asked for, and the one the alphabet gets backwards.
-    // Read from `set_password`: anonymous is the account that can hold no
-    // credential, which is what separates it from the superuser.
+    // The alphabet gets this backwards. Read from `set_password`: anonymous
+    // is the account that can hold no credential, which is what separates it
+    // from the superuser.
     expect([anonymousUser(), rootUser()].sort(byStanding).map((each) => each.username))
       .toEqual(['root', 'anonymous']);
   });
@@ -138,7 +138,7 @@ describe('byStanding', () => {
 
 describe('UsersScreen', () => {
   it('lists each account with its roles, and puts no input in the list', async () => {
-    // The whole point of the redesign: the list is for reading. Anything
+    // The list is for reading. Anything
     // editable in a row is a control the viewer can change without meaning to.
     render(<UsersScreen
       api={fakeApi([user({ id: 'a', username: 'alice', roles: ['media_viewer', 'manage_users'] })])}

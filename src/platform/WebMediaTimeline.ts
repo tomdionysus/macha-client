@@ -50,7 +50,7 @@ function canonicalOrigin(candidateMs: number): number | undefined {
  * Where the loader was pointed when this generation started fetching.
  *
  * The two attach paths differ in a way the timeline cannot infer from the
- * requested position, and inferring it was the fault this argument removes:
+ * requested position, so the caller states which one it took:
  *
  * - `generation-start` — the teardown path. hls.js loads from the beginning of
  *   the generation and the initial-seek listener samples *before* it seeks, so

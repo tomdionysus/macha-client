@@ -108,11 +108,10 @@ export const navItems = [
 /**
  * Where a viewer goes once they have signed in.
  *
- * The login redirect already records where they were heading — a deep link
- * into a title, usually — and without this that intent is collected and then
- * dropped: `onSignedIn` refreshed the session and nothing navigated, leaving
- * somebody who has just authenticated looking at the login form they only
- * filled in because they wanted to watch something.
+ * The login redirect records where they were heading — a deep link into a
+ * title, usually — and this honours it, rather than leaving somebody who has
+ * just authenticated looking at the login form they only filled in because
+ * they wanted to watch something.
  *
  * `from` is trusted only as far as it is a path this application produced. It
  * comes from `location.state`, which a viewer can author via the History API,
@@ -336,8 +335,8 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
   const volumeStore = useMemo(() => new VolumeStore(clientId), [clientId]);
   // Per device, at core's key, so every client keeps the setting alike.
   const qualityPreferences = useMemo(() => new QualityPreferenceStore(), []);
-  // Tom, 2026-09-25: offer only what this device can play, with a setting to
-  // offer everything. Read live for the player's options, and at each start
+  // Offer only what this device can play, with a setting to offer
+  // everything. Read live for the player's options, and at each start
   // and each title page for the rest.
   const offerAll = useSyncExternalStore(qualityPreferences.subscribe, qualityPreferences.getSnapshot).offerAll === true;
   const offerAllNow = useCallback(() => qualityPreferences.get().offerAll === true, [qualityPreferences]);
@@ -354,14 +353,14 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
       // somewhere to go if the configured endpoint is down at that moment.
       // Core seeds it as discovered, which is what keeps it remembered: the
       // health cycle rewrites the remembered list from discovered entries
-      // alone, and this client used to seed it as environment, which wiped
-      // it on the first cycle after every load.
+      // alone, so seeding it as environment would wipe it on the first cycle
+      // after every load.
       remembered: getDiscoveredEndpoints(),
     }),
     // Wall-clock, so the timestamps the registry stamps on health — last
     // success, last failure — are readable as dates on the Status screen.
-    // Nothing outside the registry compares against its *durations* any
-    // more: `EndpointCandidate.ready` answers "is this endpoint out of
+    // Nothing outside the registry compares against its *durations*:
+    // `EndpointCandidate.ready` answers "is this endpoint out of
     // cooldown" from inside, against whatever clock it actually holds.
     Date.now),
     [endpointKey],
@@ -373,9 +372,8 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
    *
    * Kept here because the registry is — a player is created and destroyed per
    * item, and a choice that died with the player would have to be made again
-   * on the next one. `prefer()` arrived in core on 2026-09-21 for exactly
-   * this; before it, the only public way to be preferred was `recordSuccess`,
-   * which also wrote a successful round trip that never happened.
+   * on the next one. `prefer()` exists for exactly this; `recordSuccess`
+   * would also write a successful round trip that never happened.
    */
   const pinEndpoint = useCallback(
     (endpointIds: readonly string[]) => {
@@ -388,20 +386,18 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
   /**
    * Media is where the bytes are, and core cannot see them.
    *
-   * Core records its own JSON reads from 0.12.0 and owns the bandwidth store,
-   * so the client wires one thing only: the bytes the Direct Play read-ahead
-   * worker moved. Without this the record describes JSON alone — which is how
-   * this client once spent an afternoon streaming from the slowest node it
-   * had, because a node serving nothing but media had no throughput evidence
-   * to be judged on.
+   * Core records its own JSON reads and owns the bandwidth store, so the
+   * client wires one thing only: the bytes the Direct Play read-ahead worker
+   * moved. Without this the record describes JSON alone, and a node serving
+   * nothing but media has no throughput evidence to be judged on, so the
+   * slowest node can go on being chosen.
    *
-   * It matters more than it looks. Measured against the cluster on 2026-09-15,
-   * a movie listing is 416 KB and a show listing 67 KB — both clear core's
-   * sample floor — but `/api/v1/status` is 5.7 KB and `catalogue/status` 303
-   * bytes, so the ten-second health cycle contributes nothing at all. JSON
-   * evidence therefore arrives only when a viewer opens a library, and a
-   * client launched straight into a player has none. This feed is the only
-   * throughput evidence such a session will ever produce.
+   * It matters more than it looks. Library listings clear core's sample
+   * floor, but the health cycle's status responses are a few kilobytes at
+   * most and contribute nothing. JSON evidence therefore arrives only when a
+   * viewer opens a library, and a client launched straight into a player has
+   * none. This feed is the only throughput evidence such a session will ever
+   * produce.
    */
   useEffect(() => {
     setMediaTransferListener(
@@ -437,12 +433,11 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
   // only when it actually sent a token, so a whoami that goes out during the
   // cold-start mint is answered 401, returned as-is, and the roles are never
   // read — leaving every privileged section visible for the rest of the run.
-  // It only ever worked by timing.
   const { session, refresh: refreshSession } = useCurrentSession(usersApi, connectionRequired && !effectiveConnectionGate && sessionReady);
   /**
    * Permissions come from the token, identity comes from the whoami.
    *
-   * They are deliberately separate now. `roles` rides the session itself, so a
+   * They are deliberately separate. `roles` rides the session itself, so a
    * failover or a slow node cannot leave the navigation guessing; the whoami
    * above supplies only the display name and the password policy, and a
    * failure there costs a name rather than a set of permissions.
@@ -461,11 +456,11 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
    * and stated a policy, which is a different thing from a node that could not
    * be asked. Core withholds the unreachable report for a refusal precisely so
    * that a client does not send a viewer to check a server that is up and
-   * working exactly as configured — and until now this client had nothing to
-   * say in its place. Roles stay `undefined` through a refusal, so `permits`
-   * answers its permissive "unknown is not none" and the whole navigation
-   * rendered as usual over a session that does not exist: every section
-   * visible, every request refused, and nothing on screen admitting it.
+   * working exactly as configured, and this is what the client says in its
+   * place. Roles stay `undefined` through a refusal, so `permits` alone would
+   * answer its permissive "unknown is not none" and render the whole
+   * navigation over a session that does not exist: every section visible,
+   * every request refused, and nothing on screen admitting it.
    *
    * Both land on the sign-in wall, which is the one thing a viewer can
    * actually do about either. The server's own sentence is deliberately not
@@ -527,7 +522,7 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
     // describe the node that will execute the instruction rather than whichever
     // one happened to be preferred at boot.
     // Every file the item holds: core's chooser weighs each against this
-    // client's capabilities and names the one it plays (Tom, 2026-09-24).
+    // client's capabilities and names the one it plays.
     facts: async (media: MediaSummary) => playbackFactsApi.facts({ itemId: media.id }),
     policyOverrides,
     qualityCeiling: deviceCeiling,
@@ -630,9 +625,6 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
     navigate(routes.login, { replace: true, state: { from: `${location.pathname}${location.search}` } });
   }, [activePlayback, locked, location.pathname, location.search, navigate]);
 
-  /**
-   * Finish the journey the login interrupted, rather than ending it at the form.
-   */
   const [signOutNotice, setSignOutNotice] = useState<string>();
   /**
    * Log out, in the order core states: playback first, because a playback
@@ -654,6 +646,7 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
     navigate(routes.home, { replace: true });
   }, [endSession, navigate, playback.stop, refreshSession]);
 
+  /** Finish the journey the login interrupted, rather than ending it at the form. */
   const finishSignIn = useCallback(() => {
     setSignOutNotice(undefined);
     refreshSession();
@@ -677,13 +670,8 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
   /**
    * Save the endpoint list. Nothing is probed first, deliberately.
    *
-   * There used to be a pre-save reachability check here, and it could not
-   * work: it asked an unauthenticated `catalogue/status`, which every node
-   * answers 401, so no typed endpoint ever qualified and none could be saved.
-   * On a fresh install that is a lockout — no endpoint means no session,
-   * and no session means no endpoint can ever be validated.
-   *
-   * Repairing the probe would have been the wrong fix. Reachability is not a
+   * A check that needs a session is a lockout on a fresh install, where no
+   * endpoint means no session. Nor is one needed: reachability is not a
    * question to ask once on a button press; it is a fact the client already
    * maintains. The health monitor probes every known node on a timer and the
    * registry holds the answer, and the session mint already walks candidates
@@ -818,9 +806,8 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
   // `routes.connection` is the other exception, and it is not a hole in the
   // wall: it grants no media, only the ability to point this client at a
   // different cluster. Without it a viewer whose node stops granting roles
-  // can neither sign in nor leave — 0.13.0 shipped that exact shape of
-  // lockout, where the gate stood in front of the one screen that could undo
-  // it, and it took a release to get out of.
+  // can neither sign in nor leave: the gate would stand in front of the one
+  // screen that could undo it.
   if (locked && !activePlayback) return <div className="app-shell">
     {location.pathname === routes.connection
       ? <ConnectionGateScreen
@@ -874,10 +861,6 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
             );
           })}
         </nav>
-        {/* The platform badge lived here and no longer does: it labelled the
-            build on every screen for the benefit of nobody but a developer,
-            and Status already reports the platform under Playback support,
-            beside the codec probes that give it meaning. */}
         <div className="topbar-trailing">
           {session && <AccountMenu session={session} onSignOut={signOut} />}
           <NavLink
@@ -944,9 +927,9 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
           <Route path={routes.manageUsers} element={usersAvailable ? managePane('users') : <Navigate to={routes.settings} replace />} />
           <Route path={routes.settings} element={settingsPane} />
           <Route path={routes.connection} element={settingsPane} />
-          {/* Settings used to live under Manage. A bookmark from then still
-              works rather than landing on the catch-all and silently becoming
-              Home, which reads as the setting having been lost. */}
+          {/* A bookmark to Settings under Manage still works, rather than
+              landing on the catch-all and silently becoming Home, which reads
+              as the setting having been lost. */}
           <Route path="/manage/settings" element={<Navigate to={routes.settings} replace />} />
           <Route path="/manage/settings/connection" element={<Navigate to={routes.connection} replace />} />
           <Route path={routes.login} element={<LoginScreen onSignIn={(username, password) => sessionManager.signIn({ username, password })} onSignedIn={finishSignIn} />} />

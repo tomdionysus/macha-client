@@ -77,7 +77,7 @@ function instructionNote(instruction: PlaybackInstructionReport | undefined): st
   if (!instruction) return undefined;
   if (instruction.chosenByViewer) return 'Chosen by you.';
   if (instruction.withoutFacts) {
-    // Say *why* nothing could be read, from server 0.12.0's `factsError`. A
+    // Say *why* nothing could be read, from the server's `factsError`. A
     // viewer who sees "could not be reasoned from" has no idea whether their
     // file is broken, their node is busy or this client never asked — and the
     // symptom they get downstream is a media error that reads as a corrupt
@@ -95,10 +95,9 @@ function instructionNote(instruction: PlaybackInstructionReport | undefined): st
 /**
  * Inputs nobody supplied, named rather than left to a reasonable default.
  *
- * A reasonable default produces a plausible instruction, which is why three
- * separate fields could be declared, consumed and populated by nobody without
- * anything ever looking wrong. This client intends to wire all of them, so
- * anything listed here is a defect and not a note.
+ * A reasonable default produces a plausible instruction, so an input nobody
+ * supplies never looks wrong on its own. This client intends to wire all of
+ * them, so anything listed here is a defect and not a note.
  */
 function assumptionNote(instruction: PlaybackInstructionReport | undefined): string | undefined {
   if (!instruction || instruction.chosenByViewer || instruction.assumed.length === 0) return undefined;
@@ -133,7 +132,7 @@ export function PlayerOptions({ session, pendingPreferences, instruction, capabi
   const selectedSubtitle = pendingPreferences?.subtitleStream === null
     ? -1
     : pendingPreferences?.subtitleStream ?? session.selected.subtitleStream;
-  // "Auto" is no longer a value the server understands — the client decides.
+  // "Auto" is not a value the server understands — the client decides.
   // `'choose'` is a core-side sentinel that never reaches the wire: the
   // coordinator re-runs the instruction chooser against this media's facts and
   // this platform's policy, then sends a concrete mode. Sending it on every
@@ -147,15 +146,13 @@ export function PlayerOptions({ session, pendingPreferences, instruction, capabi
   // whatever instruction created it — Auto's usual answer for this library is
   // transcode with the video copied — and naming only the mode leaves those in
   // place. The server then reads the result as a contradiction and refuses the
-  // whole update: "direct serves the source file untouched and copies every
-  // stream". The viewer pressed one button and got an error about a request
-  // they did not make. Saying the whole transform outright leaves nothing to
-  // be merged with, and nothing to disagree about.
+  // whole update, so one button press would end in an error about a request
+  // the viewer did not make. Saying the whole transform outright leaves
+  // nothing to be merged with, and nothing to disagree about.
   //
   // What it says is `modeTransform`'s to decide, and remux is the one that
-  // has a decision: copying audio this device cannot decode is how a mode
-  // press turned into a node that never produced a first fragment. See there
-  // for the measurement.
+  // has a decision: copying audio this device cannot decode leaves a node
+  // that never produces a first fragment.
   const audioCodec = session.options.audioStreams.find((stream) => stream.index === selectedAudio)?.codec
     ?? session.output.audio?.codec;
   const mode = (value: PlaybackMode | 'choose') => onApply({

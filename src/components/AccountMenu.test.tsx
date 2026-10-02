@@ -56,10 +56,9 @@ describe('AccountMenu', () => {
   });
 
   it('makes the identity itself the control, with no second target beside it', () => {
-    // It used to be an inert username-and-icon chip next to a `⋯` button:
-    // two adjacent targets for one idea, an account icon that looked
-    // pressable and did nothing, and an extra D-pad stop on a remote to
-    // reach the half that worked.
+    // A chip beside a separate `⋯` button would be two adjacent targets for
+    // one idea, an account icon that looks pressable and does nothing, and an
+    // extra D-pad stop on a remote to reach the half that works.
     show(session());
 
     const trigger = screen.getByRole('button', { name: 'Account options for alice' });
@@ -80,10 +79,9 @@ describe('AccountMenu', () => {
   });
 
   it('describes what logging out actually does, and not more', () => {
-    // `logout()` is DELETE /api/v1/session, which revokes one token. Verified
-    // against gbni-1: two sessions minted for one account, one revoked, the
-    // other still answered 200. Claiming it signs the account out everywhere
-    // describes what a password or role change does — and telling someone
+    // `logout()` is DELETE /api/v1/session, which revokes one token; the
+    // account's other sessions stay valid. Claiming it signs the account out
+    // everywhere describes what a password or role change does — and telling someone
     // their other devices are signed out when they are not stops them doing
     // the thing they actually needed.
     show(session());

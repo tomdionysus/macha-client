@@ -50,9 +50,7 @@ let browserArtworkViewport: BrowserArtworkViewport | undefined;
  * Notify once `element` is within the preload margin of the viewport.
  *
  * Falls back to loading immediately during server-side rendering and on the
- * rare browser with no IntersectionObserver (older Samsung Tizen firmware):
- * the same graceful-degradation shape this already used for SSR, just with
- * one more condition.
+ * rare browser with no IntersectionObserver (older Samsung Tizen firmware).
  */
 export function observeArtworkProximity(element: Element, listener: ProximityListener): () => void {
   if (typeof window === 'undefined' || typeof IntersectionObserver === 'undefined') {

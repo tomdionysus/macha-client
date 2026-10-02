@@ -41,8 +41,8 @@ describe('AccountScreen password control', () => {
   });
 
   it('offers none for an account that holds no credential, and says why', async () => {
-    // The anonymous account on server 0.38.4: no credential at all, so a
-    // password PATCH answers 409 `no_password`. Drawing the control anyway
+    // The anonymous account holds no credential at all, so a password PATCH
+    // answers 409 `no_password`. Drawing the control anyway
     // would be a button whose only possible outcome is an error.
     renderAccount(account({ rename: false, delete: false, set_password: false, set_roles: true }));
     await settle();

@@ -27,10 +27,9 @@ export function tvRangeOwnsDirection(value: unknown, direction: SamsungDpadDirec
  * between controls, so an editor that keeps them is an editor the viewer
  * cannot leave except by pressing Back and losing the form.
  *
- * Textarea used to be excepted here, on the grounds that it genuinely uses up
- * and down to move between lines. True, and beside the point: the endpoints
- * box is a textarea, and on the television it was a trap. Caret movement
- * within a line is what left and right are for; moving between controls is
+ * A textarea is no exception, though it uses up and down between lines: the
+ * endpoints box is a textarea, and keeping them would make it a trap. Caret
+ * movement within a line is what left and right are for; moving between controls is
  * what up and down are for, and a viewer who cannot reach the Save button has
  * lost more than a viewer who cannot reach line two.
  */
@@ -88,13 +87,11 @@ function rectGap(start: number, size: number, otherStart: number, otherSize: num
  * How far a candidate is in the direction pressed, or null when it is not in
  * that direction at all. Judged from the current element's edges, not its
  * centre: a search field spanning most of its row has its centre far from its
- * right edge, and by centres every result card right of that middle counted
- * as "right" of the field and beat the sort control beside it. Found by the
- * Android TV client, which ported this scorer and changed it in step.
+ * right edge, and by centres every result card right of that middle would
+ * count as "right" of the field and beat the sort control beside it.
  *
- * The one deliberate difference from that port: the TV client also makes the
- * opposite press undo the move just made. Tom declined it for the web
- * (2026-09-24), so this scorer alone decides every move here.
+ * The opposite press does not undo the move just made; this scorer alone
+ * decides every move.
  */
 function scoreTvCandidate(current: DOMRect, candidate: DOMRect, direction: SamsungDpadDirection): { score: number; inLane: boolean } | null {
   const tx = candidate.left + candidate.width / 2;
@@ -122,13 +119,12 @@ function scoreTvCandidate(current: DOMRect, candidate: DOMRect, direction: Samsu
 /**
  * The best candidate, one row at a time. Left and right keep to the current
  * row: only what overlaps the current element vertically competes, and at the
- * end of the row the move stops rather than falling to another row. The lane
- * penalty alone let a near card below beat a far refresh on the same row.
- * Up and down go to the nearest row: the candidate whose facing edge is
- * closest, and everything overlapping it vertically. "Same column first" was
- * wrong there: under a short row the only thing in a card's column can be the
- * top bar, and Up skipped the whole row. Both corrections are the Android TV
- * client's, found on its set and ported in step.
+ * end of the row the move stops rather than falling to another row; a lane
+ * penalty alone would let a near card below beat a far refresh on the same
+ * row. Up and down go to the nearest row: the candidate whose facing edge is
+ * closest, and everything overlapping it vertically. "Same column first"
+ * would be wrong there: under a short row the only thing in a card's column
+ * can be the top bar, and Up would skip the whole row.
  */
 function bestTvCandidate(current: HTMLElement, elements: HTMLElement[], direction: SamsungDpadDirection): HTMLElement | undefined {
   const currentRect = current.getBoundingClientRect();
@@ -144,7 +140,7 @@ function bestTvCandidate(current: HTMLElement, elements: HTMLElement[], directio
   let row = scored;
   if (direction === 'left' || direction === 'right') {
     // The end of a row is the end of the move: falling back to other rows
-    // dropped Left from the top bar's first item into a card below it.
+    // would drop Left from the top bar's first item into a card below it.
     row = scored.filter((entry) => entry.result.inLane);
   } else {
     const facingGap = (rect: DOMRect) => rectGap(currentRect.top, currentRect.height, rect.top, rect.height);

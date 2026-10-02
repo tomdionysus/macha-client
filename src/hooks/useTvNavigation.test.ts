@@ -138,10 +138,10 @@ describe('attachSpatialTvNavigation', () => {
     });
 
     it('lets up and down leave a multi-line or list editor too', () => {
-      // The endpoints box is a textarea, and on the television it was a trap:
-      // up and down moved the caret and nothing else, so the Save button below
-      // it could not be reached at all. Between-controls beats between-lines
-      // on a remote that has no other way of doing the former.
+      // The endpoints box is a textarea: if up and down moved only the caret,
+      // the Save button below it could not be reached at all. Between-controls
+      // beats between-lines on a remote that has no other way of doing the
+      // former.
       for (const editor of [element('textarea'), element('select'), element('div', { contentEditable: true })]) {
         expect(tvTextEditingOwnsCommand(editor, 'up')).toBe(false);
         expect(tvTextEditingOwnsCommand(editor, 'down')).toBe(false);

@@ -105,11 +105,9 @@ export function webHlsPreflightTargets(manifest: string, manifestUrl: string): {
 async function readFirstResponseBytes(response: Response): Promise<boolean> {
   if (!response.ok) return false;
   // Chromium 47 (Tizen 3) has `fetch` but not response streams, so `body` is
-  // undefined there. Reading that as "no bytes arrived" made every warm
-  // standby the Samsung ever prepared fail its own validation and be thrown
-  // away, leaving the set with only the slow path it is least able to take.
-  // The buffered read costs the bytes the caller's Range header has already
-  // bounded.
+  // undefined there. Reading that as "no bytes arrived" would fail every warm
+  // standby on that platform. The buffered read costs only the bytes the
+  // caller's Range header has already bounded.
   if (!response.body) return (await response.arrayBuffer()).byteLength > 0;
   const reader = response.body.getReader();
   try {
@@ -123,22 +121,17 @@ async function readFirstResponseBytes(response: Response): Promise<boolean> {
 /**
  * How long a preflight may wait before calling a node unable to serve a source.
  *
- * **Derived, not chosen, and that is the whole point.** This was 5,000 ms — a
- * number picked in isolation, against a server that gives itself 15,000 ms to
- * start a pipeline. A standby is a freshly created transcode generation and the
- * server's pipeline is lazy: nothing is produced until something asks, so the
- * preflight's own request is what starts production and then waits for it.
- * Measured against `es-1` on 2026-09-17 the first fragment of such a generation
- * took **9.0 s**. Every standby slower than five seconds was therefore recorded
- * as "that node cannot serve this" when it meant "that node had not finished
- * starting", and the rescue was discarded — silently, and worst on exactly the
- * cold, busy or distant nodes a standby exists for.
+ * **Derived from the server's budgets, not chosen.** A standby is a freshly
+ * created transcode generation and the server's pipeline is lazy: nothing is
+ * produced until something asks, so the preflight's own request is what starts
+ * production and then waits for it. A shorter, independently chosen deadline
+ * would record "that node had not finished starting" as "that node cannot serve
+ * this", and discard the rescue on exactly the cold, busy or distant nodes a
+ * standby exists for.
  *
  * So it clears what a healthy node is entitled to take: its full startup
  * budget, plus one segment hold for the request that lands past the production
  * frontier, plus room for two playlist round trips and the transfer itself.
- * Two independently chosen numbers that were never compared is the fault this
- * project keeps recording; this one is written as the sum it has to exceed.
  *
  * It bounds the whole walk — both playlists and both media ranges share it —
  * and it is a **gate**, so it must eventually give up. Warming a pipeline is a
@@ -197,7 +190,7 @@ export async function preflightWebHlsSource(
 /**
  * Budgets for a seamless generation handover. All of them fail *towards* the
  * teardown path: a handover that cannot be set up in time is abandoned and the
- * viewer gets today's behaviour, which is worse but never worse than broken.
+ * viewer gets a visible gap, which is worse but never broken.
  */
 const HANDOVER_READY_TIMEOUT_MS = 20_000;
 /**
@@ -284,11 +277,9 @@ export interface HandoverJoinObservation {
  * replacement fills at whatever rate its node produces. A node encodes a
  * generation sequentially from its own start, so the replacement can only ever
  * arrive if it produces faster than the viewer consumes. A stream copy does,
- * comfortably. A software transcode of a large source does not, and then the
- * distance never closes — measured live on 2026-09-20 at ~2 s buffered against
- * a join at 33.9 s, still diverging when the 25 s budget expired, after which
- * the fallback rewound the viewer 20 s. The handover had no way to arrive and
- * spent the whole budget finding that out.
+ * comfortably. A software transcode of a large source may not, and then the
+ * distance never closes; waiting out the whole budget for it only delays the
+ * fallback.
  *
  * **Both rates are measured, never assumed.** Not `source.mode`, which says
  * what a node is doing and not how fast; not a constant for the viewer's rate,
@@ -297,8 +288,8 @@ export interface HandoverJoinObservation {
  * observable from here.
  *
  * Answers `false` until a window has passed, because a segment arrives whole
- * and a rate read from inside one is quantisation rather than production —
- * giving up on that would abandon handovers that work today.
+ * and a rate read from inside one is quantisation rather than production;
+ * giving up on that would abandon handovers that would have arrived.
  */
 export function handoverJoinLost(observation: HandoverJoinObservation): boolean {
   const {
@@ -323,9 +314,8 @@ export function handoverJoinLost(observation: HandoverJoinObservation): boolean 
  * replacement's clock is where they have genuinely got to.
  *
  * **Only ever forward.** A position that has not moved leaves the request
- * exactly as core made it, because going backwards is the fault this exists to
- * fix rather than an outcome to allow: measured live 2026-09-20 at a 20 s
- * rewind after a 30 s wait.
+ * exactly as core made it; rewinding the viewer past what they already watched
+ * is never an acceptable outcome.
  */
 export function handoverFallbackPositionMs(
   requestedMs: number,
@@ -342,7 +332,7 @@ export function handoverFallbackPositionMs(
  * What the handover does with a join that may lie before the incoming
  * generation's start.
  *
- * After a lead move (core `d58375a`) the node produces from ahead of the
+ * After a lead move the node produces from ahead of the
  * viewer, so the join is negative in the new clock until the viewer, still
  * watching the outgoing element, reaches the generation's start. That wait is
  * the lead working, and must not be run through the convergence race, which
@@ -378,11 +368,9 @@ const HAVE_CURRENT_DATA = 2;
  * this exists to keep.
  *
  * The outgoing side is never touched, only frozen, so what it happens to be
- * playing does not bear on it. Requiring a manifest there too cost a measured
- * **16.5 s of black screen** on 2026-09-20: selecting Transcode from Direct
- * Play mid-playback is a representation change, the outgoing element held a
- * Direct Play source, and the hold declined on that alone — the one transition
- * a viewer asks for by hand and watches for the whole of.
+ * playing does not bear on it. Selecting Transcode from Direct Play
+ * mid-playback leaves a Direct Play source on the outgoing element, and it is
+ * the one transition a viewer asks for by hand and watches for the whole of.
  */
 export function canHoldThroughRelocation(subject: RelocationHoldSubject): boolean {
   if (!subject.incomingIsManifest || !subject.managedHls) return false;
@@ -447,19 +435,6 @@ export function webLocalSeekCoverage(
 }
 
 /**
- * How much playable media sits in front of a position, in the ranges given.
- *
- * Only a range that covers the position counts: media beyond a hole is not
- * runway, because the element stops at the hole. A range starting just ahead is
- * allowed the same 250 ms of slack the published figure has always used, since
- * the element and the ranges it reports do not agree to the millisecond.
- *
- * Position and ranges must share a clock; which clock does not matter, because
- * an origin common to both cancels in the subtraction. That is what lets the
- * same arithmetic serve the published event, which works in generation time,
- * and a direct reading of an element, which works in its own media time.
- */
-/**
  * Ranges stated in whole milliseconds, widened rather than narrowed.
  *
  * These are what core admits a local seek against, and the target it checks is
@@ -477,6 +452,19 @@ export function wholeMillisecondRanges(ranges: PlaybackTimeRange[]): PlaybackTim
   }));
 }
 
+/**
+ * How much playable media sits in front of a position, in the ranges given.
+ *
+ * Only a range that covers the position counts: media beyond a hole is not
+ * runway, because the element stops at the hole. A range starting just ahead is
+ * allowed 250 ms of slack, since the element and the ranges it reports do not
+ * agree to the millisecond.
+ *
+ * Position and ranges must share a clock; which clock does not matter, because
+ * an origin common to both cancels in the subtraction. That is what lets the
+ * same arithmetic serve the published event, which works in generation time,
+ * and a direct reading of an element, which works in its own media time.
+ */
 export function forwardBufferMsAt(positionMs: number, ranges: PlaybackTimeRange[]): number {
   let forwardMs = 0;
   for (const range of ranges) {
@@ -506,11 +494,9 @@ export function setKeyframeSource(source: KeyframeSource | undefined): void {
  * **Chrome's `video.buffered` for a file served whole is an estimate.**
  * Chromium converts each buffered byte range to time as
  * `byte / size × duration` (`BufferedDataSourceHostImpl::AddBufferedTimeRanges`),
- * so a file whose bitrate is uneven reports media where it is not. Measured
- * 2026-09-28 on gbni-1: a Direct Play MP4 playing smoothly at 3000 s reported a
- * range 95 s behind the playhead, growing in step with playback, beside the
- * one that held it — its video and audio bytes, read together from two places
- * in the file.
+ * so a file whose bitrate is uneven reports media where it is not. An
+ * interleaved file whose video and audio bytes are read from two places at once
+ * can report a phantom range well behind the playhead beside the real one.
  *
  * That conversion runs backwards exactly, using the same duration Chrome
  * used, which is the element's own. The bytes then go through the file's own
@@ -585,11 +571,9 @@ class WebPlayer implements Player {
    *
    * `destroy()` detaches the MediaSource, and the element goes black the moment
    * it does. Doing that at the point of diagnosis puts the picture out seconds
-   * before anything can replace it — measured 2026-09-21 on a killed node at
-   * ~9 s of black, all of it after the failure was already known. So a failed
-   * generation is stopped where it fails and destroyed where it is replaced,
-   * which is the rule `promoteHandover` already states: release the outgoing
-   * generation after the cut, never before it.
+   * before anything can replace it. So a failed generation is stopped where it
+   * fails and destroyed where it is replaced, the same rule `promoteHandover`
+   * follows: release the outgoing generation after the cut, never before it.
    */
   private retiredHls?: Hls;
   private listeners = new Set<PlaybackListener>();
@@ -623,7 +607,7 @@ class WebPlayer implements Player {
    * The element's own `error` event is the one failure channel that cannot
    * carry a generation: it is registered once, on the element, so it reports
    * whatever `sourceGeneration` happens to be when it fires. A native HLS
-   * source is now waited on before it is attached, which opens a real window
+   * source is waited on before it is attached, which opens a real window
    * where the element still holds the dying generation while the counter has
    * already moved — and an error arriving in that window would be charged to
    * a node that has not been given a URL yet.
@@ -705,7 +689,7 @@ class WebPlayer implements Player {
    * listener below already guards on `video !== this.video`, so an element that
    * is not the active one is wired and inert — it publishes nothing, fails
    * nothing and resumes nothing until it is promoted. That property is what
-   * makes the handover safe, and it was already true for other reasons.
+   * makes the handover safe.
    */
   private createWiredMediaElement(): HTMLVideoElement {
     const video = document.createElement('video');
@@ -746,13 +730,12 @@ class WebPlayer implements Player {
       if (!this.activeSource || video !== this.video) return;
       if (this.attachedSourceGeneration !== this.sourceGeneration) return;
       // Direct Play's version of the same judgement, and the only way to make
-      // it. The read-ahead worker hands a 404 body to the element as though it
-      // were media — deliberately, because not splicing an alternate over a 404
-      // is older than any of this — so the element raises a generic decode or
-      // unsupported error and the status is nowhere in it. What we do have is
-      // that the worker already told us this source was gone, for this same
-      // generation. Without that memory the reported title's own path, which is
-      // Direct Play on Chrome, would still condemn a healthy node.
+      // it. The read-ahead worker deliberately hands a 404 body to the element
+      // as though it were media rather than splicing an alternate over it, so
+      // the element raises a generic decode or unsupported error and the status
+      // is nowhere in it. What we do have is that the worker already told us
+      // this source was gone, for this same generation. Without that memory a
+      // gone Direct Play source would condemn a healthy node.
       const generation = this.sourceGeneration;
       const judge = (status: number | undefined) => {
         if (generation !== this.sourceGeneration || video !== this.video || !this.activeSource) return;
@@ -767,9 +750,9 @@ class WebPlayer implements Player {
         this.failSourceGeneration(generation, webMediaElementFailure(video.error), videoState(video));
       };
       // The worker's report can arrive after this error: it hands the element
-      // the 404 and posts separately. Measured 2026-09-23, a reclaimed session
-      // ended on "unsupported" that way. So a read-ahead source asks the
-      // worker what the node said before the error is judged terminal.
+      // the 404 and posts separately, which would end a reclaimed session on
+      // "unsupported". So a read-ahead source asks the worker what the node
+      // said before the error is judged terminal.
       if (this.notFoundSourceGeneration === generation || !this.directReadAheadSourceUrl) {
         judge(undefined);
         return;
@@ -808,12 +791,11 @@ class WebPlayer implements Player {
     // Before anything is torn down, ask whether this generation can be replaced
     // without the viewer seeing it — but only when the viewer did not ask to
     // move. Hiding a replacement they requested means holding them at the old
-    // position while it prepares: measured at 14.5 s of the previous scene with
-    // the clock already reading the destination, which is a worse lie than the
-    // interruption it avoids. A relocation therefore falls through to the
-    // teardown path, which attaches at the new position and lets them see it
-    // happen — the behaviour every target had before handovers existed, and
-    // the default here, so a coordinator too old to say stays correct.
+    // position while it prepares, with the clock already reading the
+    // destination, which is a worse lie than the interruption it avoids. A
+    // relocation therefore falls through to the teardown path, which attaches
+    // at the new position and lets them see it happen. That is also the
+    // default, so a coordinator that does not state a transition stays correct.
     if (transition === 'continue') {
       const handover = await this.handOverToSource(source, positionMs, startPaused);
       if (handover.handedOver) return true;
@@ -831,21 +813,15 @@ class WebPlayer implements Player {
     // showing. Hold the picture instead: pause where they were, build the
     // replacement beside it, and swap when it can present.
     //
-    // **Asked for on both transitions, and for a reason measured on 2026-09-21.**
-    // A mode switch arrives as `continue`, and with Direct Play outgoing the
-    // handover above declines without preparing anything — so gating the hold
-    // on `transition !== 'continue'` meant the one transition a viewer makes by
-    // hand, and watches for the whole of, was the one that could not hold its
-    // picture. Measured before this: `source-load-begin`, `media-element-reused`
-    // and `readyState` 0 with no hold attempted at all.
+    // **Asked for on both transitions.** A mode switch arrives as `continue`,
+    // and with Direct Play outgoing the handover above declines without
+    // preparing anything, so gating the hold on the transition would leave the
+    // one transition a viewer makes by hand, and watches for the whole of,
+    // unable to hold its picture.
     //
-    // **An abandoned handover is not a reason to skip it, and watching one
-    // proved that.** The gate here was `resumeAtMs !== undefined` — "the
-    // handover spent time, so do not make the viewer wait twice" — and on
-    // 2026-09-21 a handover abandoned at 6 s
-    // (`join-receding-faster-than-it-fills`) left the outgoing generation with
-    // about 10 s of runway still on the element and a picture the viewer was
-    // still watching, and this threw it away. Time spent is not the question;
+    // **An abandoned handover is not a reason to skip it.** One abandoned
+    // early can leave the outgoing generation with seconds of runway and a
+    // picture the viewer is still watching. Time spent is not the question;
     // whether there is still a frame to keep is, and
     // `canHoldThroughRelocation()` asks exactly that.
     if (await this.holdThroughRelocation(source, positionMs, startPaused)) return true;
@@ -972,15 +948,14 @@ class WebPlayer implements Player {
       } else if (this.options.forceNativeHls || nativeHlsSupported(video)) {
         this.log.info('hls-native-selected', { url: source.url });
         // No removeAttribute('src')/load() reset here, for the reason the
-        // direct path below records: it was observed live to leave the element
-        // at readyState 0 forever, no request issued and no error raised.
+        // direct path below records: it can leave the element at readyState 0
+        // forever, no request issued and no error raised.
         //
         // No readiness wait here either. A native player cannot ride a
         // `500 segment_not_ready` hold, so it must not be handed a generation
-        // that has produced nothing; core now holds the source back until the
+        // that has produced nothing; core holds the source back until the
         // session route reports media produced, because this player declares
-        // `needsProducedSource`. The zero-byte fragment probe that did this
-        // here is gone (Tom, 2026-09-23: a zero-byte check is a hack).
+        // `needsProducedSource`.
         video.src = source.url;
         this.attachedSourceGeneration = sourceGeneration;
         elementOwnsFetch = true;
@@ -1027,10 +1002,9 @@ class WebPlayer implements Player {
       // No manual removeAttribute('src')/load() reset before this: assigning a
       // new src already runs the media element load algorithm and supersedes
       // whatever the previous generation was doing. Doing both back-to-back in
-      // the same tick was observed live to leave the element stuck at
-      // readyState 0 forever (no request ever issued, no error) while the
-      // read-ahead Service Worker was controlling the page — the redundant
-      // reset raced the reassignment rather than the two ever combining safely.
+      // the same tick can leave the element stuck at readyState 0 forever (no
+      // request ever issued, no error) while the read-ahead Service Worker is
+      // controlling the page: the redundant reset races the reassignment.
       video.src = directUrl;
       this.attachedSourceGeneration = sourceGeneration;
       elementOwnsFetch = true;
@@ -1066,14 +1040,14 @@ class WebPlayer implements Player {
    *
    * **Why a second element and not a second source.** hls.js cannot be handed a
    * new source in place: `loadSource()` on a live instance detaches the media,
-   * resets the buffer and empties the element, measured — so it destroys the
+   * resets the buffer and empties the element, so it destroys the
    * runway exactly as a teardown does. Nor can two generations be appended to
    * one SourceBuffer, because each carries its own timeline origin, init segment
    * and fragment boundaries. The only way the viewer's media survives the swap
    * is for the replacement to be decoding somewhere else first.
    *
    * This is the transcode counterpart of what the Direct Play read-ahead worker
-   * already does for a dying node. That works by holding several upstream URLs
+   * does for a dying node. That works by holding several upstream URLs
    * behind one stable proxy URL, which is only possible because a byte range is
    * the same bytes from any node. A transcode generation is not interchangeable
    * with another node's, so the swap has to happen a layer up — at the element,
@@ -1086,11 +1060,10 @@ class WebPlayer implements Player {
    * offset between the two generations' clocks is taken at the moment of the
    * request, a join point is chosen slightly ahead of the live position, the
    * replacement is seeked there while still hidden, and the swap happens when
-   * the outgoing element actually reaches it. Measured live at ~6 ms of content
-   * error and a 0.6 ms handover, with sound, judged seamless by ear.
+   * the outgoing element actually reaches it.
    *
    * Hidden means `display: none`, which is enough: an unrendered element still
-   * buffers, and buffered faster than realtime in testing. Element visibility
+   * buffers faster than realtime. Element visibility
    * does not gate MSE. **Tab** visibility gates everything — a backgrounded tab
    * stops decoding entirely — and that case is deliberately not handled here,
    * because a gap nobody is watching is not a gap worth paying for.
@@ -1120,9 +1093,7 @@ class WebPlayer implements Player {
     // reports while the element is playing, so an element that has stopped
     // emitting leaves a figure that can only overestimate the runway — and an
     // element that has stopped is exactly the one this gate must not be
-    // generous about. The element itself answers for now. Raised by the
-    // Android TV client on 2026-09-19, which hit the same shape harder because
-    // it reads its runway for a failure decision.
+    // generous about. The element itself answers for now.
     //
     // The clock offset below still comes from `outgoingEvent`, and must: core
     // computed its request from that sample, so those two positions denote the
@@ -1155,17 +1126,12 @@ class WebPlayer implements Player {
     const abandon = (reason: string, detail?: unknown): HandoverOutcome => {
       // Where the viewer has actually reached, stated in the replacement's
       // clock, so the teardown path attaches at the position they are at rather
-      // than the one core computed before the attempt.
-      //
-      // Measured live 2026-09-20: 30 s spent on a handover that could not
-      // arrive, and then the fallback put the viewer back 20 s, because
-      // `positionMs` is where they were when core asked. Every abandonment has
+      // than the one core computed before the attempt. Every abandonment has
       // spent some time, and all of it is content the viewer has now watched.
       //
-      // Only ever forward. `Math.max` because a position that has not moved —
-      // an outgoing element that stopped, or a decline taken immediately — must
-      // leave the request exactly as core made it, and because going backwards
-      // is the fault being fixed rather than a place to land.
+      // Only ever forward: a position that has not moved (an outgoing element
+      // that stopped, or a decline taken immediately) leaves the request
+      // exactly as core made it, and going backwards is never a place to land.
       //
       // Withheld once the element is no longer ours: a superseded handover's
       // live position belongs to whatever replaced it, and the clock offset
@@ -1201,17 +1167,15 @@ class WebPlayer implements Player {
       built = this.attachHls(hlsModule, incoming, source.url, sourceGeneration, false, expectedJoinMs);
 
       // A led generation may take as long as its lead to become ready: the
-      // viewer is still watching the outgoing picture for all of it. Measured
-      // 2026-09-23: gbni-1 took 20.3 s to a first fragment, past the 20 s
-      // this used to allow everything.
+      // viewer is still watching the outgoing picture for all of it.
       const ready = await waitForMediaEvent(incoming, 'canplay', Math.max(HANDOVER_READY_TIMEOUT_MS, leadMs));
       if (!ready) return abandon('not-ready-in-time');
       if (this.video !== outgoing) return abandon('superseded-while-preparing');
 
       // The replacement's own clock, established from what it has buffered.
       //
-      // Told the position it was started at, not zero. Now that the loader
-      // begins at the join, the first resident fragment is *not* the generation
+      // Told the position it was started at, not zero. The loader begins at
+      // the join, so the first resident fragment is *not* the generation
       // origin, and a timeline that assumed it was would place every later
       // mapping a join's width out. hls.js puts `currentTime` at its
       // `startPosition` once metadata lands, which is inside residency, so the
@@ -1231,8 +1195,7 @@ class WebPlayer implements Player {
       // however far the viewer travelled while core was negotiating. Seeking
       // there before it is resident makes the element wait for data instead of
       // firing `seeked`, and the handover times out holding a perfectly good
-      // replacement. Measured doing exactly that: a 4.8 s join, an 8 s budget,
-      // and an abandoned handover with 46 s of runway still in hand.
+      // replacement.
       //
       // The join is recomputed each turn because the outgoing element keeps
       // moving; a point chosen once goes stale while the data is still arriving.
@@ -1354,10 +1317,9 @@ class WebPlayer implements Player {
       // the cut is where it was planned rather than wherever the seek landed.
       //
       // Unless it stops arriving. A generation whose source is gone runs out of
-      // buffer, and then the position it was supposed to reach never comes —
-      // measured stalling here for 25 s with a fully prepared replacement
-      // sitting a few frames away, which is far worse than the gap it was
-      // avoiding. So a stalled outgoing element ends the wait immediately and
+      // buffer, and then the position it was supposed to reach never comes,
+      // leaving a fully prepared replacement waiting a few frames away. So a
+      // stalled outgoing element ends the wait immediately and
       // the cut happens where it stopped: a few hundred milliseconds of skip is
       // the cheapest outcome available once the picture has already frozen.
       const deadline = performance.now() + HANDOVER_JOIN_TIMEOUT_MS;
@@ -1396,17 +1358,16 @@ class WebPlayer implements Player {
    * element — a seek the node has to build a generation for, or a mode the
    * viewer has just chosen.
    *
-   * Measured live 2026-09-18, every out-of-buffer seek: the element went to
-   * `readyState` 0 with nothing buffered and `paused` **false** throughout, so
-   * it was trying to play with no media — a black screen for as long as the node
-   * took, 1.2 s on a fast remux and 10–13 s on a transcode.
+   * Without it, an out-of-buffer seek leaves the element at `readyState` 0 with
+   * nothing buffered and `paused` false, trying to play with no media: a black
+   * screen for as long as the node takes.
    *
    * The old frame cannot survive on the element hls.js is attaching to, so the
    * replacement is prepared on a second one while the outgoing element stays
-   * exactly where it is, paused. This differs from the design rejected for
-   * relocations above in the one way that matters: that one kept *playing* the
-   * outgoing generation, so the viewer watched the previous scene while the
-   * clock read the destination. A frozen frame claims nothing.
+   * exactly where it is, paused. This differs from the handover, which `play()`
+   * declines for relocations, in the one way that matters: the handover keeps
+   * *playing* the outgoing generation, so the viewer would watch the previous
+   * scene while the clock read the destination. A frozen frame claims nothing.
    *
    * The replacement is loaded from the generation's own start and then seeked to
    * the offset, which is exactly what the teardown path does — the same origin
@@ -1414,14 +1375,12 @@ class WebPlayer implements Player {
    * would save fetching the pre-roll, but it changes where the media clock
    * begins and that is a separate question from this one.
    *
-   * A representation change arrives here too, and on 2026-09-20 it was the
-   * expensive one: selecting Transcode from Direct Play blanked the picture for
-   * 16.5 s, because the rule asked the outgoing side to be a manifest as well.
-   * `canHoldThroughRelocation()` owns that rule now and asks only what the
-   * replacement needs.
+   * A representation change arrives here too, such as selecting Transcode from
+   * Direct Play; `canHoldThroughRelocation()` asks only what the replacement
+   * needs, so a Direct Play outgoing side does not decline it.
    *
-   * Declines to anything it cannot do cleanly and the caller falls through to
-   * the teardown path, so this is never worse than the behaviour it replaces.
+   * Declines anything it cannot do cleanly and the caller falls through to the
+   * teardown path, so this is never worse than the teardown alone.
    */
   private async holdThroughRelocation(source: PlaybackSource, positionMs: number, startPaused: boolean): Promise<boolean> {
     const outgoing = this.video;
@@ -1436,7 +1395,7 @@ class WebPlayer implements Player {
     // Usually already frozen: the control holds the picture the moment the seek
     // is asked for, which is a whole negotiation earlier than this. Taken here
     // too for the relocations that do not come from a control — a failover, or a
-    // coordinator too old to hold anything. `wantsPlayback` goes with it so no
+    // coordinator that does not hold the picture itself. `wantsPlayback` goes with it so no
     // readiness event on the outgoing element can quietly start it playing again
     // while it is meant to be held.
     const restoreIntent = this.pictureHold?.resumeWanted ?? this.wantsPlayback;
@@ -1798,7 +1757,8 @@ class WebPlayer implements Player {
     const generation = this.clearSubtitleTracks(video);
     if (!subtitleUrl) return;
 
-    // Retain compatibility with older servers which expose one monolithic VTT.
+    // A server that exposes one monolithic VTT rather than a segment manifest
+    // gets a plain track.
     if (isLegacyWebVtt(subtitleUrl)) {
       await this.loadSubtitleTrack(video, subtitleUrl, generation);
       return;
@@ -1844,8 +1804,8 @@ class WebPlayer implements Player {
     // Paused is not stalled. The stall budget measures a viewer waiting on a
     // picture that will not move, and a pause is the one case where the picture
     // is not moving because they said so — so the countdown is stood down here
-    // rather than left to expire against nobody. Without this a pause reliably
-    // ended in a failure screen seven seconds later, on a node that was fine.
+    // rather than left to expire against nobody and end a pause in a failure
+    // screen on a node that is fine.
     //
     // Stood down, not switched off: core re-arms on the first report after the
     // resume, so a node that dies mid-pause is still judged the moment anyone
@@ -1929,8 +1889,8 @@ class WebPlayer implements Player {
    *
    * The player is told nothing at the moment of a seek: core decides locally
    * whether the target is covered, and the first the player hears of a
-   * relocation is `play()`, which arrives after the node has answered — 420 ms
-   * on a fast remux, 10–13 s on a transcode. For all of that the outgoing
+   * relocation is `play()`, which arrives after the node has answered, which
+   * can take many seconds on a transcode. For all of that the outgoing
    * generation keeps playing a scene the viewer has already left.
    *
    * So the hold is taken optimistically by the control and released by whichever
@@ -1947,10 +1907,8 @@ class WebPlayer implements Player {
     // Stood down for the same reason `pause()` stands it down: the picture has
     // stopped because we stopped it, and a countdown measuring "nothing is
     // moving" cannot tell that from a node that has died. Left running it
-    // expires against a freeze we asked for — measured 2026-09-18, a seek held
-    // at 51.2 s reported `source-terminal-failure` at 58.1 s, 6,864 ms later,
-    // while the node was still building the replacement it delivered at 61.0 s.
-    // Core re-arms on the first report after playback advances again, so a node
+    // expires against a freeze we asked for while the node is still building
+    // the replacement. Core re-arms on the first report after playback advances again, so a node
     // that dies during the hold is still judged the moment anyone is waiting.
     this.stallWatchdog.suspend();
     video.pause();
@@ -2081,14 +2039,12 @@ class WebPlayer implements Player {
    * Record what this element does between being given a source and showing a
    * frame, and say so in one line if that was slow or never happened.
    *
-   * For the `readyState` 0 P0 (`TODO/ACTIVE.md`): the stall raises nothing
-   * until something else gives up, so the evidence has to be gathered from
-   * before `src` is set rather than reconstructed afterwards. Covers managed
-   * HLS as well as element-owned fetches, and the standby elements of a
-   * handover and a relocation hold as well as the one on screen: the start
-   * watchdog only watches the element-owned path, and a handover standby sat
-   * at `readyState` 0 for 16 s on the first live node move (2026-09-23) with
-   * nothing recording it.
+   * A start stuck at `readyState` 0 raises nothing until something else gives
+   * up, so the evidence has to be gathered from before `src` is set rather than
+   * reconstructed afterwards. Covers managed HLS as well as element-owned
+   * fetches, and the standby elements of a handover and a relocation hold as
+   * well as the one on screen, because the start watchdog only watches the
+   * element-owned path.
    *
    * Observes only. It never fails, degrades or retries anything; the
    * watchdogs own those decisions.
@@ -2120,8 +2076,8 @@ class WebPlayer implements Player {
       if (performance.now() - armedAt >= START_RECORD_LIMIT_MS) this.finishStartRecorder(video, 'no-first-frame');
     }, 1_000);
     // An observer rather than `getEntriesByType`: the page's Resource Timing
-    // buffer holds 250 entries and was measured full eleven seconds after
-    // load, after which the buffer answers nothing new and a start that sent
+    // buffer holds 250 entries and fills within seconds of load, after which
+    // it answers nothing new and a start that sent
     // twenty requests reads as one that sent none. An observer is not bound
     // by the buffer. Where there is none, the record says unknown.
     const requests: PerformanceResourceTiming[] = [];
@@ -2178,8 +2134,7 @@ class WebPlayer implements Player {
     this.startWatchdog.start((visibleMs) => {
       if (sourceGeneration !== this.sourceGeneration || video !== this.video) return;
       const readAhead = directPlayReadAheadMetrics(this.directReadAheadSourceUrl);
-      // The distinction that cost an evening of live debugging to make by
-      // hand, recorded here automatically. When the read-ahead worker is in
+      // When the read-ahead worker is in
       // the path it sees every request the renderer actually dispatched, so
       // it separates "the browser never asked" from "the node never
       // answered" — and those have nothing in common but the symptom.
@@ -2216,17 +2171,16 @@ class WebPlayer implements Player {
    *
    * Reported as `'stream'`, the same kind the element's own `error` event
    * produces, so it reaches the failover the coordinator already performs. On
-   * a platform whose player reports nothing this is the only thing that will
-   * ever say so: a Samsung set held a frozen frame for thirty seconds with
-   * every recovery mechanism intact and idle, because its native HLS player
-   * swallowed the failure and never raised `MediaError`.
+   * a platform whose native HLS player swallows the failure and never raises
+   * `MediaError`, as Samsung's can, this is the only thing that will ever say
+   * so.
    */
   private watchForStall(video: HTMLVideoElement, source: PlaybackSource, sourceGeneration: number): void {
     // Take the stall budget from the node serving *this* source. The watchdog
     // outlives any one generation while the figure belongs to a node, so it is
     // set here — at the one place every attach path passes through — rather
-    // than at each of them, where a new path would forget it. A node
-    // configured with a longer hold than the compiled-in default was being
+    // than at each of them, where a new path would forget it. Otherwise a node
+    // configured with a longer hold than the compiled-in default would be
     // called dead for answering at its own frontier.
     this.stallWatchdog.useSourceBudgets(source);
     this.stallWatchdog.watch(({ visibleMs, positionMs, bufferedEndMs }) => {
@@ -2246,8 +2200,8 @@ class WebPlayer implements Player {
       // A generation already known to be gone has an explanation for its own
       // stall, and it is not the node's fault. Reporting `stream` here would
       // charge an endpoint that is answering correctly for the silence of a
-      // source it no longer has — and would tear down the buffer the recovery
-      // is running inside, which is the whole point of not doing that above.
+      // source it no longer has, and would tear down the buffer the recovery
+      // is running inside; see `reportSourceGone`.
       if (this.notFoundSourceGeneration === sourceGeneration || this.goneReportedGeneration === sourceGeneration) {
         this.log.warn('source-stalled-after-gone', detail);
         this.reportSourceGone(
@@ -2305,17 +2259,13 @@ class WebPlayer implements Player {
    * simply forgotten: the bytes already in the element are still good, still
    * playing, and are the entire budget the coordinator has to recover inside.
    *
-   * Measured before this existed: the teardown ran 6 ms after the fatal and
-   * took 61.5 s of playable video with it, so a recovery that had a minute to
-   * work in got none, and the viewer's picture froze for 12.7 s. hls.js gives
-   * up about 28 s after a source goes away, which is always sooner than a full
-   * buffer drains — so without this the coordinator is never allowed to choose
-   * its own moment, and the swap is always forced by the loader rather than
-   * timed by the runway.
+   * Tearing down on the fatal would throw away the whole buffer the recovery
+   * has to work in. hls.js gives up well before a full buffer drains, so
+   * without this the coordinator could never choose its own moment, and the
+   * swap would always be forced by the loader rather than timed by the runway.
    *
-   * Core owns what the viewer is told from here, and has taken that on
-   * explicitly: if there is no replacement it sets the fatal error and stops
-   * the player. This player's job is to say what happened and keep the picture
+   * Core owns what the viewer is told from here: if there is no replacement it
+   * sets the fatal error and stops the player. This player's job is to say what happened and keep the picture
    * up meanwhile.
    *
    * Latched separately from `failedSourceGeneration`, deliberately. This is not
@@ -2394,9 +2344,8 @@ class WebPlayer implements Player {
     // A handover is the one case where it is both safe and necessary. The
     // replacement is not presented and nothing else will seek it, and the join
     // is several seconds in — so loading from zero fetches every fragment
-    // before the join and throws them away. Measured: 9.03 s of a 9.54 s
-    // handover was that fetch. Starting the loader at the join asks for the one
-    // fragment the cut actually needs.
+    // before the join and throws them away. Starting the loader at the join
+    // asks for the one fragment the cut actually needs.
     const hls = new Hls(startPositionMs === undefined
       ? webHlsBufferConfig()
       : { ...webHlsBufferConfig(), startPosition: startPositionMs / 1000 });
@@ -2463,10 +2412,9 @@ class WebPlayer implements Player {
       // The earliest and cheapest recovery this client has. hls.js populates
       // `response.code` on the *nonfatal* fragment errors, so a source the node
       // no longer has is knowable while the buffer built before it went away
-      // still has a minute to run — measured at 62.8 s of cover, and the first
-      // of these arrived 3.7 s before the viewer even pressed play. Reported on
-      // the degradation channel so the coordinator can regenerate on this node
-      // inside that margin and the viewer sees nothing at all.
+      // may still have a minute to run. Reported on the degradation channel so
+      // the coordinator can regenerate on this node inside that margin and the
+      // viewer sees nothing at all.
       if (isHlsSourceNotFound(data)) {
         this.degradeSourceNotFound(
           sourceGeneration,
@@ -2663,14 +2611,12 @@ class WebPlayer implements Player {
       // the resume position and goes back to the node as `seekMs`, and the seek
       // contract is stated in integer milliseconds with no rounding slack.
       //
-      // Sub-millisecond precision here stops playback dead. Asked for
-      // 2,018,389.921 ms the node answers with a generation starting at
-      // 2,018,390, core reads `absolute < generationStart` as "this generation
-      // begins after the viewer", refuses to activate, and re-asks with the same
-      // fractional number for ever. Measured 2026-09-18: 25 identical
-      // negotiation rounds, no error raised, and `player.play()` never called at
-      // all. It bites only when the node honours the exact position and rounds
-      // up — a frame-accurate transcode — which is why it comes and goes.
+      // Sub-millisecond precision here stops playback dead. Asked for a
+      // fractional position, a node that honours it exactly and rounds up (a
+      // frame-accurate transcode) answers with a generation starting just after
+      // it; core reads `absolute < generationStart` as "this generation begins
+      // after the viewer", refuses to activate, and re-asks with the same
+      // fractional number for ever, raising no error.
       //
       // The element's own clock keeps its full precision; only what is published
       // is rounded.

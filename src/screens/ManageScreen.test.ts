@@ -25,8 +25,8 @@ function catalogued(overrides: Partial<ManageCatalogueMatch> = {}): ManageCatalo
 
 describe('candidates the catalogue already has', () => {
   it('drops an inferred candidate that is already an offered match, punctuation and case aside', () => {
-    // The same identity appearing twice — once with a working "Use match"
-    // button and once without — is what made the inferred list dead weight.
+    // The same identity must not appear twice, once with a working "Use match"
+    // button and once without.
     expect(candidateAlreadyCatalogued(probe({ title: 'jurassic park!' }), [catalogued()])).toBe(true);
   });
 

@@ -84,10 +84,9 @@ export function isProtectedAccount(user: MachaUser): boolean {
  *
  * The order within the protected pair is also read from the server rather than
  * from the names. `anonymous` is the account that holds no credential at all —
- * server 0.38.4 made that explicit, answering `409 no_password` and stating
- * `set_password: false` — so "can hold a password" separates the operator's
- * own superuser from the account that exists to be nobody. That is the
- * difference the ordering is really about, and it survives a rename.
+ * the server states `set_password: false` for it — so "can hold a password"
+ * separates the operator's own superuser from the account that exists to be
+ * nobody. That is the difference the ordering is really about, and it survives a rename.
  */
 export function byStanding(left: MachaUser, right: MachaUser): number {
   const protection = Number(isProtectedAccount(right)) - Number(isProtectedAccount(left));
@@ -513,8 +512,8 @@ export function UsersScreen({ api, session }: Props) {
   const [adding, setAdding] = useState(false);
 
   // `Manage` is the page heading, so each section heads itself the way Files
-  // and Unmatched do. A second `h1` here meant the biggest words on screen
-  // were the section's own, competing with the page title rather than sitting
+  // and Unmatched do. A second `h1` here would make the section's own words
+  // the biggest on screen, competing with the page title rather than sitting
   // under it.
   const heading = (
     <div className="manage-panel-heading">
@@ -537,9 +536,9 @@ export function UsersScreen({ api, session }: Props) {
           ? <Loading />
           : result.error
             ? <ErrorMessage error={result.error} />
-            // Neither loading, failed, nor holding a list. That combination
-            // used to render the heading and nothing at all, which reads as a
-            // broken page rather than as a server that answered oddly.
+            // Neither loading, failed, nor holding a list. The heading alone
+            // would read as a broken page rather than as a server that
+            // answered oddly.
             : <p className="manage-error" role="alert">The server did not return a user list.</p>}
       </section>
     );

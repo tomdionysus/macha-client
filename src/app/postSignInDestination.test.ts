@@ -6,9 +6,8 @@ describe('where a viewer goes after signing in', () => {
   /**
    * The point of the whole thing. Somebody follows a link to a title, has no
    * usable session, gets a login — which is the correct answer — and then has
-   * to be returned to the title they asked for. Before this, the redirect
-   * recorded where they were heading and nothing ever read it, so a successful
-   * sign-in left them on the form they had just filled in.
+   * to be returned to the title they asked for, not left on the form they had
+   * just filled in.
    */
   it('returns them to the deep link they were stopped at', () => {
     expect(postSignInDestination('/play/tmdb%3Aepisode%3A110080', routes.home))

@@ -347,14 +347,12 @@ function retryableSourceStatus(status) {
  * number from core. Keep the two in step.
  *
  * It is not in `retryableSourceStatus` and must not be, because that predicate
- * means "this node might answer if asked again" and a 404 never will. But it
- * was previously *absent* from both, which meant a 404 fell through to the
- * success path and the response was handed to the media element as though the
- * error envelope were media. The element then raised a generic MediaError, the
- * adapter reported `unsupported`, and a session that only needed re-creating
- * became a terminal failure. A different node is a different session, so the
- * walk continues; what changes is that a 404 is a failure of the source rather
- * than content, and the status survives to the client so it can be recognised.
+ * means "this node might answer if asked again" and a 404 never will. Nor is
+ * it success: an error envelope handed to the media element raises a generic
+ * MediaError, the adapter reports `unsupported`, and a session that only needs
+ * re-creating becomes a terminal failure. A different node is a different
+ * session, so the walk continues; a 404 is a failure of the source rather than
+ * content, and the status survives to the client so it can be recognised.
  */
 function sourceNotFoundStatus(status) {
   return status === 404;
@@ -377,13 +375,11 @@ async function directFetchWithFailover(request, config, cache, signal, rangeOver
         if (response.body) void response.body.cancel().catch(() => undefined);
         continue;
       }
-      // A 404 still goes back to the caller, and no alternate is spliced over
-      // it — that is deliberate and older than this branch. What was missing is
-      // that nobody was told. The response the element receives is an error
-      // envelope, so it raises a generic decode failure and the client learns
-      // only that the media was unplayable, never that the node had no record
-      // of this source. Reported here so the status survives, while the
-      // response itself travels exactly as it did before.
+      // A 404 goes back to the caller, deliberately, with no alternate spliced
+      // over it. The element receives an error envelope and raises a generic
+      // decode failure, which says only that the media was unplayable, so the
+      // status is reported here to tell the client the node had no record of
+      // this source.
       if (sourceNotFoundStatus(response.status) && cache) {
         void postSourceFailure(
           cache,
@@ -413,10 +409,9 @@ async function exactRangeReader(request, config, cache, signal, start, end, excl
         if (response.body) void response.body.cancel().catch(() => undefined);
         continue;
       }
-      // This walk already moved past a 404, because it cannot satisfy the exact
-      // range check below either way. The only change is that the status now
-      // survives on the error, so an exhausted walk reports what the node said
-      // rather than "did not return exact range" — the same fact, in the
+      // A 404 cannot satisfy the exact range check below, so the walk moves
+      // past it, keeping the status on the error so an exhausted walk reports
+      // what the node said rather than "did not return exact range", in the
       // vocabulary the client can act on.
       if (sourceNotFoundStatus(response.status)) {
         lastError = sourceFailure(`Direct Play source returned ${response.status}`, response.status);
@@ -1020,7 +1015,7 @@ async function handleProxy(request, url) {
   if (request.method === 'HEAD') return (await directFetchWithFailover(request, config, cache, undefined)).response;
 
   // A complete resident range is an immediate memory hit. Otherwise demand is
-  // proxied as the browser asked for it; there is deliberately no 8 MiB
+  // proxied as the browser asked for it; there is deliberately no
   // completion barrier and no speculative queue in front of it.
   if (requested.partial) {
     const cachedEnd = contiguousCachedEnd(cache, requested.start, requested.end);

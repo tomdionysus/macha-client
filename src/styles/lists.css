@@ -51,8 +51,8 @@
  * Fixed layout, and every column but the name a fixed width set to the
  * longest text its formatter can produce (padding included, as fixed layout
  * counts it), so a changing speed, status or ETA never reflows the row; the
- * name takes whatever is left. Automatic layout could not do this: the name's
- * old width: 100% squeezed every other column to its current content. Actions
+ * name takes whatever is left. Automatic layout cannot do this: a name at
+ * width: 100% squeezes every other column to its current content. Actions
  * is sized for the remove prompt, the widest thing it shows, so opening that
  * does not move the columns either.
  */

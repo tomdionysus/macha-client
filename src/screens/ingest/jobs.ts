@@ -6,10 +6,10 @@ export type JobAction = 'pause' | 'resume' | 'retry' | 'remove';
 
 const ingestPauseableStates = new Set(['queued', 'scanning', 'importing']);
 const ingestResumableStates = new Set(['paused', 'blocked', 'failed']);
-// `verify_queued` (server 0.61.0): waiting for another torrent's check, as
-// libtorrent checks one at a time. Pause and cancel are allowed in it.
-// `awaiting_node` (server 0.64.0): in the cluster, not yet claimed. Actions
-// are intent there too, applied once a node claims it.
+// `verify_queued`: waiting for another torrent's check, as libtorrent checks
+// one at a time. Pause and cancel are allowed in it.
+// `awaiting_node`: in the cluster, not yet claimed. Actions are intent there
+// too, applied once a node claims it.
 const torrentPauseableStates = new Set(['awaiting_node', 'queued', 'metadata', 'downloading', 'verify_queued', 'verifying', 'downloaded', 'importing']);
 const torrentResumableStates = new Set(['paused', 'blocked']);
 const terminalStates = new Set(['completed', 'cancelled', 'failed']);
@@ -19,10 +19,10 @@ export function jobKey(kind: JobKind, id: string): string {
 }
 
 /**
- * A torrent's `desired` (server 0.64.0) is what was asked of it, and it
- * decides as much as the state does: a torrent added paused (0.71.0) waits
- * for a node, or is held by one, with `desired` "paused" and a state that
- * never says so. The server resumes whenever `desired` is "paused".
+ * A torrent's `desired` is what was asked of it, and it decides as much as
+ * the state does: a torrent added paused waits for a node, or is held by
+ * one, with `desired` "paused" and a state that never says so. The server
+ * resumes whenever `desired` is "paused".
  */
 export function canPause(kind: JobKind, state: string, desired?: string): boolean {
   return kind === 'ingest' ? ingestPauseableStates.has(state) : torrentPauseableStates.has(state) && desired !== 'paused';
@@ -54,7 +54,7 @@ export function displayStateOf(job: TorrentJob, linkedIngest?: IngestJob): strin
 }
 
 /**
- * The download still being stored in the cluster (server 0.71.0), between
+ * The download still being stored in the cluster, between
  * the download finishing and the import starting: minutes to tens of minutes
  * on a large torrent, after which the import itself takes seconds. Read from
  * the server's own reason, never rebuilt from the state, and only while it is

@@ -60,7 +60,6 @@ function unmatchedSortValue(item: UnmatchedFile, key: UnmatchedSortKey): number 
   }
 }
 
-/** The unmatched files in the order asked for, stable for the same files. */
 /** One empty list, so a list not yet loaded is the same value on every render. */
 const NO_FILES: readonly UnmatchedFile[] = [];
 
@@ -76,8 +75,8 @@ function folderOf(path: string): string {
 /**
  * The unmatched files as a list in the torrent list's style: one slim row per
  * file, sortable by column, the order kept in the address, and each file on
- * its own page. Selection and the bulk retry and delete stay, since this is
- * the page where many files are dealt with at once.
+ * its own page. Selection and the bulk retry and delete belong here, since
+ * this is the page where many files are dealt with at once.
  */
 function UnmatchedManager({ api }: { api: ManageApi }) {
   const navigate = useNavigate();

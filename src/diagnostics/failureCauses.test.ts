@@ -31,15 +31,14 @@ describe('the sentence a viewer is shown for a terminal failure', () => {
 });
 
 describe('a cap refusal is about the account, not the node', () => {
-  // The server's session change brings a per-account cap answering
-  // `429 account_session_limit`. Nothing here misclassifies it — this client
-  // creates no playback session and reads no status off a caught error — but
-  // "Playback failed" in front of a node that is working exactly as designed
-  // reads as a breakage, and sends a viewer to check a server that is fine.
+  // The server caps sessions per account and answers `429
+  // account_session_limit`. "Playback failed" in front of a node that is
+  // working exactly as designed reads as a breakage, and sends a viewer to
+  // check a server that is fine.
   //
   // The match is core's (`isAccountSessionLimit` walks the chain, cycle-safe)
   // rather than a code string matched here, because the code is core's to
-  // track and four clients matching it separately is how they drift.
+  // track and clients matching it separately is how they drift.
   it('names the account when core says the cap refused', () => {
     const refusal = new Error('Macha playback request failed');
     (refusal as { code?: string }).code = 'account_session_limit';

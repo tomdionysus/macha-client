@@ -9,10 +9,9 @@ import { settle } from '../test/settle';
 /**
  * The mint is stopped at the network rather than by replacing a core export.
  *
- * Spying on the export stopped working when core became an installed package
- * rather than a linked source tree: an ES module namespace is not
- * configurable, so the property cannot be redefined. Stubbing `fetch` is also
- * the better test — it exercises the real mint, its parsing and its failure
+ * An installed package's ES module namespace is not configurable, so a core
+ * export cannot be spied on. Stubbing `fetch` is also the better test — it
+ * exercises the real mint, its parsing and its failure
  * handling, and does not depend on which function inside core happens to make
  * the request.
  */

@@ -26,11 +26,9 @@ function isSigned(artwork?: ArtworkRef): artwork is SignedArtwork {
  *
  * This guards the *signature*: a node that re-signs a capability on every
  * catalogue read hands out a fresh `exp`/`sig` for bytes that have not
- * changed, and each fresh signature is a fresh browser cache key. Measured
- * against server 0.38.x on 2026-09-13 the signature is in fact stable — `exp`
- * is pinned to a UTC day boundary and is identical for every artwork object —
- * but a mixed-version cluster is this client's normal operating condition, so
- * the guard stays until no node re-signs.
+ * changed, and each fresh signature is a fresh browser cache key. A
+ * mixed-version cluster is this client's normal operating condition, so the
+ * guard holds whichever node signed.
  *
  * It cannot guard the *host*, which is the larger half of the same problem and
  * is core's `ArtworkHostPreference`: this map is module-scoped, so it
@@ -43,10 +41,8 @@ const lastLoadedUrlById = new Map<string, string>();
 /**
  * Everywhere the browser can load this artwork from on its own, best first:
  * the copy already known to be in its cache, then whatever order
- * `@machafoundation/core` gives — which now leads with the node that last
- * served artwork, so a pre-emptive endpoint swap no longer renames every
- * poster. That ordering was this client's for a few hours and is core's now,
- * because every client with a URL-keyed image cache has the same bug.
+ * `@machafoundation/core` gives, which leads with the node that last served
+ * artwork so a pre-emptive endpoint swap does not rename every poster.
  * Anything wanting an `Authorization` header is not an `<img>` source at all,
  * and is dropped here rather than silently 401ing.
  */

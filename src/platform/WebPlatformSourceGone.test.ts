@@ -93,9 +93,9 @@ describe('a source the node no longer has must not take the presentation with it
 
   it('reports a 404 without destroying the buffer the viewer is still watching', async () => {
     // The whole recovery depends on this. Core cannot regenerate into a live
-    // element if the adapter has already paused it and torn the source down —
-    // measured, that teardown happens 6 ms after the fatal and takes 60+ s of
-    // playable video with it. So `not-found` reports and does nothing else.
+    // element if the adapter has already paused it and torn the source down,
+    // and that teardown takes the whole buffer of playable video with it. So
+    // `not-found` reports and does nothing else.
     const { video, failures } = await playingPlayer();
     expect(readAheadFailureListeners).toHaveLength(1);
 
@@ -114,8 +114,8 @@ describe('a source the node no longer has must not take the presentation with it
 
   it('still tears down for a failure that is genuinely the end of the road', async () => {
     // The guard is narrow on purpose. Without a prior `not-found` for this
-    // generation an element error is what it has always been: terminal, and the
-    // presentation stops. A latch that swallowed every media error would leave
+    // generation an element error is terminal, and the presentation stops. A
+    // latch that swallowed every media error would leave
     // a viewer watching nothing with no message.
     const { video, failures } = await playingPlayer();
     emit(video, 'error');
@@ -128,12 +128,11 @@ describe('a source the node no longer has must not take the presentation with it
   });
 
   it('reads a 404 the worker saw even when the element errors before the worker says so', async () => {
-    // Measured 2026-09-23: a Direct Play session the node had reclaimed ended
-    // on "Web media source is unsupported" with no `source-degraded` in the
-    // trail. The worker hands the element the 404 and posts its report
-    // separately, so the element's error can arrive first; the latch above
-    // was empty and the error was read as terminal. Asked, the worker already
-    // knows what the node said.
+    // The worker hands the element the 404 and posts its report separately,
+    // so the element's error can arrive first, with the latch above still
+    // empty; read as terminal, a reclaimed source would end on "Web media
+    // source is unsupported". Asked, the worker already knows what the node
+    // said.
     workerSourceStatus = 404;
     const { video, failures } = await playingPlayer();
     emit(video, 'error');

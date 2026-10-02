@@ -94,10 +94,9 @@ describe('the duration the scrubber renders and divides by', () => {
   });
 
   it('refuses a duration that cannot be rendered or divided by', () => {
-    // The predecessor was `a || b || c || 1`, which skipped `NaN` only
-    // because `NaN` is falsy — an accident, not a guard. `Infinity` is
-    // truthy and went straight through to the formatter, where it rendered
-    // as `Infinity:NaN:NaN`. Both now fall to the next stated candidate.
+    // A plain `a || b || c || 1` skips `NaN` only because `NaN` is falsy, and
+    // lets `Infinity` through to the formatter as `Infinity:NaN:NaN`. Both
+    // fall to the next stated candidate.
     expect(firstUsableDurationMs(Number.NaN, 90_000)).toBe(90_000);
     expect(firstUsableDurationMs(Number.POSITIVE_INFINITY, 90_000)).toBe(90_000);
     expect(firstUsableDurationMs(0, 90_000)).toBe(90_000);

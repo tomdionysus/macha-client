@@ -51,12 +51,11 @@ describe('presentation while playback is starting', () => {
 
   it('never renders the player visible before the player route is active', () => {
     // The mini bar is what a viewer sees for any render where playback is
-    // visible and `/play/:id` has not arrived — pressing play on a browse
-    // screen used to flash it for about a tenth of a second on the
-    // television. The cause was lane priority, not call order: the router
-    // publishes locations inside `React.startTransition` unless told
-    // otherwise, so the runtime's ordinary setState commits a render sooner.
-    // AppRouter turns that off; this asserts the pairing that depends on it.
+    // visible and `/play/:id` has not arrived, so such a render flashes it.
+    // The hazard is lane priority, not call order: the router publishes
+    // locations inside `React.startTransition` unless told otherwise, so the
+    // runtime's ordinary setState would commit a render sooner. AppRouter
+    // turns that off; this asserts the pairing that depends on it.
     const runtime = new SynchronousRuntime();
     const api = { details: vi.fn() } as unknown as MediaApi;
     const progressStore = new ContinueWatchingStore('test-client');

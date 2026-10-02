@@ -17,19 +17,18 @@ function clampVolume(value: number): number {
 /**
  * The viewer's remembered playback volume, per client.
  *
- * This was `@machafoundation/core`'s until 2026-09-13 and moved out to its two
- * real consumers — this client and Android TV — because it is not a
- * cross-client fact. What *is* cross-client is whether a host owns app-level
- * volume at all, and core keeps that as `Platform.initialVolume?()`; a
- * television's volume belongs to the television and its remote, so
- * `SamsungWebPlatform` answers 1 and never consults this store.
+ * It lives in its two real consumers — this client and Android TV — rather
+ * than in `@machafoundation/core`, because it is not a cross-client fact.
+ * What *is* cross-client is whether a host owns app-level volume at all, and
+ * core keeps that as `Platform.initialVolume?()`; a television's volume
+ * belongs to the television and its remote, so `SamsungWebPlatform` answers 1
+ * and never consults this store.
  *
  * **The key is `macha.volume.v1.${clientId}` and must not change.** It is the
- * same storage, the same origin and the same client id as when core owned it,
- * so a viewer's existing volume survives the move with no migration and
- * nobody notices it happened. Rename it and every viewer silently returns to
- * full volume on their next launch, which is the "comes up loud with nothing
- * explaining why" failure this whole line of work started from.
+ * key core wrote, in the same storage, origin and client id, so a viewer's
+ * existing volume carries over with no migration. Rename it and every viewer
+ * silently returns to full volume on their next launch, with nothing
+ * explaining why.
  *
  * Four behaviours are deliberate and are the easy ones to tidy away: an absent
  * key reads as **1**, not 0; an empty or whitespace-only entry reads as **1**,

@@ -42,16 +42,15 @@ export function IngestScreen({ api, section }: Props) {
   const { snapshot, loading, error, setError, notice, setNotice, refresh, busyByJob, confirmRemove, setConfirmRemove, act, actMany } = acquisition;
   const [path, setPath] = useState('');
   const [magnet, setMagnet] = useState('');
-  // Server 0.71.0: added held, so nothing is checked or downloaded until resumed.
+  // Added held, so nothing is checked or downloaded until resumed.
   const [startPaused, setStartPaused] = useState(false);
   const [submitting, setSubmitting] = useState<'path' | 'magnet'>();
   const [refreshing, setRefreshing] = useState(false);
   const navigate = useNavigate();
-  // The job already holding a torrent the viewer tried to add again (server
-  // 0.63.0 refuses a second job for it), to offer a way straight to it.
+  // The job already holding a torrent the viewer tried to add again (the
+  // server refuses a second job for it), to offer a way straight to it.
   const [heldBy, setHeldBy] = useState<string | undefined>(undefined);
-  // Server 0.64.0: a torrent is added to the cluster, to download on any
-  // capable node or on one the viewer pins, and can be removed a while after
+  // A torrent is added to the cluster, to download on any capable node or on one the viewer pins, and can be removed a while after
   // it completes. '' is "any node" and "the cluster default".
   const torrentNodes = useAsync(() => section === 'torrents' ? api.torrentNodes() : Promise.resolve(undefined), [api, section]);
   const [nodeChoice, setNodeChoice] = useState('');
@@ -150,12 +149,11 @@ export function IngestScreen({ api, section }: Props) {
   };
 
   const ingestEnabled = snapshot?.ingestStatus.enabled ?? false;
-  // From server 0.64.0 torrents are the cluster's: every node takes adds,
-  // and /torrents/status describes only the node that answered (fi-1 runs
-  // none and says so). So whether torrents are available is the cluster's
-  // node list, and nothing is said until it has answered. A server older
-  // than 0.64.0 has no such list; there the answering node's status is the
-  // whole story, as before.
+  // Torrents are the cluster's: every node takes adds, and /torrents/status
+  // describes only the node that answered, which may run none. So whether
+  // torrents are available is the cluster's node list, and nothing is said
+  // until it has answered. A server older than 0.64.0 has no such list; there
+  // the answering node's status is the whole story.
   const clusterAnswered = torrentNodes.value !== undefined;
   const clusterTakesTorrents = (torrentNodes.value?.nodes.length ?? 0) > 0;
   const beforeClusterTorrents = Boolean(torrentNodes.error);

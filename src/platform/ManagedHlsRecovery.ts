@@ -40,9 +40,8 @@ export class ManagedHlsMediaRecoveryBudget {
    * the MediaSource down and building another. When the stream is one this
    * browser cannot parse at all, that recovery reaches the same wall every
    * time and the player sits in a loop — one full segment refetched per turn,
-   * for as long as the viewer leaves it there. Observed against a real title:
-   * fifty-eight refetches of the same 2.4 MB segment in forty-six seconds, a
-   * spinner throughout, and nothing in the UI to say anything was wrong.
+   * for as long as the viewer leaves it there, behind a spinner and with
+   * nothing in the UI to say anything is wrong.
    *
    * "Non-fatal" is a claim about recoverability, and repetition with nothing
    * buffered is the evidence against it. Bounded here rather than left to

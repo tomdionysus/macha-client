@@ -44,10 +44,10 @@ function canResume(media: MediaSummary, progress?: PlaybackProgress): boolean {
 
 export function DetailScreen({ api, itemId, onBack, onPlay, onPlayFromStart, loadVersions, onPlayVersion, progress, onEdit, onMediaProfile }: Props) {
   const details = useRefreshableAsync(() => api.details(itemId), [api, itemId]);
-  // Every file's own profile, one line each (Tom, 2026-09-27: a title with
-  // several files shows each file's format). A file whose profile cannot be
-  // read is left out rather than failing the others. Keyed on the ids, not
-  // the details object, so a background refresh does not ask again.
+  // Every file's own profile, so a title with several files shows each
+  // file's format. A file whose profile cannot be read is left out rather
+  // than failing the others. Keyed on the ids, not the details object, so a
+  // background refresh does not ask again.
   const immutableMediaIds = details.value?.mediaIds.filter((mediaId) => mediaId.startsWith('macha:')) ?? [];
   const profiles = useAsync(
     async (signal) => api.mediaProfile
@@ -56,7 +56,7 @@ export function DetailScreen({ api, itemId, onBack, onPlay, onPlayFromStart, loa
       : [],
     [api, immutableMediaIds.join(' ')],
   );
-  // The first file's profile readies playback, as before there were several.
+  // The first file's profile readies playback.
   const firstProfile = profiles.value?.[0];
   const backdrop = useArtworkUrl(api, details.value?.artwork?.backdrop ?? details.value?.artwork?.poster ?? details.value?.artwork?.thumbnail);
   const poster = useArtworkUrl(api, details.value?.kind === 'movie' ? details.value.artwork?.poster : undefined);
@@ -66,8 +66,8 @@ export function DetailScreen({ api, itemId, onBack, onPlay, onPlayFromStart, loa
   useEffect(() => {
     if (firstProfile) onMediaProfile?.(firstProfile);
   }, [onMediaProfile, firstProfile]);
-  // Tom, 2026-09-25: Play stays and means "make the decision for me"; beside
-  // it, one button per quality the item can be played at. Keyed on the
+  // Play means "make the decision for me"; beside it, one button per quality
+  // the item can be played at. Keyed on the
   // item, not the details object, so a background refresh does not ask again.
   const versionsFor = details.value && hasPicture(details.value) && details.value.mediaIds.length > 0 && onPlayVersion ? details.value : undefined;
   const versions = useAsync(
@@ -91,8 +91,7 @@ export function DetailScreen({ api, itemId, onBack, onPlay, onPlayFromStart, loa
       <MediaPageTitle refreshing={details.refreshing} onRefresh={details.refresh}>{media.title}</MediaPageTitle>
       {media.kind === 'episode' && episodeCode(media) && <p className="subtitle">{episodeCode(media)}</p>}
       {/* One line per distinct file; core combines files whose summaries read
-          the same (Tom, 2026-09-27), and holds the TODO to report them to the
-          server as likely duplicates. */}
+          the same. */}
       {profiles.value && fileSummaries(profiles.value).map(({ summary, mediaIds }) => <MediaLine key={mediaIds[0]} className="media-profile-summary" parts={summary.parts} />)}
       {media.synopsis && <p className="synopsis">{media.synopsis}</p>}
       {playable && (

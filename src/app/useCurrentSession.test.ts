@@ -34,12 +34,11 @@ describe('useCurrentSession', () => {
   });
 
   it('takes the stated roles literally, granting nothing the server did not name', async () => {
-    // Verbatim from a live 0.37.2 node, whose role names this build does not
-    // know. There is no special handling for the account it belongs to: the
-    // array simply does not name `importer` or `manager`, so those sections
-    // stay hidden for precisely the reason they would for any other user.
-    // Reading an unfamiliar name as "cannot interpret, so show everything"
-    // would be the dangerous direction to be wrong in.
+    // A session shape whose role names this build does not know. The array
+    // does not name `importer` or `manager`, so those sections stay hidden
+    // for the reason they would for any other user. Reading an unfamiliar
+    // name as "cannot interpret, so show everything" would be the dangerous
+    // direction to be wrong in.
     const stated = {
       id: 'session-id',
       roles: ['anonymous'],
@@ -72,13 +71,3 @@ describe('useCurrentSession', () => {
     expect(result.current.known).toBe(false);
   });
 });
-
-// Deleted with the code they covered:
-//
-//   - the whoami retry, because there is nothing left here to retry. Roles no
-//     longer come from this request — they ride the token, on
-//     `sessionManager.roles`, stated by whichever path produced it. A failure
-//     here now costs a display name until the next refresh, not permissions.
-//   - `sessionLockedOut`, which is core's. Its semantics are tested there
-//     (`sessionRoles.test.ts`) against `roles | undefined`, so that "unknown is
-//     not none" holds by construction rather than per call site.

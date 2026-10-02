@@ -22,8 +22,8 @@ import {
 
 /**
  * How a title resumes: its file, and the mode, cap and audio and subtitle
- * choices it was playing with. Tom, 2026-09-27: resume "as if you'd never
- * left". Nothing to restore when starting from the beginning or with nothing
+ * choices it was playing with, so it resumes as if the viewer never left.
+ * Nothing to restore when starting from the beginning or with nothing
  * saved; a quality the viewer picks now is theirs instead.
  */
 function resumeWith(entry: PlaybackProgress | undefined) {
@@ -115,8 +115,8 @@ export function usePlaybackController(options: {
    *
    * An episode reached from Continue Watching or from its own detail page
    * arrives on its own: no season screen was open, so no queue came with it,
-   * and the transport showed no next or previous for something that plainly
-   * has both. The rest of the season is one request away — but holding the
+   * and the transport would show no next or previous for something that
+   * plainly has both. The rest of the season is one request away — but holding the
    * picture for a round trip to populate two buttons would be paying for them
    * with the thing the viewer actually asked for, so playback starts on the
    * single item and the siblings land behind it.
@@ -187,19 +187,16 @@ export function usePlaybackController(options: {
      * Never reconstruct playback before the client is connected.
      *
      * This effect runs off the URL, so on a deep link or a reload into
-     * `/play/:id` it fires on the first effect pass — measured at 15 ms against
-     * the deployed client, some 700 ms before same-origin endpoint discovery
-     * had produced an endpoint at all. `runtime.play()` then asks for playback
-     * facts through a session manager that has not been started, and core's
-     * `SessionManager.fetch` only waits for a mint that is already in flight:
-     * with none, it sends the request bare, takes the 401, and returns it
-     * unretried because nothing was sent to retry with. The coordinator logs
-     * `instruction-without-facts` and chooses a container and codec anyway,
-     * which reaches the viewer as a Format error on a title that plays.
+     * `/play/:id` it fires on the first effect pass, well before same-origin
+     * endpoint discovery has produced an endpoint. `runtime.play()` would then
+     * ask for playback facts through a session manager that has not been
+     * started, and core's `SessionManager.fetch` only waits for a mint that is
+     * already in flight: with none, it sends the request bare, takes the 401,
+     * and returns it unretried. The coordinator then chooses a container and
+     * codec without facts, which reaches the viewer as a Format error on a
+     * title that plays.
      *
-     * Regression from 0.16.0: before same-origin discovery, endpoints existed
-     * at first render and a mint was always already in flight by the time this
-     * ran. Nothing below can detect that — an endpoint probe is this client's
+     * Nothing below can detect that — an endpoint probe is this client's
      * business — so the gate belongs here rather than in core.
      */
     if (!ready) return undefined;

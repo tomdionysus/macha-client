@@ -5,7 +5,7 @@ import { navItems } from '../App';
 /**
  * The nav decision as `App` makes it, without mounting the application.
  *
- * Roles come from the session token now, so `undefined` is the third answer —
+ * Roles come from the session token, so `undefined` is the third answer —
  * nothing has said yet — and `sessionPermits` is core's rule that such a
  * session is permitted everything rather than nothing.
  */
@@ -29,16 +29,14 @@ describe('navigation role gating', () => {
   });
 
   it('hides every catalogue section from an account that may not read it', () => {
-    // The case that sent a manage-only account to a wall of 401s: Home is a
-    // catalogue screen, so leaving it visible is the same mistake as leaving
-    // Movies visible.
+    // Home is a catalogue screen, so leaving it visible would send a
+    // manage-only account to a wall of 401s just as Movies would.
     expect(visibleSections(['manage_users'])).toEqual(['Manage']);
   });
 
   it('gives a library manager Manage, but not Status — that is its own role now', () => {
-    // Status was gated on `manager` as a stopgap. It has `view_status` of its
-    // own as of server 0.38.5, and the two are independent: managing the
-    // library says nothing about wanting the node roster, and a viewer who
+    // Status has `view_status` of its own, independent of `manager`: managing
+    // the library says nothing about wanting the node roster, and a viewer who
     // only watches the cluster should not have to be given the library.
     expect(visibleSections(['manager'])).toEqual(['Manage']);
   });

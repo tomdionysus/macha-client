@@ -49,16 +49,14 @@
 .settings-playback .settings-toggle { margin-top: 1.1rem; }
 /* One row: a switch and what it does. Written in flexbox with pixel offsets
    and longhand positioning throughout, because the Samsung build runs
-   Chromium 47 — no grid, no flex `gap`, no `inset` shorthand. `inset: 0` was
-   the first attempt and it left the input with no box at all there, which made
-   the switch both invisible and, since D-pad navigation skips anything with a
-   zero-sized rect, unreachable. */
+   Chromium 47 — no grid, no flex `gap`, no `inset` shorthand. `inset: 0`
+   leaves the input with no box at all there, which makes the switch both
+   invisible and, since D-pad navigation skips anything with a zero-sized
+   rect, unreachable. */
 /* Scoped under `.settings` to outrank `.settings label { display: block }`,
-   which is more specific than a bare class and was quietly flattening this
-   row: the label stopped being a flex container, its children stopped being
-   flex items, and the switch — a span with no `display` of its own — fell
-   back to inline, where width and height mean nothing. The track then filled
-   the panel as a two-pixel line and the thumb landed on the text. */
+   which is more specific than a bare class and would otherwise flatten this
+   row: the label stops being a flex container, and the switch falls back to
+   inline, where width and height mean nothing. */
 .settings .settings-toggle { display: flex; align-items: center; cursor: pointer; }
 /* Its own `display`, rather than relying on a flex parent to blockify it. */
 .settings-switch { display: inline-block; position: relative; flex: 0 0 auto; width: 44px; height: 24px; margin-right: .75rem; }
@@ -181,8 +179,8 @@
    pair a couple of pixels apart. */
 .login-actions > button { flex: 1 1 0; min-width: 0; margin: 0; box-sizing: border-box; }
 /* The secondary carries a 1px border and the primary does not, and the flex
-   basis resolves against the content box, so the pair came out exactly two
-   pixels apart. Matching the border rather than fighting the sizing. */
+   basis resolves against the content box, so without a matching border the
+   pair comes out two pixels apart. */
 .login-actions > .primary-button { border: 1px solid transparent; }
 /* The escape hatch out of a login wall. Quiet on purpose — it is the way out
    for a viewer who cannot get in, not a second way in — but it must still take

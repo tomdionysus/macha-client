@@ -380,12 +380,11 @@ describe('Direct Play read-ahead Service Worker', () => {
 
   it('reports a 404 as a source failure carrying the status, while still returning it', async () => {
     // The node has no record of this source — most often a play session reaped
-    // out from under a long pause. Before 2026-09-17 nobody was told: the 404
-    // travelled to the media element, which raised a generic decode failure, so
-    // the client saw "unsupported media" and failed the node over rather than
-    // re-creating the session it actually needed. The response still travels as
-    // it did (the test above is the invariant); what is new is that the status
-    // reaches the client alongside it.
+    // out from under a long pause. The media element alone raises a generic
+    // decode failure, which reads as "unsupported media" and fails the node
+    // over; the status reaches the client alongside the response so it can
+    // re-create the session instead. The response itself still travels (the
+    // test above is the invariant).
     const harness = createHarness(async () => new Response('not found', { status: 404 }));
     harness.configure();
     releases.push(harness.release);
@@ -401,8 +400,8 @@ describe('Direct Play read-ahead Service Worker', () => {
 
   it('answers what the node said when asked, for an element that errors before the report arrives', async () => {
     // The report above is posted after an await, and the 404 response can
-    // reach the element first; measured 2026-09-23, the page then read the
-    // element's error as "unsupported". The status is recorded before the
+    // reach the element first, leaving the page to read the element's error
+    // as "unsupported". The status is recorded before the
     // response is returned, so a page that asks gets the answer regardless.
     const harness = createHarness(async () => new Response('not found', { status: 404 }));
     harness.configure();

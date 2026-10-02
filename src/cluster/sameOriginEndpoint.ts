@@ -19,9 +19,7 @@ export const SAME_ORIGIN_PROBE_TIMEOUT_MS = 1_500;
 
 /**
  * The answers `/api/v1/health` gives: `ok` with 200, and `starting`, `failed`
- * or `busy` with 503. The first three are from server 0.38.5, documented on
- * `LIVENESS_PATH` in core and measured against the deployed cluster on
- * 2026-09-15; `busy` arrives with 0.43.0.
+ * or `busy` with 503, as documented on `LIVENESS_PATH` in core.
  *
  * `busy` is a node refusing work because its control lane's queue is full, and
  * it carries `Retry-After`. It identifies the node exactly as the others do —
@@ -37,10 +35,9 @@ const HEALTH_STATUSES: readonly MachaHealthStatus[] = ['ok', 'starting', 'failed
 /**
  * The product marker, once a node states one.
  *
- * No released server carries it — the body is `{"status":"ok"}` and nothing
- * else — so it is asserted conditionally: present and wrong is a refusal,
- * absent is tolerated. That is what lets this ship now and tighten later
- * without a flag day across a cluster whose nodes drift apart in practice.
+ * A node may answer with no marker at all, so it is asserted conditionally:
+ * present and wrong is a refusal, absent is tolerated. That avoids a flag day
+ * across a cluster whose nodes drift apart in practice.
  */
 const PRODUCT_MARKER = 'macha';
 
@@ -48,9 +45,8 @@ export interface MachaEndpointConfirmation {
   status: MachaHealthStatus;
   /**
    * Whether the body actually named Macha rather than merely having the shape
-   * of one of its answers. Worth recording: it is the difference between proof
-   * and strong circumstantial evidence, and it is what says whether the
-   * server-side marker has reached this node yet.
+   * of one of its answers: the difference between proof and strong
+   * circumstantial evidence.
    */
   marked: boolean;
 }
@@ -58,7 +54,7 @@ export interface MachaEndpointConfirmation {
 /**
  * Ask one endpoint whether it is Macha, from a client that has no session.
  *
- * Identity, not readiness. All three health states confirm a node — a node
+ * Identity, not readiness. Every health state confirms a node — a node
  * that is starting is still a node, and the health monitor owns whether it can
  * be used yet. Refusing `starting` here would send a viewer who powered on
  * their server and their television together to an endpoint form.
@@ -91,10 +87,10 @@ export async function confirmMachaEndpoint(
     clearTimeout(timer);
   }
 
-  // 200 serving, 503 starting or failed, and nothing else. A node too old for
-  // the route answers 401 rather than 404, because authentication happens
+  // 200 serving, 503 for every other state, and nothing else. A node too old
+  // for the route answers 401 rather than 404, because authentication happens
   // before routing — so an old node is simply not adoptable, and falls through
-  // to the endpoint screen exactly as an unconfigured client does today.
+  // to the endpoint screen exactly as an unconfigured client does.
   if (!response.ok && response.status !== 503) return undefined;
 
   // The first thing that separates Macha from this client's own web host: that
@@ -126,9 +122,8 @@ export async function confirmMachaEndpoint(
 
   // Nothing reads a version here, and nothing should: liveness answers anyone
   // who can reach the port, with no token, and "which release is this" is a
-  // reconnaissance question. The server pins that from its side — one test
-  // asserts the marker is present, another that the build is not — and the
-  // node's version is already on the Status node card, behind `view_status`.
+  // reconnaissance question. The node's version is on the Status node card,
+  // behind `view_status`.
   return { status, marked: record.service === PRODUCT_MARKER };
 }
 

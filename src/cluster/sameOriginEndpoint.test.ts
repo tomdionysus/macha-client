@@ -43,8 +43,8 @@ describe('confirmMachaEndpoint', () => {
     expect(await confirmMachaEndpoint('https://media.example.com', spa)).toBeUndefined();
   });
 
-  // Measured against the live cluster 2026-09-15: the body is exactly
-  // `{"status":"ok"}`, 15 bytes, no product or version field.
+  // The plainest answer a node gives: exactly `{"status":"ok"}`, with no
+  // product or version field.
   it('confirms a node serving', async () => {
     expect(await confirmMachaEndpoint('https://node', macha('ok'))).toEqual({
       status: 'ok',
@@ -66,8 +66,8 @@ describe('confirmMachaEndpoint', () => {
   });
 
   /**
-   * Server 0.43.0 refuses work when the control lane's queue is full, with a
-   * 503 and `Retry-After`. The refusal body deliberately keeps `service` and
+   * A node refuses work when the control lane's queue is full, with a 503
+   * and `Retry-After`. The refusal body deliberately keeps `service` and
    * `status`, so it still identifies the node — and a node that is busy is one
    * to wait for, not evidence that the address is not Macha. Refusing it would
    * put an endpoint form in front of a viewer during a load spike, on a node
@@ -90,10 +90,10 @@ describe('confirmMachaEndpoint', () => {
   });
 
   /**
-   * The marker the server is adding: `{"service":"macha","status":"ok"}` and
-   * nothing more. It carries no version deliberately — an unauthenticated
-   * route that answers anyone who can reach the port does not get to say which
-   * build it is, and the server has a test from 0.38.5 asserting so.
+   * The product marker: `{"service":"macha","status":"ok"}` and nothing
+   * more. It carries no version deliberately — an unauthenticated route that
+   * answers anyone who can reach the port does not get to say which build it
+   * is, and the server has a test asserting so.
    *
    * Asserted conditionally, so a cluster whose nodes drift apart keeps
    * working: absent is tolerated, present and wrong is a refusal.
@@ -110,7 +110,7 @@ describe('confirmMachaEndpoint', () => {
 
   // A node older than 0.38.5 has no liveness route, and answers 401 rather
   // than 404 because authentication happens before routing. Not identifiable,
-  // so not adoptable — the viewer sees the endpoint screen, as today.
+  // so not adoptable — the viewer sees the endpoint screen.
   it('refuses a node too old to have the liveness route', async () => {
     const old = answering(answer(401, 'application/json', { error: 'unauthorized' }));
     expect(await confirmMachaEndpoint('https://node', old)).toBeUndefined();

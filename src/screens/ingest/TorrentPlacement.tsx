@@ -15,10 +15,9 @@ export function placementRefusalText(reason: unknown): string {
 
 /**
  * Where a cluster torrent downloads and when it is removed, changed after it
- * was added (server 0.64.0, `PATCH /api/v1/torrents/jobs/{id}`). The node can
- * be changed only while no node has claimed it, so the choice is offered only
- * then; the removal time can be changed at any point. A refusal is the
- * caller's to show.
+ * was added (`PATCH /api/v1/torrents/jobs/{id}`). The node can be changed
+ * only while no node has claimed it, so the choice is offered only then; the
+ * removal time can be changed at any point. A refusal is the caller's to show.
  */
 export function TorrentPlacement({ api, job, nodes, onChanged, onError }: {
   api: AcquisitionApi;

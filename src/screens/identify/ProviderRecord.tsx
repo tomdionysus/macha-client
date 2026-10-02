@@ -146,8 +146,8 @@ export function ProviderRecord({ releases, file, manage, numbers: initial, disab
     let unanswered = false;
     for (const sibling of (siblings ?? []).filter((candidate) => selected.has(candidate.file.id) && candidate.track != null)) {
       // A change the server did not answer is still running there, and the
-      // next would queue behind it (seen: each sat 27 s to 3 min before a
-      // conflict), so the rest are not sent.
+      // next would queue behind it, possibly for minutes, only to end in a
+      // conflict, so the rest are not sent.
       if (unanswered) {
         mark(sibling.file.id, { left: 'not tried, because the server did not answer the one before.' });
         continue;

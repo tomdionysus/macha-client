@@ -15,9 +15,8 @@ interface Props {
    * What the viewer presses to open the menu. Defaults to the `⋯` glyph.
    *
    * Supplied where the thing the menu belongs to is already on screen and can
-   * be the control itself — the account identity being the case in point.
-   * Putting a `⋯` next to it made two adjacent targets for one idea, and the
-   * icon beside it looked like a control while doing nothing.
+   * be the control itself, such as the account identity, so one idea has one
+   * target rather than two adjacent ones.
    */
   trigger?: ReactNode;
 }

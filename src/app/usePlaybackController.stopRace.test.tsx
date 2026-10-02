@@ -37,12 +37,11 @@ const platform = {} as unknown as Platform;
 
 describe('usePlaybackController stop() vs. route-reconstruction race', () => {
   it('does not restart playback when the runtime clears before the router commits the navigate-away', () => {
-    // Regression test: stop() while still on /play/:id races the runtime
-    // clearing its active request against the router applying the
-    // navigate() call. If the runtime wins, the reconstruct-from-route
-    // effect used to see "on the player route, no active playback" — this
-    // client's signature for "reload deep-linked into the player" — and
-    // restarted the very session stop() was just told to close.
+    // stop() while still on /play/:id races the runtime clearing its active
+    // request against the router applying the navigate() call. If the runtime
+    // wins, the reconstruct-from-route effect sees "on the player route, no
+    // active playback", this client's signature for "reload deep-linked into
+    // the player", and must not restart the session stop() was told to close.
     fakePathname = '/play/m1';
     const play = vi.fn().mockResolvedValue(undefined);
     const stop = vi.fn().mockResolvedValue(undefined);

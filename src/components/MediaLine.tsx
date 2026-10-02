@@ -2,10 +2,10 @@
 export const MEDIA_LINE_SEPARATOR = ' · ';
 
 /**
- * A file's technical summary as one line: core's `technicalSummary(...).parts`
- * (Tom, 2026-09-27: those details are core's, supplied structured; the client
- * does the layout). It wraps only between fields, so "926 kbps" or "2h 31m"
- * never breaks across two lines on a narrow column, as the phone found.
+ * A file's technical summary as one line: core supplies the fields
+ * (`technicalSummary(...).parts`) and this does the layout. It wraps only
+ * between fields, so "926 kbps" or "2h 31m" never breaks across two lines on
+ * a narrow column.
  */
 export function MediaLine({ parts, className }: { parts: readonly string[]; className?: string }) {
   return (

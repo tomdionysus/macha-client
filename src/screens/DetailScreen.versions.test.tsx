@@ -32,9 +32,8 @@ const fourK: PlaybackVersions = {
 };
 
 // Queried by title, not by role and name: role queries compute every
-// button's accessible name on each poll. Measured back to back on this shared
-// machine at load 100-190, the first test took 500-630 ms by title and
-// 1460-2470 ms by role, past findBy's 1000 ms, which failed a full run.
+// button's accessible name on each poll, which on a loaded machine runs past
+// findBy's 1000 ms timeout.
 describe('the detail page\'s quality buttons', () => {
   it('offers Play and one button per quality, and plays the one pressed', async () => {
     const { onPlayVersion } = show(film, fourK);
@@ -90,8 +89,8 @@ describe('a title\'s files, one line each', () => {
     await settle();
     screen.getByText(/3840×2160/);
     expect([...container.querySelectorAll('.media-profile-summary')].map((line) => line.textContent)).toEqual([
-      // Tom, 2026-09-27: highest resolution first, its class after it, and
-      // the channel count after the audio codec. Core's parts, laid out as given.
+      // Highest resolution first, its class after it, and the channel count
+      // after the audio codec: core's parts, laid out as given.
       '2h 31m · 3840×2160 (4K) · HEVC · TRUEHD · 7.1 · 47.4 Mbps',
       '2h 31m · 1920×1080 (1080p) · H.264 · AAC · 7.1 · 8.0 Mbps',
     ]);
@@ -125,8 +124,8 @@ describe('files that are the same', () => {
     await settle();
     screen.getByText(/3840×2160/);
     expect([...container.querySelectorAll('.media-profile-summary')].map((line) => line.textContent)).toEqual([
-      // Tom, 2026-09-27: highest resolution first, its class after it, and
-      // the channel count after the audio codec. Core's parts, laid out as given.
+      // Highest resolution first, its class after it, and the channel count
+      // after the audio codec: core's parts, laid out as given.
       '2h 31m · 3840×2160 (4K) · HEVC · TRUEHD · 7.1 · 47.4 Mbps',
       '2h 31m · 1920×1080 (1080p) · H.264 · AAC · 7.1 · 8.0 Mbps',
     ]);

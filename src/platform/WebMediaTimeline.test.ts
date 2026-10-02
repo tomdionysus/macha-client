@@ -65,9 +65,8 @@ describe('WebMediaTimeline', () => {
     // The teardown path: hls.js loads from zero and the initial-seek listener
     // samples at `currentTime` 0 to establish the origin *before* it seeks. The
     // requested position is the server's `seek_offset_ms` into the generation,
-    // and says nothing about where the media clock begins. Figures are the live
-    // remux generation from 2026-09-18: an 18,120 ms offset, one fragment
-    // resident, sampled at zero.
+    // and says nothing about where the media clock begins. Here: an 18,120 ms
+    // offset, one fragment resident, sampled at zero.
     const timeline = new WebMediaTimeline('remux', 18_120, 'generation-start');
     const sample = timeline.sample({
       positionMs: 0,

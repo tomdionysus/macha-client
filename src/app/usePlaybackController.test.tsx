@@ -119,14 +119,12 @@ describe('usePlaybackController route reconstruction', () => {
   });
 
   /**
-   * The 0.16.0 regression, measured against the deployed client before it was
-   * fixed: a reload into `/play/:id` reconstructed at 15 ms, some 700 ms before
-   * same-origin discovery had produced an endpoint at all. `runtime.play()`
-   * then asked for playback facts through a session manager that had not been
-   * started; core's `SessionManager.fetch` waits only for a mint already in
-   * flight, so the request went out bare, took a 401 and was returned
-   * unretried. The coordinator chose a container and codec anyway
-   * (`instruction-without-facts`), which reached the viewer as a Format error.
+   * A reload into `/play/:id` reconstructs before same-origin discovery has
+   * produced an endpoint. Asking for playback facts then goes through a
+   * session manager that has not started; core's `SessionManager.fetch` waits
+   * only for a mint already in flight, so the request would go out bare, take
+   * a 401, and leave the coordinator choosing a container and codec without
+   * facts, which reaches the viewer as a Format error.
    *
    * Waiting is free here and guessing is not: this is the one playback path
    * that runs off a URL rather than off a viewer acting in a connected app.
@@ -187,9 +185,9 @@ describe('usePlaybackController season queue', () => {
   }
 
   it('widens a lone episode into its season so the transport has next and previous', async () => {
-    // Resuming an episode from Continue Watching passes no queue — nothing was
-    // open to build one from — and the player showed no next or previous for
-    // something that plainly has both.
+    // Resuming an episode from Continue Watching passes no queue, since nothing
+    // was open to build one from, yet the episode plainly has a next and a
+    // previous.
     const play = vi.fn().mockResolvedValue(undefined);
     const runtime = { play, stop: vi.fn(), setReturnTo: vi.fn() } as unknown as PlaybackRuntime;
     const episodes = [episode('e1', 1), episode('e2', 2), episode('e3', 3)];

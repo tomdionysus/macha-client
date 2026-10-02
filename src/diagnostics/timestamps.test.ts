@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { presentedTime, presentedTimeOfDay, zuluTimestamp } from './timestamps';
 
-/** 2026-09-21T15:51:52Z — the evening that produced this module. */
+/** An arbitrary fixed instant, in UTC. */
 const INSTANT = Date.UTC(2026, 8, 21, 15, 51, 52);
 
 describe('zuluTimestamp — the interchange form', () => {
@@ -10,8 +10,7 @@ describe('zuluTimestamp — the interchange form', () => {
   });
 
   it('does not move with the machine that renders it', () => {
-    // The bug this exists to prevent: three nodes in three zones, and a
-    // client adding a fourth. Whatever this machine's offset is, the output
+    // Three nodes in three zones, and a client in a fourth. Whatever this machine's offset is, the output
     // is the node's instant.
     const offsetMinutes = new Date(INSTANT).getTimezoneOffset();
     expect(zuluTimestamp(INSTANT)).toBe('2026-09-21 15:51:52Z');

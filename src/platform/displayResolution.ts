@@ -1,7 +1,6 @@
 /**
  * The resolution this device's screen actually shows, in physical pixels, for
- * core to cap automatic play at (Tom, 2026-09-25: "cap at the screen
- * resolution for automatic play"). A viewer's own setting overrides it.
+ * core to cap automatic play at. A viewer's own setting overrides it.
  *
  * Undefined means unknown, and unknown must mean no cap: a guess that is too
  * low would quietly deny a viewer the file their screen can show.
@@ -27,8 +26,8 @@ export function browserDisplayResolution(view: Pick<Window, 'screen' | 'devicePi
 /**
  * A Samsung set reports its application surface (1920x1080 on a 4K panel), not
  * its panel, so its screen size would cap every 4K set at 1080p. The panel is
- * known only through webapis.productinfo, which this build does not load yet;
- * until that is added and tried on a set, the display is unknown and uncapped.
+ * known only through webapis.productinfo, which this build does not load, so
+ * the display is reported unknown and uncapped.
  */
 export function samsungDisplayResolution(): DisplayResolution | undefined {
   return undefined;

@@ -2,8 +2,7 @@ import type { ReactNode } from 'react';
 
 /**
  * Field parts shared by the unmatched file's manual entry and the metadata
- * editor, which ask for the same things of the same kinds of item and used to
- * do it with two copies of every input and two number parsers.
+ * editor, which ask for the same things of the same kinds of item.
  */
 
 /** A whole number typed into a field, or undefined for empty or not a number. */

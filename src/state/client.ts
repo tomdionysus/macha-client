@@ -6,7 +6,7 @@ import { MachaClientConfiguration, parseEndpointList } from '@machafoundation/co
  * The values and all their migration logic live in `MachaClientConfiguration`;
  * only their provenance is web-specific, and this is the one place that reads
  * it. `import.meta.env` exists in a Vite build and nowhere else, which is
- * exactly why it stopped at this boundary rather than going into the package.
+ * why it stays at this boundary rather than in the package.
  *
  * The Samsung package pins its build-time endpoints: stale storage from an
  * earlier development install on the same TV must not override them.

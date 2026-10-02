@@ -148,9 +148,8 @@ function subscribedSource(): string {
 
 describe('an hls.js fragment, reported the same way', () => {
   it('reaches the listener as its bytes over the time from first byte to last', () => {
-    // The wait before the first byte is the node; the rest is the link. On
-    // 2026-09-23 gbni-1 answered in 0.1-0.35 s and then delivered at 0.26-1.32
-    // MB/s, and only the second half says whether it can carry a stream.
+    // The wait before the first byte is the node; the rest is the link, and
+    // only the second half says whether it can carry a stream.
     const seen: unknown[][] = [];
     setMediaTransferListener((...args) => seen.push(args));
     reportFragmentTransfer('http://10.44.1.50:7438/api/v1/playback/sessions/s/stream/g/1/segment-000001.m4s', 2_031_747, 43_293, 51_100.8);

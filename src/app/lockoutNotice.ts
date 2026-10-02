@@ -6,18 +6,11 @@ export type LockoutReason = 'no-roles' | 'refused';
 /**
  * What to tell a viewer the wall is for.
  *
- * **A locked-out viewer used to get the sign-in form and nothing else**, which
- * is the one screen that cannot help them: their credentials were fine, and
- * typing them again produces the same session with the same nothing. A
- * television reproduced it twice on a clean install — signed in, no
- * navigation, and a catalogue answering *"this action requires the
- * 'media_viewer' role"* in a `403` nobody reads.
- *
  * **`undefined` is unknown, `[]` is granted nothing**, and they must not share
  * a sentence. A node too old to state roles leaves `roles` undefined for ever
  * and core treats that as permissive on purpose; saying "you have no roles"
  * there would lock a viewer out of a cluster that simply never answered the
- * question. `sessionLockedOut` is core's, so all four clients draw the line in
+ * question. `sessionLockedOut` is core's, so every client draws the line in
  * the same place.
  *
  * **The remedy comes first, and it is signing in.** A session granted
@@ -25,11 +18,8 @@ export type LockoutReason = 'no-roles' | 'refused';
  * viewer, a signed-in account that genuinely holds nothing, or core's
  * credential-less re-mint having replaced a working session after a `401`.
  * Two of the three are answered by signing in, and only the middle one needs
- * an administrator — so a sentence that leads with *ask an administrator*
- * sends most of these viewers to the wrong person, and they cannot tell from
- * the screen that it is the wrong one. Accurate about the state and wrong
- * about the remedy is still wrong: the remedy is the only part a viewer can
- * act on. (The phone client's finding, 2026-09-21.)
+ * an administrator, so a sentence that leads with *ask an administrator*
+ * sends most of these viewers to the wrong person.
  *
  * **A refusal is not a role problem.** `mintFailure.reason === 'refused'` is
  * no session at all — a node answered and stated a policy — so it gets the
@@ -46,11 +36,11 @@ export function lockoutReason(
 }
 
 /**
- * A role-less session gets no notice of its own (Tom, 2026-09-24): the
- * login screen's standing line, that the server requires an account, says
- * what to do. It is also what an ordinary sign-out produces on a cluster
- * whose anonymous account holds nothing, where "this session has no
- * permissions" greeted every login as though something were wrong.
+ * A role-less session gets no notice of its own: the login screen's standing
+ * line, that the server requires an account, says what to do. It is also what
+ * an ordinary sign-out produces on a cluster whose anonymous account holds
+ * nothing, where a "no permissions" notice would greet every login as though
+ * something were wrong.
  */
 export function lockoutNotice(reason: LockoutReason | undefined): string | undefined {
   if (reason === 'refused') {

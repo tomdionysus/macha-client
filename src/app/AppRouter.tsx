@@ -13,9 +13,9 @@ import { buildPlatformTraits } from '../platform/traits';
  * a render earlier, and for that render the route still describes where we
  * were. Presentation derived from the route is wrong in exactly that window:
  * the player is visible, `/play/:id` has not arrived, so the player mounts as
- * the mini bar and swaps to full once the transition lane commits. Measured at
- * around a tenth of a second on the television, which is long enough to read
- * as a flash of the wrong screen. Ordering the two calls does not help — lane
+ * the mini bar and swaps to full once the transition lane commits, around a
+ * tenth of a second later on a television, which is long enough to read as a
+ * flash of the wrong screen. Ordering the two calls does not help — lane
  * priority decides which commits first, not call order.
  *
  * Nothing here uses Suspense, lazy routes or view transitions, so the

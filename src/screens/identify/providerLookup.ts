@@ -83,10 +83,10 @@ function searchOnce(manage: ManageApi, lookup: Lookup): Promise<ProviderSearchRe
   const key = `${lookup.searchKind}|${lookup.query}|${lookup.year ?? ''}`;
   let found = asked.get(key);
   if (!found) {
-    // The artist is compared below rather than sent as the provider's
-    // filter, which is exact: a file tagged "DJ Someone" found nothing for
-    // MusicBrainz's "Someone" (seen live), and without the comparison the
-    // first result was another artist's album of the same name.
+    // The artist is compared loosely in `agreeingRecords` rather than sent as
+    // the provider's filter, which matches only the exact credit; without the
+    // comparison the first result can be another artist's album of the same
+    // name.
     found = manage.providerSearch(lookup.query, lookup.searchKind, { year: lookup.year, limit: RESULTS_READ })
       .catch(() => { asked.delete(key); return []; });
     asked.set(key, found);
@@ -104,10 +104,9 @@ export async function agreeingRecords(manage: ManageApi, lookup: Lookup): Promis
 /**
  * Records a person could not tell apart, as one: a MusicBrainz album is
  * often several releases (countries, formats, reissues) that the provider
- * answers with the same title, artist and year (five of one album, seen
- * live), and choosing among them by eye is choosing blind. Grouped in the
- * provider's order; each group is shown once and matched by one of its
- * releases.
+ * answers with the same title, artist and year, and choosing among them by
+ * eye is choosing blind. Grouped in the provider's order; each group is shown
+ * once and matched by one of its releases.
  */
 export function groupRecords(results: readonly ProviderSearchResult[]): ProviderSearchResult[][] {
   const groups = new Map<string, ProviderSearchResult[]>();
@@ -151,10 +150,10 @@ const queues = new WeakMap<ManageApi, Promise<unknown>>();
 
 /**
  * Ask the provider for a record's pictures, one MusicBrainz record at a
- * time. The server paces MusicBrainz at one request a second, so five asked
- * at once queued there past core's 8 s limit, were cut off and asked again
- * on another node (seen live); one after another, each answers in about a
- * second. TMDB is not paced and is asked at once.
+ * time. The server paces MusicBrainz at one request a second, so several
+ * asked at once queue there past core's 8 s limit and are cut off and asked
+ * again on another node; one after another, each answers in about a second.
+ * TMDB is not paced and is asked at once.
  */
 export function pacedArtwork(manage: ManageApi, ref: string, role: ProviderArtworkRole, numbers?: { season_number?: number; episode_number?: number }): Promise<ProviderArtworkOption[]> {
   if (!ref.startsWith('musicbrainz:')) return manage.providerArtwork(ref, role, numbers);
@@ -222,8 +221,7 @@ const RECORDS_TRIED = 3;
 /**
  * Find a candidate's picture: the first image for its role from the first
  * agreeing record that has one. An album is several releases and only some
- * have a cover (seen live: the first of one album's had none, the next two
- * did), so the next is tried. An episode's still needs its numbers.
+ * have a cover, so the next is tried. An episode's still needs its numbers.
  */
 export async function findCandidatePicture(manage: ManageApi, candidate: MediaProbeCandidate): Promise<CandidatePicture | undefined> {
   const lookup = recordLookup(candidate);

@@ -3,12 +3,9 @@ import { clientDiagnosticsConsole, type ClientLogEntry } from '@machafoundation/
 /**
  * The evidence behind a playback failure, in the failure's own words.
  *
- * A television has no console. Every Samsung-only fault this client has had
- * was diagnosed by reasoning from source, redeploying, and asking someone
- * watching the screen what changed — and the diagnostics buffer that would
- * have answered it in one line was sitting in memory the whole time, reachable
- * only from a developer console the set does not have. So the failure screen
- * reads it out.
+ * A television has no console. The diagnostics buffer that would explain a
+ * fault in one line sits in memory, reachable otherwise only from a developer
+ * console the set does not have, so the failure screen reads it out.
  *
  * Deliberately only warnings and errors. The buffer holds nothing else on the
  * Samsung build anyway (it is configured at `warn`), and a screen that also

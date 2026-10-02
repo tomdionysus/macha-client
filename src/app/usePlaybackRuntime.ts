@@ -20,11 +20,10 @@ export function usePlaybackRuntime(platform: Platform, resolver: PlaybackResolve
     // (`persisted`). Chrome caches a playing page on an ordinary navigation,
     // and a cached page keeps its node session, and on a one-slot node the
     // only transcode slot, for as long as it stays cached, with no event when
-    // it is evicted. Measured 2026-09-25: a navigation away from a 720p
-    // transcode fired pagehide with persisted true, and fi-1 refused the next
-    // viewer until its idle rule freed the slot. A page restored from the
-    // cache finds no playback on its player route and starts it again from
-    // the saved position, as a deep link does.
+    // it is evicted, so the next viewer is refused until the node's idle rule
+    // frees the slot. A page restored from the cache finds no playback on its
+    // player route and starts it again from the saved position, as a deep
+    // link does.
     const onPageHide = () => runtime.terminateForPageExit();
     window.addEventListener('pagehide', onPageHide);
     return () => window.removeEventListener('pagehide', onPageHide);

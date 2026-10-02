@@ -304,14 +304,13 @@ function samsungCssCompatibility(): Plugin {
      * Downlevel every stylesheet as it is loaded, before Vite decides where it
      * ends up.
      *
-     * This used to run over emitted `.css` assets only, which silently stopped
-     * working: with `renderModernChunks: false` the legacy build produces no
-     * CSS asset at all — the whole stylesheet is inlined into the JS chunk as
-     * a `<style>` element's textContent. Every `var()` then reached Chromium
-     * 47, which has no custom properties, so any rule whose only background
-     * came from a variable rendered as an unstyled white box. Transforming at
-     * source is indifferent to that decision, and rewriting minified JS to
-     * reach the same text is not something to attempt.
+     * With `renderModernChunks: false` the legacy build produces no CSS asset
+     * at all — the whole stylesheet is inlined into the JS chunk as a
+     * `<style>` element's textContent — so downlevelling emitted assets alone
+     * would let every `var()` reach Chromium 47, which has no custom
+     * properties. Transforming at source is indifferent to that decision, and
+     * rewriting minified JS to reach the same text is not something to
+     * attempt.
      */
     transform(code, id) {
       if (!id.split('?')[0].endsWith('.css')) return undefined;

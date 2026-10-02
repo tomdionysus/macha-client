@@ -31,7 +31,7 @@ export interface CurrentSessionState {
    * Re-read the session, resolving once the answer has landed.
    *
    * Awaitable because a caller usually has a decision waiting on it. Signing
-   * in is the case that forced it: the new token is live immediately, but the
+   * in is the clearest case: the new token is live immediately, but the
    * *roles* are not known until this settles, and anything that navigates in
    * between is still being judged against the old session — which, on a
    * cluster where the anonymous account holds nothing, means being bounced
@@ -81,10 +81,10 @@ export function useCurrentSession(api: UsersApi, enabled: boolean): CurrentSessi
         // Before the username fallback below, which is cosmetic: a caller
         // waiting on this wants the roles, and those have arrived.
         settleWaiting();
-        // Identity is not guaranteed on the session. A deployed 0.37.x node
-        // answers this route with roles, an expiry and a policy and names no
-        // user at all, so reading the signed-in name from the session alone
-        // leaves every account anonymous-looking forever. The account record
+        // Identity is not guaranteed on the session. An older node answers
+        // this route with roles, an expiry and a policy and names no user at
+        // all, so reading the signed-in name from the session alone would
+        // leave every account anonymous-looking. The account record
         // is the authority on who this is; a refusal simply means the server
         // will not say, which is the same as not knowing.
         if (session.username) return;
@@ -98,12 +98,11 @@ export function useCurrentSession(api: UsersApi, enabled: boolean): CurrentSessi
         }
       },
       () => {
-        // Nothing is retried here, and nothing needs to be. This request no
-        // longer carries the permissions — those ride the token itself, on
-        // `sessionManager.roles`, published by whichever path produced it. A
-        // failure here costs a display name and the password policy until the
-        // next deliberate refresh, not the viewer's permissions, so the backoff
-        // that used to live here was guarding something that had moved.
+        // Nothing is retried here, and nothing needs to be. The permissions
+        // ride the token itself, on `sessionManager.roles`, published by
+        // whichever path produced it. A failure here costs a display name and
+        // the password policy until the next deliberate refresh, not the
+        // viewer's permissions.
         if (controller.signal.aborted) return;
         setState({ known: false });
         settleWaiting();
@@ -118,10 +117,3 @@ export function useCurrentSession(api: UsersApi, enabled: boolean): CurrentSessi
   }), []);
   return { ...state, refresh };
 }
-
-// `sessionLockedOut` used to live here. It is core's now — `sessionLockedOut`
-// and `sessionPermits` in `@machafoundation/core` — taking `roles | undefined`
-// rather than a value plus a `known` flag, so "unknown is not none" holds by
-// construction instead of depending on every call site remembering to pass the
-// flag. Same semantics, one fewer way to get it wrong, and one answer shared by
-// all four clients rather than four that can drift.

@@ -5,8 +5,7 @@ import { useEffect, useState, type ReactNode } from 'react';
  * and Manage alike. Styles in `styles/lists.css`.
  */
 
-/** A list's heading: its name and count, with its controls (sort, bulk actions) to the right. */
-/** A list's heading and its count; no count where there is no list to count, rather than a false 0. */
+/** A list's heading: its name and count, with its controls (sort, bulk actions) to the right. No count where there is no list to count, rather than a false 0. */
 export function ListHeading({ id, title, count, children }: { id: string; title: string; count?: number; children?: ReactNode }) {
   return (
     <div className="list-heading">
@@ -116,7 +115,6 @@ export function SelectPageBox({ ids, selection, disabled }: { ids: readonly stri
   );
 }
 
-/** One row's box. */
 export function SelectRowBox({ id, name, selection, disabled }: { id: string; name: string; selection: ListSelection; disabled?: boolean }) {
   return (
     <input

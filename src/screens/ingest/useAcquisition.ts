@@ -57,7 +57,7 @@ export function useAcquisition(api: AcquisitionApi) {
       setError(viewerErrorText(reason));
       setLoading(false);
     },
-    // The server's own pace from 0.64.0 (5 s); an older node states none.
+    // The server's own pace; an older node states none.
     intervalMs: snapshot?.refreshIntervalMs ?? 1500,
     dependencies: [api, snapshot?.refreshIntervalMs],
   });

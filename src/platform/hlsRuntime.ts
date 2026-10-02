@@ -8,10 +8,9 @@ let loaded: HlsModule | undefined;
 /**
  * hls.js, fetched only when a stream actually needs it.
  *
- * It is 518 KB of the client's 1,172 KB legacy bundle — 44% of everything a
- * TV must download, parse and execute before it can show anything — and the
- * app needs none of it to boot, browse, or play a direct or native-HLS
- * stream. On the Samsung build, which forces the native player, it is never
+ * It is nearly half of the legacy bundle a TV must download, parse and
+ * execute before it can show anything, and the app needs none of it to boot,
+ * browse, or play a direct or native-HLS stream. On the Samsung build, which forces the native player, it is never
  * fetched at all.
  */
 export function loadHls(): Promise<HlsModule> {

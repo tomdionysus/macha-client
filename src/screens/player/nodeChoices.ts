@@ -50,10 +50,10 @@ function hostname(baseUrl: string): string | undefined {
 /**
  * What the player calls the node serving a stream, in the status line and
  * while a new stream is prepared: the host, as the node picker names it,
- * never the whole URL. "Starting the new stream on 10.35.1.50: 60%" reads;
- * the same sentence with `http://` and `:7438:` in it does not (Tom,
- * 2026-09-28: every client names nodes this way). An unparseable address is
- * shown as it is, which at least matches what was configured.
+ * never the whole URL, as every client names nodes. "Starting the new stream
+ * on 10.35.1.50: 60%" reads; the same sentence with `http://` and `:7438:` in
+ * it does not. An unparseable address is shown as it is, which at least
+ * matches what was configured.
  */
 export function nodeName(endpoint: string | undefined): string | undefined {
   if (!endpoint) return undefined;

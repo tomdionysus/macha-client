@@ -11,8 +11,8 @@ export type NodeMoveOutcome = 'moved' | 'refused' | 'retried';
  *
  * **A live generation is moved, never restarted.** Core's `moveTo` builds a
  * session on the chosen node, promotes it under the picture and only then
- * releases the old one. Restarting through `play()` closes first, which was
- * measured as 13.2 s of black between fi-1 and gbni-1.
+ * releases the old one. Restarting through `play()` closes first, which
+ * leaves the screen black for as long as the new node takes to start.
  *
  * **A refusal leaves the viewer where they were.** `false` from `moveTo` is
  * an ordinary answer, and the outgoing generation was never touched, so
@@ -23,7 +23,7 @@ export type NodeMoveOutcome = 'moved' | 'refused' | 'retried';
  * from the position it is asked for, no faster than the viewer watches, so a
  * move asked at the viewer's own position starts one start-cost behind and
  * never catches up. `leadMs` asks for a position that far ahead; without it
- * core uses its own estimate, or none (core `d58375a`).
+ * core uses its own estimate, or none.
  *
  * **A failed generation is retried, not moved.** It is already released and
  * there is nothing to move; core spells that as the preference plus `retry()`.

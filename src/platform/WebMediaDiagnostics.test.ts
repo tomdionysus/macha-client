@@ -111,7 +111,7 @@ describe('sound stopping while the picture carries on', () => {
 });
 
 describe('the picture holding while the clock runs on', () => {
-  /** The seek P0's freeze: sound continuing, picture still, nothing emitted. */
+  /** A frozen picture: sound continuing, picture still, nothing emitted. */
   function withFrames(video: ReturnType<typeof fakeVideo>) {
     const quality = { totalVideoFrames: 0, droppedVideoFrames: 0 };
     Object.assign(video, { getVideoPlaybackQuality: () => ({ ...quality }) });

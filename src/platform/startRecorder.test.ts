@@ -52,10 +52,10 @@ describe('what a start did before its first frame', () => {
   });
 
   it('says it does not know rather than that nothing was sent', () => {
-    // Measured live 2026-09-23: the page's Resource Timing buffer was full at
-    // 250 entries eleven seconds after load, and three starts in a row were
-    // recorded as "0 requests" while hls.js was plainly fetching. Zero is a
-    // finding; unobservable is not, and the next diagnosis depends on which.
+    // The page's Resource Timing buffer fills (250 entries) within seconds of
+    // load, after which a start that fetched plenty would read as "0
+    // requests". Zero is a finding; unobservable is not, and the next
+    // diagnosis depends on which.
     const time = clock();
     const recorder = new StartRecorder('primary', URL_, time.now);
     expect(recorder.finish('no-first-frame', undefined)?.requests).toBeUndefined();
@@ -63,9 +63,9 @@ describe('what a start did before its first frame', () => {
 
   it('shows a fragment that was asked for and never arrived', () => {
     // Resource Timing only lists a request once its response has ended, so a
-    // fragment the node is still holding is invisible there. Measured live
-    // 2026-09-23: a start whose last completed request was at 9.0 s, failed
-    // at 16 s, with nothing to say whether anything was in flight between.
+    // fragment the node is still holding is invisible there: a start could
+    // fail seconds after its last completed request with nothing to say
+    // whether anything was in flight between.
     const time = clock();
     const recorder = new StartRecorder('primary', URL_, time.now);
     recorder.fragment('asked', 3);

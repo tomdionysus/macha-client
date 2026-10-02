@@ -107,23 +107,20 @@ const MATROSKA_CODECS = ['avc1.42E01E', 'hvc1.1.6.L93.B0'] as const;
  * Whether this engine demuxes Matroska, asked so that a blanket "yes" cannot
  * pass for an answer.
  *
- * This container was excluded outright until now, and the exclusion was
- * written for a real fault: the Samsung's media element accepts Matroska and
- * renders corrupt video, so its `canPlayType` could not be believed. The cost
- * was 23% of the library — 173 titles measured on 2026-09-08 that are remuxed
- * for `container-not-playable` with both streams already `copy`, which is to
- * say remuxed for no reason a decoder would recognise. Chrome played a
- * 2582x1080 HEVC Matroska whole from a `mode=direct` session the same day.
+ * Some media elements (the Samsung's among them) accept Matroska and render
+ * corrupt video, so `canPlayType` cannot simply be believed; yet refusing the
+ * container everywhere sends a large share of the library through a remux
+ * whose streams are already `copy`, for no reason a decoder would recognise.
  *
  * So the question is not whether to trust `canPlayType` here — it is how to
  * ask it something it cannot answer dishonestly. An engine that agrees to an
  * impossible codec inside the container is not discriminating on the
- * container at all, and its yes carries no information; measured on Chrome
- * 151, `video/x-matroska; codecs="avc1.42E01E"` answers `probably` while the
- * same container with a nonsense codec answers `""`. That is the identical
- * discipline `hlsDeliveryProbe` above applies for the identical reason, and
- * it turns "this host's oracle lies" from a name hardcoded here into
- * something each host demonstrates about itself.
+ * container at all, and its yes carries no information; Chrome answers
+ * `probably` for `video/x-matroska; codecs="avc1.42E01E"` and `""` for the
+ * same container with a nonsense codec. That is the identical discipline
+ * `hlsDeliveryProbe` above applies for the identical reason, and it makes
+ * "this host's oracle lies" something each host demonstrates about itself
+ * rather than a name hardcoded here.
  *
  * The audio inside is not this function's business and must not become it: a
  * Matroska carrying E-AC-3, TrueHD or DTS still has nowhere to decode on the
@@ -142,10 +139,9 @@ export function detectMatroskaSupport(probe: MimeProbe): boolean {
  *
  * Worth asking separately from `hlsFmp4` rather than assuming one implies the
  * other. They are different packagings and a set can be sound at one and
- * broken at the other — the Samsung is a 2017 panel whose native HLS player
- * predates fMP4 carriage of HEVC and the Dolby codecs, and hands back a black
- * screen, stuttering sound or silence depending on which stream it is given
- * that way. MPEG-TS is what such a player was actually built for.
+ * broken at the other — an older set's native HLS player may predate fMP4
+ * carriage of HEVC and the Dolby codecs, and hand back a black screen,
+ * stuttering sound or silence depending on which stream it is given that way. MPEG-TS is what such a player was actually built for.
  *
  * `video/mp2t` is the transport stream's own media type, so this asks the
  * engine about the packaging directly rather than inferring it.

@@ -2,7 +2,7 @@ import type { AcquisitionSource, TorrentJob, TorrentNode } from '@machafoundatio
 import { formatAge, formatBytes } from './format';
 
 /**
- * Server 0.64.0: torrents belong to the cluster. An action is intent: the
+ * Torrents belong to the cluster. An action is intent: the
  * server records `desired` at once and the owning node applies it within
  * seconds, reporting `desired_applied`. Until then the viewer is told what is
  * under way, and why it is waiting when the server says it cannot apply it.
@@ -58,9 +58,8 @@ const NOT_ACCEPTING: Record<string, string> = {
 
 /**
  * A node in the add form's selector: its host, its load or why it is not
- * taking work now, and its own staging room. Tom, 2026-09-27: with torrents
- * the cluster's, the page's single staging figure (the answering node's) was
- * wrong, so each node states its own here. It can still be chosen when not
+ * taking work now, and its own staging room: with torrents the cluster's, a
+ * single figure would be only the answering node's. It can still be chosen when not
  * accepting; the torrent then waits for it.
  */
 export function torrentNodeLabel(node: Pick<TorrentNode, 'host' | 'node_id' | 'accepting' | 'not_accepting_reason' | 'active_jobs' | 'max_active'> & { staging?: Pick<TorrentNode['staging'], 'free_bytes' | 'limit_bytes'> }): string {
@@ -75,8 +74,7 @@ export function torrentNodeLabel(node: Pick<TorrentNode, 'host' | 'node_id' | 'a
 }
 
 /**
- * What to say about the nodes a list could not hear from (server 0.64.0,
- * `sources`). A node out of reach still has its jobs listed, as they were at
+ * What to say about the nodes a list could not hear from (`sources`). A node out of reach still has its jobs listed, as they were at
  * its last answer, which may be stale; a node never reached has none listed.
  * Nodes are named by host where the torrent node list knows them.
  */

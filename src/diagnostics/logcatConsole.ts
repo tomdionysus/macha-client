@@ -4,8 +4,8 @@
  *
  * Chromium forwards `console.*` to logcat as a single string, and an object
  * argument becomes `[object Object]`. Every diagnostic this client writes
- * passes its detail as that second argument, so a whole capture from the
- * Android TV reads `[playback.web] media-time [object Object]` — timings and
+ * passes its detail as that second argument, so unflattened, an Android
+ * capture reads `[playback.web] media-time [object Object]` — timings and
  * event names survive, and the endpoint, the mode, the byte counts and the
  * error do not. That is the difference between knowing when something
  * happened and knowing what it was.
