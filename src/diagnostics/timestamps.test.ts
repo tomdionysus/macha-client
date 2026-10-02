@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { presentedTime, presentedTimeOfDay, zuluTimeOfDay, zuluTimestamp } from './timestamps';
+import { presentedTime, presentedTimeOfDay, zuluTimestamp } from './timestamps';
 
 /** 2026-09-21T15:51:52Z — the evening that produced this module. */
 const INSTANT = Date.UTC(2026, 8, 21, 15, 51, 52);
@@ -32,16 +32,6 @@ describe('zuluTimestamp — the interchange form', () => {
     expect(zuluTimestamp(Number.NaN)).toBe('—');
     expect(zuluTimestamp(Number.POSITIVE_INFINITY)).toBe('—');
     expect(zuluTimestamp(-1)).toBe('—');
-  });
-});
-
-describe('zuluTimeOfDay', () => {
-  it('drops the date and keeps the zone', () => {
-    expect(zuluTimeOfDay(INSTANT)).toBe('15:51:52Z');
-  });
-
-  it('says nothing for a time that was never stated', () => {
-    expect(zuluTimeOfDay(0)).toBe('—');
   });
 });
 

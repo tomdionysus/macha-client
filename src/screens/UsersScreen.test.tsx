@@ -2,7 +2,7 @@
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { CurrentSession, MachaUser, UserMutability, UsersApi } from '@machafoundation/core';
-import { byStanding, roleSummary, UsersScreen, usersScreenAvailable } from './UsersScreen';
+import { byStanding, roleSummary, UsersScreen } from './UsersScreen';
 import { settle } from '../test/settle';
 
 function user(overrides: Partial<MachaUser> = {}): MachaUser {
@@ -373,19 +373,5 @@ describe('UsersScreen', () => {
       password: 'a-good-password',
       roles: ['media_viewer'],
     });
-  });
-});
-
-describe('usersScreenAvailable', () => {
-  it('is false while the roles are unknown, because the screen may not exist at all', () => {
-    // Distinct from every other section: this one appears only because the
-    // server has accounts, so an unanswered whoami means there is nothing
-    // there rather than something to reveal.
-    expect(usersScreenAvailable(undefined)).toBe(false);
-  });
-
-  it('needs the manage_users role specifically, and never infers it from another', () => {
-    expect(usersScreenAvailable(session({ roles: ['manager'] }))).toBe(false);
-    expect(usersScreenAvailable(session({ roles: ['media_viewer', 'manage_users'] }))).toBe(true);
   });
 });

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { addDirectPlayReadAheadAlternative, buildDirectPlayReadAheadProxyUrl, directPlayReadAheadUrl } from './directPlayReadAhead';
 import type { PlaybackSource } from '@machafoundation/core';
 
@@ -47,6 +47,9 @@ describe('Direct Play read-ahead client', () => {
    */
   async function failureListenerHarness() {
     vi.resetModules();
+    // Each failure fed in is logged as a warning, which is what the code should do; kept out of the run's output.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    onTestFinished(() => warn.mockRestore());
     let handler: ((event: MessageEvent<unknown>) => void) | undefined;
     vi.stubGlobal('window', { isSecureContext: true, location: { origin: 'https://client.test' } });
     vi.stubGlobal('navigator', {

@@ -17,7 +17,7 @@ import { DetailCard, DetailHeader, Facts } from '../../components/ListParts';
 import { ConfirmModal } from '../../components/Modal';
 import { fileName, formatAge, formatBytes, formatTimestamp } from '../ingest/format';
 import { hintResultLabel, viewerErrorText } from '../../text/viewerText';
-import { applyCandidatePicture, findCandidatePictures, type CandidatePicture } from './providerLookup';
+import { applyCandidatePicture, comparableTitle, findCandidatePictures, type CandidatePicture } from './providerLookup';
 import { Suggestions } from './Suggestions';
 import { ManualEntry } from './ManualEntry';
 import { likelyKind, ProviderMatch } from './ProviderMatch';
@@ -33,6 +33,10 @@ export function candidateSummary(candidate: MediaProbeCandidate): string {
   return [candidate.artist, candidate.album, candidate.title].filter(Boolean).join(' · ');
 }
 
+function sameStatedNumber(left: number | null, right: number | null): boolean {
+  return left == null || right == null || left === right;
+}
+
 /**
  * Whether an inferred candidate is already in the catalogue, and so has no
  * business being offered as something to create.
@@ -43,14 +47,6 @@ export function candidateSummary(candidate: MediaProbeCandidate): string {
  * matched and once to be created a second time. Deliberately conservative: a
  * field only rules a candidate out when both sides state it.
  */
-function comparableTitle(value: string): string {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
-}
-
-function sameStatedNumber(left: number | null, right: number | null): boolean {
-  return left == null || right == null || left === right;
-}
-
 export function candidateAlreadyCatalogued(candidate: MediaProbeCandidate, matches: readonly ManageCatalogueMatch[]): boolean {
   const title = comparableTitle(candidate.title);
   if (!title) return false;

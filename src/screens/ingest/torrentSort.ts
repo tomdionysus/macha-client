@@ -1,6 +1,6 @@
 import type { TorrentJob } from '@machafoundation/core';
 import { percent, ratioOf } from './format';
-import { listSortParams, parseListSort, sortRows, type ListSort, type SortKeyDef } from '../../lists/listSort';
+import { sortRows, type ListSort, type SortKeyDef } from '../../lists/listSort';
 
 export type TorrentSortKey = 'added' | 'name' | 'size' | 'progress' | 'status' | 'down' | 'up' | 'eta' | 'ratio';
 export type TorrentSort = ListSort<TorrentSortKey>;
@@ -66,13 +66,4 @@ export function sortTorrents(
   stateOf: (job: TorrentJob) => string,
 ): TorrentJob[] {
   return sortRows(jobs, sort, (job, key) => sortValue(job, key, stateOf(job)), (job) => job.name || '', (job) => job.id);
-}
-
-/** Read from the address, falling back rather than failing on one that was edited. */
-export function parseTorrentSort(params: URLSearchParams): TorrentSort {
-  return parseListSort(params, TORRENT_SORT_KEYS, DEFAULT_TORRENT_SORT);
-}
-
-export function torrentSortParams(sort: TorrentSort): Record<string, string> {
-  return listSortParams(sort);
 }

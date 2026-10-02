@@ -26,10 +26,6 @@ export function getClientId(): string {
   return clientConfiguration.clientId();
 }
 
-export function getServerUrl(): string {
-  return clientConfiguration.serverUrl();
-}
-
 export function getBootstrapEndpoints(): string[] {
   return clientConfiguration.bootstrapEndpoints();
 }

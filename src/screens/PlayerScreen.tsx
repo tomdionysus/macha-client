@@ -13,7 +13,7 @@ import { useAsync } from '../hooks/useAsync';
 import type { Platform } from '@machafoundation/core';
 import { platformTraits } from '../platform/traits';
 import type { PlaybackUpdate } from '@machafoundation/core';
-import { isSubtitleOnlyPlaybackUpdate, offeredModes, type PlaybackStartProgress, progressFor, technicalSummary, technicalProfileFromSession, type OfferedMode, type PlaybackCoordinatorSnapshot, type PlaybackPolicyOverrides, type PlaybackSession } from '@machafoundation/core';
+import { offeredModes, type PlaybackStartProgress, progressFor, technicalSummary, technicalProfileFromSession, type OfferedMode, type PlaybackCoordinatorSnapshot, type PlaybackPolicyOverrides, type PlaybackSession } from '@machafoundation/core';
 import { PlaybackRuntime, type PlaybackRuntimeRequest, type PlaybackRuntimeSnapshot } from '@machafoundation/core';
 import { uiSettings } from '../settings';
 import { describePlaybackSession } from '@machafoundation/core';
@@ -280,8 +280,6 @@ export function webArrowTargetOwnsKey(target: EventTarget | null): boolean {
   // controls where horizontal cursor/selection movement is the likely intent.
   return Boolean(target.closest('textarea, select, [contenteditable="true"], input:not([type="range"])'));
 }
-
-export const isSubtitleOnlyUpdate = isSubtitleOnlyPlaybackUpdate;
 
 function PlayerSession({ api, media, platform, runtime, startPositionMs, presentation, onProgress, onPosition, onMinimize, onExpand, onStop, onPrevious, onNext, onEnded, canPrevious, canNext, queuePosition, volume, onVolumeChange, endpoints, nodeNameOf, onPinEndpoint, offerAll = false }: Omit<Props, 'request'> & { media: MediaSummary; startPositionMs: number }) {
   const pageRef = useRef<HTMLElement | null>(null);

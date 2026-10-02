@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { boundedPlayerSeekTarget, modesToOffer, firstUsableDurationMs, preparingStreamText, startWaitNotice, isSubtitleOnlyUpdate, playerBackAction, playerBufferedTimelineEnabled, playerControlShowsPlay, playerMediaSubtitle, samsungTransportSeekDirection, webSeekDeltaForKey } from './PlayerScreen';
+import { boundedPlayerSeekTarget, modesToOffer, firstUsableDurationMs, preparingStreamText, startWaitNotice, playerBackAction, playerBufferedTimelineEnabled, playerControlShowsPlay, playerMediaSubtitle, samsungTransportSeekDirection, webSeekDeltaForKey } from './PlayerScreen';
 import type { MediaSummary, OfferedMode, PlaybackCapabilities, PlaybackSession } from '@machafoundation/core';
 
 describe('player UI transport bindings', () => {
@@ -50,13 +50,6 @@ describe('player UI transport bindings', () => {
   it('minimizes on back only where a pointer can reach a mini player, closes everywhere else', () => {
     expect(playerBackAction(true)).toBe('minimize');
     expect(playerBackAction(false)).toBe('stop');
-  });
-
-  it('recognises subtitle-only updates', () => {
-    expect(isSubtitleOnlyUpdate({ preferences: { subtitleStream: 5, subtitleLanguage: '' } })).toBe(true);
-    expect(isSubtitleOnlyUpdate({ preferences: { subtitleStream: null } })).toBe(true);
-    expect(isSubtitleOnlyUpdate({ preferences: { audioStream: 2 } })).toBe(false);
-    expect(isSubtitleOnlyUpdate({ seekMs: 10_000, preferences: { subtitleStream: 5 } })).toBe(false);
   });
 
   describe('player bar subtitle', () => {

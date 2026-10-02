@@ -54,14 +54,15 @@ export function recordLookup(candidate: MediaProbeCandidate): Lookup | undefined
   };
 }
 
-function comparable(value: string): string {
+/** A title as compared: lower case, letters and digits of any script, single spaces. */
+export function comparableTitle(value: string): string {
   return value.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 }
 
 /** Whether a provider title is the one named, allowing for an article, a prefix or a subtitle either side. */
 export function sameTitle(named: string, found: string): boolean {
-  const a = comparable(named);
-  const b = comparable(found);
+  const a = comparableTitle(named);
+  const b = comparableTitle(found);
   return Boolean(a && b) && (a === b || a.includes(b) || b.includes(a));
 }
 
@@ -111,7 +112,7 @@ export async function agreeingRecords(manage: ManageApi, lookup: Lookup): Promis
 export function groupRecords(results: readonly ProviderSearchResult[]): ProviderSearchResult[][] {
   const groups = new Map<string, ProviderSearchResult[]>();
   for (const result of results) {
-    const key = [result.provider, result.kind, comparable(result.title), comparable(result.artist ?? ''), result.year ?? ''].join('|');
+    const key = [result.provider, result.kind, comparableTitle(result.title), comparableTitle(result.artist ?? ''), result.year ?? ''].join('|');
     const group = groups.get(key);
     if (group) group.push(result);
     else groups.set(key, [result]);

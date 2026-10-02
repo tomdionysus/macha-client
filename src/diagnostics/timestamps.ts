@@ -65,9 +65,3 @@ export function zuluTimestamp(unixMs: number | undefined | null): string {
   return `${at.getUTCFullYear()}-${twoDigits(at.getUTCMonth() + 1)}-${twoDigits(at.getUTCDate())}`
     + ` ${twoDigits(at.getUTCHours())}:${twoDigits(at.getUTCMinutes())}:${twoDigits(at.getUTCSeconds())}Z`;
 }
-
-/** `15:51:52Z`, for an interchange line where the date is already established. */
-export function zuluTimeOfDay(unixMs: number | undefined | null): string {
-  const full = zuluTimestamp(unixMs);
-  return full === '—' ? full : full.slice(11);
-}

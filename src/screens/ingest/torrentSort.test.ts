@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { TorrentJob } from '@machafoundation/core';
-import { DEFAULT_TORRENT_SORT, parseTorrentSort, sortTorrents, torrentSortParams, type TorrentSort } from './torrentSort';
+import { DEFAULT_TORRENT_SORT, sortTorrents, type TorrentSort } from './torrentSort';
 
 function job(overrides: Partial<TorrentJob>): TorrentJob {
   return {
@@ -93,21 +93,5 @@ describe('the order torrents are listed in', () => {
     const jobs = [job({ id: 'imported', state: 'completed', ingest_job_id: 'i' }), job({ id: 'going', state: 'downloading' })];
     const importing = (entry: TorrentJob) => (entry.id === 'imported' ? 'importing' : entry.state);
     expect(ids(sortTorrents(jobs, { key: 'status', direction: 'desc' }, importing))).toEqual(['imported', 'going']);
-  });
-});
-
-describe('the sort, as it travels in the address', () => {
-  it('round-trips through the query string', () => {
-    const sort: TorrentSort = { key: 'down', direction: 'asc' };
-    expect(parseTorrentSort(new URLSearchParams(torrentSortParams(sort)))).toEqual(sort);
-  });
-
-  it('falls back rather than failing on an address somebody edited', () => {
-    expect(parseTorrentSort(new URLSearchParams('sort=nonsense&dir=sideways'))).toEqual(DEFAULT_TORRENT_SORT);
-  });
-
-  it('gives a key its natural direction when none is stated', () => {
-    expect(parseTorrentSort(new URLSearchParams('sort=name'))).toEqual({ key: 'name', direction: 'asc' });
-    expect(parseTorrentSort(new URLSearchParams('sort=down'))).toEqual({ key: 'down', direction: 'desc' });
   });
 });

@@ -1,6 +1,5 @@
 import { Fragment, useCallback, useState } from 'react';
 import {
-  hasRole,
   USER_ROLES,
   type CurrentSession,
   type MachaUser,
@@ -590,9 +589,4 @@ export function UsersScreen({ api, session }: Props) {
         )}
     </section>
   );
-}
-
-/** Whether the signed-in session may see this screen at all. */
-export function usersScreenAvailable(session: CurrentSession | undefined): boolean {
-  return hasRole(session?.roles, 'manage_users');
 }
