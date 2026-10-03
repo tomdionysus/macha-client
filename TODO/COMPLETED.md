@@ -1,6 +1,83 @@
 # Completed and tested
 
-Last updated: 2026-10-01, at a break for a clear: finished work moved here, the backlog rationalised
+Last updated: 2026-10-04, at a break for a clear: finished work moved here, the backlog rationalised
+
+## 0.20.1 tagged on the experiment, and deployed — 2026-10-02 and 04
+
+- **0.20.1** (`74a5caf`, annotated tag `0.20.1`): version, README and
+  CHANGELOG on `experiment/object-ledger`, pushed with the branch on Tom's
+  word ("Bump patch, commit, tag, merge and push"); not merged into
+  `develop` or `main`, by Tom's choice, because the branch links core's
+  experiment tree, whose types the published 0.21.0 lacks. Suite 698.
+- **Deployed `7d0dace`** (bundle `index-Cz2VNMGA.js`) to GBNI-1 and FI-1 on
+  2026-10-04 00:28 local, on Tom's word: backups
+  `/etc/macha/web.bak-20261004-002836.tar.gz` on each, additive rsync; the
+  bundle answers 200 on GBNI-1, through macnessa, and on FI-1.
+
+## Availability marks on every title — 2026-10-03
+
+`e35fbe0`, `7d0dace`; core `495353a`, `1251cb2`; server 0.82.0 to 0.84.0.
+Tom's ruling, relayed by core: a yellow outline triangle (partial), a red
+outline crossed circle (unavailable: greyed, not selectable, never started
+or queued), a yellow outline question mark (unknown), on a dark disc at
+the top left of every card, episode card, track row, playlist row and page
+title; TV colours (#ff4d4f, #ffc53d on #08080ac9); web tooltips in this
+client's words, a set's with member counts. Play rule is core's
+`availableToPlay`; Continue Watching and the music playlist read stored
+titles' availability fresh through core's `currentAvailability`. Seen live
+on 0.83.0: 81 partial and 58 unavailable of 322 films (filled marks, before
+the outline change); yellow outline question marks on Home after a restart.
+Suite 707.
+
+## Cleanup: dead code, one title normaliser, comments about the code now — 2026-10-02
+
+`d049179`, `187f144`, `c9a9ffa`. Removed code nothing used (`getServerUrl`,
+`test/fakeCluster.ts`) and code only its own tests used (`parseTorrentSort`,
+`torrentSortParams`, `zuluTimeOfDay`, `usersScreenAvailable`, the
+`isSubtitleOnlyUpdate` alias); the identify page uses the lookup's
+any-script title normaliser; the read-ahead tests capture their expected
+warnings, so a full run prints no stack traces. Every code comment across
+106 files now says what the code does now (Tom: "make every code comment
+earn its keep, and remove all historical references"): proved comment-only
+by comparing each file's tokens with comments removed (a checker proved
+both ways after it first mistook doc-comment edits for code). `187f144`
+also follows core `f794364`: a slow node is worded "The server is taking
+too long to answer"; the first cleanup commit was made with the suite
+unrun (core's rebuild failed the typecheck first), corrected there.
+
+## Unmatched list and file page: failures worded, no false 0 — 2026-10-01
+
+`043fd81`. Tom: "unmatched files sometimes says 'something went wrong',
+and loading the file itself is slow." Every node failing or timing out (core
+waits 8 s each, then tries the next) is worded "No Macha server answered";
+a list that never loaded shows Try again and no count; the file page shows
+on the file's detail alone, its catalogue suggestions arriving behind it.
+The server's slowness (the list route 18 s on FI-1 at one moment, 2.3 s the
+next) is not the client's; core then held slow management reads at one
+node for up to 30 s (`f794364`). The TV and phone ported the wording.
+
+## Identify: suggestions first, whole records — 2026-10-01 to 02
+
+`e405425` to `9aa147a`. In order of Tom's direction:
+- Manual entry names parents by id; a Search online tab; the editor saves
+  a partial patch (steps 2 and 3, server 0.67.0 routes, core `26fe88d`).
+- "Search the catalogue doesn't work at all": the server's matches route
+  keeps only the file's own kind, so a music file searched by artist or
+  album found nothing. Now one search per kind, grouped, parents first
+  (per kind because twenty remixes filled one shared limit, seen live).
+- Manual entry's three placements for a track; provider pictures chosen
+  at match time.
+- Candidates show the provider's picture for what they name (first agreeing
+  result, the next release when one has no cover, the artist compared here
+  because the provider's artist filter is exact), carried into Review.
+- "Start with suggestions": the page opens on agreeing records with their
+  pictures; "Use this" asks only for the numbers the file did not state.
+- Identical releases collapsed ("5 releases"); an album's other unmatched
+  files in the folder listed with their match, one checkbox each, Select
+  all and none, a status per row; spinners on the waits; the batch stops
+  after one unanswered change.
+Seen live throughout on FI-1 and GBNI-1; no match has succeeded (FI-1's
+catalogue conflicts, `ACTIVE.md`).
 
 ## Releases 0.19.0 and 0.20.0 — 2026-09-28 and 2026-09-29
 

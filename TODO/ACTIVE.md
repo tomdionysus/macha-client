@@ -1,12 +1,12 @@
 # Active tasks and concepts to explore
 
-Last updated: 2026-10-01, at a break for a clear, rationalised against the
-code, `git log`, core `1217429` (develop, after the published 0.21.0) and
-server 0.74.0. Read [2026-10-01-handover.md](2026-10-01-handover.md) first,
-for what is running, what is in flight with the sibling sessions, Tom's
-rulings and the method; where this file and a dated document in this
-directory disagree, this file is current and the dated document is the
-record of its day.
+Last updated: 2026-10-04, at a break for a clear, rationalised against the
+code, `git log`, core `22e0620` (its `experiment/object-ledger`) and server
+0.84.0. Read [2026-10-04-handover.md](2026-10-04-handover.md) first, for
+what is running, what is in flight with the sibling sessions, Tom's rulings
+and the method; where this file and a dated document in this directory
+disagree, this file is current and the dated document is the record of its
+day.
 
 This is the working backlog. Add new work here. When an item is implemented and
 its stated verification is complete, remove it from this file and add a dated
@@ -20,38 +20,43 @@ are related. Core is addressed as the `Macha Client Core` session.
 
 ## Start here
 
-**Read [2026-10-01-handover.md](2026-10-01-handover.md) first.**
+**Read [2026-10-04-handover.md](2026-10-04-handover.md) first.**
 
-**Where the repo is.** `main` is `1fa0bc4`, **0.20.0**, released and pushed
-(tag `0.20.0`), resolving published core **0.21.0** from npm. `develop` is
-`e543e0e`, linked to core's tree (`1217429`), **one commit ahead of
-`origin/develop`** (the cluster traffic cards), nothing uncommitted. Suite
-**671**, typecheck and build clean. That commit needs core's `traffic` type,
-which is on core develop only, so it reaches `main` with the next core
-release (about weekly; never ask for an early cut).
+**Where the repo is.** All work is on **`experiment/object-ledger`** (Tom,
+2026-10-01): never commit to, merge into or push `develop` or `main`. It is
+at `f264b72`, **four commits ahead of `origin`**, which holds the tag
+**0.20.1** (`74a5caf`, pushed 2026-10-02 on Tom's word, tagged on the
+experiment and not merged). It links core's tree on core's own
+`experiment/object-ledger` (`22e0620`), whose types the published core
+0.21.0 lacks, so it cannot resolve core from npm until core's next release.
+`main` is `1fa0bc4` (0.20.0), `develop` `e543e0e`. Suite **707**,
+typecheck and build clean.
 
 **The cluster.** Corvus FI-1 (10.35.1.50:7438, also .10) and Corvus GBNI-1
 (10.44.1.50:7438; **macnessa.macha.network is GBNI-1's public front, not a
-third node**) run server **0.74.0**. Node names come from the server
-(`node_name`, 0.70.0). es-1 and `ramaroja` have been down since 2026-09-24.
-Both nodes serve `index-Cz2VNMGA.js` from `experiment/object-ledger`
-`7d0dace` (deployed 2026-10-04 00:28 local, on Tom's word; backups
-`/etc/macha/web.bak-20261004-002836.tar.gz` on each node). FI-1 had a hardware error on 2026-09-29 and came
-back on 0.73.0, then 0.74.0. GBNI-1 is the only torrent node.
+third node**) run server **0.84.0**. Node names come from the server
+(`node_name`). es-1 and `ramaroja` have been down since 2026-09-24. Both
+nodes serve `index-Cz2VNMGA.js` from `7d0dace` (deployed 2026-10-04 00:28
+local, on Tom's word; backups `/etc/macha/web.bak-20261004-002836.tar.gz`
+on each node). FI-1 runs torrents as well as GBNI-1. FI-1's catalogue
+conflict loop (section "Identify and edit") logged its last conflict at
+17:03Z on 2026-10-03; none since its restart onto 0.84.0. Matching is
+untested since.
 
 **Then, in order:**
 
-1. **Owed live looks** (section below): the too-slow screen on the 4K
-   HEVC title, the stepped-down notice, storing's "no progress" wording, the
-   Direct Play bar on the title that showed the phantom range, the failover
-   and slow-start progress wording.
-2. **Catalogue management** (section "Identify and edit"): steps 2 and 3
-   built 2026-10-01; a Match applied, the parent pickers and an editor save
-   still to see live. Provider artwork is deferred until the experiment ends.
-3. **The playback P0s** as before.
+1. **Availability marks on every surface** (section below), now that the
+   nodes run 0.84.0, and Tom's answer on the tooltip wording.
+2. **A match applied**, now that FI-1's conflicts have stopped: a suggestion
+   with a chosen picture, an album's folder batch, then the owed looks in
+   "Identify and edit".
+3. **Owed live looks** (section "Built 2026-09-24 to 30").
+4. **The playback P0s** as before.
 
 **Open decisions that are Tom's alone:** any push, merge, version bump, tag,
-deploy or core publish; driven playback for the Server's soak (Server will
+deploy or core publish; the tracklist route (server, or MusicBrainz from the
+browser); the availability tooltip's "right now"; reporting the torrent
+placement defect to the Server and routing a pinned add to its node; driven playback for the Server's soak (Server will
 send a concrete request only once Tom agrees); a per-node "repair is being
 paced" flag (Server offered to put it to him); the artwork lost with es-1
 and the replication capacity (with the server); the ~15 s artwork hang on a
@@ -115,128 +120,102 @@ no posters in that listing, so movies were the whole sample.
 
 ## Identify and edit (catalogue management; resume here)
 
-Tom: one interface for matching an unmatched file and editing metadata, with
-three paths (a candidate, a search with any terms, manual entry), parents
-linked for episodes and tracks, artwork with a choice; files as alternate
-versions of an item; and later a general editor over the whole catalogue.
-Core handles all API interaction (Tom). The server's and core's answers, and
-the gaps, are summarised in the handover.
+Tom: matching an unmatched file is choosing a whole TMDB or MusicBrainz
+record; candidates, catalogue search and manual entry are the fallback.
+Core handles all API interaction. What was built, with evidence, is in
+`COMPLETED.md` under 2026-10-01 to 03; the page is `src/screens/identify/`.
 
-- **Step 1, built** (client only, through core; `8b8907e`, `dd95f96`):
-  the unmatched file page in `src/screens/identify/` with three tabs
-  (Candidates with Create or Review via core's `manualFromCandidate`, Search
-  the catalogue with each match's picture and "Add as another version",
-  Enter manually), all applied through core's `identifyUnmatched`; a Files
-  card on the metadata editor listing each file's facts, with Add a file;
-  shared fields; editor artwork upload per role. Not seen live.
-- **Steps 2 and 3, built 2026-10-01** on `experiment/object-ledger`
-  (server 0.67.0 routes, core `26fe88d`), unit-tested, every new test seen
-  red under a mutation (ten mutations):
-  - Manual entry names parents by id: a series, artist or an artist's album
-    chosen from the catalogue (`ParentPicker`, `catalogue.search` with
-    `kinds`, `catalogue.list('album', artist)`) is sent as `series_id`,
-    `artist_id` or `album_id`; one only typed is sent by name as before.
-  - A "Search online" tab (`ProviderMatch`): `manage.providerSearch` with
-    any words, kind, year and artist; a result already catalogued says so;
-    Match goes through `identifyUnmatched(..., { from: 'provider' })` with
-    the season and episode or disc and track asked once, and refuses before
-    sending when they are missing.
-  - The editor saves through `catalogue.patch` with only the changed fields
-    (`itemChanges`; artwork only when the chosen image moved; nothing sent
-    when nothing changed), and words refusals with `viewerErrorText`.
-  - **Seen live** (dev client, as Tom, FI-1/GBNI-1 on 0.74.0): the four
-    tabs, the provider form seeded from the file's candidate, a search with
-    no result worded, and a MusicBrainz search listing results. Nothing was
-    matched. Not yet seen: a Match applied, the parent pickers, an editor
-    save.
-- **Tom's second pass, 2026-10-01 evening, built:**
-  - *"Search the catalogue doesn't work at all"*: it called the server's
-    `/unmatched/{id}/matches`, which keeps only the file's own kind, so a
-    music file searched by artist or album found nothing, and offered only
-    "another version". Now one `catalogue.search` per kind (albums,
-    artists, tracks; seasons, series, episodes; movies), grouped, parents
-    first; a track or episode still takes the file as another version, an
-    album, artist, series or season opens manual entry with it chosen.
-    Per kind because one shared limit was filled by twenty remixes (seen).
-  - Manual entry says where a track goes, as three choices: an album in the
-    catalogue, a new album by an artist in the catalogue, or a new artist
-    and album; an episode, a series in the catalogue or a new one
-    (`ManualEntry.tsx`).
-  - Choosing among several pictures: a picked provider result lists the
-    provider's pictures for it (poster, the episode's still, the album's
-    cover); the one chosen is put on the item the match wrote (the album,
-    for a cover) with `chooseArtwork`. A failure there says the match was
-    made and stops.
-  - Seen live: grouped search (Albums and Tracks for one word), "Add a
-    track to this album" into the placement form, a cover offered from the
-    Cover Art Archive. Nothing matched.
-- **Redesigned 2026-10-01 night, on Tom's word: "the general case for an
-  unmatched file is that the user would select the full info from an
-  entire tmdb/musicbrainz entry ... start with suggestions."** A file's
-  page now opens on Suggestions: the TMDB and MusicBrainz records found
-  from what its candidates name (a movie's title, an episode's series, a
-  track's album), kept when title and artist agree, each with its picture.
-  "Use this" asks only for the numbers the file did not state, offers the
-  record's pictures, and matches the whole record. Search online, the
-  catalogue, what the file says and manual entry sit below under "Not one
-  of these?". MusicBrainz picture requests go one at a time (the server
-  paces it at one a second and five at once ran past core's 8 s limit).
-  Seen live: five releases of one album suggested, two with covers, the
-  confirm step with the track filled in. Not yet seen: a match applied.
-- **Open, after the experiment (server):** releases of one album are still
-  told apart only by their covers; a candidate's MusicBrainz ids from the
-  file's own tags are not sent, though the server's probe holds them,
-  and would name the exact release; the file's detail route stalls for
-  8 s+ on every node at times (it holds `config_mutex_`, which the
-  scanner's own work takes), seen three times today.
-- **Why the scanner did not match what a suggestion finds easily (Tom,
-  2026-10-02; server, investigate after the experiment):** its MusicBrainz
-  lookups ask `release:"<album>" AND artist:"<artist>"` and the same for a
-  recording (`find_release`, `media_catalogue.cpp:1910`, and :1991). The
-  artist phrase is exact, so a file tagged "DJ Tiësto" finds nothing where
-  MusicBrainz credits "Tiësto", and every candidate fails. The suggestions
-  compare the artist loosely, after the search, and find it.
-- **Why Match fails: FI-1 cannot write the catalogue (server; found
-  2026-10-02 from FI-1's own journal, read only).** Every match went to
-  FI-1, core's first node for a change, and each ended `409` after 184 s,
-  163 s and 27 s (`POST .../match status=409`), almost certainly
-  `catalogue_conflict` "catalogue changed concurrently": FI-1 has logged
-  `media information publication failed: catalogue changed concurrently`
-  31 times since 17:29Z on 2026-10-01, two minutes after its process
-  restarted (same 0.74.0 binary as GBNI-1, built 2026-09-30), and never in
-  the 42 hours before; GBNI-1 twice. Core gave up at 8 s each time, so the
-  viewer saw the "did not answer in time" line, never the refusal. The web
-  now stops an album's batch after one unanswered change, rather than
-  piling more onto the stuck node.
-- **A MusicBrainz match takes over a minute (server):** `POST
-  .../unmatched/{id}/match` with a release ref had not answered at 40 s, and
-  the file was still unmatched a minute later. Core gives a change 8 s and
-  never retries it; the web now says the server did not answer in time and
-  may still finish (it said "Something went wrong"). Until this is quick,
-  Match on a MusicBrainz suggestion fails.
-- **Built 2026-10-02:** releases no one could tell apart (provider, kind,
-  title, artist, year) are one record, "5 releases", shown and matched by
-  the first with a cover; an album record offers to match the album's
-  other unmatched files in the same folder, each by the track its own
-  candidates state, unticked by default, naming the ones it could not.
-- **Candidates cannot show artwork yet: needs the server.** A candidate
-  carries no picture, and the server records only that a file has an
-  attached picture (`attached_picture` on its stream), with no route to
-  read it. Tom's call whether to ask for one now or after the experiment.
-- **Item-based provider artwork deferred by Tom (relayed by Core,
-  2026-10-01)** until the experiment ends: choosing again on an item
-  already catalogued needs its provider ref, which only the server knows
-  cleanly; Core asked for `GET .../providers/artwork?item_id=&role=` (core
-  `6f4c396`). The match-time choice above uses the result's own ref.
-- **For the Server, after the experiment:** MusicBrainz release results are
-  indistinguishable (one album search listed the same title, artist and
-  year eight times); a result needs what tells releases apart (country, format, track
-  count, label).
-- **Open design questions for Tom:** one address or both (I proposed both);
-  whether a candidate applies directly or is reviewed first (built: complete
-  ones get Create, others Review); the lock on hand edits by default (the
-  server now locks every edit unless told otherwise).
-- **Later:** the general catalogue editor (P2 below).
+**How it stands (all on `experiment/object-ledger`, deployed 2026-10-04):**
+a file's page opens on Suggestions (records found from what its candidates
+name, title and artist agreeing, identical releases collapsed into one
+record), "Use this" asks only for the numbers the file did not state,
+offers the record's pictures, and for an album lists the album's other
+unmatched files in the folder with a checkbox each. Under "Not one of
+these?": Search online, Search the catalogue (one search per kind), What
+the file says (candidates with provider pictures, Create and Review), and
+Enter manually (placement as an album in the catalogue, a new album by an
+artist in the catalogue, or a new artist and album; parents by id). The
+editor saves a partial patch.
+
+**Owed a live look** (none seen yet, because no match has succeeded): a
+match applied from a suggestion, with a chosen picture; an album's folder
+batch; the parent pickers; an editor save.
+
+**Blocked on the server (after the experiment; not raised while it runs):**
+- **A match on FI-1 is refused.** Every match went to FI-1 (core's first
+  node for a change) and ended `409` after 27 s to 3 min, almost certainly
+  `catalogue_conflict`: FI-1 logged "catalogue changed concurrently" about
+  once a minute from 17:29Z on 2026-10-01 (two minutes after its restart),
+  never in the 42 hours before. The Server confirmed the pattern and
+  proposed a cause (a write prepared against one catalogue root loses to
+  another commit instead of rebasing), unproven; Tom has the diagnosis.
+  The last conflict was 17:03Z on 2026-10-03; none since FI-1's restart
+  onto 0.84.0, so try a match before calling it blocked.
+  Core gives a change 8 s, so the client says "did not answer in time and
+  may still finish", never the refusal; an album batch stops after one
+  unanswered change.
+- **The scanner never matches an artist credited differently:** its
+  MusicBrainz release and recording lookups put the artist in as an exact
+  phrase (`find_release`, `media_catalogue.cpp:1910`, :1991), so a file
+  tagged "DJ <name>" finds nothing where MusicBrainz credits "<name>". The
+  suggestions compare the artist loosely and find it.
+- **Releases of one album are told apart only by their covers:** search
+  results need country, format, track count or label. Core recorded it
+  (core `c211268`).
+- **No tracklist reaches the client:** the folder list says "track 4", not
+  that track's title, so nothing checks that a file's track number is the
+  release's. Tom to choose: a server route core wraps (recommended), or
+  asking MusicBrainz from the browser.
+- **A candidate's MusicBrainz ids** from the file's own tags are held by
+  the server's probe but not sent; they would name the exact release.
+- **A candidate's embedded picture** is recorded (`attached_picture`) but
+  no route reads it, so candidate pictures are the provider's.
+- **The file's detail route stalls** 8 s or more on every node at times
+  (it holds `config_mutex_`, which the scanner's own work takes); core now
+  holds a slow management read at one node for up to 30 s (core
+  `f794364`).
+- **Choosing a picture for an item already catalogued** needs its provider
+  ref; deferred by Tom until the experiment ends (core `6f4c396` records
+  the asked-for `GET .../providers/artwork?item_id=&role=`).
+
+**Open design questions for Tom:** one address or both; whether a
+complete candidate applies directly (built: Create) or is reviewed first;
+the lock on hand edits (the server locks every edit unless told not to).
+
+**Later:** the general catalogue editor (P2 below).
+
+## Availability marks (built 2026-10-03; owed a look on every surface)
+
+Tom's ruling, relayed by core, the same in every client: a yellow outline
+triangle for partial, a red outline crossed circle for unavailable (greyed,
+not selectable, never played or queued), a yellow outline question mark for
+unknown, each on a dark disc at the top left of every title; nothing for
+complete. Colours match the TV (#ff4d4f, #ffc53d on #08080ac9). Web
+tooltips are this client's wording; a set's gives its member counts. Play
+rule is core's `availableToPlay`; stored titles (Continue Watching, the
+music playlist) are read fresh with core's `currentAvailability`.
+
+- **Seen live:** the Movies grid (81 partial, 58 unavailable of 322 on
+  0.83.0, filled marks, before the outline change) and yellow outline
+  question marks on Home after a restart.
+- **Owed:** the outline triangle and crossed circle live; the series,
+  season, album, artist and detail pages; track rows; the playlist; an
+  unavailable title's missing Play and its note.
+- **Server 0.84.0** (deploying): availability is the node's best
+  knowledge, kept across restarts; "unknown" becomes rare. Tom to decide
+  whether the partial and unavailable tooltips say "as far as Macha knows"
+  rather than "right now" (pass any change to the TV and phone).
+
+## Server defects found from this side, for after the experiment
+
+- **`torrent_coordinator.cpp:235` is undefined behaviour.** A pinned add
+  checks membership with `any_of(node_.membership().active().begin(),
+  node_.membership().active().end(), ...)`; `active()` returns a vector by
+  value, so begin and end come from two temporaries. Tom saw "That node is
+  not in this cluster." choosing macnessa (GBNI-1) for a torrent, though
+  both nodes list it online and torrent-capable. Not reported to the
+  Server (Tom's call); a pinned add sent to the pinned node itself would
+  sidestep it (a core routing change, also Tom's call).
 
 ## Built 2026-09-24 to 30, owed a live look
 
