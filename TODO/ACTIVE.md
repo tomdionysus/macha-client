@@ -34,8 +34,9 @@ release (about weekly; never ask for an early cut).
 (10.44.1.50:7438; **macnessa.macha.network is GBNI-1's public front, not a
 third node**) run server **0.74.0**. Node names come from the server
 (`node_name`, 0.70.0). es-1 and `ramaroja` have been down since 2026-09-24.
-Both nodes serve `index-TzVBSVlb.js` from `develop` `e543e0e` (deployed
-2026-09-29 18:59 local). FI-1 had a hardware error on 2026-09-29 and came
+Both nodes serve `index-Cz2VNMGA.js` from `experiment/object-ledger`
+`7d0dace` (deployed 2026-10-04 00:28 local, on Tom's word; backups
+`/etc/macha/web.bak-20261004-002836.tar.gz` on each node). FI-1 had a hardware error on 2026-09-29 and came
 back on 0.73.0, then 0.74.0. GBNI-1 is the only torrent node.
 
 **Then, in order:**
