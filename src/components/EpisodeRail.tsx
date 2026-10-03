@@ -1,6 +1,7 @@
 import { useRef, type MouseEvent, type PointerEvent, type WheelEvent } from 'react';
+import { availableToPlay } from '@machafoundation/core';
 import type { MediaApi } from '@machafoundation/core';
-import { AvailabilityMarker, isUnavailable, openControlProps } from './Availability';
+import { AvailabilityMarker, openControlProps } from './Availability';
 import { LazyArtwork } from './LazyArtwork';
 import { episodeCode } from '../text/viewerText';
 import { PlayIcon, RestartIcon } from './PlaybackIcons';
@@ -43,7 +44,7 @@ function EpisodeCard({ api, episode, progress, playbackEpisode, queue, queueInde
 }) {
   const hasProgress = resumable(progress);
   return (
-    <article className={`episode-card${hasProgress ? ' has-progress' : ''}${isUnavailable(episode) ? ' is-unavailable' : ''}`}>
+    <article className={`episode-card${hasProgress ? ' has-progress' : ''}${!availableToPlay(episode) ? ' is-unavailable' : ''}`}>
       <div className="episode-still-shell">
         <button
           className="episode-still-link"
@@ -69,7 +70,7 @@ function EpisodeCard({ api, episode, progress, playbackEpisode, queue, queueInde
         </button>
         <div className="episode-play-actions" aria-hidden={!hasProgress}>
           <span className="episode-play-action episode-play-resume" aria-hidden="true"><PlayIcon /></span>
-          {hasProgress && !isUnavailable(episode) && (
+          {hasProgress && !!availableToPlay(episode) && (
             <button
               className="episode-play-action episode-play-restart"
               data-tv-focusable="true"

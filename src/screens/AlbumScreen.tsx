@@ -1,5 +1,6 @@
 import type { MediaApi } from '@machafoundation/core';
-import { AvailabilityMarker, AvailabilityNote, isUnavailable, openControlProps, titleMarker } from '../components/Availability';
+import { availableToPlay } from '@machafoundation/core';
+import { AvailabilityMarker, AvailabilityNote, openControlProps, titleMarker } from '../components/Availability';
 import { OverflowMenu, type OverflowMenuAction } from '../components/OverflowMenu';
 import { ErrorMessage, Loading } from '../components/Status';
 import { useArtworkUrl } from '../hooks/useArtworkUrl';
@@ -35,7 +36,7 @@ export function AlbumScreen({ api, albumId, onBack, onPlayTrack, onPlayAll, onOp
     {details.loading ? <Loading /> : details.error ? <ErrorMessage error={details.error} /> : null}
   </section>;
   if (!album) return <ErrorMessage error={new Error('Catalogue item is not an album.')} />;
-  const albumPlayable = album.tracks.length > 0 && !isUnavailable(album);
+  const albumPlayable = album.tracks.length > 0 && !!availableToPlay(album);
 
   return (
     <section className="album-page">
@@ -68,7 +69,7 @@ export function AlbumScreen({ api, albumId, onBack, onPlayTrack, onPlayAll, onOp
       </div>
       <div className="track-list" aria-label="Tracks">
         {album.tracks.map((track, index) => {
-          const unavailable = isUnavailable(track);
+          const unavailable = !availableToPlay(track);
           const actions: OverflowMenuAction[] = [
             { label: 'Add track to playlist', onSelect: () => onAddToPlaylist(track), disabled: unavailable },
             { label: 'Play next', onSelect: () => onPlayNext(track), disabled: unavailable },

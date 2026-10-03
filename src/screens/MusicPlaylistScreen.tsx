@@ -1,12 +1,16 @@
-import { useRef, type DragEvent, type KeyboardEvent } from 'react';
-import { AvailabilityMarker, isUnavailable, openControlProps } from '../components/Availability';
-import type { MediaApi } from '@machafoundation/core';
+import { useMemo, useRef, type DragEvent, type KeyboardEvent } from 'react';
+import { useCurrentAvailability } from '../hooks/useCurrentAvailability';
+import { availableToPlay } from '@machafoundation/core';
+import { AvailabilityMarker, openControlProps } from '../components/Availability';
+import type { CatalogueApi, MediaApi } from '@machafoundation/core';
 import { LazyArtwork } from '../components/LazyArtwork';
 import { trackNumberLabel } from '../text/viewerText';
 import type { MusicPlaylistEntry } from '@machafoundation/core';
 
 interface Props {
   api: MediaApi;
+  /** Reads the playlist's availability now: the stored playlist does not keep it. */
+  catalogue: Pick<CatalogueApi, 'get'>;
   entries: MusicPlaylistEntry[];
   onPlay: (index: number) => void;
   onShuffle: () => void;
@@ -28,7 +32,8 @@ function PlaylistArtwork({ api, entry }: { api: MediaApi; entry: MusicPlaylistEn
   );
 }
 
-export function MusicPlaylistScreen({ api, entries, onPlay, onShuffle, onRemove, onMove, onClear }: Props) {
+export function MusicPlaylistScreen({ api, catalogue, entries, onPlay, onShuffle, onRemove, onMove, onClear }: Props) {
+  const tracks = useCurrentAvailability(useMemo(() => entries.map((entry) => entry.track), [entries]), catalogue);
   const draggingEntry = useRef<string | undefined>(undefined);
 
   const handleDragStart = (event: DragEvent<HTMLButtonElement>, entryId: string) => {
@@ -69,10 +74,10 @@ export function MusicPlaylistScreen({ api, entries, onPlay, onShuffle, onRemove,
         <p className="playlist-empty">The local playlist is empty. Add tracks or albums from the Music browser.</p>
       ) : (
         <div className="playlist-track-list" aria-label="Playlist tracks">
-          {entries.map((entry, index) => (
+          {entries.map((stored, index) => ({ ...stored, track: tracks[index] ?? stored.track })).map((entry, index) => (
             <div
               key={entry.entryId}
-              className={`playlist-track-row${isUnavailable(entry.track) ? ' is-unavailable' : ''}`}
+              className={`playlist-track-row${!availableToPlay(entry.track) ? ' is-unavailable' : ''}`}
               onDragOver={(event: DragEvent<HTMLDivElement>) => {
                 event.preventDefault();
                 event.dataTransfer.dropEffect = 'move';

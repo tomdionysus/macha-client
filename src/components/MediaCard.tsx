@@ -1,10 +1,11 @@
 import { Fragment } from 'react';
+import { availableToPlay } from '@machafoundation/core';
 import { Link } from 'react-router-dom';
 import type { MediaApi } from '@machafoundation/core';
 import { routes } from '@machafoundation/core';
 import { albumLabel, cardSubtitle, episodeLabel, seasonLabel, trackNumberLabel } from '../text/viewerText';
 import type { MediaSummary } from '@machafoundation/core';
-import { AvailabilityMarker, isUnavailable, openControlProps } from './Availability';
+import { AvailabilityMarker, openControlProps } from './Availability';
 import { CardCloseButton } from './CardCloseButton';
 import { LazyArtwork } from './LazyArtwork';
 import { OverflowMenu, type OverflowMenuAction } from './OverflowMenu';
@@ -51,7 +52,7 @@ function Poster({ api, item, progress }: Pick<Props, 'api' | 'item' | 'progress'
 
 /** A card's own class, with the greyed-out state of a title that cannot be played. */
 function cardClass(item: MediaSummary, extra = ''): string {
-  return `media-card media-card-${item.kind}${extra}${isUnavailable(item) ? ' is-unavailable' : ''}`;
+  return `media-card media-card-${item.kind}${extra}${!availableToPlay(item) ? ' is-unavailable' : ''}`;
 }
 
 function actionItems(item: MediaSummary, actions: readonly MediaCardAction[]): OverflowMenuAction[] {
@@ -206,7 +207,7 @@ function ActionableMediaCard({ api, item, onOpen, actions = [], progress, elemen
       <OverflowMenu
         className="card-overflow-menu"
         label={`More options for ${item.title}`}
-        actions={actionItems(item, isUnavailable(item) ? actions.map((action) => ({ ...action, disabled: true })) : actions)}
+        actions={actionItems(item, !availableToPlay(item) ? actions.map((action) => ({ ...action, disabled: true })) : actions)}
       />
     </article>
   );

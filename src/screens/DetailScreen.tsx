@@ -1,5 +1,6 @@
 import type { MediaApi } from '@machafoundation/core';
-import { AvailabilityNote, isUnavailable, titleMarker } from '../components/Availability';
+import { availableToPlay } from '@machafoundation/core';
+import { AvailabilityNote, titleMarker } from '../components/Availability';
 import type { CatalogueMediaProfile } from '@machafoundation/core';
 import { PlayIcon, RestartIcon } from '../components/PlaybackIcons';
 import { fileSummaries, qualityLabel, type MediaDetails, type MediaSummary, type PlaybackProgress, type PlaybackVersions, type VersionStep } from '@machafoundation/core';
@@ -82,7 +83,7 @@ export function DetailScreen({ api, itemId, onBack, onPlay, onPlayFromStart, loa
   </div></section>;
 
   const media = details.value;
-  const playable = canPlayDirectly(media) && media.mediaIds.length > 0 && !isUnavailable(media);
+  const playable = canPlayDirectly(media) && media.mediaIds.length > 0 && !!availableToPlay(media);
   const qualityNote = playable && versions.value ? qualityChoiceText(versions.value) : undefined;
   const resumable = playable && canResume(media, progress);
 

@@ -1251,19 +1251,19 @@ h2 { font-size: clamp(1.2rem, 2vw, 1.75rem); letter-spacing: -.01em; margin: 1.1
 .app-notice button { margin: 0 0 0 auto; padding: .35rem .7rem; }
 
 /*
- * Availability: a mark at the top left of a title not wholly held by a
- * reachable node. Its own red and yellow, bright enough to read over any
- * artwork. An unavailable title is greyed out and cannot be selected; its
+ * Availability: an outline mark on a dark disc at the top left of a title
+ * not wholly held by a reachable node, in the same red and yellow as the
+ * other clients. An unavailable title is greyed out and cannot be selected; its
  * mark is not, so the reason stays visible.
  */
-:root { --availability-red: #e5383b; --availability-yellow: #f5c518; }
-.availability-marker { display: inline-flex; width: 1.5rem; height: 1.5rem; flex: 0 0 auto; filter: drop-shadow(0 1px 2px #000c); }
+:root { --availability-red: #ff4d4f; --availability-yellow: #ffc53d; --availability-disc: #08080ac9; }
+.availability-marker { display: inline-flex; box-sizing: border-box; width: 1.6rem; height: 1.6rem; padding: .18rem; flex: 0 0 auto; border-radius: 50%; background: var(--availability-disc); }
 .availability-marker svg { display: block; width: 100%; height: 100%; }
-.availability-partial, .availability-unavailable { color: var(--availability-red); }
-.availability-unknown { color: var(--availability-yellow); }
+.availability-unavailable { color: var(--availability-red); }
+.availability-partial, .availability-unknown { color: var(--availability-yellow); }
 .poster > .availability-marker, .episode-still > .availability-marker { position: absolute; top: .45rem; left: .45rem; z-index: 1; }
-.availability-inline { width: 1.05em; height: 1.05em; margin-right: .4em; vertical-align: -.15em; }
-.availability-title { width: .8em; height: .8em; vertical-align: -.05em; }
+.availability-inline { width: 1.4em; height: 1.4em; padding: .14em; margin-right: .4em; vertical-align: -.3em; }
+.availability-title { width: .95em; height: .95em; padding: .1em; vertical-align: -.1em; }
 .availability-note { margin: .2rem 0 .8rem; color: var(--text-dim); }
 .is-unavailable { cursor: not-allowed; }
 .is-unavailable .poster > :not(.availability-marker),

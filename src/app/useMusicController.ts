@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react';
-import { isUnavailable } from '../components/Availability';
+import { availableToPlay } from '@machafoundation/core';
 import type { MediaApi } from '@machafoundation/core';
 import { MusicPlaylistStore } from '@machafoundation/core';
 import { PlaybackQueueStore, type PlaybackQueueState } from '@machafoundation/core';
@@ -35,10 +35,10 @@ export function useMusicController(options: {
 
   // An unavailable track is never queued or added: none of it can be played.
   const tracksFor = useCallback(async (item: MediaSummary): Promise<MediaSummary[]> => {
-    if (item.kind === 'track') return isUnavailable(item) ? [] : [item];
+    if (item.kind === 'track') return !availableToPlay(item) ? [] : [item];
     if (item.kind !== 'album') return [];
     const details = await api.details(item.id);
-    return details.kind === 'album' && 'tracks' in details ? details.tracks.filter((track) => !isUnavailable(track)) : [];
+    return details.kind === 'album' && 'tracks' in details ? details.tracks.filter((track) => !!availableToPlay(track)) : [];
   }, [api]);
 
   const reportFailure = (message: string) => (error: unknown) => console.error(`[macha] ${message}`, error);
