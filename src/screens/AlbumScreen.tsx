@@ -1,4 +1,5 @@
 import type { MediaApi } from '@machafoundation/core';
+import { AvailabilityMarker, AvailabilityNote, isUnavailable, openControlProps, titleMarker } from '../components/Availability';
 import { OverflowMenu, type OverflowMenuAction } from '../components/OverflowMenu';
 import { ErrorMessage, Loading } from '../components/Status';
 import { useArtworkUrl } from '../hooks/useArtworkUrl';
@@ -34,6 +35,7 @@ export function AlbumScreen({ api, albumId, onBack, onPlayTrack, onPlayAll, onOp
     {details.loading ? <Loading /> : details.error ? <ErrorMessage error={details.error} /> : null}
   </section>;
   if (!album) return <ErrorMessage error={new Error('Catalogue item is not an album.')} />;
+  const albumPlayable = album.tracks.length > 0 && !isUnavailable(album);
 
   return (
     <section className="album-page">
@@ -45,19 +47,20 @@ export function AlbumScreen({ api, albumId, onBack, onPlayTrack, onPlayAll, onOp
         </div>
         <div>
           <p className="eyebrow">Album{album.year ? ` · ${album.year}` : ''}</p>
-          <MediaPageTitle refreshing={details.refreshing} onRefresh={details.refresh}>{album.title}</MediaPageTitle>
+          <MediaPageTitle leading={titleMarker(album)} refreshing={details.refreshing} onRefresh={details.refresh}>{album.title}</MediaPageTitle>
+          <AvailabilityNote item={album} />
           {details.error && <p className="manage-error media-refresh-error">Refresh failed: {details.error.message}</p>}
           {album.synopsis && <p className="synopsis">{album.synopsis}</p>}
           <div className="play-actions album-actions">
-            <button className="primary-button" type="button" data-tv-focusable="true" disabled={album.tracks.length === 0} onClick={() => onPlayAll(album)}>▶ Play all</button>
-            <button className="secondary-button" type="button" data-tv-focusable="true" disabled={album.tracks.length === 0} onClick={() => onShuffle(album)}>Shuffle</button>
-            <button className="secondary-button" type="button" data-tv-focusable="true" disabled={album.tracks.length === 0} onClick={() => onAddToPlaylist(album)}>Add to playlist</button>
+            <button className="primary-button" type="button" data-tv-focusable="true" disabled={!albumPlayable} onClick={() => onPlayAll(album)}>▶ Play all</button>
+            <button className="secondary-button" type="button" data-tv-focusable="true" disabled={!albumPlayable} onClick={() => onShuffle(album)}>Shuffle</button>
+            <button className="secondary-button" type="button" data-tv-focusable="true" disabled={!albumPlayable} onClick={() => onAddToPlaylist(album)}>Add to playlist</button>
             <OverflowMenu
               className="inline-overflow-menu"
               label={`More options for ${album.title}`}
               actions={[
-                { label: 'Play next', onSelect: () => onPlayNext(album), disabled: album.tracks.length === 0 },
-                { label: 'Play later', onSelect: () => onPlayLater(album), disabled: album.tracks.length === 0 },
+                { label: 'Play next', onSelect: () => onPlayNext(album), disabled: !albumPlayable },
+                { label: 'Play later', onSelect: () => onPlayLater(album), disabled: !albumPlayable },
               ]}
             />
           </div>
@@ -65,21 +68,22 @@ export function AlbumScreen({ api, albumId, onBack, onPlayTrack, onPlayAll, onOp
       </div>
       <div className="track-list" aria-label="Tracks">
         {album.tracks.map((track, index) => {
+          const unavailable = isUnavailable(track);
           const actions: OverflowMenuAction[] = [
-            { label: 'Add track to playlist', onSelect: () => onAddToPlaylist(track) },
-            { label: 'Play next', onSelect: () => onPlayNext(track) },
-            { label: 'Play later', onSelect: () => onPlayLater(track) },
+            { label: 'Add track to playlist', onSelect: () => onAddToPlaylist(track), disabled: unavailable },
+            { label: 'Play next', onSelect: () => onPlayNext(track), disabled: unavailable },
+            { label: 'Play later', onSelect: () => onPlayLater(track), disabled: unavailable },
             { label: 'View track', onSelect: () => onOpenTrack(track) },
           ];
           return (
-            <div key={track.id} className="track-row">
+            <div key={track.id} className={`track-row${unavailable ? ' is-unavailable' : ''}`}>
               <button
                 className="track-row-open"
-                data-tv-focusable="true"
                 type="button"
-                onClick={() => onPlayTrack(track, album.tracks, index)}
+                {...openControlProps(track, () => onPlayTrack(track, album.tracks, index))}
               >
                 <span className="track-number">{track.trackNumber ?? '–'}</span>
+                <AvailabilityMarker availability={track.availability} kind="track" className="availability-inline" />
                 <span className="track-title">{track.title}</span>
                 <span className="track-action">▶</span>
               </button>

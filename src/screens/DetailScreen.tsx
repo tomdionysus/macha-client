@@ -1,4 +1,5 @@
 import type { MediaApi } from '@machafoundation/core';
+import { AvailabilityNote, isUnavailable, titleMarker } from '../components/Availability';
 import type { CatalogueMediaProfile } from '@machafoundation/core';
 import { PlayIcon, RestartIcon } from '../components/PlaybackIcons';
 import { fileSummaries, qualityLabel, type MediaDetails, type MediaSummary, type PlaybackProgress, type PlaybackVersions, type VersionStep } from '@machafoundation/core';
@@ -81,14 +82,15 @@ export function DetailScreen({ api, itemId, onBack, onPlay, onPlayFromStart, loa
   </div></section>;
 
   const media = details.value;
-  const playable = canPlayDirectly(media) && media.mediaIds.length > 0;
+  const playable = canPlayDirectly(media) && media.mediaIds.length > 0 && !isUnavailable(media);
   const qualityNote = playable && versions.value ? qualityChoiceText(versions.value) : undefined;
   const resumable = playable && canResume(media, progress);
 
   const copy = (
     <div className="detail-copy">
       <p className="eyebrow">{media.kind}{media.year ? ` · ${media.year}` : ''}</p>
-      <MediaPageTitle refreshing={details.refreshing} onRefresh={details.refresh}>{media.title}</MediaPageTitle>
+      <MediaPageTitle leading={titleMarker(media)} refreshing={details.refreshing} onRefresh={details.refresh}>{media.title}</MediaPageTitle>
+      <AvailabilityNote item={media} />
       {media.kind === 'episode' && episodeCode(media) && <p className="subtitle">{episodeCode(media)}</p>}
       {/* One line per distinct file; core combines files whose summaries read
           the same. */}

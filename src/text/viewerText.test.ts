@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { endpointFailure, MachaAcquisitionApiError, MachaClusterRouteError, MachaConnectionError, MachaPlaybackError, NOT_PLAYABLE_CODE, SESSION_PROVENANCE_UNKNOWN_CODE, START_NO_PROGRESS_CODE, TOO_SLOW_TO_PLAY_CODE, type MediaSummary, type PlaybackNotice, type PlaybackStartProgress, type VersionStep, type PassedOverVersion, type QualityCeiling, type PlaybackStatusDescription, type PlaybackStreamInfo } from '@machafoundation/core';
 import {
+  availabilityText,
   playbackRefusalText,
   diagnosticErrorText,
   hintResultLabel,
@@ -338,5 +339,18 @@ describe('a quality no node can convert fast enough', () => {
     expect(playbackNoticeText({ code: 'quality-stepped-down' } as PlaybackNotice, 1080))
       .toBe("Switched to 1080p: the server can't convert a higher quality fast enough.");
     expect(qualitySteppedDownText()).toBe("Switched to a lower quality: the server can't convert a higher quality fast enough.");
+  });
+});
+
+describe('what an availability marker says', () => {
+  it('says how a set\'s members stand, leaving out the counts that are zero', () => {
+    expect(availabilityText('partial', 'album', { total: 10, complete: 7, partial: 2, unavailable: 1, unknown: 0 }))
+      .toBe("Some of this album is held only by servers that can't be reached right now: 7 of 10 tracks in full, 2 in part, 1 not at all.");
+  });
+
+  it('says a title that cannot be played cannot, and that an unchecked one plays as normal', () => {
+    expect(availabilityText('unavailable', 'episode')).toBe("This episode is held only by servers that can't be reached right now, so it can't be played.");
+    expect(availabilityText('unavailable', 'show')).toBe("Everything in this series is held only by servers that can't be reached right now, so none of it can be played.");
+    expect(availabilityText('unknown', 'movie')).toBe("Macha hasn't yet checked which servers hold this film. It plays as normal.");
   });
 });

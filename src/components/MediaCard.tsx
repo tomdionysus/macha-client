@@ -4,6 +4,7 @@ import type { MediaApi } from '@machafoundation/core';
 import { routes } from '@machafoundation/core';
 import { albumLabel, cardSubtitle, episodeLabel, seasonLabel, trackNumberLabel } from '../text/viewerText';
 import type { MediaSummary } from '@machafoundation/core';
+import { AvailabilityMarker, isUnavailable, openControlProps } from './Availability';
 import { CardCloseButton } from './CardCloseButton';
 import { LazyArtwork } from './LazyArtwork';
 import { OverflowMenu, type OverflowMenuAction } from './OverflowMenu';
@@ -43,8 +44,14 @@ function Poster({ api, item, progress }: Pick<Props, 'api' | 'item' | 'progress'
       {progress !== undefined && progress > 0 && (
         <div className="progress-track"><div className="progress-value" style={{ width: `${Math.min(100, progress * 100)}%` }} /></div>
       )}
+      <AvailabilityMarker availability={item.availability} members={item.availabilityMembers} kind={item.kind} />
     </div>
   );
+}
+
+/** A card's own class, with the greyed-out state of a title that cannot be played. */
+function cardClass(item: MediaSummary, extra = ''): string {
+  return `media-card media-card-${item.kind}${extra}${isUnavailable(item) ? ' is-unavailable' : ''}`;
 }
 
 function actionItems(item: MediaSummary, actions: readonly MediaCardAction[]): OverflowMenuAction[] {
@@ -103,13 +110,12 @@ function ContextLinks({ lines }: { lines: ReadonlyArray<ReadonlyArray<ContextLin
 function ContinueWatchingEpisodeCard({ api, item, onOpen, onRemoveFromContinueWatching, progress, elementRef }: Props) {
   if (!item.playbackContext) throw new Error(`Continue Watching episode ${item.id} is missing playback hierarchy context.`);
   return (
-    <article className="media-card media-card-episode continue-card">
+    <article className={cardClass(item, ' continue-card')}>
       <button
         type="button"
         ref={elementRef}
         className="continue-card-open"
-        data-tv-focusable="true"
-        onClick={() => onOpen(item)}
+        {...openControlProps(item, () => onOpen(item))}
         aria-label={`Resume ${item.title}`}
       >
         <Poster api={api} item={item} progress={progress} />
@@ -134,13 +140,12 @@ function ContinueWatchingEpisodeCard({ api, item, onOpen, onRemoveFromContinueWa
  */
 function InContextCard({ api, item, onOpen, elementRef, lines }: Props & { lines: ContextLink[][] }) {
   return (
-    <article className={`media-card media-card-${item.kind} continue-card`}>
+    <article className={cardClass(item, ' continue-card')}>
       <button
         type="button"
         ref={elementRef}
         className="continue-card-open"
-        data-tv-focusable="true"
-        onClick={() => onOpen(item)}
+        {...openControlProps(item, () => onOpen(item))}
         aria-label={`Play ${item.title}`}
       >
         <Poster api={api} item={item} />
@@ -154,13 +159,12 @@ function InContextCard({ api, item, onOpen, elementRef, lines }: Props & { lines
 
 function ContinueWatchingCard({ api, item, onOpen, onRemoveFromContinueWatching, progress, elementRef }: Props) {
   return (
-    <article className={`media-card media-card-${item.kind} continue-card`}>
+    <article className={cardClass(item, ' continue-card')}>
       <button
         type="button"
         ref={elementRef}
         className="continue-card-open"
-        data-tv-focusable="true"
-        onClick={() => onOpen(item)}
+        {...openControlProps(item, () => onOpen(item))}
         aria-label={`Resume ${item.title}`}
       >
         <Poster api={api} item={item} progress={progress} />
@@ -180,13 +184,12 @@ function ContinueWatchingCard({ api, item, onOpen, onRemoveFromContinueWatching,
 
 function ActionableMediaCard({ api, item, onOpen, actions = [], progress, elementRef }: Props) {
   return (
-    <article className={`media-card media-card-${item.kind} continue-card media-card-actionable`}>
+    <article className={cardClass(item, ' continue-card media-card-actionable')}>
       <button
         type="button"
         ref={elementRef}
         className="continue-card-open"
-        data-tv-focusable="true"
-        onClick={() => onOpen(item)}
+        {...openControlProps(item, () => onOpen(item))}
         aria-label={`Play ${item.title} now`}
       >
         <Poster api={api} item={item} progress={progress} />
@@ -203,7 +206,7 @@ function ActionableMediaCard({ api, item, onOpen, actions = [], progress, elemen
       <OverflowMenu
         className="card-overflow-menu"
         label={`More options for ${item.title}`}
-        actions={actionItems(item, actions)}
+        actions={actionItems(item, isUnavailable(item) ? actions.map((action) => ({ ...action, disabled: true })) : actions)}
       />
     </article>
   );
@@ -255,7 +258,7 @@ export function MediaCard({ api, item, onOpen, onRemoveFromContinueWatching, act
   }
 
   return (
-    <button ref={elementRef} className={`media-card media-card-${item.kind}`} data-tv-focusable="true" onClick={() => onOpen(item)}>
+    <button ref={elementRef} className={cardClass(item)} {...openControlProps(item, () => onOpen(item))}>
       <Poster api={api} item={item} progress={progress} />
       <span className="card-title">{item.title}</span>
       {cardSubtitle(item) && <span className="card-subtitle">{cardSubtitle(item)}</span>}

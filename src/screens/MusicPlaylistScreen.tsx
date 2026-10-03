@@ -1,4 +1,5 @@
 import { useRef, type DragEvent, type KeyboardEvent } from 'react';
+import { AvailabilityMarker, isUnavailable, openControlProps } from '../components/Availability';
 import type { MediaApi } from '@machafoundation/core';
 import { LazyArtwork } from '../components/LazyArtwork';
 import { trackNumberLabel } from '../text/viewerText';
@@ -71,7 +72,7 @@ export function MusicPlaylistScreen({ api, entries, onPlay, onShuffle, onRemove,
           {entries.map((entry, index) => (
             <div
               key={entry.entryId}
-              className="playlist-track-row"
+              className={`playlist-track-row${isUnavailable(entry.track) ? ' is-unavailable' : ''}`}
               onDragOver={(event: DragEvent<HTMLDivElement>) => {
                 event.preventDefault();
                 event.dataTransfer.dropEffect = 'move';
@@ -96,11 +97,10 @@ export function MusicPlaylistScreen({ api, entries, onPlay, onShuffle, onRemove,
               <button
                 className="playlist-track-copy playlist-track-play"
                 type="button"
-                data-tv-focusable="true"
-                onClick={() => onPlay(index)}
+                {...openControlProps(entry.track, () => onPlay(index))}
                 aria-label={`Play ${entry.track.title} now`}
               >
-                <strong>{entry.track.title}</strong>
+                <strong><AvailabilityMarker availability={entry.track.availability} kind="track" className="availability-inline" />{entry.track.title}</strong>
                 {trackNumberLabel(entry.track) && <small>{trackNumberLabel(entry.track)}</small>}
               </button>
               <button

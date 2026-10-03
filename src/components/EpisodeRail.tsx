@@ -1,5 +1,6 @@
 import { useRef, type MouseEvent, type PointerEvent, type WheelEvent } from 'react';
 import type { MediaApi } from '@machafoundation/core';
+import { AvailabilityMarker, isUnavailable, openControlProps } from './Availability';
 import { LazyArtwork } from './LazyArtwork';
 import { episodeCode } from '../text/viewerText';
 import { PlayIcon, RestartIcon } from './PlaybackIcons';
@@ -42,13 +43,12 @@ function EpisodeCard({ api, episode, progress, playbackEpisode, queue, queueInde
 }) {
   const hasProgress = resumable(progress);
   return (
-    <article className={`episode-card${hasProgress ? ' has-progress' : ''}`}>
+    <article className={`episode-card${hasProgress ? ' has-progress' : ''}${isUnavailable(episode) ? ' is-unavailable' : ''}`}>
       <div className="episode-still-shell">
         <button
           className="episode-still-link"
-          data-tv-focusable="true"
+          {...openControlProps(episode, () => onPlayEpisode(playbackEpisode, queue, queueIndex, false))}
           aria-label={`${hasProgress ? 'Resume' : 'Play'} ${episode.title}`}
-          onClick={() => onPlayEpisode(playbackEpisode, queue, queueIndex, false)}
           type="button"
         >
           <div className="episode-still">
@@ -64,11 +64,12 @@ function EpisodeCard({ api, episode, progress, playbackEpisode, queue, queueInde
                 <div className="episode-progress-value" style={{ width: `${Math.min(100, progress.positionMs / progress.durationMs * 100)}%` }} />
               </div>
             )}
+            <AvailabilityMarker availability={episode.availability} kind="episode" />
           </div>
         </button>
         <div className="episode-play-actions" aria-hidden={!hasProgress}>
           <span className="episode-play-action episode-play-resume" aria-hidden="true"><PlayIcon /></span>
-          {hasProgress && (
+          {hasProgress && !isUnavailable(episode) && (
             <button
               className="episode-play-action episode-play-restart"
               data-tv-focusable="true"

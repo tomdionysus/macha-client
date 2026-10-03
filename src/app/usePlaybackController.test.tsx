@@ -303,3 +303,44 @@ describe('usePlaybackController season queue', () => {
   });
 });
 
+
+describe('unavailable titles', () => {
+  beforeEach(() => localStorage.clear());
+
+  function controller() {
+    const play = vi.fn().mockResolvedValue(undefined);
+    const runtime = { play, stop: vi.fn(), setReturnTo: vi.fn() } as unknown as PlaybackRuntime;
+    const api = { details: vi.fn() } as unknown as MediaApi;
+    const progressStore = new ContinueWatchingStore('test-client');
+    const queueStore = new PlaybackQueueStore('test-client');
+    const volumeStore = new VolumeStore('test-client');
+    const { result } = renderHook(
+      (runtimeState: PlaybackRuntimeSnapshot) => usePlaybackController({
+        api, platform, runtime, runtimeState, progressStore, queueStore, volumeStore, ready: true,
+      }),
+      { initialProps: stalledSnapshot(), wrapper: ({ children }) => <MemoryRouter initialEntries={['/movies']}>{children}</MemoryRouter> },
+    );
+    return { result, play, queueStore };
+  }
+
+  it('never starts one', () => {
+    const { result, play } = controller();
+    act(() => { result.current.startPlayback({ ...movie('m1'), availability: 'unavailable' }); });
+    expect(play).not.toHaveBeenCalled();
+  });
+
+  it('leaves them out of a queue, keeping the place of the one started, and plays partial and unknown ones', () => {
+    const { result, play, queueStore } = controller();
+    const queue = [
+      { ...episode('e1', 1), availability: 'unavailable' },
+      { ...episode('e2', 2), availability: 'partial' },
+      { ...episode('e3', 3), availability: 'unavailable' },
+      { ...episode('e4', 4), availability: 'unknown' },
+    ];
+    act(() => { result.current.openSeasonEpisode(queue[1], queue, 1, false); });
+    expect(play).toHaveBeenCalledTimes(1);
+    const stored = queueStore.load();
+    expect(stored?.items.map((item) => item.id)).toEqual(['e2', 'e4']);
+    expect(stored?.currentIndex).toBe(0);
+  });
+});

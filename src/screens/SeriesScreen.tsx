@@ -1,4 +1,5 @@
 import type { MediaApi } from '@machafoundation/core';
+import { AvailabilityNote, titleMarker } from '../components/Availability';
 import { MediaCard } from '../components/MediaCard';
 import { ErrorMessage, Loading } from '../components/Status';
 import { useArtworkUrl } from '../hooks/useArtworkUrl';
@@ -34,7 +35,8 @@ export function SeriesScreen({ api, seriesId, onBack, onOpenSeason, onEdit }: Pr
         <button className="back-button" data-tv-focusable="true" onClick={onBack} type="button">← Back</button>
         {onEdit && <EditButton onClick={onEdit} />}
         <p className="eyebrow">TV Series{show.year ? ` · ${show.year}` : ''}</p>
-        <MediaPageTitle refreshing={details.refreshing} onRefresh={details.refresh}>{show.title}</MediaPageTitle>
+        <MediaPageTitle leading={titleMarker(show)} refreshing={details.refreshing} onRefresh={details.refresh}>{show.title}</MediaPageTitle>
+        <AvailabilityNote item={show} />
         {details.error && <p className="manage-error media-refresh-error">Refresh failed: {details.error.message}</p>}
         {show.synopsis && <p className="synopsis">{show.synopsis}</p>}
         <section className="media-section season-section">

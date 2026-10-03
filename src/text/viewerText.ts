@@ -592,3 +592,39 @@ export function qualityChoiceText(versions: Pick<PlaybackVersions, 'files' | 'au
   const chosen = `Play chooses ${qualityLabel(automatic.quality)}${passedOver && converted && plays ? ', which plays without converting' : ''}.`;
   return `${chosen} ${clauses.join(', and ')}. Pick a quality to play another.`;
 }
+
+const AVAILABILITY_NOUN: Record<string, string> = {
+  movie: 'film', show: 'series', season: 'season', episode: 'episode', artist: 'artist\'s music', album: 'album', track: 'track',
+};
+const MEMBER_NOUN: Record<string, string> = { show: 'episodes', season: 'episodes', artist: 'tracks', album: 'tracks' };
+
+/**
+ * What an availability marker means, for its tooltip. "Held only by servers
+ * that can't be reached" is the fact the server states: no reachable node
+ * holds the pieces, which is not the same as lost. A series, season, artist
+ * or album with counts says how its members stand.
+ */
+export function availabilityText(
+  mark: 'partial' | 'unavailable' | 'unknown',
+  kind?: string,
+  members?: { total: number; complete: number; partial: number; unavailable: number; unknown: number },
+): string {
+  const noun = (kind && AVAILABILITY_NOUN[kind]) || 'title';
+  const memberNoun = kind ? MEMBER_NOUN[kind] : undefined;
+  if (mark === 'unknown') return `Macha hasn't yet checked which servers hold this ${noun}. It plays as normal.`;
+  if (mark === 'unavailable') {
+    return memberNoun
+      ? `Everything in this ${noun} is held only by servers that can't be reached right now, so none of it can be played.`
+      : `This ${noun} is held only by servers that can't be reached right now, so it can't be played.`;
+  }
+  if (!memberNoun) return `Part of this ${noun} is held only by servers that can't be reached right now, so it may stop before the end.`;
+  const counts = members && members.total > 0
+    ? [
+      members.complete > 0 ? `${members.complete} of ${members.total} ${memberNoun} in full` : undefined,
+      members.partial > 0 ? `${members.partial} in part` : undefined,
+      members.unavailable > 0 ? `${members.unavailable} not at all` : undefined,
+      members.unknown > 0 ? `${members.unknown} not yet checked` : undefined,
+    ].filter(Boolean).join(', ')
+    : '';
+  return `Some of this ${noun} is held only by servers that can't be reached right now${counts ? `: ${counts}` : ''}.`;
+}

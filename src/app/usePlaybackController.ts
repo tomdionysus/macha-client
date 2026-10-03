@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { isUnavailable } from '../components/Availability';
 import { useLocation, useNavigate } from 'react-router-dom';
 import type { MediaApi } from '@machafoundation/core';
 import type { Platform } from '@machafoundation/core';
@@ -142,9 +143,13 @@ export function usePlaybackController(options: {
   }, [api, queueStore]);
 
   const startPlayback = useCallback((item: MediaSummary, startOptions: StartPlaybackOptions = {}) => {
-    const queue = startOptions.queue?.length ? startOptions.queue : [item];
-    const requestedIndex = startOptions.queueIndex ?? queue.findIndex((candidate) => candidate.id === item.id);
-    const index = requestedIndex >= 0 ? requestedIndex : 0;
+    // An unavailable title is never started, and a queue moves past the ones
+    // it holds: none of their pieces is on a reachable node.
+    if (isUnavailable(item)) return;
+    const offered = startOptions.queue?.length ? startOptions.queue : [item];
+    const requestedIndex = startOptions.queueIndex ?? offered.findIndex((candidate) => candidate.id === item.id);
+    const queue = offered.filter((candidate, position) => position === requestedIndex || !isUnavailable(candidate));
+    const index = Math.max(0, requestedIndex >= 0 ? offered.slice(0, requestedIndex).filter((candidate) => !isUnavailable(candidate)).length : 0);
     const persistedQueue = queueStore.replace(queue, index);
     setQueueState(persistedQueue);
     const stored = progressStore.list().find((entry) => entry.itemId === item.id);
