@@ -677,6 +677,12 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
           <button className="secondary-button" type="button" onClick={() => setSignOutNotice(undefined)} data-tv-focusable="true">Dismiss</button>
         </p>
       )}
+      {music.playlistNotice && (
+        <p className="app-notice" role="alert">
+          {music.playlistNotice}
+          <button className="secondary-button" type="button" onClick={music.dismissPlaylistNotice} data-tv-focusable="true">Dismiss</button>
+        </p>
+      )}
       {!playback.playerRouteActive && (musicSectionActive || statusSectionActive || manageSectionActive || importSectionActive) && (
         <div className="section-nav-slot">
           {musicSectionActive

@@ -1,7 +1,7 @@
 # Active tasks and concepts to explore
 
 Last updated: 2026-10-04 (after Tom's rulings on the open questions and the artwork race), rationalised against the
-code, `git log`, core `22e0620` (its `experiment/object-ledger`) and server
+code, `git log`, core `347afd2` (its `experiment/object-ledger`) and server
 0.84.0. Read [2026-10-04-handover.md](2026-10-04-handover.md) first, for
 what is running, what is in flight with the sibling sessions, Tom's rulings
 and the method; where this file and a dated document in this directory
@@ -27,9 +27,9 @@ are related. Core is addressed as the `Macha Client Core` session.
 **ahead of `origin`, unpushed** (`git log origin/experiment/object-ledger..`), which holds the tag
 **0.20.1** (`74a5caf`, pushed 2026-10-02 on Tom's word, tagged on the
 experiment and not merged). It links core's tree on core's own
-`experiment/object-ledger` (`22e0620`), whose types the published core
+`experiment/object-ledger` (`347afd2`), whose types the published core
 0.21.0 lacks, so it cannot resolve core from npm until core's next release.
-`main` is `1fa0bc4` (0.20.0), `develop` `e543e0e`. Suite **713**,
+`main` is `1fa0bc4` (0.20.0), `develop` `e543e0e`. Suite **716**,
 typecheck and build clean.
 
 **The cluster.** Corvus FI-1 (10.35.1.50:7438, also .10) and Corvus GBNI-1
