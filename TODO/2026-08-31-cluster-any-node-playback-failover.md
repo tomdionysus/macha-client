@@ -360,7 +360,7 @@ are permitted for this gate.
 Real cluster: three live Macha nodes across two failure domains
 (`10.44.1.50`/`10.44.1.51` = "test-lab", `10.34.1.50` = "spain", `replicas: 2`
 placement diverse-by-domain). Test title picked for confirmed cross-node
-readability (*Contact*, already in Continue Watching with prior playback
+readability (a movie, already in Continue Watching with prior playback
 history). `10.44.1.50` was the node actively serving a live Direct Play
 session; `macha.service` was stopped via `systemctl` on that host mid-playback
 (a real process kill, not a synthetic HTTP error), then restarted ~9 minutes

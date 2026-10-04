@@ -1,6 +1,22 @@
 # Completed and tested
 
-Last updated: 2026-10-04, at a break for a clear: finished work moved here, the backlog rationalised
+Last updated: 2026-10-04, after Tom's rulings on the open questions
+
+## No real titles committed; the bundling principle restored — 2026-10-04
+
+Tom: "no real titles anywhere that's committed"; the "eagerly bundled"
+principle: "reword it". Test data (`ManageScreen.test.ts`,
+`PlayerScreen.test.ts`, `viewerText.test.ts`) uses invented titles and
+`tmdb:movie:900001`; the records (`COMPLETED.md` and five dated documents)
+keep every technical fact with the work named as "movie A", "a series'
+S03E01" and `tmdb:movie:<id>`, and the two search examples quoted as
+evidence became "Example A" and "the example". Swept by reading every line
+of every tracked prose file and by pattern sweeps for provider ids,
+filenames and title-case phrases. `docs/principles-and-laws.md` gains
+"Nothing the viewer waits on is fetched late" (one bundle; hls.js split
+out, its fetch started before it is needed) and a review gate to match.
+`docs/server-api.md` stays a pointer: the server's documents are canon.
+Typecheck clean, 713 tests, build clean.
 
 ## Documentation and comments: concise and current — 2026-10-04
 
@@ -145,8 +161,8 @@ phone ported the wording word for word.
 `f512cdc`, `5a36769`: `qualityChoiceText` builds one sentence from the
 chosen file, a passed-over file and what it would convert (and, from server
 0.70.0 rates, that no node converts it fast enough), and a ceiling with its
-reason. Tom: "parse all the facts and build a sentence". Seen live on The
-Martian's page on this Mac: "Play chooses 720p, which plays without
+reason. Tom: "parse all the facts and build a sentence". Seen live on a
+movie's page on this Mac: "Play chooses 720p, which plays without
 converting. 1080p needs its audio converted, and 4K is more than this
 screen shows. Pick a quality to play another." The TV ported it and saw it.
 
@@ -214,7 +230,7 @@ the reason shown and a Settings override.
   hidden, or shown with the device's objection when Settings' "Offer every
   quality and mode" is on. The web states no `maxWidth`/`maxHeight`: a
   browser cannot report a decode size limit honestly.
-- **Seen live** (dev client, `tmdb:movie:185`): 720p played at 1194x720,
+- **Seen live** (dev client, `tmdb:movie:<id>`): 720p played at 1194x720,
   a switch to 1080p went direct at 1792x1080 from the same position, a
   720p Maximum capped Play with its reason, and after core `42cebd6` a
   1080p direct start lists "1080p* | 720p".
@@ -712,8 +728,8 @@ extension disconnected) and the startup panel (no node was starting).
   context.
 - **Tracks in search** read "Artist - Album (year)" under the title, artist
   and album each linking to its page, then their own "Track 9"; no year, no
-  brackets (core's `albumLabel`, seen live: "U2 - Achtung Baby (1991)",
-  "U2 - How to Dismantle an Atomic Bomb").
+  brackets (core's `albumLabel`, seen live: "Artist - Album A (1991)",
+  "Artist - Album B").
 - **Type pills** Movies, TV Shows and Music between the sort and refresh,
   the fields' height and shape; any combination, none included. Core's
   `SEARCH_CATEGORIES` and `api.search(query, signal, { categories })` own the
@@ -724,7 +740,7 @@ extension disconnected) and the startup panel (no node was starting).
   none gave the notice, a nonsense query gave the notice, an empty bar none.
 - **Search ignores "the", "a" and "an"** (Tom): core's `isSearchable` decides
   whether to search and `api.search` sends only the remaining words. Seen
-  live: "the" and "the a an" sent no request; "the girls" sent "girls".
+  live: "the" and "the a an" sent no request; "the example" sent "example".
 - **Layout, seen live:** refresh sits at the right of the search row,
   square to the fields (one height variable, 49 px here); the sort caret
   is a drawn chevron set in from the edge; music art in search is centred
@@ -1989,7 +2005,7 @@ Established on the blank cards themselves, not inferred:
 - `complete === true`, `naturalWidth === 500`, `naturalHeight === 750` on every
   visible image, at **every 250 ms sample from t=0** across a 12 s trace —
   33/33 visible images loaded, while the screen showed three of them blank.
-- The bytes are real: fetched and decoded to a canvas, `Airplane!` measured
+- The bytes are real: fetched and decoded to a canvas, one poster measured
   mean luma 162 / stdDev 68 over a 68,338-byte JPEG. Not a blank image.
 - Nothing is covering them: `elementFromPoint` at the centre of each blank box
   returns that card's own `<img>`, `visibility: visible`, `opacity: 1`, no
@@ -2762,7 +2778,7 @@ Verified on the set (`10.44.1.183`, 0.11.0, operator at the screen):
 - **Seeking is near instant**, which was the predicted regression and did not
   materialise. Every seek past the buffer is now a `seekMs` PATCH and a new
   generation, and it still beat the byte-range path it replaced.
-- **Ratatouille (`tmdb:movie:2062`) plays**, video transcoded and audio copied,
+- **The HEVC 10-bit E-AC-3 movie (`tmdb:movie:<id>`) plays**, video transcoded and audio copied,
   slower to start but well within tolerance. That closes the last open Samsung
   title, and confirms the re-attribution made earlier the same day: the silent
   transcode was the server's 0.33.3 AAC defect, not an fMP4 carriage fault.
@@ -2779,7 +2795,7 @@ seamless needs a second decoder, which the failover plan rejects for TVs that
 have exactly one.
 
 Still not settled, and deliberately: the "AAC transcoded, silent" row of the
-fMP4 table. Ratatouille exercised E-AC-3 *copied into MPEG-TS*, not AAC
+fMP4 table. That movie exercised E-AC-3 *copied into MPEG-TS*, not AAC
 transcoded into fMP4, so that row needs a deliberate `preferSegmentContainer`
 flip to test and nothing depends on it.
 
@@ -2991,17 +3007,17 @@ Against gbni-1 with live Chrome 151 capabilities, 748 of 770 items probed:
 
 | instruction | count | representative |
 | --- | --- | --- |
-| `direct` copy/copy | 453 | A Clockwork Orange `tmdb:movie:185` (mp4, h264, aac) |
-| `remux` copy/copy | 173 | Aliens `tmdb:movie:679` (matroska, hevc, aac) |
-| `transcode` video copy / audio transcode | 115 | Django Unchained `tmdb:movie:68718` (matroska, h264, dts) |
-| `transcode` video transcode / audio copy | **1** | Full Metal Jacket `tmdb:movie:600` (matroska, hevc 10-bit, aac) |
-| `transcode` transcode/transcode | 6 | Ratatouille `tmdb:movie:2062` (matroska, hevc 10-bit, eac3) |
+| `direct` copy/copy | 453 | Movie A `tmdb:movie:<id>` (mp4, h264, aac) |
+| `remux` copy/copy | 173 | Movie B `tmdb:movie:<id>` (matroska, hevc, aac) |
+| `transcode` video copy / audio transcode | 115 | Movie C `tmdb:movie:<id>` (matroska, h264, dts) |
+| `transcode` video transcode / audio copy | **1** | Movie D `tmdb:movie:<id>` (matroska, hevc 10-bit, aac) |
+| `transcode` transcode/transcode | 6 | Movie E `tmdb:movie:<id>` (matroska, hevc 10-bit, eac3) |
 
 All four copy/transcode permutations exist in the library, so every branch of
 the chooser has a real title behind it. Two are worth naming: the
 video-transcode/audio-copy branch has exactly **one** title in 748, reached via
 `video-transfer-not-presentable` (an HDR transfer Chrome will not present), so
-it is the only test case for that path and should not be lost. And Ratatouille,
+it is the only test case for that path and should not be lost. And movie E,
 the open Samsung P1, is transcode/transcode here too.
 
 ## Four playback faults found by measuring the browser rather than reading it
@@ -3055,7 +3071,7 @@ stays.
 
 ### The one that needed bytes
 
-Silo S03E01 would not play in Chrome at all. `isTypeSupported` returned true
+A series' S03E01 would not play in Chrome at all. `isTypeSupported` returned true
 for every codec string in the file, so no capability probe could have
 predicted it. Bisecting the served `init.mp4` against a fresh MediaSource:
 
@@ -3362,7 +3378,7 @@ this reorder a live failover. Worth doing during the pending playback UAT.
 
 ## Episode ancestry is produced by the API, not stitched on by callers
 
-Found live 2026-09-06: a deep link to `/play/tmdb:episode:6468133` showed
+Found live 2026-09-06: a deep link to `/play/tmdb:episode:<id>` showed
 "Playback failed — Episode playback hierarchy context is missing." for a
 perfectly playable episode. `playbackContext` (series id/title, season
 id/title/number) is presentational catalogue data — the wire item carries
@@ -3397,16 +3413,16 @@ enforced in the wrong layer and produced in the wrong layer:
 - [x] Live UAT against the 3-node cluster, window foregrounded and
   `document.visibilityState` confirmed `visible` (see the P0 process note in
   `ACTIVE.md`), every case reaching `readyState 4` with time advancing:
-  - Deep link `/play/tmdb:episode:6468133` plays; heading "The Golden Rule —
-    Fallout S02E02", the series title coming from the resolved ancestry.
-  - `/episodes/tmdb:episode:6468133` → Play plays (same heading).
-  - Season screen `Alone › World Championship` renders its rail; playing from
-    it gives "Worlds Collide: Part 1 — Alone S13E01".
+  - Deep link `/play/tmdb:episode:<id>` plays; heading "Episode A —
+    Series A S02E02", the series title coming from the resolved ancestry.
+  - `/episodes/tmdb:episode:<id>` → Play plays (same heading).
+  - Season screen `Series B › Season B` renders its rail; playing from
+    it gives "Episode B — Series B S13E01".
   - After 35s of playback (past `MINIMUM_PROGRESS_MS`), Home shows the new
-    Continue Watching card with both links: `Alone → /series/tmdb:tv:63726`
-    and `World Championship · S13E01 → …/seasons/tmdb:season:63726:13`; the
-    pre-existing Chernobyl card is intact; no console errors.
-  - Control: movie deep link `tmdb:movie:607` plays Direct (H264, 1:37:56).
+    Continue Watching card with both links: `Series B → /series/tmdb:tv:<id>`
+    and `Season B · S13E01 → …/seasons/tmdb:season:<id>:13`; the
+    pre-existing Series C card is intact; no console errors.
+  - Control: movie deep link `tmdb:movie:<id>` plays Direct (H264, 1:37:56).
   - Music grids are empty on this cluster, so those paths rest on the
     unchanged unit tests.
 - [x] **Found and fixed during that UAT — `SessionManager.fetch()` did not
@@ -3740,7 +3756,7 @@ immediately with no token yet minted, on the very first render.
   becomes true; confirmed it fails against the prior code (temporarily
   disabled the guard, reran, restored it) and passes with the fix.
 - [x] Live-verified against the real cluster: a hard reload directly into
-  `/play/tmdb:movie:8374` — the exact failing scenario — now resumes
+  `/play/tmdb:movie:<id>` — the exact failing scenario — now resumes
   playback cleanly instead of 401ing.
 - [x] Passed 411/411 tests and TypeScript typechecking.
 

@@ -28,12 +28,12 @@ describe('media wording, now this client\'s', () => {
   });
 
   it('gives an album its year in brackets only when it has one', () => {
-    expect(albumLabel({ album: { id: 'a', title: 'Homogenic', year: 1997 } })).toBe('Homogenic (1997)');
-    expect(albumLabel({ album: { id: 'a', title: 'Homogenic' } })).toBe('Homogenic');
+    expect(albumLabel({ album: { id: 'a', title: 'An Album', year: 1997 } })).toBe('An Album (1997)');
+    expect(albumLabel({ album: { id: 'a', title: 'An Album' } })).toBe('An Album');
   });
 
   it('puts an album\'s artist under it, a movie\'s year, and an episode\'s code', () => {
-    expect(cardSubtitle(item({ kind: 'album', musicContext: { album: { id: 'a', title: 'Homogenic' }, artist: { id: 'r', title: 'Björk' } } }))).toBe('Björk');
+    expect(cardSubtitle(item({ kind: 'album', musicContext: { album: { id: 'a', title: 'An Album' }, artist: { id: 'r', title: 'An Artist' } } }))).toBe('An Artist');
     expect(cardSubtitle(item({ kind: 'movie', year: 1997 }))).toBe('1997');
     expect(cardSubtitle(item({ kind: 'episode', seasonNumber: 2, episodeNumber: 10 }))).toBe('S02E10');
   });

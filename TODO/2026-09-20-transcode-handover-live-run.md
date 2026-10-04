@@ -23,7 +23,7 @@ about the node that were not known when the P0 was written.
 - `fi-1` (`10.35.1.50`) and the cluster front `ramaroja.macha.network`, both on
   server **0.46.2**. Signed in as `webclient`.
 - One episode, 1080p HEVC 10-bit, ~2.2 Mb/s, AAC 6ch
-  (`macha:365cbdfd…f302d3`, `tmdb:episode:1288746`).
+  (`macha:365cbdfd…f302d3`, `tmdb:episode:<id>`).
 
 ## Part one — what the node does, measured with curl before any browser
 

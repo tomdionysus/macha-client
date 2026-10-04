@@ -52,7 +52,7 @@ describe('player UI transport bindings', () => {
 
   describe('player bar subtitle', () => {
     function movie(fields: Partial<MediaSummary> = {}): MediaSummary {
-      return { id: 'm1', kind: 'movie', title: 'Ratatouille', mediaIds: ['file:m1'], ...fields };
+      return { id: 'm1', kind: 'movie', title: 'A Film', mediaIds: ['file:m1'], ...fields };
     }
 
     it('shows the year under a movie title, where the catalogue supplies one', () => {

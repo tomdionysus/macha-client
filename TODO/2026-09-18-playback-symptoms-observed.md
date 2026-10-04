@@ -15,7 +15,7 @@ why. Add a cause here only once it has been demonstrated, and say how.
 
 - Client `0.17.1` working tree, core linked from `macha-ts` at `6369f2c`.
 - Nodes `10.34.1.50` and `10.35.1.50`, both server `0.46.0`.
-- Media `tmdb:episode:7203311`, title duration 2,464.462 s.
+- Media `tmdb:episode:<id>`, title duration 2,464.462 s.
 - Foreground tab, `document.hidden` false in every sample. These are not the
   backgrounded-tab artefact described in
   `docs/playback-handover.md`.
@@ -112,7 +112,7 @@ failover exhaustion.
 | seek to 1,235,000 | **10,422 ms** |
 | client `generation-attempt` timeout | **12,000 ms** |
 
-For comparison, on media `tmdb:episode:1747124` earlier the same night, a
+For comparison, on media `tmdb:episode:<other id>` earlier the same night, a
 session update was ~200 ms and a create ~1,407 ms.
 
 ## 5. Outgoing generation stops resolving before its replacement exists

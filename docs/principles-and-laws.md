@@ -37,6 +37,13 @@ capabilities, playback, lifecycle and input. A fallback must be deliberate and
 tested, and must not weaken playback ownership, viewer priority or server
 authority.
 
+**Nothing the viewer waits on is fetched late.** Application code is one
+bundle. A large library that some playback paths never use (hls.js) may be
+split out, but its fetch starts before it is needed, overlapping session
+negotiation, and never adds a round trip to playback start. Catalogue artwork
+may be viewport-lazy; the logo and the UI assets startup needs are preloaded
+or embedded.
+
 ## Laws
 
 1. **Thou Shalt Not Make Control Wait.** Membership, health, cancellation,
@@ -99,5 +106,7 @@ Check any material client change against these:
 - Is polling introduced where an event or state transition exists?
 - Is cached state treated as server authority or a live resource?
 - Does a compatibility path change ownership or priority?
+- Does startup or playback start now wait on a fetch that could have begun
+  earlier, or load a module it does not use?
 
 If any answer is uncertain, add coverage before changing the mechanism.

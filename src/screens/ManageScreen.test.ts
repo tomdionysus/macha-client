@@ -6,7 +6,7 @@ import type { ManageCatalogueMatch, MediaProbeCandidate, UnmatchedFile } from '@
 
 function probe(overrides: Partial<MediaProbeCandidate> = {}): MediaProbeCandidate {
   return {
-    kind: 'movie', score: 90, generator: 'filename', title: 'Jurassic Park', year: 1993,
+    kind: 'movie', score: 90, generator: 'filename', title: 'Example Film', year: 1993,
     series: '', season_number: null, episode_number: null,
     artist: '', album: '', disc_number: null, track_number: null, evidence: [],
     ...overrides,
@@ -15,7 +15,7 @@ function probe(overrides: Partial<MediaProbeCandidate> = {}): MediaProbeCandidat
 
 function catalogued(overrides: Partial<ManageCatalogueMatch> = {}): ManageCatalogueMatch {
   return {
-    id: 'tmdb:movie:329', kind: 'movie', title: 'Jurassic Park', sort_title: 'jurassic park',
+    id: 'tmdb:movie:900001', kind: 'movie', title: 'Example Film', sort_title: 'example film',
     synopsis: '', parent_id: null, year: 1993,
     season_number: null, episode_number: null, disc_number: null, track_number: null,
     media_ids: [], revision: 1, updated_ns: 0,
@@ -26,11 +26,11 @@ function catalogued(overrides: Partial<ManageCatalogueMatch> = {}): ManageCatalo
 describe('candidates the catalogue already has', () => {
   it('drops an inferred candidate that is already an offered match, punctuation and case aside', () => {
     // Else the same identity appears twice, only once with a working "Use match" button.
-    expect(candidateAlreadyCatalogued(probe({ title: 'jurassic park!' }), [catalogued()])).toBe(true);
+    expect(candidateAlreadyCatalogued(probe({ title: 'example film!' }), [catalogued()])).toBe(true);
   });
 
   it('keeps a candidate the catalogue genuinely does not have, which is the only useful kind', () => {
-    expect(candidateAlreadyCatalogued(probe({ title: 'The Lost World' }), [catalogued()])).toBe(false);
+    expect(candidateAlreadyCatalogued(probe({ title: 'Example Film Two' }), [catalogued()])).toBe(false);
     expect(candidateAlreadyCatalogued(probe({ year: 2015 }), [catalogued()])).toBe(false);
     expect(candidateAlreadyCatalogued(probe(), [])).toBe(false);
   });
@@ -42,7 +42,7 @@ describe('candidates the catalogue already has', () => {
   });
 
   it('separates episodes of the same name by their position', () => {
-    const episode = probe({ kind: 'episode', title: 'Pilot', year: null, series: 'Lost', season_number: 1, episode_number: 1 });
+    const episode = probe({ kind: 'episode', title: 'Pilot', year: null, series: 'The Show', season_number: 1, episode_number: 1 });
     const listed = catalogued({ kind: 'episode', title: 'Pilot', year: null, season_number: 1, episode_number: 2 });
     expect(candidateAlreadyCatalogued(episode, [listed])).toBe(false);
     expect(candidateAlreadyCatalogued(episode, [{ ...listed, episode_number: 1 }])).toBe(true);

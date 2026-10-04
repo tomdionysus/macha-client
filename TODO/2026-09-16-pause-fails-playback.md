@@ -22,7 +22,7 @@ Pressing play recovers. Reported by Tom from the client served at
 - Dev client on `http://localhost:5199`, `VITE_MACHA_SERVER=https://ramaroja.macha.network`
   (there is no Vite API proxy; `MACHA_API_TARGET` in `.env.local` is dead).
 - `@machafoundation/core` 0.12.0 from npm (not a link). Server 0.43.0 on ramaroja.
-- Chrome, hls.js path. Title `tmdb:episode:4430698` (Foundation S02E01),
+- Chrome, hls.js path. Title `tmdb:episode:<id>` (a series' S02E01),
   chooser picked transcode: video copy, audio transcode, fMP4.
 - Signed in as `webclient`. Diagnostics read from `window.machaDiagnostics.snapshot()`.
 - Cluster candidates as the client saw them: `https://ramaroja.macha.network`
