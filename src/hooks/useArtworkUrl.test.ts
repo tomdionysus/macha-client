@@ -21,9 +21,7 @@ describe('useArtworkUrl', () => {
   });
 
   it('falls back to fetching and object-URL creation for artwork without a signed URL', async () => {
-    // jsdom does not implement createObjectURL/revokeObjectURL. Patch them
-    // directly and unmount before restoring, so the effect cleanup this
-    // hook runs on unmount has a real function to call.
+    // jsdom lacks createObjectURL/revokeObjectURL; unmount before restoring so the hook's cleanup can call one.
     const originalCreate = URL.createObjectURL;
     const originalRevoke = URL.revokeObjectURL;
     URL.createObjectURL = vi.fn(() => 'blob:fake');
@@ -31,9 +29,7 @@ describe('useArtworkUrl', () => {
     try {
       const blob = new Blob(['bytes'], { type: 'image/jpeg' });
       const artworkFetch = vi.fn(() => Promise.resolve(blob));
-      // Built once, outside the render: a new api each render is a new effect
-      // dependency, so the hook would fetch, set, re-render and fetch again
-      // for ever, and the URL would only be there between two of those.
+      // Built outside the render: a new api each render re-triggers the hook's effect for ever.
       const api = fakeApi(artworkFetch);
       const ref = { id: 'legacy', mimeType: 'image/jpeg' };
       const { result, unmount } = renderHook(() => useArtworkUrl(api, ref));

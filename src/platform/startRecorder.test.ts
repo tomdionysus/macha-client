@@ -34,16 +34,14 @@ describe('what a start did before its first frame', () => {
   });
 
   it('says whether any request for this session left the page, and when', () => {
-    // Resource Timing names a cross-origin request even without
-    // Timing-Allow-Origin; only the detailed phases are withheld. Existence
-    // and start/end are exactly the question: did the browser ask at all.
+    // Resource Timing names a cross-origin request even without Timing-Allow-Origin; only the phases are withheld.
     const time = clock();
     const recorder = new StartRecorder('handover', URL_, time.now);
     time.advance(3_000);
     const record = recorder.finish('no-first-frame', [
       { name: 'http://10.44.1.50:7438/api/v1/playback/sessions/abc/stream/def/1/master.m3u8', startTime: 1_200, responseEnd: 1_260 },
       { name: 'http://10.44.1.50:7438/api/v1/playback/sessions/abc/stream/def/1/v/seg-0.m4s', startTime: 1_300, responseEnd: 3_900 },
-      // Before arming: a previous generation's request, not this start's.
+      // Before arming: not this start's.
       { name: 'http://10.44.1.50:7438/api/v1/playback/sessions/abc/stream/def/1/v/seg-9.m4s', startTime: 900, responseEnd: 950 },
       // Another session on the same node.
       { name: 'http://10.44.1.50:7438/api/v1/playback/sessions/zzz/stream/q/1/master.m3u8', startTime: 1_500, responseEnd: 1_600 },
@@ -52,20 +50,14 @@ describe('what a start did before its first frame', () => {
   });
 
   it('says it does not know rather than that nothing was sent', () => {
-    // The page's Resource Timing buffer fills (250 entries) within seconds of
-    // load, after which a start that fetched plenty would read as "0
-    // requests". Zero is a finding; unobservable is not, and the next
-    // diagnosis depends on which.
+    // A full Resource Timing buffer (250 entries) makes requests unobservable, which is not zero.
     const time = clock();
     const recorder = new StartRecorder('primary', URL_, time.now);
     expect(recorder.finish('no-first-frame', undefined)?.requests).toBeUndefined();
   });
 
   it('shows a fragment that was asked for and never arrived', () => {
-    // Resource Timing only lists a request once its response has ended, so a
-    // fragment the node is still holding is invisible there: a start could
-    // fail seconds after its last completed request with nothing to say
-    // whether anything was in flight between.
+    // Resource Timing lists a request only once its response ends, so one still in flight is invisible there.
     const time = clock();
     const recorder = new StartRecorder('primary', URL_, time.now);
     recorder.fragment('asked', 3);

@@ -2,16 +2,12 @@ import { codeWords } from '../../text/viewerText';
 import type { TorrentJob } from '@machafoundation/core';
 import { presentedTime } from '../../diagnostics/timestamps';
 
-/** The last part of a path: the file's own name. */
 export function fileName(path: string): string {
   const slash = path.lastIndexOf('/');
   return slash >= 0 ? path.slice(slash + 1) : path;
 }
 
-/**
- * A job whose node is not in view reports its live figures as null: unknown,
- * which reads "—", not "0 B".
- */
+/** Null (the job's node is not in view) is unknown and reads "—", not "0 B". */
 export function formatBytes(value: number | null): string {
   if (value === null) return '—';
   if (!Number.isFinite(value) || value <= 0) return '0 B';
@@ -53,9 +49,7 @@ export function formatTimestamp(value: number): string {
   return presentedTime(value);
 }
 
-// Elapsed time, floored: an ETA rounds up because it promises no earlier than
-// it says, while an age counts what has actually gone by, so formatEta would
-// call a job created 3600.4s ago "1h 1m old".
+// Floored, where an ETA rounds up: an age counts only what has gone by.
 export function formatAge(value: number, now: number): string {
   if (!value) return '—';
   const seconds = Math.floor((now - value) / 1000);
@@ -83,11 +77,7 @@ export function stateLabel(state: string): string {
   return STATE_LABELS[state] ?? codeWords(state);
 }
 
-/**
- * Share ratio against what this node actually received, not against the
- * torrent's advertised size: a job that has fetched a tenth of the payload and
- * uploaded the same amount has served its peers a full ratio of what it holds.
- */
+/** Share ratio against the bytes this node received, not the torrent's advertised size. */
 export function ratioOf(job: TorrentJob): number | null {
   return job.bytes_completed !== null && job.bytes_completed > 0 && job.uploaded_total !== null ? job.uploaded_total / job.bytes_completed : null;
 }

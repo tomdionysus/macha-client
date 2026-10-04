@@ -1,9 +1,4 @@
-/*
- * Lists of jobs or files and an item's own page, shared by Import and Manage:
- * a heading with a count and a sort, a fixed-layout table whose columns never
- * move, sortable headers, and on the item's page a kicker, title and actions,
- * label/value facts and a quiet card to hold them.
- */
+/* Job and file lists and an item's own page, shared by Import and Manage. */
 .list-empty { color: var(--text-dim); font-size: .9rem; }
 .list-heading { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: .4rem; }
 .list-heading h2 { margin: 0; font-size: 1.05rem; }
@@ -21,8 +16,7 @@
   text-align: left;
   text-transform: uppercase;
   white-space: nowrap;
-  /* A header wider than its column is clipped, never left to run past the
-     table's edge, where the scroll box would count it as width to scroll to. */
+  /* Clipped, or the scroll box counts the overrun as width to scroll to. */
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -48,13 +42,9 @@
 .data-table .col-name a:hover { text-decoration: underline; }
 .data-table .col-name a:focus-visible { outline: 1px solid var(--focus); outline-offset: 2px; }
 /*
- * Fixed layout, and every column but the name a fixed width set to the
- * longest text its formatter can produce (padding included, as fixed layout
- * counts it), so a changing speed, status or ETA never reflows the row; the
- * name takes whatever is left. Automatic layout cannot do this: a name at
- * width: 100% squeezes every other column to its current content. Actions
- * is sized for the remove prompt, the widest thing it shows, so opening that
- * does not move the columns either.
+ * Fixed layout: every column but the name is as wide as the longest text its
+ * formatter can produce (padding included), so changing values never reflow the
+ * row. Actions is sized for the remove prompt, the widest thing it shows.
  */
 .data-table .col-progress { width: 9.8rem; }
 .data-table .col-size { width: 5rem; }
@@ -73,7 +63,7 @@
 .data-table td.col-added { color: var(--text-faint); }
 .data-table .col-actions { width: 13.2rem; padding-right: .35rem; text-align: right; }
 .data-table .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-/* A list item's own page: the shared back button as a link, so it carries the list's sort home. */
+/* The back button is a link, so it carries the list's sort home. */
 .detail-screen > .back-button { display: inline-block; margin-bottom: .6rem; text-decoration: none; }
 .detail-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; }
 .detail-header > div { min-width: 0; }
@@ -99,7 +89,6 @@
 .list-bulk-actions { position: sticky; top: 132px; z-index: 4; display: flex; align-items: center; gap: .55rem; margin: 0 0 .65rem; padding: .55rem .7rem; border: 1px solid #ffffff14; border-radius: .6rem; background: #111113f2; backdrop-filter: var(--glass-blur); }
 .list-bulk-actions span { margin-right: auto; color: var(--text-dim); }
 .list-bulk-actions button { margin: 0; padding: .5rem .7rem; }
-/* An item page's own buttons, beside its title. */
 .detail-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem; justify-content: flex-end; }
 .detail-actions .secondary-button { margin: 0; padding: .45rem .8rem; font-size: .85rem; }
 

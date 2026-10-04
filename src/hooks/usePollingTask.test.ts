@@ -80,9 +80,7 @@ describe('usePollingTask effect wiring', () => {
 
       rerender(['b']);
       await vi.advanceTimersByTimeAsync(0);
-      // The dependency change must recreate the task (one immediate poll for
-      // the new generation) rather than leaving the old interval running
-      // unnoticed alongside a second one.
+      // The change recreates the task (one immediate poll) rather than running two intervals.
       expect(load).toHaveBeenCalledTimes(2);
 
       await vi.advanceTimersByTimeAsync(1_000);

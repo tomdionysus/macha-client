@@ -5,7 +5,7 @@ import { runBulkOperation } from '../../components/ListParts';
 import { isTerminal, jobKey, type JobAction, type JobKind } from './jobs';
 import { viewerErrorText } from '../../text/viewerText';
 
-/** One action on one job, as the server's calls. A remove cancels a job that is still running, then clears it. */
+/** A remove cancels a job that is still running, then clears it. */
 async function perform(api: AcquisitionApi, kind: JobKind, id: string, state: string, action: JobAction): Promise<void> {
   if (kind === 'ingest') {
     if (action === 'pause') await api.pauseIngest(id);
@@ -27,10 +27,7 @@ async function perform(api: AcquisitionApi, kind: JobKind, id: string, state: st
 
 const bulkVerb: Record<JobAction, string> = { pause: 'paused', resume: 'resumed', retry: 'retried', remove: 'removed' };
 
-/**
- * The acquisition state and the actions on it, shared by the job list and a
- * torrent's own page so the two cannot disagree about what a remove does.
- */
+/** Shared by the job list and a torrent's own page, so the two agree on what each action does. */
 export function useAcquisition(api: AcquisitionApi) {
   const [snapshot, setSnapshot] = useState<AcquisitionSnapshot>();
   const [loading, setLoading] = useState(true);
@@ -57,12 +54,12 @@ export function useAcquisition(api: AcquisitionApi) {
       setError(viewerErrorText(reason));
       setLoading(false);
     },
-    // The server's own pace; an older node states none.
+    // The server's stated pace; an older node states none.
     intervalMs: snapshot?.refreshIntervalMs ?? 1500,
     dependencies: [api, snapshot?.refreshIntervalMs],
   });
 
-  /** Runs one action on one job. Answers whether it succeeded. */
+  /** Resolves to whether the action succeeded. */
   const act = useCallback(async (kind: JobKind, id: string, state: string, action: JobAction): Promise<boolean> => {
     const key = jobKey(kind, id);
     setBusyByJob((current) => ({ ...current, [key]: action }));
@@ -86,10 +83,7 @@ export function useAcquisition(api: AcquisitionApi) {
     }
   }, [api, refresh]);
 
-  /**
-   * Runs one action on many jobs at once, each row busy while it runs, and
-   * says how many the server refused. Answers whether all of them succeeded.
-   */
+  /** Runs one action on many jobs at once, reporting how many failed. Resolves to whether all succeeded. */
   const actMany = useCallback(async (kind: JobKind, jobs: ReadonlyArray<{ id: string; state: string }>, action: JobAction): Promise<boolean> => {
     if (jobs.length === 0) return true;
     const keys = jobs.map((job) => jobKey(kind, job.id));

@@ -2,11 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { currentAvailability, type CatalogueApi, type ItemAvailability, type MediaSummary } from '@machafoundation/core';
 
 /**
- * Stored titles with their availability read now. No store keeps it, since
- * a node coming back must not leave a title locked, so a row built from a
- * store asks the catalogue, once per change of titles. Until the answer
- * comes, and for a title the catalogue did not answer for, a title carries
- * no availability: no marker, and playable.
+ * Stored titles with availability read from the catalogue, once per change of titles: no
+ * store keeps it. A title with no answer carries none: no marker, and playable.
  */
 export function useCurrentAvailability<T extends Pick<MediaSummary, 'id'>>(items: readonly T[], catalogue: Pick<CatalogueApi, 'get'>): Array<T & ItemAvailability> {
   const [found, setFound] = useState<Map<string, ItemAvailability>>(new Map());

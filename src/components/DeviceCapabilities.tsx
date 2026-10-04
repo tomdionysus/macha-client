@@ -1,20 +1,16 @@
 import type { Platform } from '@machafoundation/core';
 import { useAsync } from '../hooks/useAsync';
 
-/** Probe results read back on-screen, so "none detected" is distinguishable from "not checked yet". */
+/** `—` is "not checked yet"; "None detected" is an empty probe result. */
 function codecList(values: readonly string[] | undefined): string {
   if (values === undefined) return '—';
   return values.length > 0 ? values.join(', ') : 'None detected';
 }
 
 /**
- * What this device tells the server it can decode.
- *
- * These are live `canPlayType` probe results, not a fixed profile, and they
- * decide what the server sends: a wrong answer here looks exactly like a
- * server fault from every other vantage point — a silent stream, or a picture
- * that will not decode. A TV that cannot be inspected has no other way to
- * show them, which is the whole reason this is on screen rather than in a log.
+ * What this device tells the server it can decode: live `canPlayType` results, which decide
+ * what the server sends. On screen because a TV cannot be inspected, and a wrong answer
+ * looks like a server fault.
  */
 export function DeviceCapabilities({ platform }: { platform: Platform }) {
   const capabilities = useAsync(() => platform.capabilities(), [platform]);
@@ -26,8 +22,7 @@ export function DeviceCapabilities({ platform }: { platform: Platform }) {
       <dl>
         <div><dt>Video</dt><dd>{codecList(capabilities.value?.videoCodecs)}</dd></div>
         <div><dt>Audio</dt><dd>{codecList(capabilities.value?.audioCodecs)}</dd></div>
-        {/* Only when they differ from the element's lists — otherwise the delivery
-            probe found nothing to say and repeating the rows would imply it had. */}
+        {/* Present only when they differ from the element's lists. */}
         {capabilities.value?.hlsVideoCodecs && <div><dt>Video over HLS</dt><dd>{codecList(capabilities.value.hlsVideoCodecs)}</dd></div>}
         {capabilities.value?.hlsAudioCodecs && <div><dt>Audio over HLS</dt><dd>{codecList(capabilities.value.hlsAudioCodecs)}</dd></div>}
         <div><dt>Containers</dt><dd>{codecList(capabilities.value?.containers)}</dd></div>

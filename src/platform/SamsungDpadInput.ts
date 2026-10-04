@@ -29,10 +29,7 @@ export function samsungDpadCommand(key: string, keyCode: number): SamsungDpadCom
   return KEY_COMMANDS[key] ?? KEYCODE_COMMANDS[keyCode];
 }
 
-/**
- * Thin Samsung remote adapter. It owns old key-name/keyCode compatibility and
- * repeat suppression; focus/navigation policy stays in useTvNavigation.
- */
+/** Samsung remote adapter: key-name/keyCode compatibility and repeat suppression. Navigation policy stays in useTvNavigation. */
 export class SamsungDpadInput {
   private lastCommand?: SamsungDpadCommand;
   private lastCommandAt = 0;
@@ -68,8 +65,7 @@ export class SamsungDpadInput {
       return;
     }
     if (!this.handler(command, event)) {
-      // Unhandled keys belong to the focused native control (notably text
-      // editors). Do not let repeat suppression consume their next keydown.
+      // Unhandled keys belong to the focused native control (e.g. a text field); do not suppress their next keydown.
       this.lastCommand = undefined;
       this.lastCommandAt = 0;
       return;

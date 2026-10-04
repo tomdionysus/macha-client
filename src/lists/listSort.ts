@@ -1,7 +1,4 @@
-/**
- * Sorting for a list a viewer can reorder by column, the way a torrent
- * client's is: the torrent list and the unmatched-files list share it.
- */
+/** Sorting for a list a viewer can reorder by column. */
 export type SortDirection = 'asc' | 'desc';
 
 export interface ListSort<K extends string> {
@@ -9,7 +6,7 @@ export interface ListSort<K extends string> {
   direction: SortDirection;
 }
 
-/** A key a viewer can sort by, with the direction it is naturally read in. */
+/** A sortable key, with its natural direction. */
 export interface SortKeyDef<K extends string> {
   key: K;
   label: string;
@@ -24,11 +21,8 @@ function compareValues(left: number | string, right: number | string): number {
 }
 
 /**
- * The rows in the order asked for, and always the same order for the same
- * rows: ties fall to the name and then to the id, so a poll returning rows in
- * another order never swaps two under the pointer. A value that is not known
- * (`undefined`) sorts last whichever way the list runs, because a row of
- * dashes is never what somebody sorted to find.
+ * A stable order: ties fall to the name, then the id, so a poll returning rows in another order
+ * never swaps two under the pointer. Unknown (`undefined`) values sort last in either direction.
  */
 export function sortRows<T, K extends string>(
   rows: readonly T[],
@@ -52,7 +46,7 @@ export function sortRows<T, K extends string>(
   });
 }
 
-/** Read from the address, falling back rather than failing on one that was edited. */
+/** Reads the sort from the address, falling back on anything invalid. */
 export function parseListSort<K extends string>(params: URLSearchParams, keys: readonly SortKeyDef<K>[], fallback: ListSort<K>): ListSort<K> {
   const key = params.get('sort');
   const def = keys.find((entry) => entry.key === key);

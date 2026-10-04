@@ -3,10 +3,7 @@ import vm from 'node:vm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const workerSource = readFileSync(new URL('../public/macha-direct-play-sw.js', import.meta.url), 'utf8');
-// The worker judges quiet and schedules read-ahead by its clock and timers.
-// On fake time the test decides how much time passes, so an outcome never
-// depends on how fast the machine ran; waiting advances that time and lets
-// every promise it releases run.
+// Fake time: the worker runs on its clock and timers, so the test decides how much time passes; waiting also runs every promise it releases.
 const wait = (ms: number) => vi.advanceTimersByTimeAsync(ms);
 
 type FetchOptions = RequestInit & { headers?: HeadersInit; signal?: AbortSignal };
@@ -301,9 +298,7 @@ describe('Direct Play read-ahead Service Worker', () => {
     releases.push(harness.release);
 
     const response = await harness.request('bytes=0-3');
-    // The initial fetch resolves normally — headers arrive fine — so this
-    // failure can only surface once the body is actually read, exactly as it
-    // would for a real player consuming the stream.
+    // The fetch resolves with headers, so the failure surfaces only when the body is read.
     await expect(response.arrayBuffer()).rejects.toThrow('alternate unreachable');
     expect(harness.metrics).toContainEqual(expect.objectContaining({
       type: 'macha-direct-read-ahead-source-failed',
@@ -379,12 +374,7 @@ describe('Direct Play read-ahead Service Worker', () => {
   });
 
   it('reports a 404 as a source failure carrying the status, while still returning it', async () => {
-    // The node has no record of this source — most often a play session reaped
-    // out from under a long pause. The media element alone raises a generic
-    // decode failure, which reads as "unsupported media" and fails the node
-    // over; the status reaches the client alongside the response so it can
-    // re-create the session instead. The response itself still travels (the
-    // test above is the invariant).
+    // Without the status the element raises a generic decode failure and the node is failed over; with it the client re-creates the session.
     const harness = createHarness(async () => new Response('not found', { status: 404 }));
     harness.configure();
     releases.push(harness.release);
@@ -399,10 +389,7 @@ describe('Direct Play read-ahead Service Worker', () => {
   });
 
   it('answers what the node said when asked, for an element that errors before the report arrives', async () => {
-    // The report above is posted after an await, and the 404 response can
-    // reach the element first, leaving the page to read the element's error
-    // as "unsupported". The status is recorded before the
-    // response is returned, so a page that asks gets the answer regardless.
+    // The report is posted after an await, so the 404 can reach the element first; the status is recorded before the response returns.
     const harness = createHarness(async () => new Response('not found', { status: 404 }));
     harness.configure();
     releases.push(harness.release);
@@ -415,9 +402,7 @@ describe('Direct Play read-ahead Service Worker', () => {
   });
 
   it('does not attach a status to a transport failure that never became a response', async () => {
-    // Absent is a different claim from 404 and must stay absent: a fetch that
-    // never landed says something about the node, and reporting it with a
-    // status would route it into the re-create path instead of failover.
+    // A status here would route a node failure into the re-create path instead of failover.
     const harness = createHarness(async () => { throw new TypeError('unreachable'); });
     harness.configure();
     releases.push(harness.release);
@@ -444,9 +429,7 @@ describe('Direct Play read-ahead Service Worker', () => {
 
     await expect(harness.request('bytes=0-3')).rejects.toThrow('unreachable');
     expect(calls).toEqual(['https://node.test/direct.mp4', 'https://alternate.test/direct.mp4']);
-    // A demand-path failure is more urgent than a speculative prefetch miss —
-    // it is about to surface as a real player-facing read error — so it must
-    // report source degradation at least as reliably as prefetch already does.
+    // A demand-path failure must report source degradation as reliably as a prefetch miss does.
     expect(harness.metrics).toContainEqual(expect.objectContaining({
       type: 'macha-direct-read-ahead-source-failed',
       message: 'unreachable',

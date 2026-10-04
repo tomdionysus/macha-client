@@ -21,8 +21,7 @@ type ManualKind = ManualMetadata['kind'];
 const ARTWORK_ROLE: Record<ManualKind, string> = { movie: 'poster', episode: 'still', track: 'cover' };
 
 /**
- * Where a new episode or track goes: under something the catalogue already
- * holds, sent by id so the file joins that hierarchy, or under parents named
+ * Where a new episode or track goes: under a catalogue item, sent by id, or under parents named
  * here, which the server finds or creates by name.
  */
 export type Placement = 'album' | 'artist' | 'series' | 'new';
@@ -41,12 +40,8 @@ const EPISODE_PLACEMENTS: ReadonlyArray<readonly [Placement, string]> = [
 const PLACEMENT_OF: Partial<Record<CatalogueKind, Placement>> = { album: 'album', artist: 'artist', show: 'series', season: 'series' };
 
 /**
- * Manual entry: the kind's fields, seeded from a candidate when one was being
- * reviewed, the place it goes in the catalogue, and artwork uploaded to what
- * it creates. Applied through core, which routes it. `parent` arrives chosen
- * when the viewer picked an album, artist, series or season from a catalogue
- * search; `picture` is the provider's picture found for the candidate under
- * review, offered for what this creates.
+ * Manual entry, applied through core. `probe` seeds the fields, `parent` is one already chosen from
+ * a catalogue search, and `picture` is the provider's picture for the candidate under review.
  */
 export function ManualEntry({ detail, probe, picture, parent, manage, catalogue, onResolved }: {
   detail: UnmatchedDetail;
@@ -147,8 +142,7 @@ export function ManualEntry({ detail, probe, picture, parent, manage, catalogue,
     }
   };
 
-  // The candidate's picture fits only what it was found for, and a cover is
-  // never put on an album the catalogue already holds: that album has its own.
+  // The candidate's picture fits only its own kind, and never goes on an album the catalogue already holds.
   const offered = picture && picture.kind === kind && !(kind === 'track' && placement === 'album') ? picture : undefined;
 
   const placements = kind === 'track' ? TRACK_PLACEMENTS : kind === 'episode' ? EPISODE_PLACEMENTS : [];

@@ -2,10 +2,8 @@ import type { AcquisitionSource, TorrentJob, TorrentNode } from '@machafoundatio
 import { formatAge, formatBytes } from './format';
 
 /**
- * Torrents belong to the cluster. An action is intent: the
- * server records `desired` at once and the owning node applies it within
- * seconds, reporting `desired_applied`. Until then the viewer is told what is
- * under way, and why it is waiting when the server says it cannot apply it.
+ * An action is intent: the server records `desired` at once and the owning node applies it within
+ * seconds, reporting `desired_applied`. These words cover the gap.
  */
 const PENDING: Record<string, string> = { paused: 'Pausing…', active: 'Resuming…', cancelled: 'Cancelling…' };
 const WAITING: Record<string, string> = { paused: 'Pause waiting', active: 'Resume waiting', cancelled: 'Cancel waiting' };
@@ -16,10 +14,8 @@ const BLOCKED: Record<string, string> = {
 };
 
 /**
- * What to say about an action not yet applied, or nothing. `now` and the
- * list's refresh interval tell a slow owner from a stuck one: the server
- * counts an intent not applied within two intervals, with no reason given, as
- * stuck.
+ * What to say about an action not yet applied, if anything. An intent unapplied after two refresh
+ * intervals with no reason given counts as stuck, as the server counts it.
  */
 export function intentNote(job: Pick<TorrentJob, 'desired' | 'desired_applied' | 'desired_blocked_reason' | 'desired_changed_unix_ms'>, now: number, refreshIntervalMs: number): string | undefined {
   if (!job.desired || job.desired_applied !== false) return undefined;
@@ -29,7 +25,7 @@ export function intentNote(job: Pick<TorrentJob, 'desired' | 'desired_applied' |
   return PENDING[job.desired];
 }
 
-/** The remove-after-completion choices on the add form, from off to the server's maximum of a day. */
+/** From immediate up to the server's maximum of a day. */
 export const REMOVE_AFTER_CHOICES: ReadonlyArray<{ label: string; ms: number }> = [
   { label: 'As soon as it completes', ms: 0 },
   { label: '1 hour after it completes', ms: 3_600_000 },
@@ -44,7 +40,7 @@ function durationWords(ms: number): string {
   return `${Math.round(ms / 60_000)} minutes after it completes`;
 }
 
-/** The "default" choice, saying what the cluster default is (null means off). */
+/** A null or undefined default means the cluster keeps completed torrents. */
 export function removeAfterDefaultLabel(defaultMs: number | null | undefined): string {
   return defaultMs === null || defaultMs === undefined ? 'Keep it (the default)' : `Default: remove ${durationWords(defaultMs)}`;
 }
@@ -57,10 +53,8 @@ const NOT_ACCEPTING: Record<string, string> = {
 };
 
 /**
- * A node in the add form's selector: its host, its load or why it is not
- * taking work now, and its own staging room: with torrents the cluster's, a
- * single figure would be only the answering node's. It can still be chosen when not
- * accepting; the torrent then waits for it.
+ * A node in the add form's selector: host, load or why it is not accepting, and its own staging
+ * room. A node not accepting can still be chosen; the torrent waits for it.
  */
 export function torrentNodeLabel(node: Pick<TorrentNode, 'host' | 'node_id' | 'accepting' | 'not_accepting_reason' | 'active_jobs' | 'max_active'> & { staging?: Pick<TorrentNode['staging'], 'free_bytes' | 'limit_bytes'> }): string {
   const name = node.host || node.node_id;
@@ -74,9 +68,8 @@ export function torrentNodeLabel(node: Pick<TorrentNode, 'host' | 'node_id' | 'a
 }
 
 /**
- * What to say about the nodes a list could not hear from (`sources`). A node out of reach still has its jobs listed, as they were at
- * its last answer, which may be stale; a node never reached has none listed.
- * Nodes are named by host where the torrent node list knows them.
+ * Notes on the nodes a list could not hear from. A node out of reach has its jobs listed as of its
+ * last answer; a node never reached has none listed.
  */
 export function staleSourceNotes(sources: readonly AcquisitionSource[], hosts: ReadonlyMap<string, string>, now: number): string[] {
   return sources.filter((source) => !source.reachable).map((source) => {

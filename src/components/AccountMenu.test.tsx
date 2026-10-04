@@ -27,9 +27,6 @@ function show(current: CurrentSession, onSignOut = vi.fn(() => Promise.resolve()
 
 describe('AccountMenu', () => {
   it('offers a way in, and nothing else, for the anonymous account', () => {
-    // Its session is mechanically ordinary — roles, validation, revocation all
-    // work — but it represents nobody who chose to be anyone, so there is no
-    // account to manage and no sign-out anyone would recognise as theirs.
     show(session({ username: 'anonymous' }));
 
     expect(screen.getByRole('link', { name: 'Log in' })).toBeTruthy();
@@ -38,9 +35,7 @@ describe('AccountMenu', () => {
   });
 
   it('does the same where the server names no user at all', () => {
-    // An older node has sessions but no accounts. Offering "change your
-    // password" for a user it does not model would be a promise nothing can
-    // keep, and the word `undefined` in the label is worse still.
+    // An older node has sessions but no accounts.
     show(session({ username: undefined }));
 
     expect(screen.getByRole('link', { name: 'Log in' })).toBeTruthy();
@@ -56,15 +51,12 @@ describe('AccountMenu', () => {
   });
 
   it('makes the identity itself the control, with no second target beside it', () => {
-    // A chip beside a separate `⋯` button would be two adjacent targets for
-    // one idea, an account icon that looks pressable and does nothing, and an
-    // extra D-pad stop on a remote to reach the half that works.
     show(session());
 
     const trigger = screen.getByRole('button', { name: 'Account options for alice' });
     expect(trigger.textContent).toContain('alice');
     expect(trigger.querySelector('.account-icon')).toBeTruthy();
-    // The ellipsis glyph is what a separate trigger would have rendered.
+    // The ellipsis glyph is what a separate trigger would render.
     expect(screen.queryByText('⋯')).toBeNull();
     expect(screen.getAllByRole('button')).toHaveLength(1);
   });
@@ -79,11 +71,7 @@ describe('AccountMenu', () => {
   });
 
   it('describes what logging out actually does, and not more', () => {
-    // `logout()` is DELETE /api/v1/session, which revokes one token; the
-    // account's other sessions stay valid. Claiming it signs the account out
-    // everywhere describes what a password or role change does — and telling someone
-    // their other devices are signed out when they are not stops them doing
-    // the thing they actually needed.
+    // Log out revokes one token; the account's other sessions stay valid.
     show(session());
     fireEvent.click(screen.getByRole('button', { name: 'Account options for alice' }));
     fireEvent.click(screen.getByRole('menuitem', { name: 'Log out' }));
@@ -106,8 +94,6 @@ describe('AccountMenu', () => {
   });
 
   it('treats a username that is only whitespace as no username', () => {
-    // A server that pads or blanks the field must not produce an account chip
-    // with nothing in it and a menu that cannot describe whose account it is.
     show(session({ username: '   ' }));
 
     expect(screen.getByRole('link', { name: 'Log in' })).toBeTruthy();

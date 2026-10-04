@@ -6,15 +6,7 @@ import { SessionManager } from '@machafoundation/core';
 import { bootstrapEndpoints, EndpointRegistry } from '@machafoundation/core';
 import { settle } from '../test/settle';
 
-/**
- * The mint is stopped at the network rather than by replacing a core export.
- *
- * An installed package's ES module namespace is not configurable, so a core
- * export cannot be spied on. Stubbing `fetch` is also the better test — it
- * exercises the real mint, its parsing and its failure
- * handling, and does not depend on which function inside core happens to make
- * the request.
- */
+/** The mint is stubbed at `fetch`: a core export cannot be spied on, and this exercises the real mint. */
 function sessionResponse() {
   return new Response(
     JSON.stringify({ id: 'session-1', token: 'token-a', token_type: 'Bearer', roles: ['media_viewer'], created_unix_ms: 1, expires_unix_ms: Date.now() + 60_000 }),
@@ -54,11 +46,8 @@ describe('useSession', () => {
   });
 
   it('carries why the mint failed, and tells a refusal from a silence', async () => {
-    // A node that answered 403 in forty milliseconds has been reached and has
-    // stated a policy. Core withholds the connection gate for exactly that
-    // case — so without this the cluster is up, there is no session, and this
-    // client has nothing to say about it: every section stays visible, every
-    // request 401s, and the viewer is left reading an app that looks fine.
+    // A 403 means the node was reached and stated a policy. Without the reason the client would show
+    // a working app whose every request 401s.
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(
       JSON.stringify({ error: 'anonymous_disabled', message: 'anonymous sessions are disabled' }),
       { status: 403, headers: { 'Content-Type': 'application/json' } },

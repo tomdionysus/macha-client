@@ -19,12 +19,7 @@ import { pacedArtwork, pictureRelease } from './providerLookup';
 
 export const PROVIDER_LABEL: Record<string, string> = { tmdb: 'TMDB', musicbrainz: 'MusicBrainz' };
 
-/**
- * The picture a match is chosen with, by what it matches: a movie's poster,
- * the episode's still (a series result names the episode by its numbers), an
- * album's cover. The cover goes on the album the match writes, the others on
- * the file's own item.
- */
+/** The picture a match is chosen with: poster, episode still or album cover. The cover goes on the album, the others on the file's own item. */
 const ARTWORK_ROLE: Record<ProviderSearchResult['kind'], ProviderArtworkRole> = { movie: 'poster', show: 'still', album: 'cover' };
 
 /** The item a chosen picture goes on, from what the match wrote. */
@@ -40,11 +35,7 @@ export interface RecordNumbers {
   track?: number;
 }
 
-/**
- * What to send to match a file to a provider result, or a sentence for what
- * is missing: a series needs the season and episode that are this file, and
- * an album the track that is (and, on a set, the disc).
- */
+/** What to send to match a file to a result, or a sentence naming the numbers still missing. */
 export function providerMatchTarget(result: Pick<ProviderSearchResult, 'ref' | 'kind'>, numbers: RecordNumbers): ProviderMatchRef | string {
   if (result.kind === 'show') {
     if (numbers.season == null || numbers.episode == null) return 'Enter the season and episode this file is.';
@@ -58,12 +49,9 @@ export function providerMatchTarget(result: Pick<ProviderSearchResult, 'ref' | '
 }
 
 /**
- * One TMDB or MusicBrainz record a file could be, whether suggested or
- * searched for: its picture, title, year, artist and overview, and "Use
- * this", which asks for the numbers that pick the file out of it (seeded from
- * what the file says), offers the record's pictures, and matches. The server
- * fetches the record, builds its hierarchy (reusing what the catalogue
- * holds), stages its artwork and binds the file, as a scan match does.
+ * One TMDB or MusicBrainz record a file could be. "Use this" asks for the
+ * numbers that pick the file out of it, offers the record's pictures, and
+ * matches; the server builds the hierarchy and binds the file, as a scan match does.
  */
 export function ProviderRecord({ releases, file, manage, numbers: initial, disabled, onResolved }: {
   /** One record, or several releases no one could tell apart, shown and matched as one. */
@@ -86,9 +74,9 @@ export function ProviderRecord({ releases, file, manage, numbers: initial, disab
   const [busy, setBusy] = useState(false);
   const [matched, setMatched] = useState(false);
   const [error, setError] = useState<string>();
-  // The album's other files in this folder: undefined while looked for.
+  // The album's other files in this folder; undefined while looked for.
   const [siblings, setSiblings] = useState<Sibling[]>();
-  // The album's other files to match too: every one that says which track it is, until unchosen.
+  // Siblings to match too: initially every one that states its track.
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   const [statuses, setStatuses] = useState<Record<string, FileStatus>>({});
   const [someLeft, setSomeLeft] = useState(false);
@@ -114,7 +102,7 @@ export function ProviderRecord({ releases, file, manage, numbers: initial, disab
     setOptions(undefined);
     setOptionId(undefined);
     pacedArtwork(manage, result.ref, ARTWORK_ROLE[result.kind], { season_number: target.season_number, episode_number: target.episode_number })
-      // No pictures to choose from is no reason not to match: the provider's default is staged anyway.
+      // With no options the provider's default is staged anyway.
       .catch(() => [])
       .then((found) => { if (!cancelled) setOptions(found); });
     return () => { cancelled = true; };
@@ -136,18 +124,12 @@ export function ProviderRecord({ releases, file, manage, numbers: initial, disab
 
   const mark = (id: string, status: FileStatus) => setStatuses((current) => ({ ...current, [id]: status }));
 
-  /**
-   * The chosen files of the album, one after another, against the same
-   * release, each by the track its own candidates state; each row says how
-   * it went. Answers whether any was left unmatched.
-   */
+  /** Matches the chosen siblings in turn against the same release, each by its own track. Answers whether any was left unmatched. */
   const matchSiblings = async (ref: string): Promise<boolean> => {
     let left = false;
     let unanswered = false;
     for (const sibling of (siblings ?? []).filter((candidate) => selected.has(candidate.file.id) && candidate.track != null)) {
-      // A change the server did not answer is still running there, and the
-      // next would queue behind it, possibly for minutes, only to end in a
-      // conflict, so the rest are not sent.
+      // An unanswered change is still running on the server; the next would queue behind it and end in a conflict.
       if (unanswered) {
         mark(sibling.file.id, { left: 'not tried, because the server did not answer the one before.' });
         continue;
@@ -190,7 +172,7 @@ export function ProviderRecord({ releases, file, manage, numbers: initial, disab
       try {
         await manage.chooseArtwork(itemId, ARTWORK_ROLE[result.kind], optionId);
       } catch (cause) {
-        // The file is matched; only the picture failed, so say that and go no further.
+        // The file is matched; only the picture failed.
         setMatched(true);
         setBusy(false);
         setError(`Matched, but the chosen picture could not be used: ${viewerErrorText(cause)}`);
@@ -198,7 +180,7 @@ export function ProviderRecord({ releases, file, manage, numbers: initial, disab
       }
     }
     if (await matchSiblings(target.ref)) {
-      // This file is matched, so nothing here can be done again; each row says what was left, and the way back is offered.
+      // This file is matched and cannot be redone; each row says what was left.
       setMatched(true);
       setBusy(false);
       setSomeLeft(true);
@@ -272,10 +254,7 @@ export function ProviderRecord({ releases, file, manage, numbers: initial, disab
   );
 }
 
-/**
- * The pictures the provider has for a record, to choose one of before the
- * match is made; none chosen keeps the one the server stages by default.
- */
+/** The provider's pictures for a record; none chosen keeps the server's default. */
 function Pictures({ options, optionId, disabled, onChoose }: {
   options?: ProviderArtworkOption[];
   optionId?: string;

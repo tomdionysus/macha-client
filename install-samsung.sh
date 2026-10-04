@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Build, package and install the Samsung target with the Tizen CLI.
+# TV_SERIAL: the set's sdb address. CERT_PROFILE: the Tizen signing profile.
 set -euo pipefail
 
 TV_SERIAL="${TV_SERIAL:-10.44.1.183:26101}"
@@ -16,10 +18,8 @@ tizen package \
     -s "$CERT_PROFILE" \
     -- .
 
-# The first transfer to the TV intermittently fails with "Can not transfer
-# package" while the device is otherwise reachable and `sdb devices` lists it.
-# Resetting the sdb server clears it every time; the port needs a moment to
-# leave TIME_WAIT before the server can bind it again.
+# The first transfer sometimes fails with "Can not transfer package". Resetting
+# sdb fixes it, once its port has left TIME_WAIT.
 install_package() {
     tizen install -s "$TV_SERIAL" -n Macha.wgt -- . && return 0
 
@@ -36,10 +36,8 @@ install_package() {
 
 install_package
 
-# Installing over a running app leaves it resumed rather than stopped, and the
-# first launch then reports "resumed"/"Could not launch the null application"
-# without bringing anything to the screen — the deploy looks successful and the
-# TV still shows the old screen. A second launch foregrounds it properly.
+# Installing over a running app leaves it resumed, and the first launch then
+# foregrounds nothing. A second launch does.
 launch_app() {
     local output
     output=$(tizen run -s "$TV_SERIAL" -p "$APP_ID" 2>&1) || true

@@ -23,17 +23,15 @@ function show(details: MediaDetails, versions: PlaybackVersions) {
 
 const film = { id: 'film', kind: 'movie', title: 'A film', mediaIds: ['macha:big'] } as MediaDetails;
 const fourK: PlaybackVersions = {
-  // The 4K file the screen's ceiling keeps Play off, as core only sets
-  // limitedBy when a file is above it.
+  // Core sets limitedBy only when a file is above the ceiling, as this 4K file is.
   files: [{ quality: 2160, instruction: step(2160, 'file').instruction, index: 0 }],
   steps: [step(2160, 'file'), step(1440, 'transcode'), step(1080, 'transcode'), step(720, 'transcode')],
   automatic: step(1080, 'transcode'),
   limitedBy: { quality: 1080, reason: 'ceiling-display' },
 };
 
-// Queried by title, not by role and name: role queries compute every
-// button's accessible name on each poll, which on a loaded machine runs past
-// findBy's 1000 ms timeout.
+// Queried by title: role queries compute every button's accessible name on each poll, which can
+// outrun findBy's timeout.
 describe('the detail page\'s quality buttons', () => {
   it('offers Play and one button per quality, and plays the one pressed', async () => {
     const { onPlayVersion } = show(film, fourK);
@@ -89,8 +87,7 @@ describe('a title\'s files, one line each', () => {
     await settle();
     screen.getByText(/3840×2160/);
     expect([...container.querySelectorAll('.media-profile-summary')].map((line) => line.textContent)).toEqual([
-      // Highest resolution first, its class after it, and the channel count
-      // after the audio codec: core's parts, laid out as given.
+      // Core's parts, laid out as given.
       '2h 31m · 3840×2160 (4K) · HEVC · TRUEHD · 7.1 · 47.4 Mbps',
       '2h 31m · 1920×1080 (1080p) · H.264 · AAC · 7.1 · 8.0 Mbps',
     ]);
@@ -124,8 +121,7 @@ describe('files that are the same', () => {
     await settle();
     screen.getByText(/3840×2160/);
     expect([...container.querySelectorAll('.media-profile-summary')].map((line) => line.textContent)).toEqual([
-      // Highest resolution first, its class after it, and the channel count
-      // after the audio codec: core's parts, laid out as given.
+      // Core's parts, laid out as given.
       '2h 31m · 3840×2160 (4K) · HEVC · TRUEHD · 7.1 · 47.4 Mbps',
       '2h 31m · 1920×1080 (1080p) · H.264 · AAC · 7.1 · 8.0 Mbps',
     ]);

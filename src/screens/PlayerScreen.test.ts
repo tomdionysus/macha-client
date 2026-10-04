@@ -20,8 +20,6 @@ describe('player UI transport bindings', () => {
   });
 
   it('yields left/right to control-row navigation when transport is not active', () => {
-    // With the bar up of its own accord the arrows must move focus between
-    // controls, or the control row cannot be navigated at all.
     expect(samsungTransportSeekDirection('ArrowLeft', 37, false)).toBeUndefined();
     expect(samsungTransportSeekDirection('ArrowRight', 39, false)).toBeUndefined();
   });
@@ -76,7 +74,7 @@ describe('player UI transport bindings', () => {
         mediaIds: ['file:e1'],
         playbackContext: { series: { id: 's1', title: 'The Show' }, season: { id: 'se1', title: 'Season 1', seasonNumber: 1 } },
       };
-      // The year must not creep in here: the series name is the context that matters.
+      // The episode's year stays out.
       expect(playerMediaSubtitle(episode)).toBe('The Show S01E01');
     });
 
@@ -94,9 +92,7 @@ describe('the duration the scrubber renders and divides by', () => {
   });
 
   it('refuses a duration that cannot be rendered or divided by', () => {
-    // A plain `a || b || c || 1` skips `NaN` only because `NaN` is falsy, and
-    // lets `Infinity` through to the formatter as `Infinity:NaN:NaN`. Both
-    // fall to the next stated candidate.
+    // `Infinity` is truthy, so a plain `a || b || 1` would pass it to the formatter.
     expect(firstUsableDurationMs(Number.NaN, 90_000)).toBe(90_000);
     expect(firstUsableDurationMs(Number.POSITIVE_INFINITY, 90_000)).toBe(90_000);
     expect(firstUsableDurationMs(0, 90_000)).toBe(90_000);
@@ -104,8 +100,7 @@ describe('the duration the scrubber renders and divides by', () => {
   });
 
   it('falls back to a divisible one rather than to nothing', () => {
-    // `playedPercent` divides by this, and a source that has reported no
-    // duration at all is the ordinary state before the first event.
+    // `playedPercent` divides by this, and no reported duration is the ordinary state before the first event.
     expect(firstUsableDurationMs(undefined, Number.NaN, Number.POSITIVE_INFINITY)).toBe(1);
     expect(firstUsableDurationMs()).toBe(1);
   });
@@ -113,29 +108,19 @@ describe('the duration the scrubber renders and divides by', () => {
 
 describe('what to tell a viewer whose title has not started yet', () => {
   it('says nothing while a start is still ordinary', () => {
-    // Most starts are a second or two. A message that appears and vanishes
-    // reads as a fault of its own, and saying "this is taking a while" about
-    // something that took a moment is simply wrong.
+    // Most starts take a second or two; a message that flashes up reads as a fault.
     expect(startWaitNotice(true, 0)).toBeUndefined();
     expect(startWaitNotice(true, 4_999)).toBeUndefined();
   });
 
   it('names what is being waited for, and how long it has been', () => {
-    // Work is bounded and event-driven: a failure or a degraded state must be
-    // visible and actionable rather than becoming indefinite waiting. The budgets bound three
-    // sequential phases and nothing bounds their sum, so a cold node can
-    // legitimately spend the better part of a minute before anything is
-    // declared wrong. A viewer told what is happening and for how long is in
-    // a different position from one watching an unmarked spinner, even though
-    // the wait itself is identical.
+    // Nothing bounds the sum of the three start phases, so a cold node can legitimately take most of a minute.
     expect(startWaitNotice(true, 5_000)).toBe('Waiting for the node to start the stream — 5s');
     expect(startWaitNotice(true, 12_400)).toBe('Waiting for the node to start the stream — 12s');
   });
 
   it('says nothing about a rebuffer', () => {
-    // Only a start. A rebuffer mid-film already has the picture behind it to
-    // say what is going on, and a timer over it would turn every brief
-    // hesitation into an announcement.
+    // A rebuffer has the picture behind it; a timer would announce every brief hesitation.
     expect(startWaitNotice(false, 30_000)).toBeUndefined();
   });
 

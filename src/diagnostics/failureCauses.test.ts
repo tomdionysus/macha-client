@@ -3,8 +3,7 @@ import { accountSessionLimitNotice, playbackFailureHeadline } from './failureCau
 
 describe('the sentence a viewer is shown for a terminal failure', () => {
   it('is what the node said, from the layer that knew, not what wrapped it', () => {
-    // The shape a failure has after crossing core's envelopes: the outer
-    // layers classify, the innermost carries the server's own sentence.
+    // Outer layers classify; the innermost carries the server's own sentence.
     const refused = new Error('Macha playback request failed');
     (refused as { detail?: string }).detail = 'timed out waiting for the first fragmented-MP4 segment';
     const endpoint = new Error('Macha endpoint http://10.35.1.50:7438 failed: Macha playback request failed', { cause: refused });
@@ -14,9 +13,7 @@ describe('the sentence a viewer is shown for a terminal failure', () => {
   });
 
   it('never falls back to the log line', () => {
-    // Core's rule: `.message` is two envelopes and a node address in front of
-    // somebody trying to watch a film. When no layer stated a sentence, this
-    // client says something of its own.
+    // `.message` carries envelopes and a node address, which are not for a viewer.
     const error = new Error('Macha endpoint http://10.35.1.50:7438 failed: Failed to fetch');
     const said = playbackFailureHeadline(error);
     expect(said).not.toContain('Macha endpoint');
@@ -31,14 +28,8 @@ describe('the sentence a viewer is shown for a terminal failure', () => {
 });
 
 describe('a cap refusal is about the account, not the node', () => {
-  // The server caps sessions per account and answers `429
-  // account_session_limit`. "Playback failed" in front of a node that is
-  // working exactly as designed reads as a breakage, and sends a viewer to
-  // check a server that is fine.
-  //
-  // The match is core's (`isAccountSessionLimit` walks the chain, cycle-safe)
-  // rather than a code string matched here, because the code is core's to
-  // track and clients matching it separately is how they drift.
+  // A `429 account_session_limit` comes from a working node, so "Playback failed" would mislead.
+  // Core's `isAccountSessionLimit` does the matching, so clients cannot drift on the code string.
   it('names the account when core says the cap refused', () => {
     const refusal = new Error('Macha playback request failed');
     (refusal as { code?: string }).code = 'account_session_limit';

@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { observeArtworkProximity as ObserveArtworkProximity } from './artworkViewport';
 
-/** jsdom implements no layout, so it never ships IntersectionObserver either; fake just enough of it to drive the code under test. */
+/** jsdom ships no IntersectionObserver; this fakes enough to drive the code under test. */
 class FakeIntersectionObserver implements IntersectionObserver {
   static instances: FakeIntersectionObserver[] = [];
   readonly root = null;
@@ -28,9 +28,7 @@ class FakeIntersectionObserver implements IntersectionObserver {
 describe('observeArtworkProximity', () => {
   let observeArtworkProximity: typeof ObserveArtworkProximity;
 
-  // The module keeps one IntersectionObserver singleton for the app's whole
-  // lifetime (correct in production); reset it here so each test starts from
-  // a clean module and actually exercises its own fake observer.
+  // The module holds one observer singleton, so each test re-imports it to use its own fake.
   beforeEach(async () => {
     FakeIntersectionObserver.instances = [];
     window.IntersectionObserver = FakeIntersectionObserver as unknown as typeof IntersectionObserver;
@@ -60,8 +58,7 @@ describe('observeArtworkProximity', () => {
     expect(listener).toHaveBeenCalledOnce();
     expect(observer.observed.has(element)).toBe(false);
 
-    // A later, stale callback for the same (now unobserved) element must not
-    // fire the listener again.
+    // A stale callback for the now unobserved element must not fire again.
     observer.intersect(element, true);
     expect(listener).toHaveBeenCalledOnce();
   });

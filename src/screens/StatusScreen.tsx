@@ -53,14 +53,8 @@ function formatDuration(ms?: number | null): string {
 }
 
 /**
- * Physical RAM on the machine, distinct from `runtime.rss_bytes`, which is the
- * node process's own resident set and answers a different question entirely —
- * a few hundred MB on a 64 GB box.
- *
- * Absent from a node that does not report it, which is the honest answer and
- * renders as an em dash. Zero is
- * treated the same way: a node that cannot determine its own RAM should say
- * nothing rather than claim it has none.
+ * The machine's physical RAM, not `runtime.rss_bytes` (the node process's
+ * resident set). Undefined when unreported or zero.
  */
 export function systemMemoryBytes(runtime: NodeRuntimeStatus): number | undefined {
   const reported = runtime.memory_total_bytes;
@@ -72,25 +66,14 @@ function percentage(used: number, capacity: number): string {
   return `${Math.min(100, Math.max(0, used / capacity * 100)).toFixed(0)}%`;
 }
 
-/**
- * The operator's name for a node (`node_name`), else its host, for a node
- * that sends none. The host stays the address wherever one is needed, as for Reset association.
- */
+/** The operator's `node_name`, else the host. The host remains the address wherever one is needed. */
 export function statusNodeName(node: ClusterNodeStatus): string {
   return node.node_name?.trim() || node.host || node.id.slice(0, 12);
 }
 
 /**
- * When telemetry stopped being current, as a severity rather than a number.
- *
- * The figures beside it are honest measurements of the sending process — just
- * old — so a screenful of entirely plausible numbers can be half an hour out
- * of date with nothing on the page saying so. Colour is what makes the age
- * impossible to read past; a number alone is easily missed.
- *
- * No severity without an age, and none for `unavailable`. A node that has
- * never been heard from is not an old reading, and colouring an absence would
- * invent evidence where the honest answer is an em dash.
+ * Telemetry age thresholds. `telemetryAge` gives no severity without an age,
+ * nor for `unavailable`: a node never heard from is not an old reading.
  */
 export const TELEMETRY_AGEING_MS = 60_000;
 export const TELEMETRY_STALE_MS = 300_000;
@@ -114,30 +97,11 @@ function telemetryAgeClassName(node: ClusterNodeStatus): string | undefined {
 }
 
 /**
- * Whether a node accepts inbound connections, as the node itself reports it.
- *
- * Read straight off `inbound_capable`, which is the field the cluster's own
- * `nodes_inbound_incapable` counter counts — so the node detail and the
- * cluster condition cannot disagree about which nodes they mean.
- *
- * **This is the cluster plane, not the API plane, and they are not the same
- * endpoint.** `api_endpoint` is the HTTP URL a *client* dials; inbound
- * capability is whether *peers* can dial this node's RPC plane. A node behind
- * CGNAT accepts no peer connections and still serves its HTTP API normally to
- * clients that can route to it, such as a browser on its own LAN.
- *
- * So this says nothing about whether the client can reach the node, nothing
- * about discovery, and nothing about the failover pool: such a node is a
- * discovered endpoint and an eligible failover target for a client on its
- * network. Deriving it from `api_endpoint`, or explaining the failover pool
- * with it, is wrong for exactly the nodes the label exists for.
- *
- * Tri-state on purpose. `undefined` is a node that did not say — a build older
- * than the field — and the screen says nothing rather than claiming a node
- * takes inbound connections it never mentioned. Unknown is not false.
- *
- * `inbound_capable` is not in core's `ClusterNodeStatus` yet; core owns the
- * wire model and this narrowing goes when it declares the field.
+ * Whether peers can dial this node's RPC plane, as the node reports it. Not
+ * the API plane: a node behind CGNAT accepts no peers yet serves HTTP to any
+ * client that can route to it, so this says nothing about client reach or the
+ * failover pool. `undefined` is a node that did not say, which is not false.
+ * The cast stands in for a field core's `ClusterNodeStatus` does not declare.
  */
 export function nodeInboundCapable(node: ClusterNodeStatus): boolean | undefined {
   const reported = (node as ClusterNodeStatus & { inbound_capable?: unknown }).inbound_capable;
@@ -151,9 +115,7 @@ function freshnessLabel(node: ClusterNodeStatus): string {
   return `Last known · ${presentedTime(node.observed_at_unix_ms)}`;
 }
 
-// A node can be `state: 'online'` (connected and gossiping) while
-// `phase: 'recovering'|'starting'` (not actually ready to serve). Surface that
-// distinctly rather than collapsing it into a plain "online" label.
+// `online` is connected and gossiping; a `recovering` or `starting` phase is not ready to serve.
 export function nodeNotYetReady(node: ClusterNodeStatus): boolean {
   return node.state === 'online' && (node.phase === 'recovering' || node.phase === 'starting');
 }
@@ -167,28 +129,10 @@ function nodeStatusClassName(node: ClusterNodeStatus): string {
 }
 
 /**
- * Conditions the node pages already state, per node, and better.
- *
- * `conditions` is free prose with no severity on the wire and the panel paints
- * every entry amber, so "1 node accepts no inbound connections" — a permanent,
- * intended topology — would read as a fault at the top of Status on every
- * visit. A
- * panel that cries wolf about a standing state teaches the reader to skip the
- * row that will one day carry something real.
- *
- * Styling it neutrally is not enough: the line is still the first thing on the
- * screen, and it still says nothing actionable. It is dropped rather than
- * recoloured because the fact is not lost — the
- * node's own page carries `Inbound RPC connections`, attributed to the node it
- * is about, which is more than the cluster-level count ever said.
- *
- * Matched on the stable half of the sentence, because the server counts the
- * nodes: "1 node accepts no inbound connections", "2 nodes accept…". Prose is
- * a poor thing to match on and a severity stated on the wire would be the
- * durable fix; until then the choice is between matching the sentence and
- * showing a permanent false alarm.
- *
- * Anything unrecognised is still shown, and still amber. Unknown is not benign.
+ * Conditions hidden from the cluster panel because each node's page states
+ * them: the panel paints every entry amber, and no inbound connections is a
+ * normal topology. Matched on the stable half of the server's sentence ("1
+ * node accepts…", "2 nodes accept…"). Anything unrecognised is still shown.
  */
 const CONDITIONS_STATED_PER_NODE: readonly RegExp[] = [/\bno inbound connections\b/i];
 
@@ -219,20 +163,8 @@ export function StatusHeader({ eyebrow, title = 'Status', health, refreshing, on
 }
 
 /**
- * Whether a failing endpoint is still cooling down is the registry's question
- * to answer, not this screen's.
- *
- * Comparing `health.retryAt` against `Date.now()` here would hold only while
- * `retryAt` is stamped with a wall clock. `EndpointRegistry` takes its clock as
- * a constructor argument, so a host that supplies a duration clock (an
- * arbitrary origin restarting near zero each load) puts the two on unrelated
- * number lines, and cooling nodes would be labelled retry-eligible, plausibly,
- * on the one screen someone reads when working out why a node is
- * misbehaving.
- *
- * `ready` is computed inside the registry against whatever clock it actually
- * holds, so there is nothing left to get wrong here, and nothing for this file
- * to know about how the registry measures time.
+ * Uses the registry's `ready`, never `health.retryAt` against `Date.now()`:
+ * the registry's clock is injected and need not be a wall clock.
  */
 export function clientEndpointHealth(candidate: EndpointCandidate): { className: string; label: string } {
   const { health, ready } = candidate;
@@ -288,10 +220,7 @@ function ClientApiEndpoints({ registry }: { registry: EndpointRegistry }) {
             <DetailItem label="Failures">{health.consecutiveFailures}</DetailItem>
             <DetailItem label="Last success">{timestamp(health.lastSuccessAt)}</DetailItem>
             <DetailItem label="Last failure">{timestamp(health.lastFailureAt)}</DetailItem>
-            {/* No "Retry in" countdown: it would need `retryAt` and have the
-                clock problem the pill above avoids, and the seconds are not
-                actionable — "cooling down" against "retry eligible" is the
-                whole of what a reader can use. */}
+            {/* No "Retry in" countdown: `retryAt` is on the registry's clock, not this screen's. */}
           </dl>
         </article>;
       })}</div>}
@@ -371,11 +300,7 @@ function NodeCard({ node, canManage, resetting, onReset }: { node: ClusterNodeSt
           <div><strong>{statusNodeName(node)}</strong><code>{node.id.slice(0, 12)}</code></div>
           <span className={`cluster-state-pill ${nodeStatusClassName(node)}`}>{nodeStatusLabel(node)}</span>
         </div>
-        {/* Version belongs on the card, not only on the node's own page: a
-            cluster drifts apart in practice, and "which node is behind" is the
-            first question when one of them behaves differently from the rest.
-            Having to open each node in turn to compare a version is how that
-            goes unnoticed. */}
+        {/* Version is on the card so nodes that have drifted apart show at a glance. */}
         <div className="cluster-node-meta">
           <span>{node.roles.length ? node.roles.join(' · ') : 'node'}</span>
           <span className="cluster-node-version">{node.version || '—'}</span>
@@ -387,10 +312,7 @@ function NodeCard({ node, canManage, resetting, onReset }: { node: ClusterNodeSt
           <div><dt>Storage</dt><dd>{formatBytes(node.storage.used_bytes)} / {formatBytes(node.storage.capacity_bytes)}</dd></div>
           <div><dt>Cache</dt><dd>{node.cache.capacity_bytes ? `${formatBytes(node.cache.used_bytes)} / ${formatBytes(node.cache.capacity_bytes)}` : '—'}</dd></div>
           <div><dt>Load</dt><dd>{node.runtime.load1 != null ? node.runtime.load1.toFixed(2) : '—'}</dd></div>
-          {/* Cores sits beside Load deliberately: load1 is a per-core queue
-              depth, so the two are only readable together across a cluster of
-              non-uniform machines. Memory is the machine's RAM, not the
-              node's footprint — see systemMemoryBytes. */}
+          {/* Cores beside Load: load1 is only readable against the core count. Memory is the machine's RAM. */}
           <div><dt>Cores</dt><dd>{node.runtime.cpu_cores ?? '—'}</dd></div>
           <div><dt>Memory</dt><dd>{memory != null ? formatBytes(memory) : '—'}</dd></div>
           <div><dt>Cluster traffic</dt><dd>{clusterTrafficText(node.traffic) ?? '—'}</dd></div>
@@ -565,8 +487,6 @@ export function StatusScreen({ api, endpointRegistry, manageApi, platform, secti
       <div className="metric-grid">
         <MetricTile label="Nodes" value={`${cluster.nodes_online} / ${cluster.nodes_known}`} detail="online" />
         <MetricTile label="Metadata" value={cluster.metadata_availability === 'writable' ? 'Writable' : cluster.metadata_availability === 'read-only' ? 'Read-only' : 'Unavailable'} detail={`${cluster.metadata_voters_online}/${cluster.metadata_voters} voters · ${cluster.metadata_quorum_required} required`} />
-        {/* What is used first, then what is left, each out of the whole.
-            Available is what the online nodes have free. */}
         <MetricTile label="Durable storage" value={usedOfTotal(cluster.storage_known)} detail={availableOfTotal(cluster.storage_online, cluster.storage_known)} />
         <MetricTile label="Cache" value={cluster.cache_known.capacity_bytes ? usedOfTotal(cluster.cache_known) : 'None'} detail={cluster.cache_known.capacity_bytes ? availableOfTotal(cluster.cache_online, cluster.cache_known) : undefined} />
       </div>
@@ -628,12 +548,10 @@ function trafficRateText(bytesPerSecond: number | null): string {
 }
 
 /**
- * A node's traffic to and from the other nodes (`traffic`), in
- * and out, across its classes: "in 1.2 MB/s · out 3.4 MB/s". Undefined when
- * the node did not report it or has no interval yet (its first sample). Not
- * what viewers stream, which is HTTP and not counted, so it is never called
- * bandwidth. Summed within one node only: across nodes each byte would count
- * twice, once as one node's out and once as another's in.
+ * A node's traffic with the other nodes, summed over its classes: "in 1.2 MB/s
+ * · out 3.4 MB/s". Undefined when unreported or before its first interval. Not
+ * viewer streaming, which is HTTP and uncounted. Never sum across nodes: each
+ * byte would count twice.
  */
 export function clusterTrafficText(traffic: NodeTrafficStatus | null | undefined): string | undefined {
   if (!traffic || traffic.window_ms == null) return undefined;
@@ -655,9 +573,7 @@ export function trafficClassText(entry: NodeTrafficClassStatus): string {
 function TrafficCard({ traffic }: { traffic: NodeTrafficStatus | null | undefined }) {
   return (
     <article className="node-detail-card"><h2>Cluster traffic</h2><dl>
-      {/* Between nodes only: a node streaming a file from its
-          own disk shows almost no playback here, because what a viewer
-          receives is HTTP and is not counted. */}
+      {/* Between nodes only: what a viewer receives is HTTP and is not counted. */}
       {traffic ? <>
         {traffic.classes.map((entry) => <DetailItem key={entry.class} label={trafficClassLabel(entry.class)}>{trafficClassText(entry)}</DetailItem>)}
         <DetailItem label="Measured">{traffic.window_ms != null ? `Over ${formatDuration(traffic.window_ms)}, at ${presentedTimeOfDay(traffic.as_of_unix_ms)}` : 'First sample: no rate yet'}</DetailItem>
@@ -729,28 +645,12 @@ export function NodeStatusScreen({ api }: { api: ClusterStatusApi }) {
         <article className="node-detail-card"><h2>Overview</h2><dl>
           <DetailItem label="Node ID"><code>{node.id}</code></DetailItem>
           <DetailItem label="Version">{node.version || '—'}</DetailItem>
-          {/* The URL a client actually dials, and separately the RPC
-              `host:port`, which is the node's internal bind address and often
-              one port away from the API: close enough to look right and wrong
-              enough to send an operator somewhere with nothing listening. Both
-              are shown, each under its own name, because the RPC pair is what
-              an identity reset is keyed on. */}
-          {/* Not "—", which reads as "this screen has nothing to tell you". An
-              absent endpoint is not an absent reading: it is the node saying it has
-              no HTTP API for a client to dial, which is why core's discovery
-              leaves it out of the client's endpoint registry.
-              Deliberately independent of inbound peer capability below — a
-              node can advertise a perfectly good API endpoint and still accept
-              no peer connections. */}
+          {/* The RPC `host:port` is the internal bind address, often one port from
+              the API, and what an identity reset is keyed on. No endpoint means
+              the node has no HTTP API for clients, whatever its inbound capability. */}
           <DetailItem label="API endpoint">{node.api_endpoint?.includes('://') ? node.api_endpoint : 'None advertised'}</DetailItem>
           <DetailItem label="RPC address">{node.host ? `${node.host}:${node.port}` : '—'}</DetailItem>
-          {/* Its own line, directly under the RPC address it is about, because
-              it is a standing property of the node rather than a qualifier on
-              something else. A plain Yes/No states it without implying a
-              verdict: a No here is a normal topology, not a fault, and it says
-              nothing about whether a client can reach this node's API — that
-              is the line above, on the other plane. An em dash is a node that
-              did not report the field, which is not the same as a No. */}
+          {/* A No is a normal topology, not a fault; an em dash is a node that did not report the field. */}
           <DetailItem label="Inbound RPC connections">
             {inboundCapable === undefined ? '—' : yesNo(inboundCapable)}
           </DetailItem>
@@ -772,10 +672,7 @@ export function NodeStatusScreen({ api }: { api: ClusterStatusApi }) {
           <DetailItem label="Cores">{runtime.cpu_cores ?? '—'}</DetailItem>
           <DetailItem label="Load (1m)">{runtime.load1 != null ? runtime.load1.toFixed(2) : '—'}</DetailItem>
           <DetailItem label="System memory">{memory != null ? formatBytes(memory) : '—'}</DetailItem>
-          {/* Named "Process RSS" rather than "RSS" because machine memory sits
-              directly above it: two byte counts an order of magnitude apart,
-              and the shorter label would leave the reader to know which was
-              which. */}
+          {/* "Process RSS", to tell it from the machine memory directly above. */}
           <DetailItem label="Process RSS">{runtime.rss_bytes != null ? formatBytes(runtime.rss_bytes) : '—'}</DetailItem>
           <DetailItem label="Peers">{runtime.peers_active != null ? `${runtime.peers_active}/${runtime.peers_known ?? runtime.peers_active} active` : '—'}</DetailItem>
           <DetailItem label="RPC reused">{runtime.rpc_connections_reused ?? '—'}</DetailItem>

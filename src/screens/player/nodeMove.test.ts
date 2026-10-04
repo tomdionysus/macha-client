@@ -15,17 +15,14 @@ function runtime(moved: boolean): NodeMoveRuntime & { calls: string[] } {
 
 describe('moving a stream to the node a viewer picked', () => {
   it('asks core to move a live generation, and never closes it first', async () => {
-    // `play()` closes before it starts, which is seconds of black. `moveTo`
-    // builds there, promotes, then releases here.
+    // `play()` closes before it starts, which is seconds of black; `moveTo` builds, promotes, then releases.
     const live = runtime(true);
     await expect(moveStreamToNode(live, 'https://macnessa.macha.network', false)).resolves.toBe('moved');
     expect(live.calls).toEqual(['moveTo https://macnessa.macha.network']);
   });
 
   it("leads the move by this viewer's measured start cost for that node", async () => {
-    // A slow node can take tens of seconds from create to first fragment.
-    // Asked for the viewer's own position, it starts that far behind a join
-    // receding at 1x and never catches it.
+    // Without the lead a slow node starts behind a join receding at 1x and never catches it.
     const live = runtime(true);
     await moveStreamToNode(live, 'http://10.44.1.50:7438', false, 25_342);
     expect(live.calls).toEqual(['moveTo http://10.44.1.50:7438 lead 25342']);
@@ -38,17 +35,14 @@ describe('moving a stream to the node a viewer picked', () => {
   });
 
   it('says the node refused rather than restarting the stream behind the viewer', async () => {
-    // `false` is an ordinary answer from core: the node would not build an
-    // equivalent generation. What the viewer is watching was never touched,
-    // so falling back to `play()` would trade a working picture for black.
+    // `false` means the node would not build an equivalent generation; falling back to `play()` would trade a working picture for black.
     const live = runtime(false);
     await expect(moveStreamToNode(live, 'http://10.35.1.50:7438', false)).resolves.toBe('refused');
     expect(live.calls).toEqual(['moveTo http://10.35.1.50:7438']);
   });
 
   it('retries a failed generation, because there is nothing left to move', async () => {
-    // Core: a failed generation is already released, so a move is a retry on
-    // another node, spelled as the preference (already set) and `retry()`.
+    // A failed generation is already released, so a move is `retry()` with the preference already set.
     const failed = runtime(true);
     await expect(moveStreamToNode(failed, 'http://10.35.1.50:7438', true)).resolves.toBe('retried');
     expect(failed.calls).toEqual(['retry']);

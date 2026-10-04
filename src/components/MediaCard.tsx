@@ -50,7 +50,6 @@ function Poster({ api, item, progress }: Pick<Props, 'api' | 'item' | 'progress'
   );
 }
 
-/** A card's own class, with the greyed-out state of a title that cannot be played. */
 function cardClass(item: MediaSummary, extra = ''): string {
   return `media-card media-card-${item.kind}${extra}${!availableToPlay(item) ? ' is-unavailable' : ''}`;
 }
@@ -67,11 +66,8 @@ function actionItems(item: MediaSummary, actions: readonly MediaCardAction[]): O
 type ContextLink = { to: string; label: string };
 
 /**
- * Where an item sits, each step linking to its page, one line per entry: an
- * episode's series, then its mark ("S04E08"); a track's "Artist - Album
- * (year)" on one line. For an item shown away from its parent (Continue
- * Watching, search); a season or album page already says both, so its rows
- * never ask for this.
+ * An item's parents as links, one line per entry: an episode's series, then
+ * its season mark; a track's artist and album together.
  */
 function contextLines(item: MediaSummary): ContextLink[][] | undefined {
   if (item.kind === 'episode' && item.playbackContext) {
@@ -134,11 +130,7 @@ function ContinueWatchingEpisodeCard({ api, item, onOpen, onRemoveFromContinueWa
   );
 }
 
-/**
- * A search hit that belongs to something: the card opens it, the links go to
- * its parents. A track keeps its own "Track 9" under them; an episode's label
- * is already its season link.
- */
+/** An item shown away from its parent: the card opens it, the links go to its parents. */
 function InContextCard({ api, item, onOpen, elementRef, lines }: Props & { lines: ContextLink[][] }) {
   return (
     <article className={cardClass(item, ' continue-card')}>
@@ -196,8 +188,7 @@ function ActionableMediaCard({ api, item, onOpen, actions = [], progress, elemen
         <Poster api={api} item={item} progress={progress} />
         <span className="card-title">{item.title}</span>
         {item.kind === 'track' && item.musicContext ? (
-          // On Music the artist sits below the album name, for tracks as for
-          // albums (whose second line is the artist).
+          // The artist sits below the album name, as it does for albums.
           <>
             <span className="card-subtitle">{item.musicContext.album.title}</span>
             {item.musicContext.artist && <span className="card-subtitle">{item.musicContext.artist.title}</span>}

@@ -9,12 +9,8 @@ export const VISIBLE_ARTWORK_RECOVERY_DELAY_MS = 60_000;
 const log = createClientLogger('artwork.view');
 
 /**
- * Load artwork once its host approaches the viewport.
- *
- * The network side is intentionally fire-and-finish. We never abort an artwork
- * request because a card scrolled away or unmounted: MachaMediaApi coalesces
- * unsignalled requests and caches the resulting Blob, so completing useful work
- * is both simpler and more reliable than trying to reprioritise browser HTTP.
+ * Loads artwork once its host nears the viewport. Requests are never aborted: MachaMediaApi
+ * coalesces them and caches the Blob, so a finished request serves the next card.
  */
 export function useViewportArtworkUrl(
   api: MediaApi,
@@ -46,9 +42,7 @@ export function useViewportArtworkUrl(
 
     function load() {
       stopObserving = undefined;
-      // No AbortSignal here by design. Once viewport demand exists, the request
-      // is allowed to finish and populate MediaApi's shared cache even if this
-      // particular card disappears before the response arrives.
+      // No AbortSignal: see the hook's doc.
       void fetchArtworkWithRetry(() => api.artwork(artwork)).then((blob) => {
         if (!active) return;
         objectUrl = URL.createObjectURL(blob);
@@ -61,8 +55,7 @@ export function useViewportArtworkUrl(
           retryInMs: VISIBLE_ARTWORK_RECOVERY_DELAY_MS,
           error,
         });
-        // A mounted card gets another bounded cycle, but only after a quiet
-        // period and only once it is near the viewport again.
+        // Retry after a quiet period, and only once near the viewport again.
         recoveryTimer = setTimeout(() => {
           recoveryTimer = undefined;
           if (!active) return;

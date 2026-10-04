@@ -16,25 +16,9 @@ function stateName(value: number, names: readonly string[]): string {
   return names[value] ?? String(value);
 }
 
-/**
- * How many bytes each decoder has actually consumed.
- *
- * Non-standard and Chromium-only, and the only thing an HTML media element
- * will tell you about its two pipelines *separately*. Everything else —
- * `currentTime`, `buffered`, `readyState` — is a property of the element as a
- * whole, so a source whose sound has stopped while the picture continues
- * looks completely healthy through all of it.
- *
- * Absent on an engine that does not expose them, and absent stays absent:
- * reporting zero would read as "the decoder has consumed nothing", which is a
- * different and much more alarming claim than "this browser does not say".
- */
 /** Long enough that a codec's own quiet passage is never mistaken for a fault. */
 const AUDIO_SILENCE_EVIDENCE_MS = 5_000;
-/**
- * A picture has no quiet passage: a still scene is still frames. So this only
- * has to be longer than the gap between two `timeupdate` samples.
- */
+/** A still scene still yields frames, so this need only exceed the gap between two `timeupdate` samples. */
 const PICTURE_FREEZE_EVIDENCE_MS = 1_500;
 
 /** The source buffers behind an element, by track, as the player created them. */
@@ -56,6 +40,10 @@ function freshProgress(): DecoderProgress {
   return { decoded: {}, audioLossReported: false, pictureFreezeReported: false };
 }
 
+/**
+ * Bytes each decoder has consumed: Chromium-only, and the element's only per-pipeline signal.
+ * Absent stays absent, since zero would claim the decoder consumed nothing.
+ */
 function decodedBytes(video: HTMLVideoElement): { audio?: number; video?: number } {
   const counters = video as HTMLVideoElement & {
     webkitAudioDecodedByteCount?: unknown;
@@ -69,18 +57,14 @@ function decodedBytes(video: HTMLVideoElement): { audio?: number; video?: number
   };
 }
 
-/** Standard, unlike the byte counters, and counts a frame whether it was shown or dropped. */
+/** Counts a frame whether it was shown or dropped. */
 function frameCounts(video: HTMLVideoElement): { total: number; dropped: number } | undefined {
   if (typeof video.getVideoPlaybackQuality !== 'function') return undefined;
   const quality = video.getVideoPlaybackQuality();
   return { total: quality.totalVideoFrames, dropped: quality.droppedVideoFrames };
 }
 
-/**
- * What each track holds, separately. The element's own `buffered` is the
- * intersection, so a video track with nothing at the playhead and an audio
- * track with a minute ahead of it read identically to both being short.
- */
+/** Each track's ranges separately; the element's `buffered` is their intersection and hides which track is short. */
 function trackRanges(tracks: TrackBuffers): Record<string, Array<{ start: number; end: number }> | 'removed'> | undefined {
   const sources = tracks();
   if (!sources) return undefined;
@@ -112,14 +96,7 @@ export function videoState(video: HTMLVideoElement): Record<string, unknown> {
     playbackRate: video.playbackRate,
     currentSrc: video.currentSrc,
     decodedBytes: decodedBytes(video),
-    // Whether anything can actually see this. A backgrounded tab throttles the
-    // fragment loading loop as well as decoding — Chrome drops a background
-    // tab's timers to roughly one firing a minute, and hls.js drives its loop
-    // on a timer — so the player looks hung from here and the client looks
-    // dead from the node, with `readyState 0`, nothing buffered and no error;
-    // a node asked for nothing that long reclaims the idle pipeline. One field
-    // makes that self-evident rather than deduced, and it has to be here
-    // rather than in a sampler someone remembers to add.
+    // A hidden tab has its timers throttled, so the player looks hung with nothing buffered and no error.
     hidden: typeof document === 'undefined' ? undefined : document.hidden,
     error,
   };
@@ -185,21 +162,9 @@ export class WebMediaDiagnostics {
   }
 
   /**
-   * Notice sound stopping while the picture carries on.
-   *
-   * Nothing else in this client can see it. Every failure channel is driven by
-   * something the element emits, and an element whose audio decoder has
-   * stopped emits nothing at all: `currentTime` advances, the buffer fills,
-   * `readyState` stays at HAVE_ENOUGH_DATA, no `error`, no `stalled`. The
-   * stall watchdog is explicitly built not to fire while things are moving,
-   * which is correct and also means it will never see this.
-   *
-   * This does not fix it and deliberately does not act on it: whether the
-   * decoder stopped or the audio simply stopped being audible are different
-   * faults with different owners, and the two decoder counters separate them.
-   * Audio bytes frozen while video bytes climb is a decoder that has stopped.
-   * Both climbing with no sound is the output path — a track, a route, a duck
-   * — and nothing in the page is at fault at all.
+   * Reports the audio decoder stopping while the picture carries on (audio bytes frozen, video bytes
+   * climbing), for which the element emits no event. Both climbing with no sound is the output path,
+   * not the page's fault. Reports only; never acts.
    */
   private noteDecoderProgress(video: HTMLVideoElement, state: DecoderProgress): void {
     const decoded = decodedBytes(video);
@@ -231,16 +196,9 @@ export class WebMediaDiagnostics {
   }
 
   /**
-   * The same fault the other way round: the picture holds while the clock,
-   * and so the sound, runs on. Two causes fit, and only a reading taken at
-   * the moment separates them. A video track with nothing buffered at the
-   * playhead is a node still producing; one that holds the playhead while no
-   * frame advances is the decoder. So the report carries each track's ranges
-   * and the frame counters, taken when the freeze is established and again
-   * when it ends.
-   *
-   * A hidden page is never judged: a browser may stop decoding the picture of
-   * a page nobody can see, which is exactly this signature and not a fault.
+   * Reports the picture holding while the clock runs on. The report carries each track's ranges and
+   * the frame counters, which separate a node still producing (nothing buffered at the playhead) from
+   * a stopped decoder. A hidden page is never judged: a browser may stop decoding a picture nobody sees.
    */
   private notePictureProgress(video: HTMLVideoElement, state: DecoderProgress, tracks: TrackBuffers): void {
     const frames = frameCounts(video);
@@ -265,8 +223,7 @@ export class WebMediaDiagnostics {
       return;
     }
     const hidden = typeof document !== 'undefined' && document.hidden;
-    // Only a clock that moved: one that did not is a stall, which is the
-    // watchdog's and is reported there.
+    // A clock that did not move is a stall, which the watchdog reports.
     if (video.paused || video.seeking || hidden || video.currentTime <= previousClockS) {
       if (!state.pictureFreezeReported) state.pictureStoppedAtMs = undefined;
       return;

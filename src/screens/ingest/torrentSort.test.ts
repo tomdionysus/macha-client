@@ -38,8 +38,7 @@ describe('the order torrents are listed in', () => {
   });
 
   it('is the same however the server happened to order them', () => {
-    // Ties on the sort key fall to the name, compared as a person would, then
-    // to the job id, so two polls of the same jobs never swap rows.
+    // Ties fall to the name, compared naturally, then the job id, so polls never swap rows.
     const jobs = [
       job({ id: 'c', name: 'Show S01E10' }),
       job({ id: 'a', name: 'Show S01E2' }),

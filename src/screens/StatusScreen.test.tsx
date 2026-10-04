@@ -24,12 +24,7 @@ describe('client API endpoint status', () => {
   });
 
   it('takes the cooldown answer from the registry rather than recomputing it', () => {
-    // Comparing `health.retryAt` against `Date.now()` would be right only
-    // while App.tsx injects `Date.now` as the registry's clock; the registry's
-    // default is a duration clock whose origin restarts near zero every load,
-    // and the label would invert silently, on the screen someone reads when a
-    // node is misbehaving. `ready` decides, so a `retryAt` from any clock at
-    // all changes nothing.
+    // `retryAt` is on the registry's clock, which need not be `Date.now`; only `ready` decides.
     const cooling = candidate({ consecutiveFailures: 2, retryAt: Number.MAX_SAFE_INTEGER }, false);
     const eligible = candidate({ consecutiveFailures: 2, retryAt: Number.MAX_SAFE_INTEGER }, true);
 
@@ -38,7 +33,6 @@ describe('client API endpoint status', () => {
   });
 
   it('never calls a failing endpoint available, whatever it once managed', () => {
-    // A node with a success behind it and failures in front of it is failing.
     expect(clientEndpointHealth(candidate({ consecutiveFailures: 1, lastSuccessAt: 900 }, false)).label)
       .toBe('Cooling down');
   });
@@ -74,10 +68,9 @@ describe('per-node phase distinct from connection state', () => {
     expect(nodeNotYetReady(ready)).toBe(false);
     expect(nodeNotYetReady(recovering)).toBe(true);
     expect(nodeNotYetReady(starting)).toBe(true);
-    // Honestly-reported "unknown" is not a claim of readiness, but it isn't
-    // evidence of unreadiness either — never guess past what the node reported.
+    // "unknown" is neither readiness nor evidence of unreadiness.
     expect(nodeNotYetReady(unknownPhase)).toBe(false);
-    // A node that isn't even online is already distinctly labelled by state.
+    // An offline node is already labelled by state.
     expect(nodeNotYetReady(offlineRecovering)).toBe(false);
 
     expect(nodeStatusLabel(online)).toBe('online');
@@ -88,12 +81,7 @@ describe('per-node phase distinct from connection state', () => {
 });
 
 describe('cluster conditions the node pages already state', () => {
-  /**
-   * A node configured to accept no inbound connections is a normal topology —
-   * this cluster has one on its own LAN — and it is permanent. Painting it
-   * amber on every visit to Status trains the reader to skip the row that will
-   * one day carry something real.
-   */
+  // A node configured to accept no inbound connections is a normal, permanent topology, not a warning.
   it('drops the cluster-level count, which the node page states per node', () => {
     expect(conditionStatedPerNode('1 node accepts no inbound connections')).toBe(true);
     // The server counts them, so the count is not part of the match.
@@ -101,8 +89,7 @@ describe('cluster conditions the node pages already state', () => {
   });
 
   it('shows everything it does not recognise, still as a warning', () => {
-    // Unknown is not benign. A condition this helper has never seen must keep
-    // the amber, or the next genuinely bad one arrives wearing grey.
+    // Unknown is not benign: an unrecognised condition keeps the amber.
     expect(conditionStatedPerNode('metadata quorum unavailable')).toBe(false);
     expect(conditionStatedPerNode('1 node offline')).toBe(false);
     expect(conditionStatedPerNode('')).toBe(false);
@@ -112,29 +99,15 @@ describe('cluster conditions the node pages already state', () => {
 describe('a node that accepts no inbound connections', () => {
   const node = (fields: Record<string, unknown>) => fields as unknown as ClusterNodeStatus;
 
-  /**
-   * The first test because it is the only one that distinguishes the two
-   * plausible implementations.
-   *
-   * They are two planes, not two names for one. `api_endpoint` is the HTTP URL
-   * a client dials; `inbound_capable` is whether peers can dial this node's
-   * RPC plane. A node behind CGNAT refuses peer connections and still serves
-   * its API to clients that can route to it, as here: `inbound_capable: false`
-   * while advertising a LAN address usable from inside that building and dead
-   * from anywhere else. Deriving one from the other calls such a node
-   * inbound-capable, which is backwards, on exactly the node the label exists
-   * for.
-   */
+  // `api_endpoint` is the HTTP URL clients dial; `inbound_capable` is whether peers can dial the
+  // node's RPC plane. A node behind CGNAT can serve its API yet refuse peers, so neither derives
+  // from the other.
   it('does not mistake an advertised API endpoint for inbound peer capability', () => {
     expect(nodeInboundCapable(node({ inbound_capable: false, api_endpoint: 'http://10.35.1.50:7438' }))).toBe(false);
     expect(nodeInboundCapable(node({ inbound_capable: true, api_endpoint: 'https://macnessa.macha.network' }))).toBe(true);
   });
 
-  /**
-   * Unknown is not false. A node too old to report the field has not said it
-   * refuses inbound connections, and printing that it does would be the client
-   * inventing a fact — the same rule the roles and `mutable` handling follow.
-   */
+  // Unknown is not false: a node too old to report the field has not said it refuses inbound connections.
   it('says nothing for a node that did not report the field', () => {
     expect(nodeInboundCapable(node({ api_endpoint: 'https://node.example' }))).toBeUndefined();
     expect(nodeInboundCapable(node({ inbound_capable: 'false' }))).toBeUndefined();
@@ -201,8 +174,7 @@ describe('telemetry age, coloured rather than merely printed', () => {
   });
 
   it('never colours an absence, which would invent evidence rather than age it', () => {
-    // A node never heard from is not an old reading. Both of these render an
-    // em dash, and an em dash is not a warning.
+    // A node never heard from is not an old reading.
     expect(aged(null)).toBeUndefined();
     expect(aged(Number.NaN)).toBeUndefined();
     expect(aged(600_000, 'unavailable' as never)).toBeUndefined();
@@ -211,19 +183,13 @@ describe('telemetry age, coloured rather than merely printed', () => {
 
 describe('machine memory reported separately from the node process footprint', () => {
   it('never answers with the process resident set, and says nothing rather than nothing-at-all', () => {
-    // The whole reason this helper exists. `rss_bytes` may be the only byte
-    // count a node sends, and it is the node's own process footprint — a few
-    // hundred MB on a machine with 64 GB. Rendering it
-    // under "Memory" would be wrong by two orders of magnitude and look
-    // entirely plausible.
+    // `rss_bytes` is the node process's footprint, not the machine's memory.
     expect(systemMemoryBytes({ rss_bytes: 402_653_184 })).toBeUndefined();
 
     expect(systemMemoryBytes({ memory_total_bytes: 68_719_476_736, rss_bytes: 402_653_184 }))
       .toBe(68_719_476_736);
 
-    // A node that cannot determine its own RAM reports nothing; the server
-    // guards on nonzero for exactly this reason. Should one ever send a zero
-    // anyway, "—" is the truth and "0 B" is a claim it has no memory.
+    // A node that cannot determine its RAM reports nothing; a zero is treated the same.
     expect(systemMemoryBytes({ memory_total_bytes: 0 })).toBeUndefined();
     expect(systemMemoryBytes({})).toBeUndefined();
   });

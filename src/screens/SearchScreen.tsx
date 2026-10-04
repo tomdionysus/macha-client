@@ -41,8 +41,7 @@ export function SearchScreen({ api, onOpen }: Props) {
   const alphabet = useAlphabetIndex(ordered);
 
   useEffect(() => {
-    // Core decides what is worth a search: the words titles ignore for
-    // ordering never trigger one, and never reach the catalogue.
+    // Core decides what is worth a search.
     const normalized = query.trim();
     if (!isSearchable(normalized)) {
       setResults([]);
@@ -125,7 +124,7 @@ export function SearchScreen({ api, onOpen }: Props) {
           />
         ))}
       </div>
-      {/* A letter marks a place only in title order; under any other it points nowhere useful. */}
+      {/* A letter marks a place only in title order. */}
       {ordered.length > 0 && sort === 'title' && <AlphabetIndex availableKeys={alphabet.availableKeys} onSelect={alphabet.jumpTo} />}
     </section>
   );

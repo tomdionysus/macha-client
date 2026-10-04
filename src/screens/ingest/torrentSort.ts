@@ -5,10 +5,7 @@ import { sortRows, type ListSort, type SortKeyDef } from '../../lists/listSort';
 export type TorrentSortKey = 'added' | 'name' | 'size' | 'progress' | 'status' | 'down' | 'up' | 'eta' | 'ratio';
 export type TorrentSort = ListSort<TorrentSortKey>;
 
-/**
- * The keys a viewer can sort by, with the direction each is naturally read
- * in: names A to Z, but speeds, sizes and dates largest or newest first.
- */
+/** Sort keys with their default directions: names A to Z; speeds, sizes and dates largest or newest first. */
 export const TORRENT_SORT_KEYS: readonly SortKeyDef<TorrentSortKey>[] = [
   { key: 'added', label: 'Added', direction: 'desc' },
   { key: 'name', label: 'Name', direction: 'asc' },
@@ -23,11 +20,7 @@ export const TORRENT_SORT_KEYS: readonly SortKeyDef<TorrentSortKey>[] = [
 
 export const DEFAULT_TORRENT_SORT: TorrentSort = { key: 'added', direction: 'desc' };
 
-/**
- * Work that is moving, then work that is waiting, then work that is over.
- * Alphabetical would put "Cancelled" and "Completed" at the top, which is the
- * part of the list nobody is watching.
- */
+/** Moving work, then waiting, then finished. */
 const STATUS_ORDER = [
   'downloading', 'metadata', 'verifying', 'downloaded', 'importing', 'scanning', 'cataloguing',
   'verify_queued', 'queued', 'awaiting_node', 'paused', 'blocked', 'failed', 'completed', 'cancelled',
@@ -54,11 +47,8 @@ function sortValue(job: TorrentJob, key: TorrentSortKey, state: string): number 
 }
 
 /**
- * The torrents in the order the viewer asked for, and always the same order
- * for the same jobs: ties fall to the name and then to the job id, so a poll
- * that returns the jobs in a different order never swaps two rows under the
- * pointer. What the server cannot say yet sorts last whichever way the list
- * runs, because a row of dashes is never what somebody sorted to find.
+ * Stable for the same jobs: ties fall to name, then job id, so a reordered poll never
+ * swaps rows. Values the server cannot say yet sort last in either direction.
  */
 export function sortTorrents(
   jobs: readonly TorrentJob[],

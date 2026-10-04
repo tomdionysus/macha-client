@@ -72,12 +72,7 @@ function folderOf(path: string): string {
   return slash > 0 ? path.slice(0, slash) : '/';
 }
 
-/**
- * The unmatched files as a list in the torrent list's style: one slim row per
- * file, sortable by column, the order kept in the address, and each file on
- * its own page. Selection and the bulk retry and delete belong here, since
- * this is the page where many files are dealt with at once.
- */
+/** The unmatched files as a sortable, paged list with bulk retry and delete; each file opens on its own page. */
 function UnmatchedManager({ api }: { api: ManageApi }) {
   const navigate = useNavigate();
   const { sort, setSort, sortBy, page, setPage, search } = useListSort(UNMATCHED_SORT_KEYS, DEFAULT_UNMATCHED_SORT);

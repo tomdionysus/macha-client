@@ -49,45 +49,21 @@ interface Props {
   queuePosition?: { index: number; total: number };
   volume: number;
   onVolumeChange: (volume: number) => void;
-  /** Every node this client knows, so the viewer can send the stream to one. */
+  /** Every node this client knows, for the node picker. */
   endpoints?: readonly EndpointCandidate[];
-  /** The cluster's name for the node behind an endpoint (the registry's `nodeName`), for the node picker. */
+  /** The cluster's name for the node behind an endpoint. */
   nodeNameOf?: (endpointId: string) => string | undefined;
-  /**
-   * Put this node at the head of the candidate order and keep it there.
-   *
-   * The registry belongs to the app, not to a player that comes and goes, so
-   * the pin is set where the registry lives and this player only says which.
-   */
+  /** Pins this node at the head of the app's registry order, where it stays. */
   onPinEndpoint?: (endpointIds: readonly string[]) => string | undefined;
-  /**
-   * The viewer's "offer everything" setting: the options are limited to the
-   * device's capabilities unless this is on.
-   */
+  /** Offer every option, not only those the device's capabilities allow. */
   offerAll?: boolean;
 }
 
 
 /**
- * What to tell a viewer whose title has not started yet.
- *
- * An unmarked spinner says only that something is happening. The three budgets
- * that bound a start — negotiating a generation, waiting for its first
- * fragment, and starvation once a URL is attached — are sequential and nothing
- * bounds their sum, so a cold node can spend the better part of a minute with
- * every budget behaving exactly as written. A degraded state must be visible
- * rather than indefinite waiting: a viewer told what is being waited for and
- * for how long is in a different position from one watching a spinner, even
- * though the wait is identical.
- *
- * Only a start. A rebuffer mid-film has the picture behind it to say what is
- * going on, and a timer over that would turn every brief hesitation into an
- * announcement.
- *
- * A node that reports its start's progress says which stage it is in, and
- * `stage` is that sentence: it replaces the general one, and the number stays
- * where it is. The delay before anything shows is the same either way, since
- * a quick start is no more worth announcing for being measured.
+ * What to tell a viewer whose title has not started yet, so a slow start is not an unexplained
+ * spinner. Only for a start: a rebuffer has the picture behind it. A node that reports its stage
+ * supplies `stage`, which replaces the general sentence.
  */
 export function startWaitNotice(starting: boolean, elapsedMs: number, stage?: string): string | undefined {
   if (!starting || elapsedMs < uiSettings.playerStartWaitNoticeMs) return undefined;
@@ -95,13 +71,9 @@ export function startWaitNotice(starting: boolean, elapsedMs: number, stage?: st
 }
 
 /**
- * The status line while a new stream is prepared behind the one playing.
- *
- * A change (a seek, a mode or quality switch) is built on the node already
- * serving, so that node is named. A failover also arrives as a *start*, on a
- * node this line cannot name: the endpoint it holds is the one being
- * replaced. So a start is worded as a new stream with no node, and a node
- * that reports no progress gets the general sentence.
+ * The status line while a new stream is prepared behind the one playing. A change is built on the
+ * serving node, so that node is named; a start (a failover included) is on a node this line
+ * cannot name, since the endpoint it holds is the one being replaced.
  */
 export function preparingStreamText(progress: PlaybackStartProgress | undefined, endpoint: string | undefined): string {
   const stage = progress && startProgressText({ ...progress, kind: 'change' }, progress.kind === 'change' ? endpoint : undefined, true);
@@ -194,15 +166,7 @@ function shouldTrackProgress(media: MediaSummary): boolean {
   return media.kind === 'movie' || media.kind === 'episode';
 }
 
-/**
- * The line under the title in the player bar.
- *
- * Worded here from the item's facts, since core writes no viewer text: an
- * episode is its series and code ("The Show S01E01"), a movie its year, since
- * remakes and re-releases share titles freely, and anything else the line
- * its card shows. A movie with no year shows nothing rather than an empty
- * separator.
- */
+/** The line under the title: an episode's series and code, a movie's year, else its card's line. */
 export function playerMediaSubtitle(media: MediaSummary): string | undefined {
   if (media.kind === 'episode') {
     return `${media.playbackContext?.series.title ?? ''} ${episodeCode(media) ?? ''}`.trim() || undefined;
@@ -217,15 +181,9 @@ export function webSeekDeltaForKey(key: string): number | undefined {
 }
 
 /**
- * Which way a transport shortcut seeks, or undefined when the keys belong to
- * navigation instead.
- *
- * With the control bar up, left/right are spatial navigation for the control
- * row. With the chrome hidden they are transport, matching TV-player
- * convention. `transportActive` also stays true while the bar is up *because*
- * a seek revealed it, so a gesture is not disarmed halfway through by the
- * chrome it just summoned. Distance comes from the same accelerating ladder
- * the scrubber uses.
+ * Which way a transport shortcut seeks, or undefined when the keys belong to navigation. Left and
+ * right are transport while the chrome is hidden, and while the bar is up only because a seek
+ * revealed it, so a held seek is not disarmed by the chrome it summoned.
  */
 export function samsungTransportSeekDirection(
   key: string,
@@ -235,9 +193,7 @@ export function samsungTransportSeekDirection(
   return transportActive ? seekDirectionForKey(key, keyCode) : undefined;
 }
 
-// Scrubbing on the progress bar accelerates while the key is held rather than
-// moving a fixed distance per press: see `./player/seekAcceleration`. Direction
-// is all this screen decides; the distance comes from how long it is held.
+// Seek distance accelerates with how long the key is held: see `./player/seekAcceleration`.
 
 export function boundedPlayerSeekTarget(positionMs: number, deltaMs: number, durationMs: number): number {
   return Math.max(0, Math.min(Math.max(0, durationMs), positionMs + deltaMs));
@@ -247,12 +203,7 @@ export function playerBufferedTimelineEnabled(samsungControls: boolean): boolean
   return !samsungControls;
 }
 
-/**
- * What a back-like action (remote "Return" key, Escape/Backspace) should do
- * on the full-presentation player. Only `webControls` platforms have a
- * pointer that can reach a floating mini-player bar, so only they minimize;
- * every other platform closes outright, same as the explicit close button.
- */
+/** Only a pointer can reach the floating mini-player, so only `webControls` platforms minimise; the rest close. */
 export function playerBackAction(webControls: boolean): 'minimize' | 'stop' {
   return webControls ? 'minimize' : 'stop';
 }
@@ -263,9 +214,7 @@ export function playerControlShowsPlay(intentPaused: boolean, failed: boolean): 
 
 export function webArrowTargetOwnsKey(target: EventTarget | null): boolean {
   if (!(target instanceof Element)) return false;
-  // Left/right are transport controls everywhere in the Web player, including
-  // while range inputs have focus. Preserve native arrow editing only for
-  // controls where horizontal cursor/selection movement is the likely intent.
+  // Left and right are transport everywhere, range inputs included; only text-like controls keep them.
   return Boolean(target.closest('textarea, select, [contenteditable="true"], input:not([type="range"])'));
 }
 
@@ -279,13 +228,12 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
   const lastReportRef = useRef(0);
   const lastPositionPersistRef = useRef(0);
   const endedHandledRef = useRef(false);
-  /** The in-progress D-pad hold on the scrubber, if any. Cleared on release. */
+  /** The in-progress D-pad hold on the scrubber. */
   const seekHoldRef = useRef<SeekHold | undefined>(undefined);
   /** True while the control bar is up only because a transport seek revealed it. */
   const seekRevealedControlsRef = useRef(false);
   const lastEventByMediaRef = useRef(new Map<string, PlaybackEvent>());
-  // How the title was last seen playing, for the save on the way out, when
-  // the snapshot may already be gone.
+  // How the title was last seen playing, for the save on exit, when the snapshot may be gone.
   const lastPlayingRef = useRef<PlaybackCoordinatorSnapshot | undefined>(undefined);
   const log = useMemo(() => createClientLogger('playback.screen', { mediaId: media.id }), [media.id]);
   const traits = platformTraits(platform);
@@ -362,7 +310,6 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
     }
     if (shouldTrackProgress(media) && (event.ended || now - lastReportRef.current >= 10_000)) {
       lastReportRef.current = now;
-      // The title, the file and how it was playing.
       lastPlayingRef.current = runtimePlayback;
       onProgress(progressFor(media, event.positionMs, event.durationMs, runtimePlayback));
     }
@@ -409,12 +356,9 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
     if (hideTimerRef.current !== undefined) window.clearTimeout(hideTimerRef.current);
     hideTimerRef.current = undefined;
     if (fatalError) return;
-    // Keep the bar up for the whole span of a status change (seek, stream
-    // reconfiguration, subtitle load) rather than letting it hide mid-transition
-    // and making the interaction look like it did nothing.
+    // Stay up through a status change (seek, reconfiguration, subtitle load) so the input visibly registers.
     if (playback.preparingSource) return;
-    // A resting pointer over the bar means the viewer is actively looking at
-    // or about to use it — auto-hide under the mouse reads as broken chrome.
+    // Never auto-hide under a resting pointer.
     if (hoveringChromeRef.current) return;
     if (!interactionControlled && (playback.intent.paused || optionsVisible)) return;
     hideTimerRef.current = window.setTimeout(hideControls, uiSettings.playerControlsHideDelayMs);
@@ -463,13 +407,8 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
     }
   }, [interactionControlled, runtime, showControls]);
 
-  // Freeze the picture the moment a seek is committed, before core has decided
-  // whether it can be served from the buffer. Holding first and releasing on the
-  // cheap path is the only ordering that acts at the instant the viewer asked:
-  // core tells the player nothing about a relocation until the replacement
-  // exists, which is a whole negotiation later. An unnecessary hold costs
-  // nothing — core calls `player.seek()` synchronously for a buffered target, so
-  // it is released in the same tick and never reaches a frame.
+  // Freeze the picture when a seek is committed, before core decides how to serve it: core reports
+  // nothing until a replacement exists. A buffered target releases in the same tick, at no cost.
   const holdPicture = useCallback(() => {
     (platform as Partial<{ holdPicture(): void }>).holdPicture?.();
   }, [platform]);
@@ -482,14 +421,10 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
     setLocalNotice(undefined);
     setScrubPosition(undefined);
     holdPicture();
-    // Whole milliseconds, at the one place every committed seek passes through.
-    // The scrubber's own value is on a one-second grid except at its maximum,
-    // which an `<input type="range">` hands back exactly as given — so a drag
-    // to the far right commits the duration itself, and that is the end of the
-    // title, where a node is most likely to clamp and round. The element's
-    // clock keeps its precision; what is asked of a node does not.
+    // Whole milliseconds: a range input returns its maximum exactly, and a fractional duration at the
+    // end of the title is where a node is most likely to clamp and round.
     const accepted = runtime.seek(Math.round(positionMs));
-    // A stream that cannot seek never moves, so nothing should have stopped.
+    // A refused seek moves nothing, so the hold is released.
     if (!accepted) {
       releasePicture();
       const notice = runtime.getPlaybackSnapshot()?.notice;
@@ -522,31 +457,11 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
     runtime.update(update);
   }, [runtime]);
 
-  /**
-   * Send this stream to the node the viewer picked, from where they are.
-   *
-   * **A new session there, promoted under the picture.** A playback session
-   * belongs to the node that created it, so "stream from that node instead"
-   * is a session on that node at this position. Core's `moveTo` builds it
-   * while the old one keeps presenting, swaps, then releases the old one;
-   * `moveStreamToNode` says what happens when it cannot.
-   *
-   * **The pin is set before the request, and outlives it.** Ordering is what
-   * makes the resolver choose, so the choice has to be in the registry before
-   * anything resolves; leaving it there is what keeps the next seek, mode
-   * change and recovery on the node the viewer asked for.
-   *
-   * **Not a restart**: `play()` closes before it starts, which is seconds of
-   * black.
-   */
   const nodeChoices = useMemo(
     () => playerNodeChoices(endpoints ?? [], playback.session?.endpoint?.id, nodeNameOf),
     [endpoints, nodeNameOf, playback.session?.endpoint?.id],
   );
-  // What this device can decode, asked once per player. It decides what a
-  // remux press may ask the node to copy; without it every remux press would
-  // have to assume the safe answer and transcode audio that was fine as it
-  // was.
+  // What this device can decode, asked once per player; it decides what a remux may ask the node to copy.
   const [capabilities, setCapabilities] = useState<PlaybackCapabilities | undefined>(undefined);
   useEffect(() => {
     let cancelled = false;
@@ -556,12 +471,17 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
     return () => { cancelled = true; };
   }, [platform]);
   const [movingToNode, setMovingToNode] = useState<string | undefined>(undefined);
+  /**
+   * Sends this stream to the node the viewer picked, at the current position. Core's `moveTo` builds
+   * a session there under the playing picture, then swaps; `play()` would restart through black.
+   * The pin is set before the request so the resolver chooses that node, and stays for later seeks,
+   * mode changes and recovery.
+   */
   const selectNode = useCallback((nodeId: string) => {
     const choice = nodeChoices.find((node) => node.id === nodeId);
     if (!onPinEndpoint || !choice) return;
     const positionMs = Math.max(0, Math.round(scrubValueRef.current ?? playback.intent.positionMs));
-    // This viewer's latest start cost for that node, with core's margin. No
-    // fresh figure means no host lead: core then uses its own estimate.
+    // This viewer's latest start cost for that node plus core's margin; with none, core estimates.
     const measured = nodeStartCosts.forNode(choice.endpointIds);
     const leadMs = measured ? measured.costMs + MOVE_LEAD_MARGIN_MS : undefined;
     log.info('node-move-request', {
@@ -577,8 +497,7 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
     const endpointId = onPinEndpoint(choice.endpointIds);
     if (endpointId === undefined) return;
     setMovingToNode(nodeId);
-    // Cleared when the move settles rather than when a session appears: a
-    // move never takes the session away, so the note would clear at once.
+    // Cleared when the move settles: a move never removes the session, so that cannot be the signal.
     void moveStreamToNode(runtime, endpointId, Boolean(fatalError), leadMs)
       .then((outcome) => {
         log.info('node-move-settled', { to: endpointId, outcome });
@@ -601,9 +520,7 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
     };
   }, [interactionControlled, presentation]);
 
-  // Read once, when the failure lands: the buffer keeps filling afterwards
-  // (session teardown, endpoint probes) and would push the evidence off a
-  // list the viewer is in the middle of reading.
+  // Read once, when the failure lands: the buffer keeps filling and would push the evidence off the list.
   const [failureTrail, setFailureTrail] = useState<PlaybackFailureTrailEntry[]>([]);
   useEffect(() => {
     setFailureTrail(fatalError && failureTrailEnabled() ? playbackFailureTrail() : []);
@@ -621,10 +538,8 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
       armControlsHide();
       return;
     }
-    // Only for a change to a stream that is already playing — a seek, a
-    // representation switch — where the bar is what tells the viewer their
-    // input registered. At startup there is no such input to acknowledge, and
-    // showing it flashes chrome across a title that is only just appearing.
+    // Only for a change to a playing stream, where the bar acknowledges the input; at startup it
+    // would flash chrome over a title just appearing.
     if (playback.session) setControlsVisible(true);
     if (hideTimerRef.current !== undefined) {
       window.clearTimeout(hideTimerRef.current);
@@ -662,12 +577,8 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
   }, [log, webControls]);
 
   useEffect(() => {
-    // Android's hardware/remote back button is intercepted natively before
-    // any DOM keydown fires (see platforms/android's MainActivity), so
-    // there is no keyboard event to hook here the way Samsung's remote
-    // "Return" key works below. MainActivity calls this directly instead,
-    // falling back to its own WebView-history/finish() behavior when it's
-    // absent (not on the full player) or returns false.
+    // Android intercepts its back button natively before any keydown fires, so MainActivity calls
+    // this directly, falling back to its own behaviour when it is absent or returns false.
     const host = window as unknown as { __machaHandleBack?: () => boolean };
     host.__machaHandleBack = () => {
       if (presentation !== 'full') return false;
@@ -700,9 +611,7 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
           setScrubPosition(undefined);
           return;
         }
-        // No mini player on a TV remote — there's nowhere to reasonably
-        // navigate a persistent floating bar to, and no pointer to reach it
-        // with. Back closes the player outright, same as the close button.
+        // A TV remote has no pointer to reach a mini player, so Back closes outright.
         onStop();
         return;
       }
@@ -714,25 +623,17 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
         return;
       }
       if (presentation === 'full' && samsungControls) {
-        // Left/right are transport shortcuts only while the chrome is hidden,
-        // so that the control row stays navigable when it is up. Showing the
-        // bar on a seek would therefore disarm the next press mid-gesture:
-        // once it is up, left/right would become spatial navigation and
-        // seeking would stop after one step. While the bar is up *because of*
-        // seeking, keep treating them as transport.
+        // Left and right stay transport while a seek revealed the bar: see samsungTransportSeekDirection.
         const transportActive = !controlsVisible || seekRevealedControlsRef.current;
         const direction = samsungTransportSeekDirection(keyEvent.key, keyEvent.keyCode, transportActive);
         if (direction !== undefined) {
           keyEvent.preventDefault();
           keyEvent.stopPropagation();
-          // Same ladder as the scrubber, and the same hold: a viewer holding
-          // right should not get a different distance depending on whether
-          // the bar happened to be up.
+          // The scrubber's ladder and hold, so the distance does not depend on whether the bar is up.
           const { hold, deltaMs } = accelerateSeek(seekHoldRef.current, direction, Date.now());
           seekHoldRef.current = hold;
           seekBy(deltaMs);
-          // Show where the seek landed: a jump with no visible scrubber gives
-          // the viewer nothing to judge it by.
+          // Show the scrubber so the viewer can see where the seek landed.
           seekRevealedControlsRef.current = true;
           showControls();
           return;
@@ -751,10 +652,7 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
         keyEvent.preventDefault();
         keyEvent.stopPropagation();
         if (optionsVisible) { setOptionsVisible(false); return; }
-        // Non-web here means Android, reachable only via a keyboard in a dev
-        // build: a real device intercepts its hardware back button natively
-        // before any JS runs (see platforms/android's MainActivity), so this
-        // is keyboard-testing parity, not the on-device path.
+        // Non-web here is Android with a keyboard in a dev build; a device's back button is intercepted natively.
         if (playerBackAction(webControls) === 'minimize') onMinimize();
         else onStop();
         return;
@@ -826,10 +724,7 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
     </span>
   );
   const audio = media.kind === 'track';
-  // The playing track's format line, from its file's catalogue profile: the
-  // same line as a title page, beside the artwork. Only the file actually
-  // playing, once the session names it; a profile that cannot be read shows
-  // nothing.
+  // The playing track's format line, from the catalogue profile of the file the session names.
   const playingMediaId = audio ? session?.mediaId : undefined;
   const trackFormat = useAsync(
     async (signal) => {
@@ -840,8 +735,7 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
     [api, playingMediaId],
   );
   const described = describePlaybackSession(session, event.streamOrigin);
-  // The cluster's own name for the serving node where core knows it
-  // ("corvus-fi-1"), else its host: never a URL.
+  // The cluster's name for the serving node where core knows it, else its host: never a URL.
   const streamStatus = described && { endpoint: described.endpointName ?? nodeName(described.endpoint), ...streamStatusText(described) };
   const mediaSubtitle = playerMediaSubtitle(media);
   const pausedForControl = playerControlShowsPlay(playback.intent.paused, Boolean(fatalError));
@@ -849,9 +743,7 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
   const playerSubtitle = [mediaSubtitle, queueLabel].filter(Boolean).join(' · ');
   const tooSlow = Boolean(fatalError) && playbackFailureCode(fatalError) === TOO_SLOW_TO_PLAY_CODE;
   const showBuffering = !fatalError && (playback.starting || Boolean(event.buffering));
-  // How long this start has been going on, for telling the viewer. Counted
-  // here rather than from a timestamp on the snapshot, because core says
-  // `starting` without saying since when.
+  // Counted here: core says `starting` without saying since when.
   const startWaitMs = useElapsedMs(playback.starting);
 
   return (
@@ -860,8 +752,7 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
       className={`player-page player-presentation-${presentation} ${audio ? 'audio-player' : ''} ${fullscreen && !controlsVisible && pointer.idle && !fatalError ? 'cursor-hidden' : ''} ${fatalError ? 'player-failed' : ''}`}
       onPointerMove={(pointerEvent) => {
         if (presentation !== 'full') return;
-        // The cursor comes back on any movement; the chrome only where its
-        // own rules say, below.
+        // Any movement restores the cursor; the chrome follows its own rules below.
         pointer.noteMovement();
         if (webControls) {
           if (!pointerEvent.pointerType || pointerEvent.pointerType === 'mouse') noteWebPointerMovement(pointerEvent.clientY);
@@ -906,14 +797,8 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
       {fatalError && (
         <div className="player-fatal-error" role="alert">
           <strong>Playback failed</strong>
-          {/* Core's sentence, never `.message`: by the time a failure reaches
-              here its message is two of core's envelopes and a node address.
-              The trail below still carries the whole chain for anyone who
-              switched it on. A quality no node can keep up with is worded from
-              the facts of what was playing, since those say which. */}
+          {/* Core's sentence, never `.message`, which carries envelopes and a node address. */}
           <span>{tooSlow ? tooSlowToPlayText(runtimePlayback?.instruction?.quality, session?.transform) : playbackFailureHeadline(fatalError)}</span>
-          {/* Try again, and beside it the list: another quality is the other
-              way on. */}
           {tooSlow && (
             <div className="player-failure-actions">
               <button type="button" className="secondary-button" data-tv-focusable="true" data-tv-default-focus="true" onClick={() => { void runtime.retry(); }}>Try again</button>
@@ -922,12 +807,7 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
               )}
             </div>
           )}
-          {/* **The cap explains why recovery could not finish. It is not what
-              went wrong**, and putting it first would tell a viewer their
-              account is busy when a node had just died under them. Core's head
-              is the failure that *started* the recovery, so that leads; this
-              follows it as the part they can act on, and it is the only line
-              here that names an action. */}
+          {/* After the headline: the cap explains why recovery could not finish, not what went wrong. */}
           {accountSessionLimitNotice(fatalError) && (
             <span className="player-failure-notice">{accountSessionLimitNotice(fatalError)}</span>
           )}
@@ -972,23 +852,11 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
             {playbackNotice ? (
               <small>{playbackNotice}</small>
             ) : playback.preparingSource ? (
-              // Named rather than anonymous: this is the one moment the client
-              // is moving between nodes, and "which node" is the only question
-              // worth asking about it. The endpoint shown is the one currently
-              // held — the node being replaced during a failover, the node
-              // doing the work during a seek — and it flips to the replacement
-              // the moment that generation activates, so watching this line
-              // through a failover shows how far round the cluster it has got.
+              // The endpoint named is the one currently held; it flips to the replacement when that generation activates.
               <small>{preparingStreamText(playback.startProgress, streamStatus?.endpoint)}</small>
             ) : (
               <>
-                {/* The carriage and the node that served it, on one line as
-                    `CONTAINER : endpoint`. They are read together — "what was
-                    I served, and by whom" is a single question — and a second
-                    line would push the per-stream transforms down the panel.
-                    Either half is omitted rather than defaulted when
-                    absent: this is the one place a segment container the
-                    client asked for and did not get can show, and a default
+                {/* `CONTAINER : endpoint` on one line. An absent half is omitted, never defaulted: a default
                     would read as an answer. */}
                 {(streamStatus?.container || streamStatus?.endpoint) && (
                   <small>{[streamStatus?.container, streamStatus?.endpoint].filter(Boolean).join(' : ')}</small>
@@ -1048,9 +916,7 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
                 if (direction === undefined) return;
                 keyEvent.preventDefault();
                 keyEvent.stopPropagation();
-                // Only the preview position moves here; the seek is committed
-                // once on release, so a long hold costs one request however
-                // far it travelled.
+                // Only the preview moves; the seek is committed once, on release.
                 const { hold, deltaMs } = accelerateSeek(seekHoldRef.current, direction, Date.now());
                 seekHoldRef.current = hold;
                 const current = scrubValueRef.current ?? Math.min(duration, playback.intent.positionMs);
@@ -1144,11 +1010,8 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
 }
 
 /**
- * Which modes this device can play the playing file in, so the options offer
- * only those unless the viewer asked for everything. Core's
- * answer carries the node's operations and is preferred; until its facts
- * arrive, the session's profile answers without them, which can offer a
- * remux the node's build then refuses.
+ * The modes this device can play the file in. Core's answer includes the node's operations and is
+ * preferred; until it arrives the session's profile answers, and may offer a remux the node refuses.
  */
 export function modesToOffer(
   fromCore: readonly OfferedMode[] | undefined,

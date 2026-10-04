@@ -1,20 +1,13 @@
 /**
- * The resolution this device's screen actually shows, in physical pixels, for
- * core to cap automatic play at. A viewer's own setting overrides it.
- *
- * Undefined means unknown, and unknown must mean no cap: a guess that is too
- * low would quietly deny a viewer the file their screen can show.
+ * The screen's resolution in physical pixels, which core caps automatic play at. Undefined means
+ * unknown and must mean no cap: too low a guess denies a viewer a file their screen can show.
  */
 export interface DisplayResolution {
   width: number;
   height: number;
 }
 
-/**
- * A browser's screen: CSS size times device pixel ratio, taken landscape so a
- * phone held upright is not read as a tall, narrow screen. A browser on a
- * desktop reports the monitor the window is on, which is the one that matters.
- */
+/** CSS size times device pixel ratio, landscape so an upright phone is not read as tall and narrow. */
 export function browserDisplayResolution(view: Pick<Window, 'screen' | 'devicePixelRatio'> = window): DisplayResolution | undefined {
   const ratio = view.devicePixelRatio > 0 ? view.devicePixelRatio : 1;
   const width = Math.round(view.screen.width * ratio);
@@ -24,10 +17,8 @@ export function browserDisplayResolution(view: Pick<Window, 'screen' | 'devicePi
 }
 
 /**
- * A Samsung set reports its application surface (1920x1080 on a 4K panel), not
- * its panel, so its screen size would cap every 4K set at 1080p. The panel is
- * known only through webapis.productinfo, which this build does not load, so
- * the display is reported unknown and uncapped.
+ * Always unknown, so uncapped: a Samsung set reports its application surface (1920x1080 on a 4K
+ * panel), and the panel size needs webapis.productinfo, which this build does not load.
  */
 export function samsungDisplayResolution(): DisplayResolution | undefined {
   return undefined;

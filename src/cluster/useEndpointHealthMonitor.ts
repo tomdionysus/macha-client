@@ -2,13 +2,7 @@ import { useEffect } from 'react';
 import { EndpointHealthMonitor, type AuthenticatedFetch, type ClusterStatusApi, type EndpointRegistry } from '@machafoundation/core';
 import { clientConfiguration } from '../state/client';
 
-/**
- * Binds the core's health loop to a React lifecycle.
- *
- * The loop itself is plain and lives in `@machafoundation/core`; only this binding is
- * framework-specific. `stop()` is idempotent, so a double teardown in strict
- * mode is safe.
- */
+/** Runs core's health loop while mounted and `enabled`. */
 export function useEndpointHealthMonitor(
   registry: EndpointRegistry,
   clusterStatusApi: ClusterStatusApi,

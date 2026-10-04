@@ -74,7 +74,6 @@ interface AbortGlobals {
   AbortSignal?: typeof AbortSignal;
 }
 
-/** Install only on legacy browsers; modern native cancellation is never replaced. */
 export function installAbortControllerPolyfill(target: AbortGlobals): boolean {
   if (typeof target.AbortController === 'function') return false;
   target.AbortSignal = LegacyAbortSignal as unknown as typeof AbortSignal;

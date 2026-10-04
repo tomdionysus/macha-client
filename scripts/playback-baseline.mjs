@@ -1,11 +1,6 @@
 /**
- * Which titles in the library exercise which playback instruction.
- *
- * Runs the real chooser (`choosePlaybackInstruction`) over the real facts
- * endpoint for every catalogue item, so the buckets are what this client would
- * genuinely ask for rather than what a reimplementation guesses. Capabilities
- * are an input, so the same library can be bucketed for Chrome, for the
- * Samsung's narrower profile, or for anything else.
+ * Buckets every catalogue title by the playback instruction the real chooser
+ * picks from the real facts endpoint, for the given capabilities and policy.
  *
  *   node playback-baseline.mjs [--node http://10.44.1.50:7438] [--caps caps.json]
  *                              [--limit 400] [--policy samsung]
@@ -27,12 +22,7 @@ function arg(name, fallback) {
 const NODE = arg('node', 'http://10.44.1.50:7438');
 const LIMIT = Number(arg('limit', '400'));
 
-/**
- * Chrome on macOS, as the running client probes it. `matroska` is listed
- * because `canPlayType` discriminates on it properly:
- * `video/x-matroska; codecs="avc1.42E01E"` answers `probably` and the same
- * container with a nonsense codec answers `""`.
- */
+/** Chrome on macOS as the client probes it. `matroska` is listed because `canPlayType` answers per codec for it. */
 const CHROME = {
   platform: 'web',
   videoCodecs: ['h264', 'hevc', 'vp9', 'av1'],
@@ -46,8 +36,7 @@ const CHROME = {
 
 const capsPath = arg('caps');
 const capabilities = capsPath ? JSON.parse(readFileSync(capsPath, 'utf8')) : CHROME;
-// The Samsung states these as host policy rather than by narrowing what it
-// claims to decode; bucketing for that target has to apply them too.
+// The Samsung states these as host policy, not by narrowing its claimed capabilities.
 const POLICIES = {
   none: {},
   samsung: { neverDirect: true, excludeContainers: ['webm'], preferSegmentContainer: 'mpegts' },
@@ -56,12 +45,7 @@ const overrides = POLICIES[arg('policy', 'none')] ?? {};
 
 configureMachaHost({ origin: NODE });
 
-/**
- * The cluster gives an unauthenticated session no roles, so this signs in as
- * the test account the way any client does. Core exports no mint helper,
- * and the endpoint is two lines, so this asks the node directly rather than
- * standing up a `SessionManager` for one token.
- */
+/** Signs in as the test account: an unauthenticated session holds no roles. */
 async function mint(node) {
   const username = process.env.MACHA_TEST_USER;
   const password = process.env.MACHA_TEST_PASSWORD;
@@ -71,8 +55,7 @@ async function mint(node) {
   const response = await fetch(`${node}/api/v1/session`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    // Nested, deliberately: a flat body is accepted and returns an anonymous
-    // session holding no roles, which then 403s on the catalogue.
+    // Must be nested: a flat body yields an anonymous, role-less session that 403s on the catalogue.
     body: JSON.stringify({ credentials: { username, password } }),
   });
   if (!response.ok) throw new Error(`session mint failed: ${response.status}`);
@@ -124,8 +107,7 @@ for (const item of items) {
   });
 }
 
-// The node caps sessions at 4096 and a repeated run would fill it, so this
-// run gives its own back rather than leaving it to expire.
+// Revoke the session: the node caps sessions at 4096 and repeated runs would fill it.
 await fetch(`${NODE}/api/v1/session`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } })
   .catch((error) => console.error(`  (session revoke failed: ${error.message})`));
 

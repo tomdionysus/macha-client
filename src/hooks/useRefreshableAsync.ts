@@ -8,7 +8,7 @@ export interface RefreshableAsyncState<T> {
   refresh: () => void;
 }
 
-/** Page-owned loading that preserves the last usable value during manual refresh. */
+/** Keeps the last usable value during a manual refresh. */
 export function useRefreshableAsync<T>(
   factory: (signal: AbortSignal) => Promise<T>,
   dependencies: readonly unknown[],
@@ -40,7 +40,7 @@ export function useRefreshableAsync<T>(
   useEffect(() => {
     load(false);
     return () => activeRef.current?.controller.abort(new DOMException('Async page was replaced', 'AbortError'));
-    // The caller explicitly owns the reload boundary.
+    // The caller owns the reload boundary.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, dependencies);
 

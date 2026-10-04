@@ -16,11 +16,9 @@ function folderOf(path: string): string {
 const READ_AT_ONCE = 3;
 
 /**
- * The other unmatched files in a file's folder that say they are tracks of
- * the album, by their own candidates: an album's files usually arrive
- * together and fail together (one tagged artist the provider credits
- * differently fails them all), so once one is matched by hand the rest can
- * follow. A file whose details cannot be read is left out, not guessed.
+ * The other unmatched files in a file's folder whose own candidates name the
+ * same album, so they can follow one matched by hand. A file whose details
+ * cannot be read is left out.
  */
 export async function albumSiblings(manage: ManageApi, file: UnmatchedFile, album: string, artist: string | undefined): Promise<Sibling[]> {
   const folder = folderOf(file.path);

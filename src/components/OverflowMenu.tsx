@@ -12,11 +12,8 @@ interface Props {
   actions: readonly OverflowMenuAction[];
   className?: string;
   /**
-   * What the viewer presses to open the menu. Defaults to the `⋯` glyph.
-   *
-   * Supplied where the thing the menu belongs to is already on screen and can
-   * be the control itself, such as the account identity, so one idea has one
-   * target rather than two adjacent ones.
+   * The control that opens the menu; defaults to the `⋯` glyph. Supply one when
+   * the menu's owner is already on screen, such as the account identity.
    */
   trigger?: ReactNode;
 }

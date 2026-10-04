@@ -1,23 +1,9 @@
 import type { PlaybackResolver } from '@machafoundation/core';
 
 /**
- * What it costs each node to start a stream, measured by this viewer.
- *
- * **Session create to first fragment.** A node produces a generation
- * sequentially from the position it was asked for at create, so everything
- * between the request and the first fragment is time the viewer travels while
- * the node has produced nothing, and a handover that asks for the viewer's
- * position starts that far behind a join receding at 1x. No node states this
- * figure, and its start timeout is a ceiling rather than an expectation, so
- * it is measured here.
- *
- * **The latest figure, and only while it is fresh.** A node under load is
- * slower now than it was, so the newest measurement wins, and one older than
- * `START_COST_STALE_MS` answers nothing rather than a guess. Never a
- * constant: a figure frozen in a client goes wrong as soon as the node changes.
- *
- * Keyed by origin, because that is what a session URL and an endpoint share.
- * A node reachable at two addresses is asked about by all of them.
+ * What it costs each node to start a stream, as this viewer measures it: session create to first
+ * fragment. Only the latest figure counts, and only while fresh. Keyed by origin, which a session
+ * URL and an endpoint share.
  */
 
 /** Past this a measurement describes the node as it was, not as it is. */
@@ -52,10 +38,7 @@ export class NodeStartCosts {
     this.pending.set(sourceUrl, startedAtMs);
   }
 
-  /**
-   * The first media fragment of this source arrived. Later ones are not start
-   * cost. Answers the measurement it made, if this was the one to make it.
-   */
+  /** Call on a source's first media fragment. Returns the measurement if this call made it. */
   firstFragment(sourceUrl: string): number | undefined {
     const startedAtMs = this.pending.get(sourceUrl);
     if (startedAtMs === undefined) return undefined;
@@ -91,14 +74,9 @@ function sessionSourceUrl(value: unknown): string | undefined {
 }
 
 /**
- * The resolver core is given, with every session-producing call timed.
- *
- * Generic over the interface rather than naming its methods: whichever call
- * resolves to a session (a start, a failover, a regeneration, a move, a
- * standby) is stamped with when it was asked for, so a method core adds later
- * is measured without this being edited. Everything else passes through, and
- * an optional method the inner resolver lacks stays absent, because core
- * branches on whether it exists.
+ * Wraps the resolver so every call resolving to a session is timed. A Proxy rather than named
+ * methods, so a method core adds is measured too, and an absent optional method stays absent,
+ * which core branches on.
  */
 export function measureStartCosts(resolver: PlaybackResolver, costs: NodeStartCosts = nodeStartCosts): PlaybackResolver {
   return new Proxy(resolver, {

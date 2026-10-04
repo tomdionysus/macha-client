@@ -1,13 +1,6 @@
 import { machaHost, type MachaHost } from '@machafoundation/core';
 
-/**
- * The read/write half of core's storage seam.
- *
- * Derived from `MachaHost` rather than restated, because core's
- * `ReadWriteStorageLike` is not exported from the package root — only the host
- * is. Deriving keeps this exactly as wide as what a store needs and cannot
- * drift from core's own shape the way a copied interface would.
- */
+/** Derived from `MachaHost` because core does not export its read/write storage type. */
 type VolumeStorage = Pick<MachaHost['storage'], 'getItem' | 'setItem'>;
 
 function clampVolume(value: number): number {
@@ -15,28 +8,13 @@ function clampVolume(value: number): number {
 }
 
 /**
- * The viewer's remembered playback volume, per client.
+ * The viewer's remembered playback volume, per client. A host that owns its own
+ * volume answers `Platform.initialVolume?()` and never consults this.
  *
- * It lives in its two real consumers — this client and Android TV — rather
- * than in `@machafoundation/core`, because it is not a cross-client fact.
- * What *is* cross-client is whether a host owns app-level volume at all, and
- * core keeps that as `Platform.initialVolume?()`; a television's volume
- * belongs to the television and its remote, so `SamsungWebPlatform` answers 1
- * and never consults this store.
- *
- * **The key is `macha.volume.v1.${clientId}` and must not change.** It is the
- * key core wrote, in the same storage, origin and client id, so a viewer's
- * existing volume carries over with no migration. Rename it and every viewer
- * silently returns to full volume on their next launch, with nothing
- * explaining why.
- *
- * Four behaviours are deliberate and are the easy ones to tidy away: an absent
- * key reads as **1**, not 0; an empty or whitespace-only entry reads as **1**,
- * because it is not a value at all; a stored value that is not a finite number
- * reads as **1**; and `save` returns the value actually stored rather than the
- * one asked for, so a caller can render what happened instead of what it
- * requested. A stored `0` is none of these — it is a viewer who chose silence,
- * and it keeps meaning silence.
+ * The key `macha.volume.v1.${clientId}` is the one core wrote and must not
+ * change, or every viewer returns to full volume. An absent, blank or
+ * non-numeric entry reads as 1; a stored 0 is a chosen mute and stays 0.
+ * `save` returns the value actually stored.
  */
 export class VolumeStore {
   private readonly key: string;
@@ -47,13 +25,7 @@ export class VolumeStore {
 
   load(): number {
     const raw = this.storage.getItem(this.key);
-    // An empty or whitespace-only entry is not a volume — it is a corrupted or
-    // half-written one, and it must not be read as a choice. `Number('')` is
-    // `0`, and `0` is finite, so without this line the clamp accepts it and a
-    // viewer's next launch is silent with nothing explaining why. `0` itself
-    // stays a legitimate stored value: a viewer who mutes stays muted. The
-    // difference is a value someone chose against no value at all, which is why
-    // this belongs on the parse and not on the clamp.
+    // `Number('')` is 0, so a blank entry must be caught here or it reads as a mute.
     if (raw === null || raw.trim() === '') return 1;
     const value = Number(raw);
     return Number.isFinite(value) ? clampVolume(value) : 1;

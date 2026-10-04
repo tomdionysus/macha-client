@@ -1,11 +1,8 @@
 import { useEffect, useState, type ReactNode } from 'react';
 
-/**
- * The shared parts of a job or file list and an item's own page, for Import
- * and Manage alike. Styles in `styles/lists.css`.
- */
+/** Shared parts of list and item pages, for Import and Manage. Styles in `styles/lists.css`. */
 
-/** A list's heading: its name and count, with its controls (sort, bulk actions) to the right. No count where there is no list to count, rather than a false 0. */
+/** Omit `count` where there is no list to count, rather than showing a false 0. */
 export function ListHeading({ id, title, count, children }: { id: string; title: string; count?: number; children?: ReactNode }) {
   return (
     <div className="list-heading">
@@ -15,7 +12,7 @@ export function ListHeading({ id, title, count, children }: { id: string; title:
   );
 }
 
-/** An item page's header: its state or kind above the title, and its actions to the right. */
+/** `kicker` is the item's state or kind, shown above the title. */
 export function DetailHeader({ kicker, kickerClass = '', title, actions }: { kicker: string; kickerClass?: string; title: string; actions?: ReactNode }) {
   return (
     <header className="detail-header">
@@ -28,12 +25,10 @@ export function DetailHeader({ kicker, kickerClass = '', title, actions }: { kic
   );
 }
 
-/** Label and value pairs, labels left and values right. */
 export function Facts({ rows }: { rows: ReadonlyArray<readonly [string, ReactNode]> }) {
   return <dl className="facts">{rows.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>;
 }
 
-/** A quiet card with a small-capitals heading, for an item's facts. */
 export function DetailCard({ id, title, children }: { id: string; title: string; children: ReactNode }) {
   return (
     <section className="detail-card" aria-labelledby={id}>
@@ -43,7 +38,6 @@ export function DetailCard({ id, title, children }: { id: string; title: string;
   );
 }
 
-/** Previous and next through a long list, with where the page sits in it. Nothing for a list of one page. */
 export function Pager({ label, page, pageCount, first, last, total, onPage }: {
   label: string;
   page: number;
@@ -63,16 +57,15 @@ export function Pager({ label, page, pageCount, first, last, total, onPage }: {
   );
 }
 
-/** Runs one operation per id, all at once. Answers how many failed. */
+/** Runs every operation at once; resolves to how many failed. */
 export async function runBulkOperation(ids: readonly string[], operation: (id: string) => Promise<void>): Promise<number> {
   const results = await Promise.allSettled(ids.map(operation));
   return results.filter((result) => result.status === 'rejected').length;
 }
 
 /**
- * The ticked rows of a list, kept across its pages. A row that leaves the
- * list leaves the selection, so a bulk action never reaches something the
- * viewer can no longer see.
+ * The ticked rows, kept across pages. A row that leaves the list leaves the selection, so a bulk
+ * action never reaches a row the viewer cannot see.
  */
 export function useListSelection(items: ReadonlyArray<{ id: string }>) {
   const [checked, setChecked] = useState<ReadonlySet<string>>(() => new Set());
@@ -98,7 +91,7 @@ export function useListSelection(items: ReadonlyArray<{ id: string }>) {
 
 export type ListSelection = ReturnType<typeof useListSelection>;
 
-/** The header box: ticks or unticks the page on screen; selections on other pages stay. */
+/** Ticks or unticks the visible page only; selections on other pages stay. */
 export function SelectPageBox({ ids, selection, disabled }: { ids: readonly string[]; selection: ListSelection; disabled?: boolean }) {
   const all = ids.length > 0 && ids.every((id) => selection.checked.has(id));
   const some = !all && ids.some((id) => selection.checked.has(id));
@@ -128,7 +121,6 @@ export function SelectRowBox({ id, name, selection, disabled }: { id: string; na
   );
 }
 
-/** What can be done to the ticked rows, with how many there are and a way to untick them all. Nothing while none are ticked. */
 export function BulkActions({ label, selection, disabled, children }: { label: string; selection: ListSelection; disabled?: boolean; children: ReactNode }) {
   if (selection.checked.size === 0) return null;
   return (

@@ -1,9 +1,6 @@
 package media.macha.client
 
-/**
- * Design stub only. The Android host will implement the TypeScript Platform /
- * Player contracts with Media3/ExoPlayer.
- */
+/** Design stub: a possible Media3/ExoPlayer host implementing the TypeScript Platform and Player contracts. */
 interface MachaBridge {
     fun capabilitiesJson(): String
     fun play(playbackSourceJson: String, positionMs: Long): Boolean

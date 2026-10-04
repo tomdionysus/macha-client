@@ -239,12 +239,7 @@ h2 { font-size: clamp(1.2rem, 2vw, 1.75rem); letter-spacing: -.01em; margin: 1.1
 }
 .media-row::-webkit-scrollbar { display: none; }
 .media-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(145px, 1fr)); gap: 1.4rem 1rem; }
-/*
- * Cards start at the top rather than stretch to their row: a <button> centres
- * its content in whatever height it is given, so one taller card (a search
- * episode with its series and season links) would push every button card in
- * its row down by half the difference, and their titles off the line.
- */
+/* Start-aligned: a <button> card stretched to a taller row centres its content, pushing its title off the line. */
 .media-grid > * { align-self: start; }
 .catalogue-indexed { padding-right: 2.35rem; }
 .alphabet-index {
@@ -433,10 +428,7 @@ h2 { font-size: clamp(1.2rem, 2vw, 1.75rem); letter-spacing: -.01em; margin: 1.1
   z-index: 60;
   display: grid;
   place-items: center;
-  /* Content-height rows, centred as a group. Without this the implicit rows
-     stretch to fill, and a spinner with a note under it becomes a spinner in
-     the top half and a sentence in the bottom half. With one child it is
-     indistinguishable from the stretched form. */
+  /* Content-height rows centred as a group; stretched rows would split a spinner from its note. */
   align-content: center;
   grid-auto-rows: max-content;
   pointer-events: none;
@@ -619,7 +611,7 @@ h2 { font-size: clamp(1.2rem, 2vw, 1.75rem); letter-spacing: -.01em; margin: 1.1
 .search-bar > * { height: var(--search-control-height); }
 .secondary-button.async-icon-button.search-bar-refresh { flex: 0 0 auto; width: var(--search-control-height); height: var(--search-control-height); border-radius: .65rem; }
 .search-input { flex: 1; min-width: 0; padding-block: 0; }
-/* The type filter: toggles in the fields' own height and shape, lit like the player's options when on. */
+/* Type filter toggles, in the fields' height and shape. */
 .search-type-filter { display: flex; gap: .5rem; flex: 0 0 auto; }
 .search-type-pill {
   height: 100%;
@@ -634,17 +626,10 @@ h2 { font-size: clamp(1.2rem, 2vw, 1.75rem); letter-spacing: -.01em; margin: 1.1
 }
 .search-type-pill:hover, .search-type-pill:focus-visible { border-color: var(--focus); color: #dedee2; outline: none; }
 .search-type-pill[aria-pressed='true'] { border-color: var(--focus); background: var(--accent-surface-strong); color: #dedee2; }
-/* Centred in what is left of the page below the search row. */
 .search-empty { display: grid; place-items: center; min-height: 50vh; margin: 0; color: var(--text-dim); font-size: 1.1rem; text-align: center; }
 .search-results { margin-top: 1.4rem; row-gap: 1rem; }
-/*
- * Search mixes square music art with 2:3 posters. A percentage margin is taken
- * from the card's width, so 25% above and below centres a square in a poster's
- * height and every title in a row still starts on the same line. The title's
- * own top margin collapses into the one below, so that one carries it too.
- */
+/* Percentage margins come from the card's width, so 25% each side centres square art in a 2:3 poster's height and titles stay on one line. */
 .search-results .music-artwork { margin-top: 25%; margin-bottom: calc(25% + .65rem); }
-/* Headline figures in a row of tiles: Status's cluster overview, a torrent's page. */
 .metric-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .8rem; }
 .metric-tile { min-width: 0; padding: 1rem 1.05rem; border: 1px solid #ffffff10; border-radius: .75rem; background: #151517c9; box-shadow: 0 10px 26px #0003; }
 .metric-tile > span { display: block; color: var(--text-faint); text-transform: uppercase; letter-spacing: .09em; font-size: .7rem; }
@@ -759,11 +744,7 @@ h2 { font-size: clamp(1.2rem, 2vw, 1.75rem); letter-spacing: -.01em; margin: 1.1
 .player-stream-status { flex: 0 0 auto; display: grid; justify-items: end; gap: .18rem; min-width: max-content; color: #9b9ba3; text-align: right; }
 .player-stream-status small { display: block; max-width: none; white-space: nowrap; }
 .player-options {
-  /* Two areas side by side, each packing its own rows: everything about
-     *what* the node sends on the left, *which node* sends it on the right.
-     Two areas rather than one grid, because a right-hand cell spanning every
-     row stretches the left rows apart to match its height — the controls end
-     up floating in space with the film showing between them. */
+  /* Two flex areas, not one grid: a right-hand cell spanning every row would stretch the left rows apart. */
   display: flex;
   align-items: flex-start;
   gap: 2rem;
@@ -782,10 +763,7 @@ h2 { font-size: clamp(1.2rem, 2vw, 1.75rem); letter-spacing: -.01em; margin: 1.1
 .player-option-group > span { padding-top: .45rem; color: var(--text-faint); font-size: .78rem; text-transform: uppercase; letter-spacing: .08em; }
 .player-option-group > div { display: flex; flex-wrap: wrap; gap: .4rem; }
 .player-option-note { grid-column: 2; color: var(--text-faint); font-size: .75rem; line-height: 1.35; }
-/* The node group is the same group, mirrored: label on the right, pills
-   flush against the same edge as the `CONTAINER : origin` line above them.
-   Same grid, same pills, opposite hand — the format controls say what the
-   node sends, this says which node. */
+/* The node group mirrored: label and pills against the right edge. */
 .player-options > .player-option-group-node {
   flex: 0 1 auto;
   width: min(26rem, 38%);
@@ -793,21 +771,14 @@ h2 { font-size: clamp(1.2rem, 2vw, 1.75rem); letter-spacing: -.01em; margin: 1.1
   grid-template-columns: auto;
   gap: .4rem;
   justify-items: end;
-  /* Two areas rather than one list with a straggler: the rule is the seam
-     between what the node sends and which node sends it. */
+  /* The rule is the seam between what the node sends and which node sends it. */
   padding-left: 1.4rem;
   border-left: 1px solid #ffffff12;
 }
 .player-option-group-node > span { grid-column: 1; padding-top: 0; }
-/* Stacked, one node per line: they are alternatives to each other, and a
-   wrapping row of them reads as a sentence rather than a list. */
 .player-option-group-node > div {
   grid-column: 1;
-  /* Pills wrap and justify against the right edge rather than running down
-     one per line: a dozen short names fit three or four to a row, the block
-     keeps a straight edge under the label, and the area stays as wide as it
-     is rather than as tall as the cluster. Bounded and scrolling for the
-     case where there really are dozens. */
+  /* Pills wrap against the right edge; bounded and scrolling for dozens of nodes. */
   flex-direction: row;
   flex-wrap: wrap;
   justify-content: flex-end;
@@ -819,14 +790,11 @@ h2 { font-size: clamp(1.2rem, 2vw, 1.75rem); letter-spacing: -.01em; margin: 1.1
   padding-right: .15rem;
 }
 .player-option-group-node > .player-option-note { grid-column: 1; max-width: 13rem; text-align: right; }
-/* A host is not a word: `capitalize` turns macnessa.macha.network into
-   Macnessa.Macha.Network, which is not the name of anything. */
+/* A host is not a word: `capitalize` would mangle it. */
 .player-option-group.player-option-group-node button { text-transform: none; }
-/* The node you are on is disabled because there is nothing to ask for, not
-   because it is unavailable — so it keeps the highlight every other selected
-   pill has instead of being dimmed like a refusal. */
+/* The current node is disabled but not unavailable, so it keeps the selected highlight undimmed. */
 .player-option-group.player-option-group-node button.selected:disabled { opacity: 1; }
-/* A fallback instruction is the one case here worth reading, so it is the one case that is not faint. */
+/* A fallback instruction is the one note not faint. */
 .player-option-warning { color: var(--accent); }
 .player-options-loading { color: var(--text-faint); font-size: .82rem; }
 .player-option-group button {
@@ -874,7 +842,6 @@ h2 { font-size: clamp(1.2rem, 2vw, 1.75rem); letter-spacing: -.01em; margin: 1.1
 .audio-player-art { position: absolute; left: 50%; top: 44%; width: min(42vh, 38vw, 420px); aspect-ratio: 1; transform: translate(-50%, -50%); border-radius: .8rem; overflow: hidden; background: var(--surface-2); box-shadow: 0 24px 70px #000b; }
 .audio-player-art img { width: 100%; height: 100%; object-fit: cover; }
 .audio-player-placeholder { width: 100%; height: 100%; display: grid; place-items: center; font-size: 7rem; color: #ffffff22; }
-/* Artist, album and year, and the track's place, centred under the artwork: the artist brightest, the rest quieter. */
 .audio-player-facts { position: absolute; left: 50%; top: calc(44% + min(21vh, 19vw, 210px) + 1.3rem); width: min(90vw, 36rem); transform: translateX(-50%); text-align: center; pointer-events: none; }
 .audio-player-facts p { margin: 0; overflow-wrap: anywhere; }
 .audio-player-artist { color: #f2f2f4; font-size: 1.35rem; font-weight: 600; }
@@ -883,17 +850,14 @@ h2 { font-size: clamp(1.2rem, 2vw, 1.75rem); letter-spacing: -.01em; margin: 1.1
 .audio-player-facts .audio-player-format { margin-top: .6rem; color: var(--text-dim); font-size: .9rem; letter-spacing: .02em; }
 /* A media line wraps only between its fields; see MediaLine. */
 .media-line-field { white-space: nowrap; }
-/* Beside the artwork where the screen has room across, under it otherwise.
-   --art, --gap and --facts size the pair, which is centred as one block so
-   neither half drifts off a wide screen. */
+/* Beside the artwork where the screen has room, under it otherwise; --art, --gap and --facts centre the pair as one block. */
 @media (min-width: 760px) and (min-aspect-ratio: 1/1) {
   .audio-player { --art: min(42vh, 38vw, 420px); --gap: 2.5rem; --facts: min(28rem, 36vw); }
   .audio-player .audio-player-art { left: calc(50% - (var(--art) + var(--gap) + var(--facts)) / 2); width: var(--art); transform: translateY(-50%); }
   .audio-player .audio-player-facts { left: calc(50% - (var(--art) + var(--gap) + var(--facts)) / 2 + var(--art) + var(--gap)); top: 44%; width: var(--facts); transform: translateY(-50%); text-align: left; }
 }
 .player-page .loading-overlay { z-index: 110; }
-/* What is being waited for, under the spinner. Quiet: it is company during a
-   wait, not a warning about one. */
+/* What is being waited for, under the spinner. */
 .loading-note {
   margin: .9rem 0 0;
   color: #9a9aa4;
@@ -919,15 +883,10 @@ h2 { font-size: clamp(1.2rem, 2vw, 1.75rem); letter-spacing: -.01em; margin: 1.1
 }
 .player-fatal-error strong { color: #dedee2; font-size: 1.05rem; }
 .player-fatal-error span { color: #ffb4b4; overflow-wrap: anywhere; }
-/* The account's cap refusing, which is the one failure here a viewer can act
-   on. Brighter than the message beneath it, because it is the sentence that
-   sends them to the right place rather than to check a healthy server. */
+/* The account-cap refusal, the one failure a viewer can act on, so brighter than the message beneath. */
 .player-fatal-error .player-failure-notice { color: #f2dede; }
-/* What the viewer can do about a quality no node can keep up with. */
 .player-failure-actions { display: flex; justify-content: center; gap: .6rem; margin-top: .35rem; }
-/* The evidence behind the failure, in the failure's own words. Quieter than
-   the message itself and left-aligned: it is read line by line, and centring
-   a list of timings makes the column of numbers unfollowable. */
+/* Left-aligned: a centred list of timings is unfollowable. */
 .player-failure-trail {
   margin: .35rem 0 0;
   padding: .55rem .7rem;
@@ -1073,8 +1032,7 @@ h2 { font-size: clamp(1.2rem, 2vw, 1.75rem); letter-spacing: -.01em; margin: 1.1
   .player-option-group { grid-template-columns: 1fr; gap: .25rem; }
   .player-option-group > span { padding-top: 0; }
   .player-option-note { grid-column: 1; }
-  /* One column leaves no right-hand side to sit on, so the node group stops
-     pretending there is one and reads like every other group. */
+  /* One column has no right-hand side, so the node group reads like every other group. */
   .player-options { flex-direction: column; gap: .65rem; }
   .player-options-controls { max-width: none; width: 100%; }
   .player-options > .player-option-group-node {
@@ -1122,10 +1080,7 @@ h2 { font-size: clamp(1.2rem, 2vw, 1.75rem); letter-spacing: -.01em; margin: 1.1
   .movie-detail-poster { width: min(58vw, 240px); }
 }
 
-/* Record lists ------------------------------------------------------- *
- * The client's one way of presenting managed records: a compact row that
- * states what the record is, and opens a dialogue to change it. Nothing in a
- * row is an input. See `docs/architecture.md`.                            */
+/* Record lists: compact rows that open a dialogue to change the record; nothing in a row is an input. See `docs/architecture.md`. */
 .record-list { list-style: none; margin: 1rem 0 0; padding: 0; display: grid; gap: .4rem; }
 .record-row {
   display: flex;
@@ -1136,8 +1091,7 @@ h2 { font-size: clamp(1.2rem, 2vw, 1.75rem); letter-spacing: -.01em; margin: 1.1
   border-radius: 10px;
   background: #ffffff08;
 }
-/* The row itself is the control, so it carries no button chrome of its own
-   until it is focused or hovered. */
+/* The row is the control: no button chrome until focused or hovered. */
 .record-main {
   flex: 1 1 auto;
   display: flex;
@@ -1170,8 +1124,7 @@ h2 { font-size: clamp(1.2rem, 2vw, 1.75rem); letter-spacing: -.01em; margin: 1.1
   border: 1px solid #ffffff24;
   border-radius: 999px;
 }
-/* Between the accounts an operator cannot recreate and everyone else.
-   Deliberately faint: it groups, it does not announce. */
+/* Between the accounts an operator cannot recreate and everyone else. */
 .record-divider { height: 1px; margin: .35rem .6rem; background: #ffffff14; }
 .manage-panel-actions { display: flex; gap: .6rem; flex-wrap: wrap; margin-top: 1rem; }
 
@@ -1208,12 +1161,7 @@ h2 { font-size: clamp(1.2rem, 2vw, 1.75rem); letter-spacing: -.01em; margin: 1.1
 .account-icon { display: inline-flex; opacity: .8; }
 .account-username { font-size: .78rem; letter-spacing: .02em; max-width: 9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .account-overflow button { color: var(--text-dim); }
-/* The identity is the trigger, so it is sized by its own content rather than
-   by the 1.8rem box a `⋯` glyph needs, and it stays flat until pointed at:
-   a permanent button outline in the top bar would compete with the navigation
-   for attention it has not earned. The focus ring is restored explicitly —
-   the rules above lose to this selector's specificity, and losing the ring on
-   a television is losing the only cue there is. */
+/* The identity is the trigger: sized by its content and flat until pointed at. The focus ring is restored explicitly, because this selector outranks the rules above. */
 .account-overflow .overflow-menu-trigger {
   width: auto;
   height: auto;
@@ -1246,16 +1194,11 @@ h2 { font-size: clamp(1.2rem, 2vw, 1.75rem); letter-spacing: -.01em; margin: 1.1
 .topbar-settings { display: inline-flex; align-items: center; color: var(--text-dim); padding: .3rem; border-radius: .45rem; }
 .topbar-settings:hover, .topbar-settings:focus-visible, .topbar-settings.active { color: inherit; }
 
-/* An app-wide notice under the top bar, for something the viewer must know that belongs to no one screen. */
+/* An app-wide notice under the top bar. */
 .app-notice { display: flex; align-items: center; gap: .8rem; margin: .6rem 1.5rem 0; padding: .6rem .85rem; border: 1px solid #7b273133; border-radius: .55rem; background: #35080c73; color: #ffb4b4; }
 .app-notice button { margin: 0 0 0 auto; padding: .35rem .7rem; }
 
-/*
- * Availability: an outline mark on a dark disc at the top left of a title
- * not wholly held by a reachable node, in the same red and yellow as the
- * other clients. An unavailable title is greyed out and cannot be selected; its
- * mark is not, so the reason stays visible.
- */
+/* Availability: an outline mark on a dark disc, top left of a title not wholly held by a reachable node. A greyed-out unavailable title keeps its mark at full strength. */
 :root { --availability-red: #ff4d4f; --availability-yellow: #ffc53d; --availability-disc: #08080ac9; }
 .availability-marker { display: inline-flex; box-sizing: border-box; width: 1.6rem; height: 1.6rem; padding: .18rem; flex: 0 0 auto; border-radius: 50%; background: var(--availability-disc); }
 .availability-marker svg { display: block; width: 100%; height: 100%; }

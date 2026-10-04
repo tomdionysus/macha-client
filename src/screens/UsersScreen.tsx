@@ -34,81 +34,45 @@ const ROLE_DESCRIPTIONS: Record<UserRole, string> = {
   importer: 'Add content through torrents and ingest.',
   manager: 'Files, namespaces and catalogue matches.',
   manage_users: 'Add, edit and remove accounts.',
-  // Deliberately says what it does *not* cover. `view_status` gates the
-  // diagnostic view only — the node roster, per-node capacity, which node is
-  // being asked for what. Health, ranking, failover and the connection gate
-  // all run off `/api/v1/health`, which needs no session and no role, so
-  // withholding this costs a viewer the Status screen and nothing else.
+  // `view_status` gates only the Status screen; health, failover and the connection gate need no role.
   view_status: 'Node health and capacity. Does not affect playback.',
 };
 
-/**
- * What an account can do, in one line, in the canonical order.
- *
- * The list is for recognising an account and seeing what it holds at a glance;
- * the labels are the same ones the editor uses, so the summary and the
- * checkboxes never read as two different vocabularies. An account with no
- * roles is a real and important state — it can sign in and do nothing — so it
- * says so rather than rendering an empty cell.
- */
+/** An account's roles in one line, in canonical order, with the editor's labels; "No roles" when it has none. */
 export function roleSummary(roles: readonly UserRole[]): string {
   const named = USER_ROLES.filter((role) => roles.includes(role)).map((role) => ROLE_LABELS[role]);
-  // A role this build does not recognise still counts: the server granted it,
-  // and silently dropping it would under-report what the account can do.
+  // A role this build does not recognise still counts, so the summary never under-reports.
   const unrecognised = roles.filter((role) => !USER_ROLES.includes(role)).length;
   if (unrecognised > 0) named.push(unrecognised === 1 ? '1 other role' : `${unrecognised} other roles`);
   return named.length > 0 ? named.join(' · ') : 'No roles';
 }
 
 /**
- * An account the server protects from being renamed — `root` and `anonymous`,
- * on this deployment.
- *
- * Asked of the server's own flag rather than by testing for those two names,
- * which is the rule the rest of this screen follows: the names are the
- * server's to choose, and a client that tested for them would pin the wrong
- * accounts the moment they changed — and pin nothing at all on a deployment
- * that names them something else.
- *
- * `rename` is the honest one of the four flags for this. `delete` is also
- * withheld from the last `manage_users` holder and from your own account, both
- * of which are ordinary accounts that must not float to the top.
+ * An account the server protects from renaming. Read from the server's flag, never the username.
+ * `rename` rather than `delete`, which is also withheld from ordinary accounts (the last
+ * `manage_users` holder, your own).
  */
 export function isProtectedAccount(user: MachaUser): boolean {
   return user.mutable.rename === false;
 }
 
 /**
- * The two accounts an operator cannot recreate, first, and in that order:
- * `root`, then `anonymous`, then everyone else alphabetically.
- *
- * The order within the protected pair is also read from the server rather than
- * from the names. `anonymous` is the account that holds no credential at all —
- * the server states `set_password: false` for it — so "can hold a password"
- * separates the operator's own superuser from the account that exists to be
- * nobody. That is the difference the ordering is really about, and it survives a rename.
+/**
+ * Protected accounts first, then everyone else alphabetically. Of the protected, the one that can
+ * hold a password (the superuser) precedes the credential-less one (anonymous).
  */
 export function byStanding(left: MachaUser, right: MachaUser): number {
   const protection = Number(isProtectedAccount(right)) - Number(isProtectedAccount(left));
   if (protection !== 0) return protection;
   if (isProtectedAccount(left)) {
-    // The account that can hold a password first. Note the operands run the
-    // other way round from the protection test above: there the flag being
-    // true sorts first, here the flag being false sorts last.
+    // The account that can hold a password sorts first.
     const credentialless = Number(left.mutable.set_password === false) - Number(right.mutable.set_password === false);
     if (credentialless !== 0) return credentialless;
   }
   return left.username.localeCompare(right.username);
 }
 
-/**
- * Which form field a server error belongs against.
- *
- * Codes, never message text: the server owns the wording and this only has to
- * know which control the reader should look at. Anything unrecognised
- * falls through to the form-level slot rather than being hidden — an
- * unfamiliar code from a newer server must still be readable.
- */
+/** Which form field a server error belongs against, by code. An unknown code goes to the form-level slot. */
 function fieldForCode(code: string | undefined): 'username' | 'password' | 'roles' | 'form' {
   switch (code) {
     case 'username_taken':
@@ -135,22 +99,15 @@ function fieldError(cause: unknown): FieldError {
 }
 
 function passwordComplaint(password: string, policy: PasswordPolicy | undefined): string | undefined {
-  // The server owns the rule; this only saves a round trip for the obvious
-  // case. An absent minimum means the server states no rule, so nothing is
-  // checked here rather than a length being invented locally.
+  // Saves a round trip only; where the server states no minimum, nothing is checked.
   const minimum = policy?.min_password_length;
   if (minimum === undefined || password.length >= minimum) return undefined;
   return `Passwords must be at least ${minimum} characters.`;
 }
 
 /**
- * One request from a dialogue, with the busy state and the error mapping that
- * every one of them needs.
- *
- * Returned rather than thrown on failure so the caller decides whether the
- * dialogue closes: a refusal has to stay on screen beside the field it
- * belongs to, and a dialogue that closes on failure takes the only
- * explanation with it.
+ * Runs one dialogue request with its busy state and error mapping. Returns success rather than
+ * throwing, so a refused dialogue stays open beside its error.
  */
 function useDialogueSubmit(onDone: () => void) {
   const [busy, setBusy] = useState(false);
@@ -188,8 +145,7 @@ function RoleChoice({ roles, disabled, onChange }: {
               checked={roles.includes(role)}
               disabled={disabled}
               onChange={(event) => onChange(event.target.checked
-                // Rebuilt in the canonical order rather than appended, so two
-                // users with the same roles always read the same way.
+                // Rebuilt in canonical order, so the same roles always read the same way.
                 ? USER_ROLES.filter((candidate) => candidate === role || roles.includes(candidate))
                 : roles.filter((candidate) => candidate !== role))}
             />
@@ -278,14 +234,8 @@ function NewUserDialogue({ api, policy, open, onClose, onCreated }: {
 }
 
 /**
- * Renaming an account and setting its roles — the two things that describe who
- * it is, together, because they are saved by one request.
- *
- * A password is not here. Setting one is a different kind of act with a
- * different consequence — it bumps `credential_generation` and signs that
- * account out everywhere — and burying it in the middle of an edit form is how
- * somebody does it by accident. It has its own dialogue, reached from the same
- * menu.
+ * Renames an account and sets its roles, in one request. Setting a password has its own dialogue,
+ * because it bumps `credential_generation` and signs the account out everywhere.
  */
 function EditUserDialogue({ api, user, open, onClose, onChanged }: {
   api: UsersApi;
@@ -415,16 +365,8 @@ function PasswordDialogue({ api, user, policy, open, onClose, onChanged }: {
 }
 
 /**
- * One account, as a row.
- *
- * The row states what the account is and nothing else; everything that changes
- * it opens a dialogue. Which actions are offered comes from the server's
- * per-field `mutable` block, never from the username — the names of the
- * protected accounts are the server's to choose, and a client that tested for
- * `root` or `anonymous` would be wrong the moment those names change, and
- * wrong everywhere at once because all four clients would carry the same
- * guess. An absent `mutable` is read as "this node does not say", not as a
- * refusal.
+ * One account as a row; every change opens a dialogue. The actions offered come from the server's
+ * per-field `mutable` block, never from the username.
  */
 function UserRow({ api, user, policy, isSelf, onChanged }: {
   api: UsersApi;
@@ -456,10 +398,7 @@ function UserRow({ api, user, policy, isSelf, onChanged }: {
 
   return (
     <li className="record-row">
-      {/* The row is the edit control, the way the account identity is its own
-          menu trigger in the top bar. A separate "Edit" button beside a name
-          that does nothing is two targets for one idea, and on a remote it
-          costs a D-pad stop to reach the half that works. */}
+      {/* The row itself is the edit control, which saves a D-pad stop over a separate Edit button. */}
       <button
         type="button"
         className="record-main"
@@ -511,10 +450,7 @@ export function UsersScreen({ api, session }: Props) {
   const onChanged = useCallback(() => refresh(), [refresh]);
   const [adding, setAdding] = useState(false);
 
-  // `Manage` is the page heading, so each section heads itself the way Files
-  // and Unmatched do. A second `h1` here would make the section's own words
-  // the biggest on screen, competing with the page title rather than sitting
-  // under it.
+  // `Manage` is the page's `h1`, so each section heads itself with an `h2`.
   const heading = (
     <div className="manage-panel-heading">
       <div>
@@ -536,18 +472,14 @@ export function UsersScreen({ api, session }: Props) {
           ? <Loading />
           : result.error
             ? <ErrorMessage error={result.error} />
-            // Neither loading, failed, nor holding a list. The heading alone
-            // would read as a broken page rather than as a server that
-            // answered oddly.
+            // Neither loading, failed, nor holding a list.
             : <p className="manage-error" role="alert">The server did not return a user list.</p>}
       </section>
     );
   }
 
   const users = [...result.value].sort(byStanding);
-  // Where the protected pair stops and the ordinary accounts begin. A rule is
-  // drawn there, and only there: a divider above nothing, or below nothing,
-  // is a line with no two things either side of it.
+  // Where the protected accounts end; the divider is drawn there, and only if there are any.
   const ordinaryFrom = users.filter(isProtectedAccount).length;
 
   return (

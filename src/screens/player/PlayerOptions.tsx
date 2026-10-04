@@ -46,15 +46,7 @@ const REASON_TEXT: Record<PlaybackDecisionReason, string> = {
   'transcode-below-real-time': 'the server cannot convert this picture fast enough to play',
 };
 
-/**
- * Why the facts lookup failed, in one clause, or nothing.
- *
- * `factsError` is `unknown` by contract — it is whatever the facts supplier
- * threw — so nothing here assumes a shape. An absent error is not a failure to
- * describe: core states that it is absent when there is no facts supplier at
- * all, which is a configuration rather than a fault, and inventing a sentence
- * for it would report a problem nobody has.
- */
+/** Why the facts lookup failed, in one clause. `factsError` is whatever the supplier threw, so no shape is assumed; absent means no supplier, not a fault. */
 function describeFactsError(cause: unknown): string | undefined {
   if (cause === undefined || cause === null) return undefined;
   const message = cause instanceof Error ? cause.message : String(cause);
@@ -63,26 +55,14 @@ function describeFactsError(cause: unknown): string | undefined {
 }
 
 /**
- * Why this stream is being served the way it is.
- *
- * The chooser's worst failure has no symptom without this. When the facts
- * lookup fails the coordinator falls back to transcode — the right answer,
- * since it is the only instruction always performable — and the viewer sees a
- * picture that works. So a client can quietly transcode a whole library that
- * would have direct-played, on a cluster that looks healthy, and nothing ever
- * prompts anyone to look. A television has no log a person will read; this is
- * the only place the difference can show.
+ * Why this stream is served the way it is. A failed facts lookup falls back to
+ * transcode, which plays, so this note is the only place that failure shows.
  */
 function instructionNote(instruction: PlaybackInstructionReport | undefined): string | undefined {
   if (!instruction) return undefined;
   if (instruction.chosenByViewer) return 'Chosen by you.';
   if (instruction.withoutFacts) {
-    // Say *why* nothing could be read, from the server's `factsError`. A
-    // viewer who sees "could not be reasoned from" has no idea whether their
-    // file is broken, their node is busy or this client never asked — and the
-    // symptom they get downstream is a media error that reads as a corrupt
-    // download. `factsError` is deliberately `unknown`, because it is whatever
-    // the supplier threw, so it is described rather than trusted.
+    // Say why nothing could be read, so the viewer can tell a broken file from a busy node.
     const cause = describeFactsError(instruction.factsError);
     return cause
       ? `Chosen without facts — transcoding because this file's details could not be read: ${cause}`
@@ -92,13 +72,7 @@ function instructionNote(instruction: PlaybackInstructionReport | undefined): st
   return reasons.length > 0 ? `Chosen automatically: ${reasons.join('; ')}.` : 'Chosen automatically.';
 }
 
-/**
- * Inputs nobody supplied, named rather than left to a reasonable default.
- *
- * A reasonable default produces a plausible instruction, so an input nobody
- * supplies never looks wrong on its own. This client intends to wire all of
- * them, so anything listed here is a defect and not a note.
- */
+/** Inputs nobody supplied to the chooser. This client intends to wire them all, so any listed is a defect. */
 function assumptionNote(instruction: PlaybackInstructionReport | undefined): string | undefined {
   if (!instruction || instruction.chosenByViewer || instruction.assumed.length === 0) return undefined;
   return `Decided without: ${instruction.assumed.join(', ')}.`;
@@ -107,22 +81,21 @@ function assumptionNote(instruction: PlaybackInstructionReport | undefined): str
 export function PlayerOptions({ session, pendingPreferences, instruction, capabilities, versions, offered, nodes = [], movingToNode, onApply, onPlayVersion, onSelectNode }: {
   session: PlaybackSession;
   /**
-   * Which modes this device can play the file in (core's `offeredModes`).
-   * A mode not offered is not shown; one offered only because the viewer
-   * asked for everything says why the device objects. Absent shows every
-   * mode the node allows.
+  /**
+   * Core's `offeredModes`. A mode not offered is hidden; one offered only because
+   * the viewer asked for everything says why the device objects. Absent shows every mode the node allows.
    */
   offered?: readonly OfferedMode[];
   /** The item's qualities, as on its detail page; see core's `snapshot.versions`. */
   versions?: PlaybackVersions;
   onPlayVersion?: (step: VersionStep) => void;
-  /** What this device can actually decode, which decides what remux may copy. */
+  /** What this device decodes, which decides what remux may copy. */
   capabilities?: PlaybackCapabilities;
   pendingPreferences?: PlaybackPreferencesUpdate;
   instruction?: PlaybackInstructionReport;
-  /** Every node this client knows, already in a stable display order. */
+  /** Every node this client knows, in display order. */
   nodes?: readonly PlayerNodeChoice[];
-  /** The node a move is in flight to, so the pill can say so rather than look ignored. */
+  /** The node a move is in flight to. */
   movingToNode?: string;
   onApply: (update: PlaybackUpdate) => void;
   onSelectNode?: (nodeId: string) => void;
@@ -132,35 +105,18 @@ export function PlayerOptions({ session, pendingPreferences, instruction, capabi
   const selectedSubtitle = pendingPreferences?.subtitleStream === null
     ? -1
     : pendingPreferences?.subtitleStream ?? session.selected.subtitleStream;
-  // "Auto" is not a value the server understands — the client decides.
-  // `'choose'` is a core-side sentinel that never reaches the wire: the
-  // coordinator re-runs the instruction chooser against this media's facts and
-  // this platform's policy, then sends a concrete mode. Sending it on every
-  // press, rather than clearing the field, is what makes Auto mean the same
-  // thing mid-playback as it does at the start — an absent mode would leave
-  // the server on whatever it was already doing, and the control would
-  // highlight while changing nothing.
-  // A mode press states the whole transform, not the shorthand for it.
-  //
-  // The session being amended already carries per-stream transforms from
-  // whatever instruction created it — Auto's usual answer for this library is
-  // transcode with the video copied — and naming only the mode leaves those in
-  // place. The server then reads the result as a contradiction and refuses the
-  // whole update, so one button press would end in an error about a request
-  // the viewer did not make. Saying the whole transform outright leaves
-  // nothing to be merged with, and nothing to disagree about.
-  //
-  // What it says is `modeTransform`'s to decide, and remux is the one that
-  // has a decision: copying audio this device cannot decode leaves a node
-  // that never produces a first fragment.
+  // `'choose'` (Auto) is a core sentinel that never reaches the wire: the
+  // coordinator re-runs the chooser and sends a concrete mode. A concrete mode
+  // press states the whole transform (`modeRequest`), because naming only the
+  // mode leaves the session's per-stream transforms in place and the server
+  // refuses the contradiction.
   const audioCodec = session.options.audioStreams.find((stream) => stream.index === selectedAudio)?.codec
     ?? session.output.audio?.codec;
   const mode = (value: PlaybackMode | 'choose') => onApply({
     preferences: value === 'choose' ? { mode: value } : modeRequest(value, audioCodec, capabilities),
   });
   const chosenByViewer = effectivePreferences.mode !== undefined && effectivePreferences.mode !== 'choose';
-  // With dozens of nodes the one you are on can be off the bottom of its own
-  // list, which reads as no node being selected at all.
+  // Keeps the active node in view in a long list.
   const activeNodeRef = useRef<HTMLButtonElement | null>(null);
   useEffect(() => {
     activeNodeRef.current?.scrollIntoView?.({ block: 'nearest' });
@@ -232,12 +188,7 @@ export function PlayerOptions({ session, pendingPreferences, instruction, capabi
       </div>}
       </div>
 
-      {/* Right-hand side, unlike everything above it, and that placement is
-          the point: the format controls change what the node sends, this
-          changes which node sends it. It is also where the node already
-          appears — the `CONTAINER : origin` line in the title bar is
-          right-aligned, so the answer and the control that changes it sit on
-          the same edge. */}
+      {/* On the right, where the title bar already names the node: this changes which node sends, not what is sent. */}
       {onSelectNode && nodes.length > 1 && <div className="player-option-group player-option-group-node">
         <span>Node</span>
         <div>

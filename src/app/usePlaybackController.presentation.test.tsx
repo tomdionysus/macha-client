@@ -16,13 +16,7 @@ function movie(id: string): MediaSummary {
   return { id, kind: 'movie', title: id, mediaIds: [`file:${id}`], durationMs: 600_000 };
 }
 
-/**
- * Stands in for PlaybackRuntime on the one property that matters here: play()
- * patches its lifecycle and notifies subscribers *synchronously*, before it
- * returns, which is what the real runtime does. A fake that published on a
- * later tick would batch differently and hide the very thing this file exists
- * to catch.
- */
+/** Like the real runtime, play() notifies subscribers synchronously, before it returns; a later-tick fake would batch differently and hide the flash. */
 class SynchronousRuntime {
   private snapshot: PlaybackRuntimeSnapshot = { phase: 'idle', generation: 0 };
   private readonly listeners = new Set<(state: PlaybackRuntimeSnapshot) => void>();
@@ -50,12 +44,9 @@ describe('presentation while playback is starting', () => {
   });
 
   it('never renders the player visible before the player route is active', () => {
-    // The mini bar is what a viewer sees for any render where playback is
-    // visible and `/play/:id` has not arrived, so such a render flashes it.
-    // The hazard is lane priority, not call order: the router publishes
-    // locations inside `React.startTransition` unless told otherwise, so the
-    // runtime's ordinary setState would commit a render sooner. AppRouter
-    // turns that off; this asserts the pairing that depends on it.
+    // A render with playback visible before `/play/:id` arrives flashes the mini bar.
+    // The router publishes locations in `React.startTransition` by default, which the
+    // runtime's setState would outrun; AppRouter turns that off.
     const runtime = new SynchronousRuntime();
     const api = { details: vi.fn() } as unknown as MediaApi;
     const progressStore = new ContinueWatchingStore('test-client');

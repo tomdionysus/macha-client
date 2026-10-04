@@ -31,7 +31,6 @@ function fakeVideo() {
 }
 
 describe('sound stopping while the picture carries on', () => {
-  /** The one fault no other channel can see: nothing is emitted and nothing stalls. */
   function play(video: ReturnType<typeof fakeVideo>, audioBytes: number, videoBytes: number, atMs: number) {
     vi.spyOn(performance, 'now').mockReturnValue(atMs);
     video.webkitAudioDecodedByteCount = audioBytes;
@@ -51,8 +50,7 @@ describe('sound stopping while the picture carries on', () => {
     play(video, 2_000, 40_000, 5_000);
     expect(warnings.filter((entry) => entry.event === 'media-audio-decode-stopped')).toHaveLength(0);
 
-    // Six seconds after the audio stopped, which is the first sample past the
-    // evidence threshold — not the first sample after it stopped.
+    // The first sample past the evidence threshold, six seconds after the audio stopped.
     play(video, 2_000, 50_000, 8_000);
     play(video, 2_000, 60_000, 11_000);
     const reported = warnings.filter((entry) => entry.event === 'media-audio-decode-stopped');
@@ -64,8 +62,7 @@ describe('sound stopping while the picture carries on', () => {
   });
 
   it('says nothing while both pipelines are moving, however quiet the film is', () => {
-    // Encoded silence is still decoded bytes, so a quiet passage never looks
-    // like a stopped decoder.
+    // Encoded silence is still decoded bytes.
     const { warnings, log } = recorder();
     const video = fakeVideo();
     new WebMediaDiagnostics(log).attach(video, () => undefined);
@@ -111,7 +108,6 @@ describe('sound stopping while the picture carries on', () => {
 });
 
 describe('the picture holding while the clock runs on', () => {
-  /** A frozen picture: sound continuing, picture still, nothing emitted. */
   function withFrames(video: ReturnType<typeof fakeVideo>) {
     const quality = { totalVideoFrames: 0, droppedVideoFrames: 0 };
     Object.assign(video, { getVideoPlaybackQuality: () => ({ ...quality }) });
@@ -188,9 +184,7 @@ describe('the picture holding while the clock runs on', () => {
     diagnostics.attach(outgoing, () => undefined);
     diagnostics.attach(incoming, () => undefined);
 
-    // The outgoing picture holds at 106 frames while its clock runs; the
-    // incoming element decodes normally. Sampled interleaved, a shared
-    // previous sample makes every outgoing sample look like progress.
+    // Sampled interleaved, a previous sample shared between elements would make the frozen one look like progress.
     for (let step = 0; step < 12; step += 1) {
       tick(outgoing, outgoingFrames, 106, 100 + step * 0.25, step * 250);
       tick(incoming, incomingFrames, step * 6, step * 0.25, step * 250 + 1);

@@ -3,11 +3,9 @@ import type { CatalogueItem } from '@machafoundation/core';
 import { viewerErrorText } from '../../text/viewerText';
 
 /**
- * Choose an existing catalogue item to file something under: the series an
- * episode belongs to, or an artist or album a track belongs to. Naming the
- * parent by id joins the hierarchy the scanner already built, where a name
- * alone would create a `manual:` copy beside it. `find` searches for the
- * typed words.
+ * Chooses an existing catalogue item as a parent: an episode's series, or a
+ * track's artist or album. Naming the parent by id joins the scanner's
+ * hierarchy; a name alone would create a `manual:` copy beside it.
  */
 export function ParentPicker({ label, find, chosen, onChoose, disabled }: {
   label: string;

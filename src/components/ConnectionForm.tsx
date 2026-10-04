@@ -6,15 +6,7 @@ export interface ConnectionFormProps {
   onSave: (urls: readonly string[]) => Promise<string | undefined>;
   submitLabel?: string;
   notice?: string;
-  /**
-   * The host this page was served from, confirmed as a Macha node and in use
-   * because nothing is configured.
-   *
-   * Stated, never filled into the field. It is not configuration and it is not
-   * stored, so a viewer who presses save must be saving what they typed rather
-   * than something the client guessed on their behalf — and an empty field is
-   * the honest description of an unconfigured client.
-   */
+  /** This page's own host, in use because nothing is configured. Shown, never filled into the field: it is not stored. */
   usingHost?: string;
 }
 
@@ -53,9 +45,7 @@ export function ConnectionForm({ bootstrapEndpoints, onSave, submitLabel = 'Save
     <button className="primary-button" type="submit" disabled={saving} data-tv-focusable="true">
       {saving ? 'Saving…' : submitLabel}
     </button>
-    {/* Endpoints are not checked before they are saved, so nothing here may
-        let a viewer read a saved endpoint as a verified one. The client
-        reports what it can actually reach once it tries. */}
+    {/* Endpoints are saved unchecked, so this text must not imply a saved endpoint is verified. */}
     <p>Endpoints are tried in order, and whichever answers is used. The client can learn additional node APIs after connecting.</p>
     {usingHost && <p className="connection-form-origin">
       Nothing is configured, so this client is using the host it was served from: <code>{usingHost}</code>.

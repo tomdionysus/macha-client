@@ -38,37 +38,26 @@ function containsPosition(ranges: readonly PlaybackTimeRange[], positionMs: numb
 function canonicalOrigin(candidateMs: number): number | undefined {
   if (!Number.isFinite(candidateMs)) return undefined;
   if (Math.abs(candidateMs) <= ZERO_ORIGIN_TOLERANCE_MS) return 0;
-  // A transformed generation's media clock cannot begin before the generation
-  // does. A negative candidate means the sample was not what the caller assumed
-  // — so refuse it and stay unestablished rather than encode the nonsense into
-  // every later mapping, which is how a readout ends up permanently ahead of
-  // the picture. The next sample gets another go.
+  // A generation's media clock cannot begin before the generation does. Refuse
+  // a negative origin and stay unestablished, or every later mapping runs
+  // ahead of the picture.
   return candidateMs < 0 ? undefined : candidateMs;
 }
 
 /**
- * Where the loader was pointed when this generation started fetching.
+ * Where the loader was pointed when the generation started fetching; the
+ * timeline cannot infer it from the requested position.
  *
- * The two attach paths differ in a way the timeline cannot infer from the
- * requested position, so the caller states which one it took:
- *
- * - `generation-start` — the teardown path. hls.js loads from the beginning of
- *   the generation and the initial-seek listener samples *before* it seeks, so
- *   the first resident timestamp is the origin and `currentTime` is 0 whatever
- *   the requested position is. Under the server's seek contract that requested
- *   position is `seek_offset_ms`, which on a remux generation is routinely
- *   seconds and says nothing at all about where the media clock begins.
- * - `requested-position` — the handover path. `attachHls` sets hls.js's
- *   `startPosition`, so once metadata lands `currentTime` genuinely is the
- *   requested position and the origin is the difference.
+ * - `generation-start`: hls.js loads from the generation's beginning and is
+ *   sampled before it seeks, so the first resident timestamp is the origin.
+ * - `requested-position`: `attachHls` sets `startPosition`, so `currentTime`
+ *   is the requested position and the origin is the difference.
  */
 export type WebMediaLoaderStart = 'generation-start' | 'requested-position';
 
 /**
- * Normalize the browser media clock into the source-generation-local clock
- * required by Player. MSE/HLS is allowed to expose timestamps whose origin is
- * inherited from the source media; the rest of the frontend must never need to
- * know that raw origin.
+ * Maps the browser media clock, whose origin MSE/HLS may inherit from the
+ * source, onto the generation-local clock Player requires.
  */
 export class WebMediaTimeline {
   private originMs: number | undefined;
@@ -128,18 +117,13 @@ export class WebMediaTimeline {
     const residency = buffered.length > 0 ? buffered : seekable;
     if (residency.length === 0) return;
 
-    // The loader began at the generation's own start, so the first resident
-    // media timestamp is the origin. It works whether MSE exposes a zero-based
-    // timeline or preserves an absolute/non-zero timestamp from the source
-    // generation, and it does not care where the caller intends to seek next.
+    // The first resident timestamp is the origin, zero-based or not.
     if (this.loaderStart === 'generation-start') {
       this.originMs = canonicalOrigin(residency[0].startMs);
       return;
     }
 
-    // The loader began at the requested position, so once that position is
-    // actually resident `currentTime` is it, and the difference is the origin.
-    // This maps both zero-based and non-zero MSE clocks without assuming either.
+    // Once the requested position is resident, `currentTime` is it and the difference is the origin.
     if (Number.isFinite(rawPositionMs) && containsPosition(residency, rawPositionMs)) {
       this.originMs = canonicalOrigin(rawPositionMs - this.requestedPositionMs);
     }

@@ -1,31 +1,12 @@
 import { sessionLockedOut, type UserRole } from '@machafoundation/core';
 
-/** Why the sign-in wall is standing in front of this viewer, if it is. */
+/** Why the sign-in wall stands in front of this viewer. */
 export type LockoutReason = 'no-roles' | 'refused';
 
 /**
- * What to tell a viewer the wall is for.
- *
- * **`undefined` is unknown, `[]` is granted nothing**, and they must not share
- * a sentence. A node too old to state roles leaves `roles` undefined for ever
- * and core treats that as permissive on purpose; saying "you have no roles"
- * there would lock a viewer out of a cluster that simply never answered the
- * question. `sessionLockedOut` is core's, so every client draws the line in
- * the same place.
- *
- * **The remedy comes first, and it is signing in.** A session granted
- * nothing means one of three things: a cluster that carries no anonymous
- * viewer, a signed-in account that genuinely holds nothing, or core's
- * credential-less re-mint having replaced a working session after a `401`.
- * Two of the three are answered by signing in, and only the middle one needs
- * an administrator, so a sentence that leads with *ask an administrator*
- * sends most of these viewers to the wrong person.
- *
- * **A refusal is not a role problem.** `mintFailure.reason === 'refused'` is
- * no session at all — a node answered and stated a policy — so it gets the
- * sentence for that instead: sign in, because this cluster will not carry an
- * anonymous viewer. The server's own words are deliberately not repeated;
- * core's contract is that they are never assumed fit for a viewer.
+ * `undefined` roles are unknown (a node too old to state them) and stay permissive; only `[]` is
+ * granted nothing. `sessionLockedOut` is core's, so every client draws that line in the same place.
+ * A refused mint is no session at all, not a role problem.
  */
 export function lockoutReason(
   roles: readonly UserRole[] | undefined,
@@ -36,11 +17,8 @@ export function lockoutReason(
 }
 
 /**
- * A role-less session gets no notice of its own: the login screen's standing
- * line, that the server requires an account, says what to do. It is also what
- * an ordinary sign-out produces on a cluster whose anonymous account holds
- * nothing, where a "no permissions" notice would greet every login as though
- * something were wrong.
+ * A role-less session gets no notice: the login screen already says an account is required, and
+ * an ordinary sign-out produces the same state on a cluster whose anonymous account holds nothing.
  */
 export function lockoutNotice(reason: LockoutReason | undefined): string | undefined {
   if (reason === 'refused') {

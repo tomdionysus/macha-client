@@ -6,10 +6,7 @@ import { ConfirmModal } from './Modal';
 
 interface Props {
   session: CurrentSession;
-  /**
-   * Logs out: stops playback, revokes the session and starts afresh. The app
-   * owns it because all three are app-wide, and it reports its own failure.
-   */
+  /** Stops playback, revokes the session and starts afresh; reports its own failure. */
   onSignOut: () => Promise<void>;
 }
 
@@ -23,27 +20,12 @@ function UserIcon() {
 }
 
 /**
- * Who the viewer is, and the few things they can do about it.
- *
- * Deliberately quiet and beside the platform badge: on every screen but this
- * menu, identity is not what the viewer came for. It carries the username as
- * text rather than only an icon, because "am I signed in as the right person"
- * is the one question this control exists to answer at a glance, and an
- * avatar alone does not answer it.
- *
- * The anonymous account is the one presentational exception, and only here.
- * Every session belongs to a user and empty credentials authenticate that
- * one, so its session is ordinary in every mechanical sense — it carries
- * roles, it validates, it can be revoked. What it does not represent is
- * somebody who chose to be someone, so this offers a way in rather than an
- * account to manage. That is a statement about the viewer's intent, not a
- * capability check, and it is the only place in this client that names an
- * account at all.
+ * Shows the username as text, so "am I signed in as the right person" is answered at a glance.
+ * The anonymous account has an ordinary session, but is offered a way in rather than an account to manage.
  */
 export function AccountMenu({ session, onSignOut }: Props) {
   const navigate = useNavigate();
-  // Recorded on the login link below, so signing in returns the viewer to the
-  // page they were on rather than to Home.
+  // The login link records the pathname, so signing in returns here.
   const location = useLocation();
   const who = session.username?.trim() || '';
   const [confirming, setConfirming] = useState(false);
@@ -59,9 +41,6 @@ export function AccountMenu({ session, onSignOut }: Props) {
     }
   };
 
-  // Nobody has chosen to be anyone yet, so there is no account to manage and
-  // nothing to sign out of that the viewer would recognise as theirs. One
-  // control, saying the only thing they can usefully do.
   if (!isSignedIn(session)) {
     return (
       <Link className="account-menu account-login" to={routes.login} state={{ from: location.pathname }} data-tv-focusable="true">
@@ -73,9 +52,7 @@ export function AccountMenu({ session, onSignOut }: Props) {
 
   return (
     <div className="account-menu">
-      {/* The identity *is* the control: one target for one idea, so nothing
-          beside it looks pressable while doing nothing, and on a remote it
-          costs no extra D-pad stop. */}
+      {/* The identity is the trigger: one target, one D-pad stop. */}
       <OverflowMenu
         className="account-overflow"
         label={`Account options for ${who}`}
@@ -100,14 +77,7 @@ export function AccountMenu({ session, onSignOut }: Props) {
         onCancel={() => setConfirming(false)}
         onConfirm={() => void signOut()}
       >
-        {/* What logout actually does: `logout()` is `DELETE /api/v1/session`,
-            which revokes this one token, and the account's other sessions
-            keep working. Core's "propagates to every node" means this token
-            cannot be used against a different node, not that every session
-            the account holds is ended; signing out everywhere is what a
-            *password or role change* does, by bumping `credential_generation`.
-            Telling someone their other devices have been signed out when they
-            have not stops them doing the thing they actually needed. */}
+        {/* `logout()` revokes this one token; the account's other sessions keep working. */}
         <p>
           This signs <strong>{who}</strong> out on this device only — anywhere else stays signed in.
           Anything playing here will stop.

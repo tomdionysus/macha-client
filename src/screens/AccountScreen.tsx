@@ -26,14 +26,7 @@ function when(unixMs: number | undefined): string {
   return presentedTime(unixMs);
 }
 
-/**
- * What the signed-in user is, as the server describes it.
- *
- * Roles are shown by the names this build knows, and anything the server
- * grants that this build has never heard of is listed as it came rather than
- * dropped. A viewer who cannot see a permission they demonstrably have would
- * reasonably conclude the screen is lying.
- */
+/** The signed-in user as the server describes them. Roles this build does not know are listed as they came, not dropped. */
 export function AccountScreen({ api, session }: { api: UsersApi; session?: CurrentSession }) {
   const navigate = useNavigate();
   const details = useAsync((signal) => api.me(signal), [api]);
@@ -67,16 +60,8 @@ export function AccountScreen({ api, session }: { api: UsersApi; session?: Curre
         )}
 
       <div className="account-actions">
-        {/* Rendered from the server's own `mutable` block, never from the
-            username — the same rule the Users screen follows, and for the same
-            reason: which accounts are protected is not knowable from what they
-            are called. The anonymous account holds no credential at all, so
-            offering to change a password it cannot have is a control whose only
-            outcome is an error.
-
-            Absent `mutable` means an older node that does not state this, which
-            is not the same as a refusal: the button stays, and the server is
-            still the one that decides. */}
+        {/* Decided by the server's `mutable` block, never the username. Absent
+            `mutable` is an older node, not a refusal: the button stays. */}
         {details.value?.mutable?.set_password === false
           ? <p className="account-no-password">This account has no password, and one cannot be set for it.</p>
           : (
@@ -90,13 +75,9 @@ export function AccountScreen({ api, session }: { api: UsersApi; session?: Curre
 }
 
 /**
- * Change your own password.
- *
- * The server hands back a fresh token in the same response, because the
- * change invalidates the session that made it — being signed out by your own
- * password change is a bug, not a security measure. That token is the
- * session manager's to adopt, which is why this reports success and asks the
- * app to re-read rather than storing anything itself.
+ * Change your own password. The server returns a fresh token, since the change
+ * invalidates the session that made it; the session manager adopts it, so this
+ * only reports success and asks the app to re-read.
  */
 export function ChangePasswordScreen({ api, policy, onChanged }: {
   api: UsersApi;

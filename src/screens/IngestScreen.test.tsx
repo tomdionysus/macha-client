@@ -24,8 +24,7 @@ function torrentJob(overrides: Partial<TorrentJob> = {}): TorrentJob {
     eta_seconds: 1_200,
     progress: 0.25,
     ingest_job_id: null,
-    // A real node id, as `GET /api/v1/status` reports it: an opaque hash, not
-    // a host name, so the Node row's assertion tests the shape the server sends.
+    // An opaque hash, as the server reports node ids; not a host name.
     node_id: '855716bd8bb0ad12b0c4f876386699de',
     created_unix_ms: Date.now() - 3_600_000,
     updated_unix_ms: Date.now() - 2_000,
@@ -92,9 +91,8 @@ const importing: IngestJob = {
   error: null,
 };
 
-// The list polls every 1.5 s. On real time, a slow run sees polls a quick run
-// does not, so a test's outcome would depend on the machine. No test here
-// needs a poll; the settle helper's zero-delay timer stays real.
+// The list polls every 1.5 s; faking the interval keeps outcomes independent of
+// machine speed. The settle helper's zero-delay timer stays real.
 beforeEach(() => { vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] }); });
 afterEach(() => { vi.useRealTimers(); });
 
@@ -198,8 +196,7 @@ describe("a torrent's own page", () => {
     // 250 MB served against the 1 GB this node actually holds.
     expect(tile('Ratio')).toBe('0.25');
     expect(tile('Added')).toBe('1h ago');
-    // A torrent that downloaded cleanly and catalogued nothing is a failed
-    // acquisition wearing a completed badge; the counts are the only tell.
+    // Downloaded cleanly but only partly catalogued: the counts are the only tell.
     const catalogue = stage('catalogue');
     expect(catalogue.querySelector('.torrent-stage-status')?.textContent).toBe('Completed with issues');
     expect(fact(catalogue, 'Catalogued')).toBe('1 / 2');
@@ -373,8 +370,7 @@ describe('adding a torrent the node already holds (server 0.63.0)', () => {
     const alert = screen.getByRole('alert');
     expect(alert.textContent).toContain('That torrent is already in the list. To download it again, remove its job first.');
     fireEvent.click(within(alert).getByText('Open it'));
-    // Waits for the route, not just the element: under load the click lands
-    // before the navigation renders, and the address still reads the list.
+    // Wait for the route: the click can land before the navigation renders.
     await settle();
     expect(screen.getByTestId('where').textContent).toContain('/ingest/torrents/tor-1');
   });

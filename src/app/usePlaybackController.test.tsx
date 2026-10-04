@@ -44,12 +44,7 @@ function season(episodes: Episode[]): SeasonDetails {
   };
 }
 
-/**
- * A stalled snapshot: play() was called but the runtime's own lifecycle
- * subscriber hasn't published a matching request yet. This is the real race
- * window (the runtime updates asynchronously) rather than something timed
- * against React's incidental batching.
- */
+/** A stalled snapshot: play() was called but the runtime has not yet published a matching request. */
 function stalledSnapshot(): PlaybackRuntimeSnapshot {
   return { phase: 'starting', generation: 1 };
 }
@@ -63,9 +58,7 @@ describe('usePlaybackController route reconstruction', () => {
     const play = vi.fn().mockResolvedValue(undefined);
     const runtime = { play, stop: vi.fn(), setReturnTo: vi.fn() } as unknown as PlaybackRuntime;
     const api = { details: vi.fn() } as unknown as MediaApi;
-    // Constructed once, outside the render callback: real screens pass these
-    // down as stable props, and a fresh instance per render would itself
-    // retrigger every effect keyed on them.
+    // Constructed once: a fresh store per render would retrigger every effect keyed on it.
     const progressStore = new ContinueWatchingStore('test-client');
     const queueStore = new PlaybackQueueStore('test-client');
     const volumeStore = new VolumeStore('test-client');
@@ -84,9 +77,7 @@ describe('usePlaybackController route reconstruction', () => {
       result.current.startPlayback(movie('m1'));
     });
 
-    // The route-reconstruction effect also ran (playerItemId is now 'm1' and
-    // runtimeState.request never caught up), but the explicit-start guard
-    // must have suppressed it: exactly the one play() startPlayback issued.
+    // The route-reconstruction effect also ran; the explicit-start guard must suppress it.
     expect(play).toHaveBeenCalledTimes(1);
     expect(api.details).not.toHaveBeenCalled();
   });
@@ -112,23 +103,11 @@ describe('usePlaybackController route reconstruction', () => {
       await Promise.resolve();
     });
 
-    // No prior explicit start for this navigation (e.g. a page reload on
-    // /play/m2): the guard must not suppress the one legitimate reconstruction.
     expect(details).toHaveBeenCalledWith('m2');
     expect(play).toHaveBeenCalledTimes(1);
   });
 
-  /**
-   * A reload into `/play/:id` reconstructs before same-origin discovery has
-   * produced an endpoint. Asking for playback facts then goes through a
-   * session manager that has not started; core's `SessionManager.fetch` waits
-   * only for a mint already in flight, so the request would go out bare, take
-   * a 401, and leave the coordinator choosing a container and codec without
-   * facts, which reaches the viewer as a Format error.
-   *
-   * Waiting is free here and guessing is not: this is the one playback path
-   * that runs off a URL rather than off a viewer acting in a connected app.
-   */
+  // Facts requested before a session exists go out bare, take a 401, and the coordinator chooses blind.
   it('does not reconstruct from the URL before the client has an endpoint', async () => {
     const play = vi.fn().mockResolvedValue(undefined);
     const runtime = { play, stop: vi.fn(), setReturnTo: vi.fn() } as unknown as PlaybackRuntime;
@@ -156,8 +135,7 @@ describe('usePlaybackController route reconstruction', () => {
     expect(play).not.toHaveBeenCalled();
     expect(details).not.toHaveBeenCalled();
 
-    // And it is a hold, not a refusal: the same reload plays as soon as the
-    // client has somewhere to ask.
+    // A hold, not a refusal: the same reload plays once there is an endpoint.
     rerender(true);
     await act(async () => {
       await Promise.resolve();
@@ -185,9 +163,7 @@ describe('usePlaybackController season queue', () => {
   }
 
   it('widens a lone episode into its season so the transport has next and previous', async () => {
-    // Resuming an episode from Continue Watching passes no queue, since nothing
-    // was open to build one from, yet the episode plainly has a next and a
-    // previous.
+    // Resuming from Continue Watching passes no queue.
     const play = vi.fn().mockResolvedValue(undefined);
     const runtime = { play, stop: vi.fn(), setReturnTo: vi.fn() } as unknown as PlaybackRuntime;
     const episodes = [episode('e1', 1), episode('e2', 2), episode('e3', 3)];
@@ -197,8 +173,7 @@ describe('usePlaybackController season queue', () => {
     const { result } = harness(api, runtime);
     act(() => { result.current.startPlayback(episodes[1]); });
 
-    // Playback is not held for the season: the request goes out first, on the
-    // single item, and the siblings arrive behind it.
+    // Playback starts on the single item; the siblings arrive behind it.
     expect(play).toHaveBeenCalledTimes(1);
     expect(result.current.canNext).toBe(false);
 
@@ -209,14 +184,12 @@ describe('usePlaybackController season queue', () => {
     expect(result.current.queueState?.currentIndex).toBe(1);
     expect(result.current.canPrevious).toBe(true);
     expect(result.current.canNext).toBe(true);
-    // Widening must not restart anything: exactly the one play() from the start.
+    // Widening must not restart playback.
     expect(play).toHaveBeenCalledTimes(1);
   });
 
   it('leaves a queue the viewer built alone', async () => {
-    // The season arrives after the fact, so it must check what it is widening.
-    // A queue chosen since — the next title, a music queue — is the viewer's,
-    // and replacing it would rearrange playback to finish a stale errand.
+    // The season arrives late, so it must not replace a queue chosen since.
     const play = vi.fn().mockResolvedValue(undefined);
     const runtime = { play, stop: vi.fn(), setReturnTo: vi.fn() } as unknown as PlaybackRuntime;
     const episodes = [episode('e1', 1), episode('e2', 2)];

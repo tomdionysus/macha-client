@@ -4,66 +4,33 @@ import { createClientLogger, LIVENESS_PATH, normalizeBaseUrl } from '@machafound
 const log = createClientLogger('cluster.same-origin');
 
 /**
- * How long the splash holds while this page's own origin is asked whether it
- * is a Macha node.
- *
- * Deliberately far shorter than core's `CONNECTION_CHECK_TIMEOUT_MS` (4 s).
- * That budget belongs to a viewer who typed an address and is waiting on their
- * own decision. This one is spent before anybody asked for anything, and what
- * it delays is a screen they could already be using — so it buys much less and
- * must cost much less. A host that is not listening refuses in single-digit
- * milliseconds; only one that accepts the connection and then says nothing
- * costs the whole wait, and that host is not Macha.
+ * How long the splash waits on the same-origin probe. Far shorter than core's
+ * `CONNECTION_CHECK_TIMEOUT_MS`: nobody asked for this wait, and only a host that
+ * accepts the connection and then says nothing costs all of it.
  */
 export const SAME_ORIGIN_PROBE_TIMEOUT_MS = 1_500;
 
 /**
- * The answers `/api/v1/health` gives: `ok` with 200, and `starting`, `failed`
- * or `busy` with 503, as documented on `LIVENESS_PATH` in core.
- *
- * `busy` is a node refusing work because its control lane's queue is full, and
- * it carries `Retry-After`. It identifies the node exactly as the others do —
- * the refusal body keeps `service` and `status` for that reason — so it is a
- * node to wait for, never evidence that the address is not Macha. Refusing it
- * would put an endpoint form in front of a viewer during a load spike, on a
- * node that is plainly there.
+ * `/api/v1/health` answers: `ok` with 200; `starting`, `failed` or `busy` with 503.
+ * `busy` (queue full, carries `Retry-After`) still identifies a node.
  */
 export type MachaHealthStatus = 'ok' | 'starting' | 'failed' | 'busy';
 
 const HEALTH_STATUSES: readonly MachaHealthStatus[] = ['ok', 'starting', 'failed', 'busy'];
 
-/**
- * The product marker, once a node states one.
- *
- * A node may answer with no marker at all, so it is asserted conditionally:
- * present and wrong is a refusal, absent is tolerated. That avoids a flag day
- * across a cluster whose nodes drift apart in practice.
- */
+/** The product marker. Absent is tolerated; present and wrong is a refusal. */
 const PRODUCT_MARKER = 'macha';
 
 export interface MachaEndpointConfirmation {
   status: MachaHealthStatus;
-  /**
-   * Whether the body actually named Macha rather than merely having the shape
-   * of one of its answers: the difference between proof and strong
-   * circumstantial evidence.
-   */
+  /** Whether the body named Macha, rather than merely having the shape of its answer. */
   marked: boolean;
 }
 
 /**
- * Ask one endpoint whether it is Macha, from a client that has no session.
- *
- * Identity, not readiness. Every health state confirms a node — a node
- * that is starting is still a node, and the health monitor owns whether it can
- * be used yet. Refusing `starting` here would send a viewer who powered on
- * their server and their television together to an endpoint form.
- *
- * The bar is the body, and it has to be. This client's own deployment
- * requirement is that the web host serves `index.html` for unknown application
- * paths, so a host serving this bundle and nothing else answers **200 for the
- * liveness route too**. Confirming on the status line alone would make every
- * correctly-deployed Macha web host identify as a Macha node.
+ * Asks one endpoint, without a session, whether it is Macha. Identity, not
+ * readiness: every health state confirms a node. The body decides, because this
+ * client's web host serves `index.html` (200) for unknown paths, the liveness route included.
  */
 export async function confirmMachaEndpoint(
   baseUrl: string,
@@ -81,29 +48,22 @@ export async function confirmMachaEndpoint(
       signal: controller.signal,
     });
   } catch {
-    // Refused, timed out, or blocked. None of those identify anything.
+    // Refused, timed out or blocked.
     return undefined;
   } finally {
     clearTimeout(timer);
   }
 
-  // 200 serving, 503 for every other state, and nothing else. A node too old
-  // for the route answers 401 rather than 404, because authentication happens
-  // before routing — so an old node is simply not adoptable, and falls through
-  // to the endpoint screen exactly as an unconfigured client does.
+  // 200 or 503 only. A node too old for the route answers 401, since authentication precedes routing.
   if (!response.ok && response.status !== 503) return undefined;
 
-  // The first thing that separates Macha from this client's own web host: that
-  // host answers `text/html`.
+  // This client's own web host answers `text/html`.
   const contentType = response.headers?.get?.('content-type') ?? '';
   if (!/^application\/json\b/i.test(contentType.trim())) return undefined;
 
   let body: unknown;
   try {
-    // `response.json()` rather than core's `readJsonBody`, which attributes
-    // bytes to the transfer recorder. This endpoint is not in the registry and
-    // may turn out not to exist; a probe must not leave throughput evidence
-    // against an endpoint ranking has never heard of.
+    // Not core's `readJsonBody`: a probe must not record transfer evidence against an unregistered endpoint.
     body = await response.json();
   } catch {
     return undefined;
@@ -114,32 +74,17 @@ export async function confirmMachaEndpoint(
   if (typeof record.status !== 'string') return undefined;
   const status = record.status as MachaHealthStatus;
   if (!HEALTH_STATUSES.includes(status)) return undefined;
-  // The status line and the body carry the same answer: `ok` is the only 200,
-  // and every other value is a 503. A payload that disagrees with its own
-  // response code is not this contract being answered, whatever it is.
+  // `ok` is the only 200; a body that disagrees with its status line is not this contract.
   if (status === 'ok' ? !response.ok : response.status !== 503) return undefined;
   if (record.service !== undefined && record.service !== PRODUCT_MARKER) return undefined;
 
-  // Nothing reads a version here, and nothing should: liveness answers anyone
-  // who can reach the port, with no token, and "which release is this" is a
-  // reconnaissance question. The node's version is on the Status node card,
-  // behind `view_status`.
+  // No version is read or wanted: liveness answers anyone, without a token.
   return { status, marked: record.service === PRODUCT_MARKER };
 }
 
 /**
- * The address this page was served from, when that is an address at all.
- *
- * A packaged build has no host to link to: the Samsung widget and the Android
- * shell both load from `file:`, where `origin` names nothing fetchable.
- * Samsung is pinned to its build-time endpoints besides, so it never gets
- * here.
- *
- * Exactly this origin, and no port guessing. "The API is right here" is the
- * whole claim being tested; probing `:7438` on the viewer's own host would be
- * a different address than the one they reached, needing CORS and turning a
- * fast negative into a slow one. An API behind a proxy on another port is an
- * endpoint somebody types.
+ * The page's own origin, when it is fetchable: packaged builds load from `file:`.
+ * Exactly this origin, with no port guessing; an API on another port is an endpoint somebody types.
  */
 export function sameOriginCandidate(
   location: { protocol: string; origin: string } = window.location,
@@ -149,27 +94,16 @@ export function sameOriginCandidate(
 }
 
 export interface SameOriginEndpoint {
-  /** Still being asked. Nothing is decided, and no gate should be shown yet. */
+  /** Still being asked; show no gate yet. */
   probing: boolean;
-  /** A confirmed Macha node on this page's own origin — for this run only. */
+  /** A confirmed Macha node on this page's origin, for this run only. */
   endpoint?: string;
 }
 
 /**
- * Bind the same-origin question to a React lifecycle, for an unconfigured
- * client only.
- *
- * **Nothing here is ever persisted.** A derived endpoint is not user
- * configuration, and writing one where `bootstrapEndpoints` is read from would
- * hand a viewer an endpoint they never typed — one that outlives the page
- * moving to a different host, that they have no reason to go and delete, and
- * that they would have to delete before this could ever look again. It is
- * re-derived and re-confirmed on every cold start instead, which costs one
- * bounded request and can never be stale. This is the same rule core states on
- * `discoveredEndpoints`, for the same reason.
- *
- * It also cannot become authoritative by accident: `enabled` is false the
- * moment anything is configured, and the candidate is dropped with it.
+ * The same-origin probe as a hook, for an unconfigured client only. The result
+ * is never persisted: it is re-confirmed on every cold start, so it cannot go
+ * stale or outlive the page moving host.
  */
 export function useSameOriginEndpoint(enabled: boolean): SameOriginEndpoint {
   const candidate = useMemo(() => enabled ? sameOriginCandidate() : undefined, [enabled]);
@@ -188,8 +122,7 @@ export function useSameOriginEndpoint(enabled: boolean): SameOriginEndpoint {
         log.info('same-origin-adopted', {
           endpoint: candidate,
           status: confirmation.status,
-          // False means the node did not name itself and was accepted on the
-          // shape of its answer alone. Worth seeing in a failure trail.
+          // False: accepted on the shape of its answer alone.
           marked: confirmation.marked,
         });
       } else {

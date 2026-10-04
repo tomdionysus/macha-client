@@ -11,12 +11,7 @@ function fakeStorage(seed?: Record<string, string>) {
 }
 
 describe('VolumeStore', () => {
-  /**
-   * The key is the one `@machafoundation/core` wrote, in the same storage,
-   * origin and client id, so a viewer's existing volume is still there. A
-   * renamed key would silently reset every viewer to full volume on their
-   * next launch, with nothing on screen explaining why.
-   */
+  // The key core wrote: a renamed key would silently reset every viewer to full volume.
   it('reads the key core wrote, so a viewer keeps the volume they had', () => {
     const storage = fakeStorage({ 'macha.volume.v1.viewer-1': '0.25' });
     expect(new VolumeStore('viewer-1', storage).load()).toBe(0.25);
@@ -28,8 +23,6 @@ describe('VolumeStore', () => {
     expect(new VolumeStore('b', storage).load()).toBe(0.8);
   });
 
-  // Silence is the wrong default for "we have never asked": a viewer who has
-  // set nothing wants the film audible, not muted with no clue why.
   it('starts at full volume when nothing has been stored', () => {
     expect(new VolumeStore('fresh', fakeStorage()).load()).toBe(1);
   });
@@ -39,24 +32,13 @@ describe('VolumeStore', () => {
     expect(new VolumeStore('v', fakeStorage({ 'macha.volume.v1.v': 'null' })).load()).toBe(1);
   });
 
-  /**
-   * `Number('')` is `0`, and `0` is finite, so without an explicit guard an
-   * empty entry reads as a deliberate mute — the one input that produces
-   * exactly the "comes up silent with nothing explaining why" failure this
-   * store exists to prevent. An empty string is not a volume; it is a
-   * corrupted or half-written entry.
-   *
-   * Android TV holds its own copy of this store with the same rule, so a
-   * divergence here would be invisible until a viewer's storage reached that
-   * state.
-   */
+  // `Number('')` is 0 and finite, so an unguarded empty entry would read as a
+  // mute. Android TV's copy of this store has the same rule.
   it('treats an empty or whitespace-only entry as absent, not as silence', () => {
     expect(new VolumeStore('v', fakeStorage({ 'macha.volume.v1.v': '' })).load()).toBe(1);
     expect(new VolumeStore('v', fakeStorage({ 'macha.volume.v1.v': '   ' })).load()).toBe(1);
   });
 
-  // The other half of that decision: a stored zero is a viewer who chose
-  // silence, and it must keep meaning silence.
   it('keeps a stored zero as the mute a viewer chose', () => {
     expect(new VolumeStore('v', fakeStorage({ 'macha.volume.v1.v': '0' })).load()).toBe(0);
   });

@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { presentedTime, presentedTimeOfDay, zuluTimestamp } from './timestamps';
 
-/** An arbitrary fixed instant, in UTC. */
 const INSTANT = Date.UTC(2026, 8, 21, 15, 51, 52);
 
 describe('zuluTimestamp — the interchange form', () => {
@@ -10,8 +9,7 @@ describe('zuluTimestamp — the interchange form', () => {
   });
 
   it('does not move with the machine that renders it', () => {
-    // Three nodes in three zones, and a client in a fourth. Whatever this machine's offset is, the output
-    // is the node's instant.
+    // Whatever this machine's offset, the output is the UTC instant.
     const offsetMinutes = new Date(INSTANT).getTimezoneOffset();
     expect(zuluTimestamp(INSTANT)).toBe('2026-09-21 15:51:52Z');
     expect(offsetMinutes).toBe(new Date(INSTANT).getTimezoneOffset());
@@ -40,17 +38,14 @@ describe('presentedTime — the only place a zone belongs', () => {
     const at = new Date(INSTANT);
     const hour24 = at.getHours();
     const hour12 = ((hour24 + 11) % 12) + 1;
-    // Locale decides 12- or 24-hour, so accept either spelling of the local
-    // hour; what matters is that it is the local one and not the Zulu form.
+    // Locale decides 12- or 24-hour, so either spelling of the local hour is accepted.
     expect(shown.includes(String(hour24)) || shown.includes(String(hour12))).toBe(true);
     expect(shown).not.toMatch(/Z$/);
     if (at.getTimezoneOffset() !== 0) expect(shown).not.toBe(zuluTimestamp(INSTANT));
   });
 
   it('names the zone, because an unlabelled hour beside a node journal is the whole trap', () => {
-    // `timeStyle: 'long'` carries the zone; whatever this machine's is, it
-    // must appear. Asserted as "more than the digits" rather than against a
-    // fixed abbreviation, which would pin the test to one machine.
+    // Asserted as "more than the digits": a fixed abbreviation would pin the test to one machine.
     const shown = presentedTime(INSTANT);
     expect(shown.replace(/[\d\s:,-]/g, '').length).toBeGreaterThan(3);
   });

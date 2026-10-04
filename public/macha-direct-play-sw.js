@@ -1,13 +1,8 @@
-/* Macha Direct Play rolling read-ahead service worker.
+/* Direct Play rolling read-ahead service worker.
  *
- * Viewer demand is never scheduled behind read-ahead. Cache misses are proxied
- * as native streaming HTTP range requests; speculative fetches run only after
- * established playback has gone briefly quiet and are aborted immediately by
- * new demand or a seek. The cache is memory-only. Viewer bytes are delivered
- * first and copied into resident cache opportunistically; completed speculative
- * ranges share the same cache. Cache bookkeeping is never a prerequisite for
- * current demand, so bytes already paid for can accelerate later seeks/repeats
- * without extending the viewer-critical path.
+ * Viewer demand never waits behind read-ahead: cache misses are proxied as streaming range
+ * requests, and speculative fetches run only once playback goes quiet and are aborted by new
+ * demand or a seek. The cache is memory-only and is filled after delivery, never before it.
  */
 'use strict';
 
@@ -160,12 +155,8 @@ function pruneIdleSources() {
 }
 
 function activeFetchStarted(cache) {
-  // Time spent transferring, not wall time. The page turns deltas of
-  // `fetchedBytes` over deltas of this into a throughput estimate for the node
-  // that served them, and wall time would divide real bytes by long idle
-  // stretches — paused playback, a full cache — and report a fast link as slow.
-  // Only the 0 -> 1 transition opens the window, so concurrent fetches count
-  // the period once rather than once each.
+  // Transfer time, not wall time: the page derives throughput from `fetchedBytes` over this, and
+  // idle stretches would make a fast link look slow. Concurrent fetches share one window.
   if (cache.metrics.activeFetches === 0) cache.fetchWindowStartedAt = now();
   cache.metrics.activeFetches += 1;
   cache.metrics.peakFetches = Math.max(cache.metrics.peakFetches, cache.metrics.activeFetches);
@@ -237,9 +228,7 @@ function storeSegment(cache, start, buffer) {
   let mergedStart = start;
   let mergedBuffer = buffer;
   let mergedEnd = start + buffer.byteLength - 1;
-  // Demand streaming often arrives in small transport chunks. Coalesce adjacent
-  // chunks into modest resident entries off the viewer path so cache lookup does
-  // not degrade into a huge linear segment list during long Direct Play sessions.
+  // Coalesce small adjacent transport chunks so the linearly searched segment list stays short.
   const MAX_DEMAND_SEGMENT_BYTES = 2 * 1024 * 1024;
   for (const [existingStart, existing] of cache.segments.entries()) {
     if (existing.start === mergedStart && existing.end === mergedEnd) {
@@ -259,8 +248,7 @@ function storeSegment(cache, start, buffer) {
       break;
     }
   }
-  // Drop ranges wholly covered by the new range. Partial overlap is harmless
-  // and rare because speculative fetches walk the contiguous-ahead frontier.
+  // Drop ranges the new one wholly covers; partial overlap is harmless.
   for (const [existingStart, existing] of cache.segments.entries()) {
     if (existing.start >= mergedStart && existing.end <= mergedEnd) cache.segments.delete(existingStart);
   }
@@ -339,20 +327,11 @@ function retryableSourceStatus(status) {
 }
 
 /**
- * The node has no record of this source: its session was reaped, or the range
- * is past the end of what the session covers.
+ * The node has no record of this source. Mirrors the constant in `@machafoundation/core`, which a
+ * plain worker script cannot import; keep the two in step.
  *
- * Restated here because this file is shipped as a plain worker script and
- * cannot import `@machafoundation/core`; the TypeScript side takes the same
- * number from core. Keep the two in step.
- *
- * It is not in `retryableSourceStatus` and must not be, because that predicate
- * means "this node might answer if asked again" and a 404 never will. Nor is
- * it success: an error envelope handed to the media element raises a generic
- * MediaError, the adapter reports `unsupported`, and a session that only needs
- * re-creating becomes a terminal failure. A different node is a different
- * session, so the walk continues; a 404 is a failure of the source rather than
- * content, and the status survives to the client so it can be recognised.
+ * Not in `retryableSourceStatus` (this node will never answer) and not success: the status must
+ * reach the client so it re-creates the session rather than reporting unplayable media.
  */
 function sourceNotFoundStatus(status) {
   return status === 404;
@@ -375,11 +354,7 @@ async function directFetchWithFailover(request, config, cache, signal, rangeOver
         if (response.body) void response.body.cancel().catch(() => undefined);
         continue;
       }
-      // A 404 goes back to the caller, deliberately, with no alternate spliced
-      // over it. The element receives an error envelope and raises a generic
-      // decode failure, which says only that the media was unplayable, so the
-      // status is reported here to tell the client the node had no record of
-      // this source.
+      // A 404 is returned as it is and reported: the element alone would raise only a generic decode failure.
       if (sourceNotFoundStatus(response.status) && cache) {
         void postSourceFailure(
           cache,
@@ -409,10 +384,7 @@ async function exactRangeReader(request, config, cache, signal, start, end, excl
         if (response.body) void response.body.cancel().catch(() => undefined);
         continue;
       }
-      // A 404 cannot satisfy the exact range check below, so the walk moves
-      // past it, keeping the status on the error so an exhausted walk reports
-      // what the node said rather than "did not return exact range", in the
-      // vocabulary the client can act on.
+      // A 404 cannot satisfy the exact range, so move on, keeping its status for an exhausted walk to report.
       if (sourceNotFoundStatus(response.status)) {
         lastError = sourceFailure(`Direct Play source returned ${response.status}`, response.status);
         if (response.body) void response.body.cancel().catch(() => undefined);
@@ -450,9 +422,7 @@ async function postMetrics(cache, force) {
 }
 
 async function postSourceFailure(cache, sourceUrl, error) {
-  // Recorded before anything awaits, so it is in place before the response
-  // that carried it reaches the element. The page asks for it when the
-  // element errors first, which the report below cannot promise to beat.
+  // Recorded before any await: the page asks for it when the element errors, which can beat the message below.
   if (error && typeof error.status === 'number') cache.sourceStatus = error.status;
   if (cache.released || cache.sourceFailureNotified) return;
   cache.sourceFailureNotified = true;
@@ -463,10 +433,8 @@ async function postSourceFailure(cache, sourceUrl, error) {
     sourceUrl,
     message: error && error.message ? error.message : 'Direct Play read-ahead source failed',
   };
-  // Only when a response actually carried one. Absent must stay absent: the
-  // client reads a missing status as "transport failure, judge the node" and a
-  // present 404 as "this source is gone, re-create it", and defaulting either
-  // way collapses two different answers into one.
+  // Only when a response carried one: the client reads a missing status as a transport failure
+  // and a 404 as a source to re-create.
   if (error && typeof error.status === 'number') payload.status = error.status;
   for (const client of clients) client.postMessage(payload);
 }
@@ -586,8 +554,7 @@ async function pumpPrefetch(cache) {
     void postMetrics(cache, false);
   } catch (error) {
     if (!(error && error.name === 'AbortError')) {
-      // Every configured source has failed. Speculation still cannot become a
-      // viewer failure; active demand will independently retry the bounded set.
+      // Every source failed. Speculation never becomes a viewer failure; demand retries independently.
       void postMetrics(cache, true);
       void postSourceFailure(cache, cache.sourceUrl, error);
       cache.prefetchFailureCount += 1;
@@ -626,8 +593,7 @@ function setMode(sourceKey, mode) {
   cache.generation = config.generation;
   cache.metrics.generation = cache.generation;
   cache.metrics.mode = mode;
-  // Pause freezes presentation only. Preserve an in-flight range and continue
-  // filling the bounded read-ahead cache for the expected resume.
+  // Pause keeps filling the read-ahead cache for the expected resume.
   if (mode === 'playing' || mode === 'paused') schedulePrefetch(cache);
   else abortPrefetch(cache, false);
   updateAheadBytes(cache);
@@ -726,9 +692,7 @@ function wrapDemandResponse(cache, response, request, config, requested, request
           cache.lastServedOffset = cursor;
           cache.lastAccess = Date.now();
           controller.enqueue(value);
-          // Caching is a beneficiary of demand, never a prerequisite for it.
-          // Copy/cache after enqueue so cache bookkeeping cannot extend first-byte
-          // or steady-state demand delivery latency.
+          // Cache after enqueue so bookkeeping never delays demand delivery.
           queueMicrotask(() => storeStreamChunk(cache, chunkStart, value));
           updateAheadBytes(cache);
           schedulePrefetch(cache);
@@ -748,8 +712,7 @@ function wrapDemandResponse(cache, response, request, config, requested, request
             attemptedSources.add(replacement.sourceUrl);
           } catch (replacementError) {
             activeFetchFinished(cache);
-            // See demandFetch's catch: a demand-path exhaustion is the same
-            // urgent evidence a prefetch-path exhaustion already reports.
+            // Demand-path exhaustion must reach the client; see demandFetch's catch.
             void postSourceFailure(cache, cache.sourceUrl, replacementError);
             controller.error(replacementError);
             return;
@@ -762,7 +725,7 @@ function wrapDemandResponse(cache, response, request, config, requested, request
       try {
         await reader.cancel(reason);
       } catch {
-        // Browser cancellation is normal during media probing and seeking.
+        // Cancellation is routine during media probing and seeking.
       }
       schedulePrefetch(cache);
       activeFetchFinished(cache);
@@ -797,11 +760,7 @@ async function demandFetch(cache, request, config, rangeOverride, requested) {
     return wrapDemandResponse(cache, response, request, config, requested, startedAt, controller, sourceUrl);
   } catch (error) {
     activeFetchFinished(cache);
-    // Unlike a prefetch miss, a failed demand fetch is about to surface as a
-    // real player-facing read error — but the client cannot react to what it
-    // is never told. This is the earliest and most urgent evidence a source
-    // has actually failed; it must reach the client at least as reliably as
-    // a speculative prefetch failure already does.
+    // A failed demand fetch surfaces as a player-facing read error, so the client must be told.
     if (!(error && error.name === 'AbortError')) void postSourceFailure(cache, cache.sourceUrl, error);
     throw error;
   }
@@ -909,9 +868,7 @@ function cacheThenDemandResponse(cache, request, config, requested, cachedEnd) {
         cache.lastServedOffset = cursor;
         cache.lastAccess = Date.now();
         controller.enqueue(value);
-        // Caching is a beneficiary of demand, never a prerequisite for it.
-        // Copy/cache after enqueue so cache bookkeeping cannot extend first-byte
-        // or steady-state demand delivery latency.
+        // Cache after enqueue so bookkeeping never delays demand delivery.
         queueMicrotask(() => storeStreamChunk(cache, chunkStart, value));
         updateAheadBytes(cache);
         schedulePrefetch(cache);
@@ -930,8 +887,7 @@ function cacheThenDemandResponse(cache, request, config, requested, cachedEnd) {
           attemptedSources.add(replacement.sourceUrl);
         } catch (replacementError) {
           finishNetwork();
-          // See demandFetch's catch: a demand-path exhaustion is the same
-          // urgent evidence a prefetch-path exhaustion already reports.
+          // Demand-path exhaustion must reach the client; see demandFetch's catch.
           void postSourceFailure(cache, cache.sourceUrl, replacementError);
           controller.error(replacementError);
         }
@@ -942,7 +898,7 @@ function cacheThenDemandResponse(cache, request, config, requested, cachedEnd) {
       try {
         if (networkReader) await networkReader.cancel(reason);
       } catch {
-        // Browser cancellation is normal during media probing and seeking.
+        // Cancellation is routine during media probing and seeking.
       }
       finishNetwork();
       schedulePrefetch(cache);
@@ -1014,9 +970,7 @@ async function handleProxy(request, url) {
 
   if (request.method === 'HEAD') return (await directFetchWithFailover(request, config, cache, undefined)).response;
 
-  // A complete resident range is an immediate memory hit. Otherwise demand is
-  // proxied as the browser asked for it; there is deliberately no
-  // completion barrier and no speculative queue in front of it.
+  // A fully resident range is served from memory; anything else is proxied as asked, with nothing queued in front.
   if (requested.partial) {
     const cachedEnd = contiguousCachedEnd(cache, requested.start, requested.end);
     if (cachedEnd >= requested.end) {
@@ -1099,8 +1053,7 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
   if (!url.pathname.endsWith(PROXY_PATH_SUFFIX)) return;
   event.respondWith(handleProxy(event.request, url).catch((error) => {
-    // Source release/browser cancellation is routine during navigation and
-    // seek probing. Do not leak a rejected FetchEvent promise to the console.
+    // Source release and cancellation are routine; do not reject the FetchEvent promise.
     if (error && error.name === 'AbortError') return new Response(null, { status: 499 });
     throw error;
   }));

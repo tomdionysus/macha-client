@@ -42,9 +42,7 @@ describe('attachSpatialTvNavigation', () => {
   let middle: HTMLButtonElement;
   let bottom: HTMLButtonElement;
 
-  // jsdom reports every element's layout as zero-size by default; stub real,
-  // vertically stacked rects so the geometry scorer (not the DOM-order
-  // fallback) is what this test actually exercises.
+  // jsdom lays nothing out; stacked rects make the geometry scorer, not the DOM-order fallback, do the work.
   function stackRect(element: HTMLElement, top: number) {
     element.getBoundingClientRect = () => ({
       top, bottom: top + 50, left: 0, right: 50, width: 50, height: 50, x: 0, y: top, toJSON: () => ({}),
@@ -82,9 +80,7 @@ describe('attachSpatialTvNavigation', () => {
   });
 
   it('moves selection down through visual order via ArrowDown', () => {
-    // SamsungDpadInput suppresses a repeated command inside a short real-time
-    // floor; advance a fake clock between presses so this test exercises
-    // navigation, not that unrelated repeat-suppression policy.
+    // SamsungDpadInput suppresses rapid repeats, so a fake clock advances between presses.
     vi.useFakeTimers();
     try {
       detach = attachSpatialTvNavigation();
@@ -125,8 +121,7 @@ describe('attachSpatialTvNavigation', () => {
 
   describe('escaping a focused text field', () => {
     it('lets up and down leave a single-line input, so a search box is not a trap', () => {
-      // There is no pointer on a TV: an input that swallows vertical
-      // navigation can only be left with Back, which exits the screen.
+      // With no pointer, an input that swallows up and down can only be left with Back, which exits the screen.
       expect(tvTextEditingOwnsCommand(element('input'), 'up')).toBe(false);
       expect(tvTextEditingOwnsCommand(element('input'), 'down')).toBe(false);
     });
@@ -138,10 +133,7 @@ describe('attachSpatialTvNavigation', () => {
     });
 
     it('lets up and down leave a multi-line or list editor too', () => {
-      // The endpoints box is a textarea: if up and down moved only the caret,
-      // the Save button below it could not be reached at all. Between-controls
-      // beats between-lines on a remote that has no other way of doing the
-      // former.
+      // Otherwise a button below a textarea could not be reached at all.
       for (const editor of [element('textarea'), element('select'), element('div', { contentEditable: true })]) {
         expect(tvTextEditingOwnsCommand(editor, 'up')).toBe(false);
         expect(tvTextEditingOwnsCommand(editor, 'down')).toBe(false);
@@ -158,9 +150,8 @@ describe('attachSpatialTvNavigation', () => {
 });
 
 describe('a wide element beside smaller ones', () => {
-  // The search row: a field spanning most of the width, then the sort and a
-  // far refresh, with a row of result cards below. Centres misjudge it: most
-  // cards' centres lie right of the field's centre.
+  // A search row: a wide field, then sort and a far refresh, above a row of cards. Centres misjudge
+  // it: most cards' centres lie right of the field's.
   let detach: (() => void) | undefined;
 
   function place(id: string, left: number, top: number, width: number, height: number) {
@@ -237,9 +228,8 @@ describe('a wide element beside smaller ones', () => {
 });
 
 describe('up and down go to the nearest row', () => {
-  // Home: the top bar, a short Continue Watching row, and a longer Movies row
-  // below. The Movies cards at the right have nothing directly above them in
-  // Continue Watching; the only thing in their column is a nav item.
+  // Home: the top bar, a short row, and a longer row below whose right-hand cards have only a nav
+  // item in their column.
   let detach: (() => void) | undefined;
 
   function place(id: string, left: number, top: number, width: number, height: number) {

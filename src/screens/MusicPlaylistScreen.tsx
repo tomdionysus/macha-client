@@ -9,7 +9,7 @@ import type { MusicPlaylistEntry } from '@machafoundation/core';
 
 interface Props {
   api: MediaApi;
-  /** Reads the playlist's availability now: the stored playlist does not keep it. */
+  /** Reads the playlist's availability fresh: the stored playlist does not keep it. */
   catalogue: Pick<CatalogueApi, 'get'>;
   entries: MusicPlaylistEntry[];
   onPlay: (index: number) => void;

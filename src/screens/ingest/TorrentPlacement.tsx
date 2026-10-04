@@ -3,21 +3,15 @@ import { acquisitionError, type AcquisitionApi, type TorrentJob, type TorrentNod
 import { viewerErrorText } from '../../text/viewerText';
 import { REMOVE_AFTER_CHOICES, torrentNodeLabel } from './clusterTorrents';
 
-/**
- * A refused change, in words. `invalid_state` here means a node claimed the
- * torrent before the change arrived; elsewhere the code means other things,
- * so it is worded only for this.
- */
+/** A refused change, in words. `invalid_state` is worded for this call only: a node claimed the torrent first. */
 export function placementRefusalText(reason: unknown): string {
   if (acquisitionError(reason)?.code === 'invalid_state') return 'A node has already taken this torrent, so where it downloads can no longer be changed.';
   return viewerErrorText(reason);
 }
 
 /**
- * Where a cluster torrent downloads and when it is removed, changed after it
- * was added (`PATCH /api/v1/torrents/jobs/{id}`). The node can be changed
- * only while no node has claimed it, so the choice is offered only then; the
- * removal time can be changed at any point. A refusal is the caller's to show.
+ * Changes where a cluster torrent downloads and when it is removed. The node is offered only while
+ * no node has claimed it; the removal time can change at any point. A refusal is the caller's to show.
  */
 export function TorrentPlacement({ api, job, nodes, onChanged, onError }: {
   api: AcquisitionApi;

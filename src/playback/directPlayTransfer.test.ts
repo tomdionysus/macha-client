@@ -7,11 +7,7 @@ import {
   type DirectPlayReadAheadMetrics,
 } from './directPlayReadAhead';
 
-/**
- * The worker posts cumulative counters, so the interesting behaviour is
- * entirely in what the page does *between* two messages. These drive the
- * message listener the way the Service Worker does.
- */
+/** The worker posts cumulative counters; these tests drive the message listener as the Service Worker does. */
 function metrics(over: Partial<DirectPlayReadAheadMetrics> = {}): DirectPlayReadAheadMetrics {
   return {
     sourceOrigin: 'http://node-a.test:7438',
@@ -26,13 +22,8 @@ function metrics(over: Partial<DirectPlayReadAheadMetrics> = {}): DirectPlayRead
 }
 
 /**
- * Stand in for the Service Worker so the real listener wiring is exercised.
- *
- * Installed once for the file, deliberately: the module registers its
- * `message` listener behind a one-shot guard, so a per-test stub would leave
- * every test after the first talking to a `navigator` the module never
- * subscribed to — and passing, silently, for the cases that assert nothing
- * happens.
+ * Stands in for the Service Worker. Installed once for the file: the module registers its
+ * `message` listener behind a one-shot guard, so a per-test stub would never be subscribed to.
  */
 function workerHost() {
   const listeners = new Set<(event: MessageEvent<unknown>) => void>();
@@ -67,8 +58,7 @@ describe('direct play media throughput reporting', () => {
     host.post(source, metrics({ fetchedBytes: 4_000_000, fetchActiveMs: 1_000 }));
     host.post(source, metrics({ fetchedBytes: 10_000_000, fetchActiveMs: 3_000 }));
 
-    // The first message establishes a baseline and reports nothing: its
-    // counters describe transfers that happened before anyone was listening.
+    // The first message is only a baseline: its counters predate the listener.
     expect(seen).toEqual([['http://node-a.test:7438', 6_000_000, 2_000]]);
   });
 
@@ -78,9 +68,7 @@ describe('direct play media throughput reporting', () => {
     const source = subscribedSource();
 
     host.post(source, metrics({ fetchedBytes: 1_000_000, fetchActiveMs: 500 }));
-    // Two minutes of wall clock pass with the buffer full and nothing fetched,
-    // then 8 MB arrives in a second. Wall time would call this ~0.07 MB/s; the
-    // link actually carried 8 MB/s and that is what ranking must be told.
+    // The buffer sits full for a while, then 8 MB arrives in one second of transfer time.
     host.post(source, metrics({ fetchedBytes: 9_000_000, fetchActiveMs: 1_500 }));
 
     expect(seen).toEqual([['http://node-a.test:7438', 8_000_000, 1_000]]);
@@ -103,9 +91,7 @@ describe('direct play media throughput reporting', () => {
     const source = subscribedSource();
 
     host.post(source, metrics({ fetchedBytes: 9_000_000, fetchActiveMs: 3_000 }));
-    // A new generation for the same source restarts the counters. Treating the
-    // decrease as a delta would report a negative transfer; treating it as a
-    // new baseline is the only reading that is ever true.
+    // A new generation restarts the counters: a decrease is a new baseline, not a negative delta.
     host.post(source, metrics({ fetchedBytes: 1_000_000, fetchActiveMs: 400 }));
     host.post(source, metrics({ fetchedBytes: 3_000_000, fetchActiveMs: 900 }));
 
@@ -120,17 +106,12 @@ describe('direct play media throughput reporting', () => {
     host.post(source, metrics({ sourceOrigin: '', fetchedBytes: 1_000_000, fetchActiveMs: 100 }));
     host.post(source, metrics({ sourceOrigin: '', fetchedBytes: 9_000_000, fetchActiveMs: 1_100 }));
 
-    // Throughput with no endpoint to attribute it to is not evidence about any
-    // endpoint, and guessing would credit whichever node happened to be first.
+    // Throughput with no endpoint to attribute it to is evidence about none.
     expect(seen).toHaveLength(0);
   });
 });
 
-/**
- * Register a source through the module's real entry point, so posted metrics
- * resolve to a URL the same way they do in production. The key is opaque; only
- * the module's own mapping matters.
- */
+/** Registers a source through the module's real entry point, so posted metrics resolve to a URL as in production. */
 let sourceSequence = 0;
 function subscribedSource(): string {
   const sourceUrl = `http://node-a.test:7438/api/v1/playback/sessions/s${sourceSequence += 1}/stream/cap/direct`;
@@ -148,8 +129,7 @@ function subscribedSource(): string {
 
 describe('an hls.js fragment, reported the same way', () => {
   it('reaches the listener as its bytes over the time from first byte to last', () => {
-    // The wait before the first byte is the node; the rest is the link, and
-    // only the second half says whether it can carry a stream.
+    // The wait before the first byte is the node's; only the rest measures the link.
     const seen: unknown[][] = [];
     setMediaTransferListener((...args) => seen.push(args));
     reportFragmentTransfer('http://10.44.1.50:7438/api/v1/playback/sessions/s/stream/g/1/segment-000001.m4s', 2_031_747, 43_293, 51_100.8);

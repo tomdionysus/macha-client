@@ -1,18 +1,14 @@
 import type { ReactNode } from 'react';
 
-/**
- * Field parts shared by the unmatched file's manual entry and the metadata
- * editor, which ask for the same things of the same kinds of item.
- */
+/** Field parts shared by the unmatched file's manual entry and the metadata editor. */
 
-/** A whole number typed into a field, or undefined for empty or not a number. */
+/** Undefined for an empty field or anything that is not a number. */
 export function wholeNumber(value: string): number | undefined {
   if (!value.trim()) return undefined;
   const parsed = Number.parseInt(value, 10);
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
-/** A number as a field shows it: empty for none. */
 export function numberText(value: number | null | undefined): string {
   return value == null ? '' : String(value);
 }

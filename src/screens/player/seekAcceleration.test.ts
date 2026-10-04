@@ -31,14 +31,14 @@ describe('seek acceleration', () => {
     for (const [rung, step] of SEEK_LADDER_MS.entries()) {
       expect(seekLadderStepMs(rung * SEEK_RUNG_ADVANCE_MS)).toBe(step);
     }
-    // Held far beyond the ladder: the largest step, not an ever-growing one.
+    // Held far beyond the ladder.
     expect(seekLadderStepMs(SEEK_RUNG_ADVANCE_MS * 500)).toBe(SEEK_LADDER_MS[SEEK_LADDER_MS.length - 1]);
   });
 
   it('accelerates across a sustained hold, measuring elapsed time not event count', () => {
     let hold: SeekHold | undefined;
     const steps: number[] = [];
-    // A TV repeating every 100ms: the ladder must still climb on the clock.
+    // A TV repeating every 100ms.
     for (let now = 0; now <= 1_800; now += 100) {
       const result = accelerateSeek(hold, 1, now);
       hold = result.hold;
@@ -47,7 +47,7 @@ describe('seek acceleration', () => {
     expect(steps[0]).toBe(1_000);
     expect(steps[steps.length - 1]).toBe(seekLadderStepMs(1_800));
     expect(steps[steps.length - 1]).toBeGreaterThan(steps[0]);
-    // Monotonic: a hold never gets slower while it is being held.
+    // A hold never slows while held.
     for (let index = 1; index < steps.length; index += 1) {
       expect(steps[index]).toBeGreaterThanOrEqual(steps[index - 1]);
     }
@@ -69,7 +69,7 @@ describe('seek acceleration', () => {
     const held = hold(1, SEEK_RUNG_ADVANCE_MS * 4);
     expect(held.deltaMs).toBeGreaterThan(1_000);
 
-    // Released and pressed again: a fresh search, not a continuation.
+    // Released and pressed again.
     const afterRelease = accelerateSeek(held.hold, 1, held.hold.lastEventAtMs + SEEK_HOLD_RELEASE_MS + 1);
     expect(afterRelease.deltaMs).toBe(1_000);
   });
@@ -84,7 +84,7 @@ describe('seek acceleration', () => {
     const fast = hold(1, SEEK_RUNG_ADVANCE_MS * 5);
     expect(fast.deltaMs).toBeGreaterThan(10_000);
 
-    // Overshot and coming back: at minutes per press this would be unusable.
+    // Overshot and coming back.
     const reversed = accelerateSeek(fast.hold, -1, fast.hold.lastEventAtMs + 100);
     expect(reversed.deltaMs).toBe(-1_000);
     expect(reversed.hold.startedAtMs).toBe(fast.hold.lastEventAtMs + 100);

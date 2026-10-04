@@ -18,15 +18,11 @@ import './styles.css';
 
 const samsung = import.meta.env.MODE === 'samsung';
 const android = import.meta.env.MODE === 'android';
-// Before anything logs: the Android TV has no console of its own, so logcat is
-// the only way to read this client, and it flattens object arguments to
-// `[object Object]` unless they are strings before they leave the page.
+// Before anything logs: logcat is the Android TV's only console, and it flattens
+// object arguments to `[object Object]`.
 if (android) installLogcatConsoleBridge();
 installAbortControllerPolyfill(window);
-// Everything the core needs from a host. Storage, clock, id generation and
-// performance all auto-detect correctly in a browser; only the origin has to
-// be supplied, and it is what the API layer resolves relative artwork and
-// stream URLs against on a same-origin deployment.
+// Core auto-detects everything but the origin, which relative artwork and stream URLs resolve against.
 configureMachaHost({ origin: window.location.origin });
 configureClientDiagnostics({
   level: samsung ? 'warn' : diagnosticsSettings.playbackLogLevel,
@@ -68,8 +64,7 @@ async function boot(): Promise<void> {
   if (!rootElement) throw new Error('Missing #root element');
 
   log.info('boot-start', { href: window.location.href, userAgent: navigator.userAgent });
-  // The splash is presentation, never a boot dependency. Mount the application
-  // immediately and let the fixed overlay finish its visual lifetime in parallel.
+  // The splash is an overlay, never a boot dependency: the application mounts at once.
   const splashHost = document.createElement('div');
   splashHost.style.pointerEvents = 'none';
   document.body.appendChild(splashHost);

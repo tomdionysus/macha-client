@@ -77,10 +77,8 @@ function reorderArtwork(items: CatalogueArtwork[], selected: Record<string, stri
 const EDITED_FIELDS = ['title', 'sort_title', 'year', 'season_number', 'episode_number', 'disc_number', 'track_number', 'synopsis', 'aliases'] as const;
 
 /**
- * Only what the edit changed, for a partial save: a field left as it was is
- * not sent, so the save cannot overwrite what something else wrote meanwhile
- * or drop what this form never showed. Artwork is sent only when the choice
- * of image changed its order.
+ * Only the changed fields, for a partial save that cannot overwrite what something else wrote
+ * meanwhile. Artwork is sent only when the chosen image changed its order.
  */
 export function itemChanges(initial: CatalogueItem, edited: CatalogueItem): CatalogueItemPatch {
   const changes: Record<string, unknown> = {};
@@ -174,8 +172,7 @@ function MetadataForm({ api, facts, manage, initial, onBack, onSaved, onCleared,
     return roles;
   }, [draft.artwork, draft.kind]);
   const [uploading, setUploading] = useState<string>();
-  // An upload saves at once and reloads the item, which would drop anything
-  // typed here and not yet saved; so it waits until there is nothing to lose.
+  // An upload saves and reloads the item, dropping unsaved edits, so it waits until the form is clean.
   const dirty = JSON.stringify(draft) !== JSON.stringify(initial) || aliasesText !== initial.aliases.join('\n');
 
   const upload = async (role: string, event: ChangeEvent<HTMLInputElement>) => {

@@ -21,12 +21,7 @@ import {
   versionPreferences,
 } from '@machafoundation/core';
 
-/**
- * How a title resumes: its file, and the mode, cap and audio and subtitle
- * choices it was playing with, so it resumes as if the viewer never left.
- * Nothing to restore when starting from the beginning or with nothing
- * saved; a quality the viewer picks now is theirs instead.
- */
+/** Restores the file, mode, cap and track choices a title was playing with; nothing without a saved entry. */
 function resumeWith(entry: PlaybackProgress | undefined) {
   return entry ? resumePreferences(entry) : undefined;
 }
@@ -40,13 +35,8 @@ export function usePlaybackController(options: {
   queueStore: PlaybackQueueStore;
   volumeStore: VolumeStore;
   /**
-   * Whether this client has somewhere to ask yet: an endpoint, and a session
-   * attempt that has settled.
-   *
-   * Only the route-reconstruction effect reads it, and only that effect needs
-   * it — every other way playback starts is a viewer acting inside an app that
-   * is already connected. Reconstruction is the one path that runs off a URL on
-   * a cold load, before anything has been established.
+   * An endpoint exists and the session attempt has settled. Gates only route
+   * reconstruction, the one start that runs off a URL on a cold load.
    */
   ready: boolean;
 }) {
@@ -54,18 +44,11 @@ export function usePlaybackController(options: {
   const navigate = useNavigate();
   const location = useLocation();
   const activePlayback = runtimeState.request;
-  // Set immediately before any explicit runtime.play() call below and consumed
-  // by the route-reconstruction effect, so a navigation that already started
-  // playback deliberately is never re-started by that effect racing the same
-  // tick (which would open a second, wasted generation/session).
+  // Set just before an explicit runtime.play(), so the route-reconstruction
+  // effect does not start the same item a second time.
   const explicitlyStartedItemIdRef = useRef<string | undefined>(undefined);
-  // Stopping while still on the `/play/:id` route races the runtime clearing
-  // its active request against the router committing the navigate-away —
-  // if the runtime wins, the reconstruct-from-route effect below sees "on
-  // the player route, no active playback", indistinguishable from a reload
-  // deep-linked into the player, and restarts the very session that was
-  // just told to stop. Suppress reconstruction until the route has actually
-  // caught up with an intentional stop.
+  // Set on an intentional stop from `/play/:id`: if the runtime clears its request
+  // before the router leaves the route, reconstruction would restart the session.
   const suppressReconstructRef = useRef(false);
   const [queueState, setQueueState] = useState<PlaybackQueueState | undefined>(() => queueStore.load());
   const [volume, setVolume] = useState(() => platform.initialVolume?.() ?? volumeStore.load());
@@ -112,15 +95,8 @@ export function usePlaybackController(options: {
   }, [progressStore]);
 
   /**
-   * Widen a lone episode into the season it belongs to, once it is playing.
-   *
-   * An episode reached from Continue Watching or from its own detail page
-   * arrives on its own: no season screen was open, so no queue came with it,
-   * and the transport would show no next or previous for something that
-   * plainly has both. The rest of the season is one request away — but holding the
-   * picture for a round trip to populate two buttons would be paying for them
-   * with the thing the viewer actually asked for, so playback starts on the
-   * single item and the siblings land behind it.
+   * Widens a lone playing episode's queue to its season. Runs after playback
+   * starts, so the picture never waits on the request.
    */
   const widenToSeason = useCallback(async (episode: MediaSummary) => {
     const seasonId = episode.kind === 'episode' ? episode.playbackContext?.season.id : undefined;
@@ -129,22 +105,16 @@ export function usePlaybackController(options: {
     if (season.kind !== 'season' || !('episodes' in season) || season.episodes.length < 2) return;
     const index = season.episodes.findIndex((candidate) => candidate.id === episode.id);
     if (index < 0) return;
-    // Only the queue this call started may be widened. Anything else — another
-    // title, a music queue built while the season was in flight — is something
-    // the viewer chose after this, and replacing it would be rearranging their
-    // playback to finish an errand they have already moved on from.
+    // Widen only the queue this call started; anything else is a later choice by the viewer.
     const current = queueStore.load();
     if (current?.items.length !== 1 || current.items[0]?.id !== episode.id) return;
     const widened = queueStore.replace(season.episodes, index);
-    // `replace` starts a queue at zero, which is right for a new one and wrong
-    // here: this episode is already playing, and dropping its position would
-    // restart it on a reload.
+    // `replace` resets the position to zero, which would restart the playing episode on a reload.
     setQueueState(current.positionMs > 0 ? queueStore.updatePosition(current.positionMs) ?? widened : widened);
   }, [api, queueStore]);
 
   const startPlayback = useCallback((item: MediaSummary, startOptions: StartPlaybackOptions = {}) => {
-    // An unavailable title is never started, and a queue moves past the ones
-    // it holds: none of their pieces is on a reachable node.
+    // An unavailable title is never started, and is dropped from the queue.
     if (!availableToPlay(item)) return;
     const offered = startOptions.queue?.length ? startOptions.queue : [item];
     const requestedIndex = startOptions.queueIndex ?? offered.findIndex((candidate) => candidate.id === item.id);
@@ -167,15 +137,9 @@ export function usePlaybackController(options: {
       queueIndex: persistedQueue.currentIndex,
       returnTo,
     };
-    // Navigate, then start: presentation is chosen by the route
-    // (`playerRouteActive` decides full versus mini) while visibility comes
-    // from the runtime, and both have to reach React in one render or the
-    // player mounts as the mini bar before swapping to full. What makes them
-    // one render is `AppRouter`'s `useTransitions={false}` — with the router's
-    // default lane, ordering these two calls achieves nothing, because the
-    // lower-priority location update commits second whichever is called first.
-    // The reconstruction guard is set above, so the route arriving in the same
-    // render as the request cannot trigger a second play.
+    // Navigate, then start: the route picks full versus mini and the runtime picks
+    // visibility, and both must land in one render or the player mounts as the mini
+    // bar first. That relies on `AppRouter`'s `useTransitions={false}`.
     navigate(startOptions.fromStart ? routes.playerFromStart(item.id) : routes.player(item.id), { state });
     void runtime.play({
       media: item,
@@ -188,28 +152,13 @@ export function usePlaybackController(options: {
   }, [activePlayback?.returnTo, location.pathname, location.search, navigate, playerRouteActive, progressStore, queueStore, runtime, widenToSeason]);
 
   useEffect(() => {
-    /**
-     * Never reconstruct playback before the client is connected.
-     *
-     * This effect runs off the URL, so on a deep link or a reload into
-     * `/play/:id` it fires on the first effect pass, well before same-origin
-     * endpoint discovery has produced an endpoint. `runtime.play()` would then
-     * ask for playback facts through a session manager that has not been
-     * started, and core's `SessionManager.fetch` only waits for a mint that is
-     * already in flight: with none, it sends the request bare, takes the 401,
-     * and returns it unretried. The coordinator then chooses a container and
-     * codec without facts, which reaches the viewer as a Format error on a
-     * title that plays.
-     *
-     * Nothing below can detect that — an endpoint probe is this client's
-     * business — so the gate belongs here rather than in core.
-     */
+    // Not before the client is connected: on a deep link this runs ahead of endpoint
+    // discovery, and `runtime.play()` would fetch playback facts unauthenticated,
+    // take a 401 and choose a format without them.
     if (!ready) return undefined;
     if (runtimeState.phase === 'stopping') return undefined;
     if (suppressReconstructRef.current) {
-      // Only the route catching up (leaving `/play/:id`) proves the
-      // intentional stop this was guarding actually completed — clearing on
-      // any other render risks unsuppressing mid-race.
+      // Clear only once the route has left `/play/:id`; any other render may be mid-race.
       if (!playerItemId) suppressReconstructRef.current = false;
       return undefined;
     }
@@ -221,9 +170,7 @@ export function usePlaybackController(options: {
       return undefined;
     }
     if (explicitlyStartedItemIdRef.current === playerItemId) {
-      // startPlayback/selectQueueIndex already issued this exact play() and
-      // navigated here in the same gesture; reconstructing from route state
-      // would race that call with a second, redundant generation.
+      // startPlayback or selectQueueIndex already issued this play().
       explicitlyStartedItemIdRef.current = undefined;
       return undefined;
     }
@@ -267,8 +214,7 @@ export function usePlaybackController(options: {
         }),
         returnTo: routeState?.returnTo ?? pathForMedia(media),
       }, resumeWith(fromStart ? undefined : stored));
-      // Deep-linking or reloading into an episode reconstructs the same lone
-      // queue startPlayback would have, and needs the same widening.
+      // A deep link or reload builds the same lone queue as startPlayback, and needs the same widening.
       if (nextQueue.items.length === 1) await widenToSeason(media);
     })().catch((error) => console.error('[macha] unable to reconstruct playback route', error));
     return () => { cancelled = true; };

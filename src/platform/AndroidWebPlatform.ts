@@ -6,15 +6,9 @@ import { WebPlatform } from './WebPlatform';
 export class AndroidWebPlatform implements Platform {
   readonly name = 'android' as const;
   /**
-   * No `forceNativeHls` here. Forcing the native path is for engines with no
-   * usable MediaSource; an Android WebView is a modern Chromium whose own
-   * capability probe advertises `hlsFmp4` on the strength of MediaSource, so
-   * declining it would ask for a container through a path it refuses to take.
-   *
-   * hls.js also brings an error channel. `prepareAlternate` is reachable only
-   * from `degrade()`, and `degrade()` only from the player's degradation
-   * events, which the native path does not raise; without them there is no
-   * warm standby and every recovery is a full cold start.
+   * No `forceNativeHls`: the WebView is a modern Chromium with MediaSource, and
+   * only hls.js raises the degradation events that reach `prepareAlternate`.
+   * Without them there is no warm standby and every recovery is a cold start.
    */
   private readonly web = new WebPlatform();
 

@@ -6,17 +6,16 @@ import { samsungDisplayResolution } from './displayResolution';
 import { registerSamsungMediaKeys } from './SamsungMediaKeys';
 
 /**
- * Samsung's 2017 Tizen browser is deliberately treated as an old Web target,
- * not as an AVPlay target. Keep the decoder contract narrower than the TV's
- * native capabilities because playback is through Chromium 47 HTMLMediaElement.
+ * Samsung's 2017 Tizen browser as an old Web target, not AVPlay. Playback is
+ * through Chromium 47's HTMLMediaElement, so the decoder contract is narrower
+ * than the TV's native capabilities.
  */
 export class SamsungWebPlatform implements Platform {
   readonly name = 'tizen' as const;
   private readonly web = new WebPlatform({
     directPlayReadAhead: false,
     legacyMediaElement: true,
-    // The native player, paired with the MPEG-TS preference below. Inside fMP4
-    // segments this set behaves as follows, per stream:
+    // Native player, paired with the MPEG-TS preference below. In fMP4 HLS, per stream:
     //
     //             native player          hls.js / MediaSource
     //   h264      plays                  —
@@ -24,68 +23,26 @@ export class SamsungWebPlatform implements Platform {
     //   E-AC-3    0.2s every ~20s        stream rejected outright
     //   AAC       silent                 plays
     //
-    // hls.js is worse, since MediaSource rejects E-AC-3 here; it works only
-    // with E-AC-3 excluded, forcing a needless audio transcode on every title.
-    //
-    // Every one of those faults is fMP4's. MPEG-TS is what this vintage of
-    // native HLS player was built for, and the server emits it with both
-    // streams copied, so the native player is used and the segment preference
-    // below keeps it off fMP4.
+    // Every fault is fMP4's; MPEG-TS with both streams copied plays natively.
     forceNativeHls: true,
   });
   private readonly log = createClientLogger('playback.capabilities.samsung');
 
   /**
-   * Platform truths a probe cannot establish, stated as policy rather than
-   * folded into the capability list.
-   *
-   * `webm`: ffmpeg reports every Matroska file as `matroska,webm` — its
-   * demuxer family, not the file's identity. This set decodes WebM and says
-   * so honestly, which would let a matcher testing "is any of these names
-   * listed" hand it a Matroska file, which it renders corrupt. The chooser
-   * resolves that string to a container family before matching; this is belt
-   * and braces for anywhere else the string is read. Refusing to instruct WebM
-   * costs nothing and removes the ambiguity entirely.
-   *
-   * Deliberately a policy and not a narrowed `containers` list: the
-   * capability describes what the hardware decodes, the policy describes what
-   * we will ask for. Falsifying the first to achieve the second is how a
-   * workaround outlives its reason.
+   * What to ask for, kept apart from `capabilities`, which state what the
+   * hardware decodes. Never narrow the capabilities to enforce a policy.
    */
   readonly playbackPolicy: PlaybackPolicyOverrides = {
-    // Never hand this set a whole file, however playable its streams are.
-    //
-    // Not a statement about decoding — it decodes these titles fine — but
-    // about buffering. Direct play leaves read-ahead entirely to the media
-    // element, and the Service Worker byte-range proxy that does that job on
-    // the web cannot exist here: a Tizen widget is served from `file://`, and
-    // Service Workers require a secure http(s) origin, so registration is
-    // refused. Nor can MediaSource stand in — Chromium 47 takes fMP4 and WebM,
-    // not an arbitrary progressive MP4 or Matroska, which is the very reason
-    // the proxy was built rather than an MSE pipeline. Both doors are shut, so
-    // on this platform there is no way to read ahead of a file.
-    //
-    // Segments are the way out, and the way every television player already
-    // works: the native HLS player buffers a playlist properly, which is what
-    // it was built to do. Remux copies both streams into MPEG-TS carriage
-    // (see `preferSegmentContainer` below), so the cost is a container
-    // rewrite — no re-encode, no quality lost, no decoder asked anything new.
-    //
-    // Stated as policy rather than by narrowing `containers`, for the same
-    // reason as `webm` above: the capability describes what the hardware
-    // decodes, the policy describes what we will ask for.
+    // Direct play leaves read-ahead to the media element, and nothing can
+    // buffer for it here: a widget on `file://` cannot register the Service
+    // Worker range proxy, and Chromium 47 MSE takes only fMP4 and WebM. Remux
+    // to segments is a container rewrite with no re-encode.
     neverDirect: true,
+    // ffmpeg names every Matroska file `matroska,webm`; this set decodes WebM but renders Matroska corrupt.
     excludeContainers: ['webm'],
-    // Segment as MPEG-TS, not fMP4. Every fault this set has shown on HLS is
-    // an fMP4 fault — see the table on `forceNativeHls` above — and none of
-    // the codecs involved are at fault anywhere else: the same HEVC direct
-    // plays, the same E-AC-3 plays progressively, and h264 in fMP4 is fine.
-    //
-    // Deliberately no codec exclusions to accompany this. Excluding E-AC-3
-    // moves the failure rather than removing it: a policy stated at the codec
-    // level against a fault at the container level narrows the choice into a
-    // worse branch, which the chooser then faithfully defends. TS carries both
-    // streams copied, so there is nothing left to exclude.
+    // MPEG-TS, not fMP4: every HLS fault on this set is fMP4's (see
+    // `forceNativeHls`). No codec exclusions: they move the failure to a worse
+    // branch, and TS carries both streams copied.
     preferSegmentContainer: 'mpegts',
   };
 
@@ -94,9 +51,7 @@ export class SamsungWebPlatform implements Platform {
   }
 
   initialVolume(): number {
-    // TV volume is owned by the television/remote. Keep the HTML media
-    // element itself at unity and do not inherit the Web client's persisted
-    // per-client volume (including a stale muted value).
+    // The television owns volume: keep the element at unity and ignore the Web client's persisted volume.
     return 1;
   }
 

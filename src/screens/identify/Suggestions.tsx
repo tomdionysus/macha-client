@@ -3,12 +3,7 @@ import type { ManageApi, UnmatchedDetail } from '@machafoundation/core';
 import { findSuggestions, type Suggestion } from './providerLookup';
 import { ProviderRecord } from './ProviderRecord';
 
-/**
- * Where identifying a file starts: the TMDB and MusicBrainz records it most
- * likely is, found from what the file says about itself. Choosing one takes
- * the whole record, which is the usual case; searching, the catalogue and
- * entering by hand are below for when none of these is it.
- */
+/** Where identifying a file starts: the provider records it most likely is, found from what the file says about itself. */
 export function Suggestions({ detail, manage, onResolved }: {
   detail: UnmatchedDetail;
   manage: ManageApi;

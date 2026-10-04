@@ -7,7 +7,7 @@ import type { Sibling } from './folderSiblings';
 /** Where one file of the album stands while the album is matched. */
 export type FileStatus = 'matching' | 'matched' | { left: string };
 
-/** A file's place on the release, as its MusicBrainz match reads: the track, and the disc where there is more than one. */
+/** A file's place on the release: the track, and the disc when past the first. */
 export function trackText(track: number | undefined, disc: number | undefined): string {
   if (track == null) return 'no track number';
   return disc != null && disc > 1 ? `disc ${disc}, track ${track}` : `track ${track}`;
@@ -20,14 +20,9 @@ function statusText(status: FileStatus | undefined): string | undefined {
 }
 
 /**
- * The album's files in this folder and the MusicBrainz match each would
- * take: this file first, always matched, then the others its candidates
- * agree belong to the album, each chosen by its checkbox. A file that does
- * not say which track it is cannot be chosen: it is not guessed at.
- *
- * The match is the release and the track number the file's own tags give;
- * the track's title on the release is not checked here, because no route
- * gives a release's tracklist.
+ * The album's files in this folder: this file, always matched, then the siblings its
+ * candidates place on the album, each chosen by checkbox. A file with no track number
+ * cannot be chosen. The release's track titles are not checked: no route gives a tracklist.
  */
 export function AlbumFiles({ release, file, track, disc, siblings, selected, statuses, disabled, onSelect }: {
   release: ProviderSearchResult;

@@ -49,8 +49,7 @@ export function registerSamsungMediaKeys(target: unknown = globalThis): void {
     try {
       registerKey.call(tizen.tvinputdevice, key);
     } catch {
-      // Older sets omit some key names. Register every supported key without
-      // allowing one optional key to disable the rest of the transport row.
+      // Older sets lack some key names; one missing key must not stop the rest registering.
     }
   }
 }

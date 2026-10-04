@@ -7,7 +7,7 @@ function decoded(match: RegExpMatchArray | null, index: number): string | undefi
   try { return decodeURIComponent(value); } catch { return value; }
 }
 
-/** Deterministic Samsung Return-key hierarchy; Home itself is handled centrally as an application exit. */
+/** The Samsung Return-key hierarchy. Home yields `undefined`: the caller exits the application. */
 export async function samsungBackTarget(pathname: string, api: MediaApi, playerReturnTo?: string): Promise<string | undefined> {
   if (pathname === routes.home) return undefined;
   if (/^\/play\/[^/]+$/.test(pathname)) return playerReturnTo || routes.home;
@@ -39,9 +39,7 @@ export async function samsungBackTarget(pathname: string, api: MediaApi, playerR
   if (pathname === routes.status) return routes.home;
   if (pathname === routes.manageFiles || pathname === routes.manageUsers) return routes.manage;
   if (pathname === routes.manage) return routes.home;
-  // Settings is a top-level section reached from the top bar, not a page
-  // under Manage, so Return leaves for Home rather than a section the viewer
-  // may not even be able to see.
+  // Settings is top-level, not under Manage, so Return goes Home.
   if (pathname === routes.connection) return routes.settings;
   if (pathname === routes.settings) return routes.home;
   if (pathname === routes.accountPassword) return routes.account;

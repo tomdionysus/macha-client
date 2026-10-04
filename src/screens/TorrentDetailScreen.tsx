@@ -35,26 +35,18 @@ function StageCard({ stage, title, number, progress, summary, rows }: {
   );
 }
 
-/**
- * Everything the server reports about one torrent, laid out for the question
- * "why is this not finished": how far it has got, who it is talking to, and
- * which of the three stages on its way into the library it is in, each with
- * what that stage is doing now.
- */
+/** Everything the server reports about one torrent: progress, peers, and its three stages into the library. */
 function TorrentBody({ job, linkedIngest }: { job: TorrentJob; linkedIngest?: IngestJob }) {
   const now = Date.now();
   const [download, importStage, catalogueStage] = torrentStages(job, linkedIngest);
   const downloaded = download.status === 'done';
-  // Once the payload is handed to an import, the server reports that import's
-  // bytes, progress and rate in the torrent's own fields. So the download's
-  // figures are only read while the download is what is running.
+  // Once an import has the payload, the torrent's byte, progress and rate fields describe that import.
   const downloadProgress = downloaded ? 100 : percent(job.progress, job.bytes_completed, job.bytes_total);
   // Unknown while the owning node is out of view: nothing is said to remain.
   const remaining = downloaded || job.bytes_total === null || job.bytes_completed === null ? 0 : Math.max(0, job.bytes_total - job.bytes_completed);
   const catalogue = job.catalogue;
   const catalogueDone = catalogue ? catalogue.catalogued + catalogue.no_match + catalogue.failed : 0;
-  // Between the download and the import the owner stores the download in the
-  // cluster; the import stage shows that until the import starts.
+  // Between download and import the owner stores the payload in the cluster; the import stage shows that.
   const storing = linkedIngest ? undefined : storingOf(job);
   const storingStall = storing && storingStallText(storing);
   const storedText = storing && `${formatBytes(storing.published_bytes)} of ${formatBytes(storing.bytes)} stored${storingStall ? `, ${storingStall}` : ''}`;
@@ -63,8 +55,7 @@ function TorrentBody({ job, linkedIngest }: { job: TorrentJob; linkedIngest?: In
       : storing ? storingPercent(storing) ?? null : null;
   const catalogueProgress = catalogueStage.status === 'done' || catalogueStage.status === 'issues' ? 100 : catalogue && catalogue.total > 0 ? (catalogueDone / catalogue.total) * 100 : null;
 
-  // The headline is whichever stage is under way, named, so the big number is
-  // never a finished stage's or a stage that has not started.
+  // The headline is whichever stage is under way.
   const current = [
     { stage: download, progress: downloadProgress, ...downloadStageText(job, remaining) },
     { stage: importStage, progress: importProgress, doing: storing ? 'Storing in the cluster' : 'Copying into the library', detail: linkedIngest ? `${formatBytes(linkedIngest.bytes_completed)} of ${formatBytes(linkedIngest.bytes_total)} · ${linkedIngest.files_completed} of ${linkedIngest.files_total} files · ETA ${formatEta(linkedIngest.eta_seconds)}` : storedText ?? 'Starting' },
@@ -155,10 +146,9 @@ function TorrentBody({ job, linkedIngest }: { job: TorrentJob; linkedIngest?: In
 }
 
 /**
- * What the first stage is doing, from the torrent's state. A torrent checks
- * the data it already has before downloading, one torrent at a time: `verify_queued` waits for another's check, and
- * `verifying` is its own, with `eta_seconds` for the check. `progress` is
- * valid pieces over the total throughout.
+ * What the download stage is doing. Torrents check their existing data one at
+ * a time: `verify_queued` waits for another's check, `verifying` is its own,
+ * with `eta_seconds` for the check. `progress` is valid pieces over the total.
  */
 export function downloadStageText(job: Pick<TorrentJob, 'state' | 'bytes_completed' | 'bytes_total' | 'eta_seconds'>, remaining: number): { doing: string; detail: string } {
   const of = `${formatBytes(job.bytes_completed)} of ${job.bytes_total !== null && job.bytes_total > 0 ? formatBytes(job.bytes_total) : 'unknown size'}`;
@@ -167,7 +157,7 @@ export function downloadStageText(job: Pick<TorrentJob, 'state' | 'bytes_complet
   return { doing: 'Downloading', detail: `${of}${remaining > 0 ? ` · ${formatBytes(remaining)} to go · ETA ${formatEta(job.eta_seconds)}` : ''}` };
 }
 
-/** One torrent's own page. The list carries its sort in the address, and so does the way back. */
+/** One torrent's page. The way back carries the list's sort in the address. */
 export function TorrentDetailScreen({ api }: { api: AcquisitionApi }) {
   const { torrentId = '' } = useParams();
   const { search } = useLocation();

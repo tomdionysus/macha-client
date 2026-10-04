@@ -19,8 +19,7 @@ describe('modeTransform', () => {
   });
 
   it('becomes a transcode that copies the video when the audio cannot be copied', () => {
-    // Not `mode: remux` with a transcoded stream: the server refuses that
-    // outright — "remux repackages and copies every stream".
+    // Not `mode: remux` with a transcoded stream: the server refuses that.
     expect(modeRequest('remux', 'ac3', capabilities())).toEqual({ mode: 'transcode', video: 'copy', audio: 'transcode' });
     expect(modeRequest('remux', 'eac3', capabilities())).toEqual({ mode: 'transcode', video: 'copy', audio: 'transcode' });
   });

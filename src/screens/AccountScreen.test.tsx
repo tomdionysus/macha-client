@@ -41,9 +41,7 @@ describe('AccountScreen password control', () => {
   });
 
   it('offers none for an account that holds no credential, and says why', async () => {
-    // The anonymous account holds no credential at all, so a password PATCH
-    // answers 409 `no_password`. Drawing the control anyway
-    // would be a button whose only possible outcome is an error.
+    // A password PATCH on this account answers 409 `no_password`.
     renderAccount(account({ rename: false, delete: false, set_password: false, set_roles: true }));
     await settle();
     expect(screen.getByText('This account has no password, and one cannot be set for it.')).toBeTruthy();
@@ -51,8 +49,7 @@ describe('AccountScreen password control', () => {
   });
 
   it('keeps the control where the server states no mutability at all', async () => {
-    // An older node saying nothing is not a refusal. The server still decides;
-    // hiding the control on silence would remove it for everyone on that node.
+    // Silence from an older node is not a refusal; the server still decides.
     renderAccount(account(undefined));
     await settle();
     expect(screen.getByRole('button', { name: 'Change password' })).toBeTruthy();

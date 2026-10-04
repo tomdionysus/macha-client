@@ -25,8 +25,7 @@ function catalogued(overrides: Partial<ManageCatalogueMatch> = {}): ManageCatalo
 
 describe('candidates the catalogue already has', () => {
   it('drops an inferred candidate that is already an offered match, punctuation and case aside', () => {
-    // The same identity must not appear twice, once with a working "Use match"
-    // button and once without.
+    // Else the same identity appears twice, only once with a working "Use match" button.
     expect(candidateAlreadyCatalogued(probe({ title: 'jurassic park!' }), [catalogued()])).toBe(true);
   });
 
@@ -37,8 +36,7 @@ describe('candidates the catalogue already has', () => {
   });
 
   it('never lets a field only one side states rule a candidate out', () => {
-    // A match with no year is not evidence that the year differs, and hiding
-    // on a difference neither side claimed loses the reader a real option.
+    // A missing year is not evidence that the year differs.
     expect(candidateAlreadyCatalogued(probe({ year: 1993 }), [catalogued({ year: null })])).toBe(true);
     expect(candidateAlreadyCatalogued(probe({ year: null }), [catalogued({ year: 1993 })])).toBe(true);
   });

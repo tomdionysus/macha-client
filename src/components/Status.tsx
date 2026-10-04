@@ -15,18 +15,13 @@ export function Loading({ delayMs = uiSettings.loadingIndicatorDelayMs, note }: 
   return (
     <div className="loading-overlay" role="status" aria-live="polite" aria-label="Loading">
       <div className="loading-spinner" aria-hidden="true" />
-      {/* Inside the overlay rather than beside it, so the wait and what is
-          being said about it cannot drift apart on screen — and inside the
-          `aria-live` region, so it is announced when it appears. */}
+      {/* Inside the `aria-live` region so the note is announced when it appears. */}
       {note && <p className="loading-note">{note}</p>}
     </div>
   );
 }
 
-/**
- * A wait inside a panel, as a line: the small spinner and what is being
- * waited for. For the page-sized wait, `Loading`.
- */
+/** An inline wait inside a panel; `Loading` is the page-sized one. */
 export function Waiting({ children }: { children: string }) {
   return (
     <p className="waiting-note" role="status" aria-live="polite">

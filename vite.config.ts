@@ -92,9 +92,7 @@ h2 { font-size: 24px; }
 .player-volume-control { display: flex; align-items: center; }
 
 .settings { width: 900px; max-width: 100%; }
-/* min() is Chrome 79+, so the modern width is dropped whole here and the input
-   collapses to its intrinsic size. Full width rather than the desktop rule's
-   900px cap: at 1920 that cap is half the content area and reads as a bug. */
+/* min() is unsupported here, so the modern width is dropped; full width, not the desktop cap. */
 .search-input, .settings input { width: 100%; box-sizing: border-box; }
 .settings-line { display: flex; }
 .settings-line > * { margin-right: 10px; }
@@ -129,9 +127,7 @@ h2 { font-size: 24px; }
 .sponsor-options article { flex: 1 1 0; margin-right: 16px; }
 
 .status-screen { min-height: 700px; flex-direction: column; text-align: center; }
-/* Laid out with grid and gap, both inert here, and min() drops its width
-   outright — so the message collapsed to its intrinsic size with its title and
-   detail run together. Stated as a block with margins instead. */
+/* Grid, gap and min() are inert here; laid out as a block with margins. */
 .player-fatal-error { display: block; width: 680px; max-width: calc(100% - 48px); }
 .player-fatal-error > * { display: block; margin-bottom: 7px; }
 .player-fatal-error > *:last-child { margin-bottom: 0; }
@@ -146,19 +142,10 @@ h2 { font-size: 24px; }
 .player-presentation-mini.audio-player .player-mini-chrome { left: 76px !important; }
 .player-chrome { position: absolute !important; top: auto !important; right: 0 !important; bottom: 0 !important; left: 0 !important; height: auto !important; min-height: 0 !important; z-index: 120 !important; }
 .player-stream-status, .player-options { display: block; }
-/* The status lines are separated by a grid gap that does not exist here, so
-   they sat directly on top of one another; restated as a margin, per the note
-   further down about every gap-spaced container needing a rule. */
+/* The grid gap between status lines does not exist here; restated as a margin. */
 .player-stream-status small { margin-bottom: 3px; }
-/* The label sits centred against its controls rather than nudged down by a
-   hand-set padding. The modern sheet's .45rem is calibrated against a grid row
-   whose height it knows; here the row is a flex line, and asking the line to
-   centre its own contents is the only version that stays true when the pill
-   metrics move. Two things have to hold for centring to mean what it says:
-   the pills need symmetric vertical margins (below), or the line's centre is
-   not the pills' centre — and the note has to be pushed onto its own line, or
-   the label centres itself against a paragraph instead of against the
-   controls it names. */
+/* The label centres against its controls. That needs symmetric vertical margins
+   on the pills, and the note on its own line. */
 .player-option-group { display: flex; flex-wrap: wrap; align-items: center; }
 .player-option-group > span { width: 104px; flex: 0 0 104px; padding-top: 0; }
 .player-option-group > .player-option-note { flex: 0 0 100%; margin-left: 104px; }
@@ -167,10 +154,8 @@ h2 { font-size: 24px; }
 .player-scrubber { flex: 1 1 auto; margin: 0 16px; }
 .player-scrubber-display { flex: 1 1 auto; height: 6px; margin: 0 16px; background: #28282c; overflow: hidden; }
 .player-scrubber-display > span { display: block; height: 100%; background: #9f1834; }
-/* Centred by negative margins, because the modern rule sizes itself with
-   min()/aspect-ratio and Chromium 47 has neither. The transform that centres
-   it there must be cancelled or the artwork is pulled half its own width up
-   and to the left — centred twice, and so not centred at all. */
+/* Centred by negative margins: no min() or aspect-ratio here. The modern rule's
+   centring transform is cancelled, or the artwork is centred twice. */
 .audio-player-art { width: 420px; height: 420px; margin-left: -210px; margin-top: -210px; transform: none !important; }
 .player-presentation-mini .audio-player-art { width: 76px !important; height: 76px !important; margin-left: 0 !important; margin-top: 0 !important; }
 .player-mini-copy { display: flex; align-items: center; }
@@ -178,13 +163,9 @@ h2 { font-size: 24px; }
 .player-mini-time { position: absolute; right: 14px; top: 14px; }
 .toast { max-width: 560px; }
 
-/* Chromium 47 has neither CSS Grid nor flex gap, so all 119 gap declarations
-   in the app stylesheet are inert here and every grid collapses to a block.
-   Spacing therefore has to be restated as margins. Beyond looking cramped, a
-   zero gap puts focusable controls edge to edge, and the 1px focus outline
-   then draws over its neighbour instead of around itself — on a D-pad UI that
-   makes the selected control genuinely hard to identify. Any new grid- or
-   gap-spaced container needs a rule here too. */
+/* No CSS Grid or flex gap: every gap is inert and every grid a block, so spacing
+   is restated as margins. With no gap, focus outlines draw over neighbours.
+   Any new grid- or gap-spaced container needs a rule here too. */
 .player-button-row { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; }
 .player-button-row > * { margin: 5px; }
 .player-option-group > div { display: flex; flex-wrap: wrap; }
@@ -211,12 +192,10 @@ h2 { font-size: 24px; }
 .settings-status-card dl > div > dt { margin-right: 10px; }
 .play-actions > * { margin: 0 10px 10px 0; }
 
-/* Chromium 47: avoid expensive compositor effects and animation on the TV UI. */
+/* No compositor effects or animation on the TV UI. */
 *, *::before, *::after { transition: none !important; animation: none !important; }
-/* ...except the progress indicators. A spinner that cannot turn is worse than
-   no spinner: it reads as a hung application, which is exactly the wrong thing
-   to show while something is legitimately loading. Class beats the universal
-   selector, so these win despite its !important. */
+/* Except progress indicators: a still spinner reads as a hung app. The class
+   outranks the universal selector's !important. */
 .loading-spinner { animation: macha-loading-spin 700ms linear infinite !important; }
 .button-spinner { animation: button-spinner 700ms linear infinite !important; }
 .app-watermark, .player-backdrop { display: none !important; }
@@ -229,10 +208,9 @@ h2 { font-size: 24px; }
 h1, h2, .card-title, .episode-heading strong, .track-title, .player-titlebar strong { text-shadow: none !important; }
 .media-card:focus, .episode-still-link:focus { transform: none !important; }
 
-/* The one TV focus ring. It covers [data-tv-selected] as well as :focus
-   because D-pad navigation marks selection by attribute and real focus is not
-   always present, so anything added alongside this draws a second ring.
-   #620014 is near-black and disappears at sofa distance; #c8203c reads. */
+/* The one TV focus ring. It covers [data-tv-selected] because D-pad navigation
+   marks selection by attribute; anything added beside it draws a second ring.
+   #c8203c is readable at sofa distance. */
 [data-tv-focusable="true"]:focus,
 [data-tv-focusable="true"][data-tv-selected="true"] {
   outline: none !important;
@@ -241,10 +219,8 @@ h1, h2, .card-title, .episode-heading strong, .track-title, .player-titlebar str
   box-shadow: 0 0 0 4px #c8203c !important;
 }
 
-/* Hold the ring off the artwork by roughly its own width. Media cards already
-   have padding; the still and Continue Watching buttons have none, so their
-   ring sits directly on the image. Applied unconditionally so focus does not
-   resize anything. */
+/* Hold the ring off artwork that has no padding. Unconditional, so focus
+   resizes nothing. */
 .episode-still-link, .continue-card-open { padding: 4px !important; }
 `
 
@@ -263,11 +239,7 @@ function legacyRgba(css: string): string {
   });
 }
 
-/**
- * Everything Chromium 47 cannot parse, resolved ahead of time: custom
- * properties (no `var()` support at all), `:focus-visible`, and `#RGBA`/
- * `#RRGGBBAA` hex colours.
- */
+/** Resolves what Chromium 47 cannot parse: `var()`, `:focus-visible`, and `#RGBA`/`#RRGGBBAA` colours. */
 function downlevelCss(css: string): string {
   let result = css;
   for (const name of Object.keys(samsungCssVariables)) {
@@ -301,23 +273,15 @@ function samsungCssCompatibility(): Plugin {
       ];
     },
     /**
-     * Downlevel every stylesheet as it is loaded, before Vite decides where it
-     * ends up.
-     *
-     * With `renderModernChunks: false` the legacy build produces no CSS asset
-     * at all — the whole stylesheet is inlined into the JS chunk as a
-     * `<style>` element's textContent — so downlevelling emitted assets alone
-     * would let every `var()` reach Chromium 47, which has no custom
-     * properties. Transforming at source is indifferent to that decision, and
-     * rewriting minified JS to reach the same text is not something to
-     * attempt.
+     * Downlevels each stylesheet at load: with `renderModernChunks: false` the legacy build
+     * inlines CSS into the JS chunk, so emitted assets alone would miss it.
      */
     transform(code, id) {
       if (!id.split('?')[0].endsWith('.css')) return undefined;
       return { code: downlevelCss(code), map: null };
     },
     generateBundle(_options, bundle) {
-      // Belt and braces: a build that does emit a CSS asset is still covered.
+      // Covers a build that does emit a CSS asset.
       for (const fileName of Object.keys(bundle)) {
         const output = bundle[fileName];
         if (output.type !== 'asset' || !output.fileName.endsWith('.css')) continue;
@@ -332,9 +296,8 @@ function samsungCssCompatibility(): Plugin {
   };
 }
 
-// Tizen config.xml exposes one package/test launcher icon. Samsung TV published 1:1,
-// 16:9 and 512x423 launcher artwork is supplied separately through Seller Office;
-// the corresponding build assets live under public/samsung/.
+// config.xml carries one launcher icon; the other Samsung launcher artwork goes through
+// Seller Office, with its build assets under public/samsung/.
 function samsungManifest(version: string): Plugin {
   return {
     name: 'macha-samsung-manifest',
@@ -393,9 +356,8 @@ export default defineConfig(({ mode }) => {
     test: {
       environment: 'node',
       setupFiles: './src/test/setup.ts',
-      // A test's verdict is its assertions, never the clock: a deadline fails
-      // a correct test on a loaded machine. A test that truly hangs shows as
-      // a run that does not finish.
+      // No deadline: a timeout fails a correct test on a loaded machine. A hung test shows
+      // as a run that never finishes.
       testTimeout: 0,
       hookTimeout: 0,
     },

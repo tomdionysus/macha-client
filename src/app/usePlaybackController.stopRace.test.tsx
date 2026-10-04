@@ -10,14 +10,8 @@ import { VolumeStore } from '../state/volume';
 import type { MediaSummary } from '@machafoundation/core';
 import { usePlaybackController } from './usePlaybackController';
 
-// Real `navigate()` calls, minus actually applying them to the route: in the
-// real app, React Router commits a navigate-away asynchronously relative to
-// the runtime's own lifecycle subscription, so a render can legitimately
-// observe "stop() was told to navigate away" and "we're still on
-// /play/:id" at the same time. `MemoryRouter` in a synchronous test flushes
-// both together, which would hide exactly the race this file exists to
-// catch — so `useLocation` here is driven by a variable this file controls
-// directly, independent of when `navigate` was called.
+// `useLocation` reads a variable rather than following `navigate`: the real router commits a
+// navigate-away after the runtime's lifecycle update, and MemoryRouter would flush both together.
 let fakePathname = '/play/m1';
 const navigateSpy = vi.fn();
 vi.mock('react-router-dom', async (importOriginal) => {
@@ -37,11 +31,8 @@ const platform = {} as unknown as Platform;
 
 describe('usePlaybackController stop() vs. route-reconstruction race', () => {
   it('does not restart playback when the runtime clears before the router commits the navigate-away', () => {
-    // stop() while still on /play/:id races the runtime clearing its active
-    // request against the router applying the navigate() call. If the runtime
-    // wins, the reconstruct-from-route effect sees "on the player route, no
-    // active playback", this client's signature for "reload deep-linked into
-    // the player", and must not restart the session stop() was told to close.
+    // If the runtime clears before the router leaves /play/:id, the route effect sees its
+    // deep-link signature (player route, no active playback) and must not restart the session.
     fakePathname = '/play/m1';
     const play = vi.fn().mockResolvedValue(undefined);
     const stop = vi.fn().mockResolvedValue(undefined);
@@ -62,16 +53,13 @@ describe('usePlaybackController stop() vs. route-reconstruction race', () => {
     act(() => { result.current.stop(); });
     expect(navigateSpy).toHaveBeenCalledWith('/movies/m1', { replace: true });
 
-    // The runtime's async teardown resolves (request cleared) before the
-    // router has actually committed the navigate-away — `fakePathname`
-    // deliberately still says `/play/m1` here.
+    // The runtime has cleared; the route still says /play/m1.
     rerender({ phase: 'idle', generation: 1 } as PlaybackRuntimeSnapshot);
 
     expect(play).not.toHaveBeenCalled();
     expect(api.details).not.toHaveBeenCalled();
 
-    // Once the route genuinely catches up, normal reconstruction behavior
-    // must resume rather than staying suppressed forever.
+    // Once the route catches up, reconstruction is no longer suppressed.
     fakePathname = '/movies/m1';
     rerender({ phase: 'idle', generation: 1 } as PlaybackRuntimeSnapshot);
     expect(play).not.toHaveBeenCalled();

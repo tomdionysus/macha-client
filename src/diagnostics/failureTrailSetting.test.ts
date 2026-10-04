@@ -28,14 +28,11 @@ describe('showing diagnostics on a playback failure', () => {
 
     setFailureTrailEnabled(false);
     expect(failureTrailEnabled()).toBe(false);
-    // Turning it off leaves nothing behind, so a viewer who never touched it
-    // and one who tried it once are the same viewer to everything downstream.
     expect(storage.entries.size).toBe(0);
   });
 
   it('stays off rather than throwing where storage itself throws', () => {
-    // A private window or a widget with no quota. Neither a settings screen
-    // nor a player is worth failing over a preference.
+    // A private window, or a widget with no quota.
     configureMachaHost({
       storage: {
         getItem: () => { throw new Error('storage is unavailable'); },

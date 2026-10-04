@@ -19,26 +19,15 @@ export function tvRangeOwnsDirection(value: unknown, direction: SamsungDpadDirec
 }
 
 /**
- * Whether a focused editor should keep this command rather than let it move
- * focus elsewhere.
- *
- * Editors own the caret keys and Enter. **No editor owns up and down**, and
- * that includes the multi-line ones. On a D-pad, up and down are the only way
- * between controls, so an editor that keeps them is an editor the viewer
- * cannot leave except by pressing Back and losing the form.
- *
- * A textarea is no exception, though it uses up and down between lines: the
- * endpoints box is a textarea, and keeping them would make it a trap. Caret
- * movement within a line is what left and right are for; moving between controls is
- * what up and down are for, and a viewer who cannot reach the Save button has
- * lost more than a viewer who cannot reach line two.
+ * Whether a focused editor keeps this command. Editors own the caret keys and Enter, but never up
+ * and down, multi-line editors included: on a D-pad those are the only way between controls, and
+ * an editor that kept them could only be left with Back.
  */
 export function tvTextEditingOwnsCommand(value: unknown, command: SamsungDpadCommand): boolean {
   if (!isTextEditingElement(value)) return false;
   return command !== 'up' && command !== 'down';
 }
 
-/** Editors own caret movement, selection controls and Enter while focused. */
 export function isTextEditingElement(value: unknown): boolean {
   if (!value || typeof value !== 'object') return false;
   const element = value as {
@@ -84,14 +73,9 @@ function rectGap(start: number, size: number, otherStart: number, otherSize: num
 }
 
 /**
- * How far a candidate is in the direction pressed, or null when it is not in
- * that direction at all. Judged from the current element's edges, not its
- * centre: a search field spanning most of its row has its centre far from its
- * right edge, and by centres every result card right of that middle would
- * count as "right" of the field and beat the sort control beside it.
- *
- * The opposite press does not undo the move just made; this scorer alone
- * decides every move.
+ * How far a candidate is in the direction pressed, or null when it is not in that direction.
+ * Judged from the current element's edges, not its centre: by centres, cards below a wide search
+ * field would count as "right" of it and beat the control beside it.
  */
 function scoreTvCandidate(current: DOMRect, candidate: DOMRect, direction: SamsungDpadDirection): { score: number; inLane: boolean } | null {
   const tx = candidate.left + candidate.width / 2;
@@ -117,14 +101,9 @@ function scoreTvCandidate(current: DOMRect, candidate: DOMRect, direction: Samsu
 }
 
 /**
- * The best candidate, one row at a time. Left and right keep to the current
- * row: only what overlaps the current element vertically competes, and at the
- * end of the row the move stops rather than falling to another row; a lane
- * penalty alone would let a near card below beat a far refresh on the same
- * row. Up and down go to the nearest row: the candidate whose facing edge is
- * closest, and everything overlapping it vertically. "Same column first"
- * would be wrong there: under a short row the only thing in a card's column
- * can be the top bar, and Up would skip the whole row.
+ * Left and right keep to the current row and stop at its end. Up and down go to the nearest row,
+ * not the same column first: under a short row, the only thing in a card's column can be the top
+ * bar, and Up would skip the row between.
  */
 function bestTvCandidate(current: HTMLElement, elements: HTMLElement[], direction: SamsungDpadDirection): HTMLElement | undefined {
   const currentRect = current.getBoundingClientRect();
@@ -139,8 +118,7 @@ function bestTvCandidate(current: HTMLElement, elements: HTMLElement[], directio
 
   let row = scored;
   if (direction === 'left' || direction === 'right') {
-    // The end of a row is the end of the move: falling back to other rows
-    // would drop Left from the top bar's first item into a card below it.
+    // No fallback to other rows: Left from the top bar's first item would drop to a card below.
     row = scored.filter((entry) => entry.result.inLane);
   } else {
     const facingGap = (rect: DOMRect) => rectGap(currentRect.top, currentRect.height, rect.top, rect.height);
@@ -158,7 +136,7 @@ function sequentialCandidate(elements: HTMLElement[], current: HTMLElement, dire
   return next >= 0 && next < elements.length ? elements[next] : undefined;
 }
 
-/** Plain DOM wiring (not a hook) called from inside useTvNavigation's useEffect below. Exported so it's testable without a real Samsung/Android build mode. */
+/** Plain DOM wiring, exported so it is testable outside a TV build mode. */
 export function attachSpatialTvNavigation(onBack?: () => boolean): () => void {
   const focusFirst = () => {
     const elements = tvElements();

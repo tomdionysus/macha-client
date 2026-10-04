@@ -11,12 +11,8 @@ export type ManagedHlsUnbufferedMediaDecision =
   | { action: 'fail'; occurrences: number };
 
 /**
- * Per-source-generation recovery budget for fatal hls.js media errors.
- *
- * A recovery is useful only if it produces observable playback progress. The
- * guard therefore permits one immediate MediaSource recovery, requires real
- * timeline advancement before another, and has a hard per-generation ceiling.
- * A new playback source gets a new guard; pause/resume does not.
+ * Recovery budget for one playback source; pause and resume keep it. Allows one
+ * immediate media recovery, then requires timeline progress before another.
  */
 export class ManagedHlsMediaRecoveryBudget {
   private attempts = 0;
@@ -33,19 +29,9 @@ export class ManagedHlsMediaRecoveryBudget {
   ) {}
 
   /**
-   * A media error hls.js calls non-fatal, raised while nothing has buffered.
-   *
-   * hls.js recovers from some of these itself, without ever asking us: an
-   * append against a MediaSource the browser has ended is answered by tearing
-   * the MediaSource down and building another. When the stream is one this
-   * browser cannot parse at all, that recovery reaches the same wall every
-   * time and the player sits in a loop — one full segment refetched per turn,
-   * for as long as the viewer leaves it there, behind a spinner and with
-   * nothing in the UI to say anything is wrong.
-   *
-   * "Non-fatal" is a claim about recoverability, and repetition with nothing
-   * buffered is the evidence against it. Bounded here rather than left to
-   * hls.js, which has no view of whether its own recoveries achieve anything.
+   * A non-fatal media error with nothing buffered. hls.js retries these itself,
+   * refetching a segment each time, so a stream the browser cannot parse loops
+   * behind a spinner unless bounded here.
    */
   unbufferedMediaError(): ManagedHlsUnbufferedMediaDecision {
     this.unbufferedMediaErrors += 1;
@@ -54,7 +40,7 @@ export class ManagedHlsMediaRecoveryBudget {
       : { action: 'ignore', occurrences: this.unbufferedMediaErrors };
   }
 
-  /** Anything buffered means the pipeline is working; the streak starts again. */
+  /** Buffered content resets the unbuffered-error streak. */
   observeBufferedContent(): void {
     this.unbufferedMediaErrors = 0;
   }

@@ -74,24 +74,11 @@ interface FormModalProps {
 }
 
 /**
- * Editing one record, in a dialogue.
+ * The client's single idiom for editing a record; see `docs/architecture.md`.
  *
- * This is the client's single idiom for changing something: a list shows
- * records compactly and read-only, and every mutation opens one of these. It
- * exists so that no screen hand-rolls the parts that must not vary — a
- * focus-managed panel, Cancel first and the commit second, one busy state
- * disabling both, and Escape meaning cancel. See `docs/architecture.md`.
- *
- * The commit is wired twice, deliberately: the form's `submit` so Enter in a
- * field commits, and the button's `click`. The button is outside the `<form>`
- * because the actions row is the modal's, not the form's, and associating them
- * with a `form` attribute would rest on markup Chromium 47 on the Samsung
- * handles inconsistently. Two call sites of one handler is the cheaper
- * certainty.
- *
- * Field-level errors are not this component's business — they belong beside
- * the field that caused them, which only the caller can place. `error` is for
- * what is left: the failure with no field to sit against.
+ * The commit is wired twice: the form's `submit` for Enter, and the button's `click`. The button
+ * sits outside the `<form>`, and the `form` attribute is unreliable on the Samsung's Chromium 47.
+ * `error` is for a failure with no field to sit beside; field errors are the caller's.
  */
 export function FormModal({
   open,

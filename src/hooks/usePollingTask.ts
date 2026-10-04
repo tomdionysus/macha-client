@@ -47,7 +47,7 @@ export function usePollingTask<T>(options: {
       task.stop();
       window.clearInterval(timer);
     };
-    // Callers explicitly define when the polling task must be recreated.
+    // Callers define when the task is recreated.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [...options.dependencies, options.enabled]);
 }

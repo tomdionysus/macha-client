@@ -1,13 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { EndpointCandidate, EndpointRegistry } from '@machafoundation/core';
 
-/**
- * The registry's current candidate order, as React state.
- *
- * Shared by the Status screen and the player, since neither owns the
- * registry. Ordering moves as health and measurements move, so this re-reads on every
- * notification rather than caching a list that would go stale silently.
- */
+/** The registry's current candidate order, re-read on every notification since health and measurements reorder it. */
 export function useEndpointCandidates(registry: EndpointRegistry): EndpointCandidate[] {
   const [candidates, setCandidates] = useState<EndpointCandidate[]>(() => registry.candidates());
   useEffect(() => {

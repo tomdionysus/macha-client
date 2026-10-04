@@ -5,10 +5,7 @@ import { PlaybackRuntime, type PlaybackRuntimeOptions } from '@machafoundation/c
 import { platformTraits } from '../platform/traits';
 
 export function usePlaybackRuntime(platform: Platform, resolver: PlaybackResolver, options?: PlaybackRuntimeOptions) {
-  // The runtime is keyed only by platform. Resolver changes are applied without
-  // replacing the application-scoped player or an unrelated presentation host.
-  // `options` supplies the facts and host policy the instruction chooser needs;
-  // it is read once for the same reason, and its contents are stable.
+  // Keyed by platform only: resolver changes are applied in place, and `options` is read once.
   const runtime = useMemo(() => new PlaybackRuntime(platform, resolver, options), [platform]);
   const [state, setState] = useState(() => runtime.getSnapshot());
 
@@ -16,25 +13,16 @@ export function usePlaybackRuntime(platform: Platform, resolver: PlaybackResolve
   useEffect(() => { runtime.setResolver(resolver); }, [resolver, runtime]);
   useEffect(() => () => { void runtime.dispose(); }, [runtime]);
   useEffect(() => {
-    // Every pagehide, including one into the back-forward cache
-    // (`persisted`). Chrome caches a playing page on an ordinary navigation,
-    // and a cached page keeps its node session, and on a one-slot node the
-    // only transcode slot, for as long as it stays cached, with no event when
-    // it is evicted, so the next viewer is refused until the node's idle rule
-    // frees the slot. A page restored from the cache finds no playback on its
-    // player route and starts it again from the saved position, as a deep
-    // link does.
+    // Every pagehide, including into the back-forward cache: a cached page keeps its
+    // node session and transcode slot, with no event on eviction. A restored page
+    // restarts playback from its player route.
     const onPageHide = () => runtime.terminateForPageExit();
     window.addEventListener('pagehide', onPageHide);
     return () => window.removeEventListener('pagehide', onPageHide);
   }, [runtime]);
 
-  // A TV or app host suspends us without ever firing `pagehide`, so the
-  // keepalive DELETE above never runs and the server keeps the session — which
-  // on a node allowing one transcode at a time means the next viewer is
-  // refused. `visibilitychange` is the one signal such a host reliably does
-  // send. Deliberately not on the web, where a backgrounded tab is still
-  // playing and stopping it would be wrong.
+  // A TV or app host suspends without firing `pagehide`, so `visibilitychange` ends
+  // the session there. Not on the web, where a backgrounded tab is still playing.
   const suspendEndsPlayback = !platformTraits(platform).hasPointerControls;
   useEffect(() => {
     if (!suspendEndsPlayback) return undefined;

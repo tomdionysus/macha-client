@@ -1,12 +1,7 @@
 /** How a media line's fields are joined. The fields and their labels are core's. */
 export const MEDIA_LINE_SEPARATOR = ' · ';
 
-/**
- * A file's technical summary as one line: core supplies the fields
- * (`technicalSummary(...).parts`) and this does the layout. It wraps only
- * between fields, so "926 kbps" or "2h 31m" never breaks across two lines on
- * a narrow column.
- */
+/** A file's technical summary on one line, from core's `technicalSummary(...).parts`. Wraps only between fields. */
 export function MediaLine({ parts, className }: { parts: readonly string[]; className?: string }) {
   return (
     <p className={className}>

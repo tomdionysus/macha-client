@@ -1,10 +1,7 @@
 /** Rows per page in a slim job or file list. */
 export const LIST_PAGE_SIZE = 50;
 
-/**
- * One page of a list, with the page clamped into range, so a page number
- * carried in the address from a longer list never shows an empty page.
- */
+/** One page of a list, the page clamped into range so a stale page number never shows an empty page. */
 export function pageSlice<T>(items: readonly T[], page: number, pageSize = LIST_PAGE_SIZE): {
   items: T[];
   page: number;

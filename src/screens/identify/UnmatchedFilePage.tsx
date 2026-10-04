@@ -38,14 +38,8 @@ function sameStatedNumber(left: number | null, right: number | null): boolean {
 }
 
 /**
- * Whether an inferred candidate is already in the catalogue, and so has no
- * business being offered as something to create.
- *
- * The two lists on this screen answer different questions — "what do we think
- * this file is" and "what already exists that it could be" — and where they
- * overlap the first one is dead weight: the same identity appears twice, once
- * matched and once to be created a second time. Deliberately conservative: a
- * field only rules a candidate out when both sides state it.
+ * Whether an inferred candidate is already in the catalogue, so is not offered for creation a
+ * second time. Conservative: a field rules a candidate out only when both sides state it.
  */
 export function candidateAlreadyCatalogued(candidate: MediaProbeCandidate, matches: readonly ManageCatalogueMatch[]): boolean {
   const title = comparableTitle(candidate.title);
@@ -63,10 +57,8 @@ const KIND_NAME: Record<CatalogueKind, string> = {
 };
 
 /**
- * What a catalogue search looks for, by what the file most likely is:
- * everything it could be filed under, then the item it could be another
- * version of. Each kind is its own search, so twenty remixes of a track
- * cannot crowd its album and artist out of one shared limit.
+ * The catalogue kinds searched for each kind of file: its possible parents, then the item it
+ * could be another version of. Each kind is its own search, so one cannot crowd out the others.
  */
 const SEARCH_KINDS: Record<MediaProbeCandidate['kind'], CatalogueKind[]> = {
   movie: ['movie'],
@@ -75,7 +67,7 @@ const SEARCH_KINDS: Record<MediaProbeCandidate['kind'], CatalogueKind[]> = {
 };
 const PER_KIND = 8;
 
-/** Kinds whose picture is a square cover, not a tall poster. */
+/** Kinds with a square cover rather than a tall poster. */
 const SQUARE_ART: ReadonlySet<CatalogueKind> = new Set(['artist', 'album', 'track']);
 
 const GROUP_NAME: Record<CatalogueKind, string> = {
@@ -84,7 +76,7 @@ const GROUP_NAME: Record<CatalogueKind, string> = {
 
 type Found = ReadonlyArray<readonly [CatalogueKind, CatalogueItem[]]>;
 
-/** What a search result offers: a playable item takes the file; a parent opens manual entry with itself chosen. */
+/** The action offered on a parent result, which opens manual entry with it chosen; a playable item takes the file instead. */
 const PLACE_UNDER: Partial<Record<CatalogueKind, string>> = {
   album: 'Add a track to this album', artist: 'Add a new album by this artist', show: 'Add an episode to this series', season: 'Add an episode to this season',
 };
@@ -99,7 +91,7 @@ function matchSubtitle(match: CatalogueItem): string {
   return parts.join(' · ');
 }
 
-/** The image a catalogue item shows: its own, else the one the server resolves for it (an album's for a track). */
+/** The item's own image, else the one the server resolves for it (an album's for a track). */
 function displayArtworkUrl(item: CatalogueItem | undefined): string | undefined {
   if (!item) return undefined;
   const all = [...item.artwork, ...(item.effective_artwork ?? [])];
@@ -110,14 +102,9 @@ function displayArtworkUrl(item: CatalogueItem | undefined): string | undefined 
 type Tab = 'candidates' | 'search' | 'provider' | 'manual';
 
 /**
- * One unmatched file: what it is, the TMDB and MusicBrainz records it most
- * likely is (the usual answer: a whole record), and, for when none is, four
- * other ways to say what it should be — a provider search with any words, an
- * item already in the catalogue (which gains it as another version, or is
- * the parent it goes under), what the file says about itself, or metadata
- * entered by hand. Every one is applied through core's `identifyUnmatched`,
- * which routes it; this screen calls no match or manual route itself.
- * Whatever resolves the file returns to the list.
+ * One unmatched file: its likely provider records, and four other ways to say what it is (a
+ * provider search, a catalogue item, what the file says of itself, or manual entry). All are
+ * applied through core's `identifyUnmatched`; whatever resolves the file returns to the list.
  */
 export function UnmatchedFilePage({ api, catalogueApi }: { api: ManageApi; catalogueApi: CatalogueApi }) {
   const { fileId = '' } = useParams();
@@ -129,7 +116,7 @@ export function UnmatchedFilePage({ api, catalogueApi }: { api: ManageApi; catal
   const [query, setQuery] = useState('');
   const [suggested, setSuggested] = useState<string>();
   const [reloads, setReloads] = useState(0);
-  // Each candidate's picture by its index: undefined while asked, null for none found.
+  // By candidate index: undefined while asked, null for none found.
   const [pictures, setPictures] = useState<Record<number, CandidatePicture | null>>({});
   const [found, setFound] = useState<Found>();
   const [parent, setParent] = useState<CatalogueItem>();
@@ -144,23 +131,20 @@ export function UnmatchedFilePage({ api, catalogueApi }: { api: ManageApi; catal
     let cancelled = false;
     setLoading(true);
     setError(undefined);
-    // The page needs only the file. Both calls make the server probe it, and
-    // the second can be slow, so the page does not wait for it.
+    // Both calls make the server probe the file; the page waits only for the first.
     void api.unmatchedDetail(fileId)
       .then((nextDetail) => {
         if (cancelled) return;
         setDetail(nextDetail);
         setPictures({});
-        // Pictures arrive behind the page, each as the provider answers.
         findCandidatePictures(api, nextDetail.probes).forEach((found, index) => {
           void found.then((picture) => { if (!cancelled) setPictures((current) => ({ ...current, [index]: picture ?? null })); });
         });
       })
       .catch((cause) => { if (!cancelled) setError(viewerErrorText(cause)); })
       .finally(() => { if (!cancelled) setLoading(false); });
-    // The server's own match list, of leaf items only, says which candidates
-    // are already catalogued, and its query seeds the search. Without it every
-    // candidate is offered and the search starts empty: nothing to report.
+    // The server's match list says which candidates are already catalogued, and its query seeds the
+    // search. Its failure is not reported: every candidate is offered and the search starts empty.
     void api.prospectiveMatches(fileId)
       .then((result) => {
         if (cancelled) return;
@@ -187,9 +171,8 @@ export function UnmatchedFilePage({ api, catalogueApi }: { api: ManageApi; catal
   const apply = (identification: Identification) => resolve(() => identifyUnmatched(api, fileId, identification));
 
   /**
-   * Create a candidate as it stands, with its picture when one was found. A
-   * picture refused after the file is catalogued says so and stays, with
-   * every action held: the file is no longer unmatched.
+   * Creates a candidate as it stands, with its picture if one was found. A picture refused after
+   * the file is catalogued is reported and every action held: the file is no longer unmatched.
    */
   const create = async (candidate: MediaProbeCandidate, picture: CandidatePicture | undefined) => {
     setBusy(true);
@@ -226,7 +209,7 @@ export function UnmatchedFilePage({ api, catalogueApi }: { api: ManageApi; catal
     }
   }, [catalogueApi, fileKind]);
 
-  // The search runs once with the server's suggested words, when its tab is open and they have arrived.
+  // Runs once, with the server's suggested words, when the tab is open and they have arrived.
   useEffect(() => {
     if (tab === 'search' && found === undefined && suggested) void searchCatalogue(suggested);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only on opening the tab or the words arriving
@@ -302,8 +285,7 @@ export function UnmatchedFilePage({ api, catalogueApi }: { api: ManageApi; catal
                 : (
                   <ul className="identify-candidates">
                     {candidates.map(({ candidate, index }) => {
-                      // Core decides whether a candidate says enough to create
-                      // it as it stands; one that does not is reviewed first.
+                      // Core decides whether a candidate says enough to create as it stands; otherwise it is reviewed first.
                       const complete = manualFromCandidate(candidate) !== undefined;
                       return (
                         <li key={`${candidate.generator}-${index}`}>
@@ -343,8 +325,7 @@ export function UnmatchedFilePage({ api, catalogueApi }: { api: ManageApi; catal
                         <div><strong>{match.title}</strong><span>{matchSubtitle(match)}</span></div>
                         {under
                           ? <button className="secondary-button" type="button" disabled={busy} onClick={() => placeUnder(match)} data-tv-focusable="true">{under}</button>
-                          // An item that already has a file gains this one beside it, as another
-                          // version; the server never replaces what the item holds.
+                          // The server adds the file beside any the item already holds, never replacing it.
                           : (
                             <button className="secondary-button" type="button" disabled={busy} onClick={() => void apply({ from: 'catalogue', catalogueItemId: match.id })} data-tv-focusable="true">
                               {match.media_ids?.length ? 'Add as another version' : 'Use this'}
@@ -367,8 +348,7 @@ export function UnmatchedFilePage({ api, catalogueApi }: { api: ManageApi; catal
 
         {tab === 'manual' && (
           <div role="tabpanel" id="identify-manual" aria-labelledby="identify-tab-manual">
-            {/* Keyed on the candidate under review and the parent chosen: the form
-                seeds its fields once, at mount, so either change builds a new form. */}
+            {/* Keyed so a new candidate or parent remounts the form, which seeds its fields only at mount. */}
             <ManualEntry
               key={`manual-${reviewing ?? 'blank'}-${parent?.id ?? 'none'}`}
               detail={detail}

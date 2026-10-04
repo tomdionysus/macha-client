@@ -3,14 +3,8 @@ const DEFAULT_PRELOAD_MARGIN_PX = 1000;
 type ProximityListener = () => void;
 
 /**
- * One-shot proximity notice used by lazy artwork, backed by the browser's own
- * IntersectionObserver rather than hand-rolled scroll/resize polling.
- *
- * Registration is deliberately monotonic: once an element reaches the preload
- * region it is unobserved and its listener fires exactly once. Because the
- * browser itself re-runs intersection checks on any layout change (not just a
- * scroll or resize event), a card revealed by content moving elsewhere on the
- * page is never missed the way a scroll-only check would miss it.
+ * One-shot proximity notice for lazy artwork: an element is unobserved once it
+ * reaches the preload region, and its listener fires exactly once.
  */
 class BrowserArtworkViewport {
   private observer?: IntersectionObserver;
@@ -47,10 +41,8 @@ class BrowserArtworkViewport {
 let browserArtworkViewport: BrowserArtworkViewport | undefined;
 
 /**
- * Notify once `element` is within the preload margin of the viewport.
- *
- * Falls back to loading immediately during server-side rendering and on the
- * rare browser with no IntersectionObserver (older Samsung Tizen firmware).
+ * Notifies once `element` is within the preload margin of the viewport;
+ * immediately where there is no IntersectionObserver (SSR, older Tizen firmware).
  */
 export function observeArtworkProximity(element: Element, listener: ProximityListener): () => void {
   if (typeof window === 'undefined' || typeof IntersectionObserver === 'undefined') {

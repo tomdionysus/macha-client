@@ -35,11 +35,7 @@ import {
 
 /**
  * Every word this client shows a viewer about the media and the player.
- *
- * Core handles no viewer text at all. It hands over structured facts (season,
- * episode, disc and track numbers, the series, album and artist an item
- * belongs to, sort and category keys) and codes in place of sentences, and
- * each client words them.
+ * Core supplies structured facts and codes, never sentences.
  */
 
 const pad = (value: number) => String(value).padStart(2, '0');
@@ -51,9 +47,8 @@ export function episodeCode(item: Pick<MediaSummary, 'seasonNumber' | 'episodeNu
 }
 
 /**
- * An episode's mark where it is shown away from its season (search,
- * Continue Watching), taking the season from its context where the item
- * lacks one. It reads "S04E08" in all cases, on every client.
+ * An episode's mark away from its season (search, Continue Watching): "S04E08", the season taken
+ * from its context where the item lacks one.
  */
 export function episodeLabel(item: Pick<MediaSummary, 'seasonNumber' | 'episodeNumber' | 'playbackContext'>): string | undefined {
   return episodeCode({ episodeNumber: item.episodeNumber, seasonNumber: item.playbackContext?.season.seasonNumber ?? item.seasonNumber });
@@ -75,10 +70,8 @@ export function albumLabel(context: MusicHierarchyContext): string {
 }
 
 /**
- * The second line of an ordinary card: what distinguishes this item from
- * others of its name. A movie or show its year; an episode its code; a
- * season found outside its series that series; an album its artist (on
- * Music the artist sits below the album name); a track its number.
+ * An ordinary card's second line, telling this item from others of its name: a movie or show's
+ * year, an episode's code, a season's series, an album's artist, a track's number.
  */
 export function cardSubtitle(item: MediaSummary): string | undefined {
   switch (item.kind) {
@@ -142,12 +135,9 @@ export function startupSubsystemLabel(key: StartupSubsystem['key']): string {
 }
 
 /**
- * The server puts a code beside every sentence it sends, and the code is
- * what this client words. One rule for all of them: a code this client knows
- * gets its sentence here; a code that says only that something went wrong
- * underneath (libtorrent's error, a storage error) gets its sentence and then
- * the server's, which is where the substance is; a code this client does not
- * know, or no code at all (an older node), shows the server's sentence.
+ * Words a server code. A known code gets this client's sentence; a `generic` one (something failed
+ * underneath) gets that sentence and then the server's; an unknown or absent code (an older node)
+ * shows the server's sentence.
  */
 function coded<C extends string>(words: Partial<Record<C, string>>, generic: ReadonlySet<string>, code: string | null | undefined, detail: string | null | undefined): string | undefined {
   const sentence = code ? words[code as C] : undefined;
@@ -247,16 +237,12 @@ const PLACEMENT_REASONS: Record<string, string> = {
   node_not_torrent_capable: 'That node cannot run torrents.',
 };
 
-/**
- * A node holds a torrent in one job, and a second add of the same torrent is
- * refused while that job exists, in whatever state.
- */
+/** A second add of a torrent is refused while a node holds a job for it, in whatever state. */
 const TORRENT_ALREADY_ADDED_CODE = 'torrent_already_added';
 
 /**
- * A torrent another node would not take: by its reason, or the peer's own
- * code where that is a job's. Read through core's `acquisitionError`, since
- * the cluster router wraps the node's refusal as the cause of its own.
+ * A torrent another node would not take. Read through core's `acquisitionError`, since the cluster
+ * router wraps the node's refusal as the cause of its own.
  */
 function placementText(caught: unknown): string | undefined {
   const error = acquisitionError(caught);
@@ -273,39 +259,24 @@ export function serverStatusText(status: { code: string | null; detail: string |
   return status.code && status.code !== 'ok' ? codeWords(status.code) : undefined;
 }
 
-/**
- * Signed out here, and the cluster could not be told. Core has already
- * dropped the token, so this device is signed out either way; the session
- * itself stays valid on the server until it expires.
- */
+/** Core has dropped the token, but the cluster could not be told. */
 export const SIGN_OUT_UNCONFIRMED_TEXT = 'You are signed out on this device, but the server could not be reached to end the session, so it stays valid there until it expires.';
 
 export const SERVER_UNREACHABLE_TEXT = 'The Macha server cannot be reached. Check that the server is running and that the API address is correct.';
 
-/**
- * Every node was tried and none answered: refused, gone, or slower than core
- * waits for one (8 s each). Usually a passing slowness, so it says to try
- * again before it says to check anything.
- */
+/** Every node was tried and none answered within core's wait. Usually passing, so it says to try again first. */
 export const NO_NODE_ANSWERED_TEXT = 'No Macha server answered. Try again in a moment; if it keeps happening, check that the servers are running.';
 
 /** A node in good standing was still working when core's budget for the read ran out: slow, not gone. */
 export const SERVER_SLOW_TEXT = 'The server is taking too long to answer. Try again in a moment.';
 
-/**
- * One node was asked to change something and did not answer in time. A
- * change is never retried on another node, and the node may still be doing
- * it (a MusicBrainz match can run past a minute), so the viewer is told to
- * look before asking again.
- */
+/** One node did not answer a change in time. A change is never retried on another node, and may still be running. */
 export const CHANGE_UNANSWERED_TEXT = 'The server did not answer in time. It may still finish: refresh in a minute before trying again.';
 
 /**
- * What a viewer is told about a thrown error. An error's `message` is core's
- * log text and never shown. In order: this client's sentence for a code core
- * states, the server's own sentence from wherever in the chain it was said,
- * this client's sentence for no node answering, and last the caller's
- * general line.
+ * What a viewer is told about a thrown error; its `message` is core's log text and never shown.
+ * In order: this client's sentence for a code core states, the server's own sentence, the
+ * no-node-answered sentence, then `fallback`.
  */
 export function viewerErrorText(error: unknown, fallback = 'Something went wrong. Try again.'): string {
   const placed = placementText(error);
@@ -328,19 +299,12 @@ const CHOICE_NAMES: Record<string, string> = {
   container: 'streaming format',
 };
 
-/**
- * The node is converting as much as it is allowed to. A change back into a
- * transcode reacquires the node's slot and can meet this when another viewer
- * took it meanwhile; the server's own sentence ("video transcode limit
- * reached") is the operator's, not the viewer's.
- */
+/** The node is at its transcode limit. The server's sentence is the operator's, so the viewer gets this client's. */
 const RESOURCE_LIMIT_CODE = 'resource_limit';
 
 /**
- * Why the node refused a playback change, as specifically as it said. A
- * stream choice is worded from its code; anything else is the server's own
- * sentence; and where nothing said why, it says so plainly rather than
- * inventing a reason.
+ * Why the node refused a playback change: a stream choice is worded from its code, anything else is
+ * the server's sentence, and where nothing said why, it says so.
  */
 export function playbackRefusalText(error: unknown, refusal?: PlaybackRefusal): string {
   const code = refusal?.code ?? (error instanceof MachaPlaybackError ? error.code : undefined);
@@ -368,11 +332,7 @@ export function playbackNoticeText(notice: PlaybackNotice, quality?: QualityClas
   }
 }
 
-/**
- * The failure screen's sentence for a failure core states by code, or
- * undefined for one it does not, where the server's own sentence (or the
- * screen's general one) applies.
- */
+/** The failure screen's sentence for a failure code core states, or undefined to use the server's sentence. */
 export function playbackFailureCodeText(code: string | undefined): string | undefined {
   switch (code) {
     case SESSION_PROVENANCE_UNKNOWN_CODE:
@@ -380,8 +340,7 @@ export function playbackFailureCodeText(code: string | undefined): string | unde
       return 'This stream is no longer available. Start it again.';
     case NOT_PLAYABLE_CODE:
       return 'This item cannot be played here.';
-    // Core's own code, raised when a start that reports progress stops
-    // reporting any: there is no server sentence behind it.
+    // Core's own code, with no server sentence behind it.
     case START_NO_PROGRESS_CODE:
       return 'The node stopped making progress starting this stream.';
     case TOO_SLOW_TO_PLAY_CODE:
@@ -391,11 +350,7 @@ export function playbackFailureCodeText(code: string | undefined): string | unde
   }
 }
 
-/**
- * The player's stream-status lines, from core's description of the session.
- * For example:
- * "DIRECT · HEVC · 1920×1080 · 7.5 Mb/s", "AUDIO TRANSCODE · SOURCE · … → …".
- */
+/** The player's stream-status lines, e.g. "DIRECT · HEVC · 1920×1080 · 7.5 Mb/s". */
 const CONTAINER_LABELS: Record<string, string> = { fmp4: 'FMP4', mpegts: 'MPEG-TS' };
 
 function bitrateText(bitrate?: number): string {
@@ -486,14 +441,9 @@ function measuredPercent(done: number | undefined, total: number | undefined): n
 }
 
 /**
- * What a start or a change is doing, from core's counters: the stage, and
- * how far through it when the node measured that. Never an estimate — a
- * counter the node did not report shows no figure at all.
- *
- * `node` names where the work is happening. A change names it throughout,
- * because the viewer is watching one stream while another is built; a start
- * names it only while planning. `standalone` marks an open stage with an
- * ellipsis, for a line with nothing after it.
+ * What a start or a change is doing, from core's counters: the stage, and how far through it. Never
+ * an estimate: an unreported counter shows no figure. `node` names where the work happens;
+ * `standalone` ends an open stage with an ellipsis.
  */
 export function startProgressText(progress: PlaybackStartProgress, node?: string, standalone = false): string | undefined {
   const on = node ? ` on ${node}` : '';
@@ -510,11 +460,7 @@ export function startProgressText(progress: PlaybackStartProgress, node?: string
   return standalone ? `${words}…` : words;
 }
 
-/**
- * The scrubber's clock: "1:23:45", or "4:05" under an hour. Anything not a
- * positive finite duration reads "0:00", since there is no position to show
- * yet; that is a placeholder, not a decision.
- */
+/** The scrubber's clock: "1:23:45", or "4:05" under an hour; "0:00" for anything not a positive finite duration. */
 export function playbackTimeText(ms: number): string {
   if (!Number.isFinite(ms) || ms <= 0) return '0:00';
   const total = Math.floor(ms / 1000);
@@ -539,10 +485,8 @@ function convertedStreams(video: boolean, audio: boolean): string | undefined {
 }
 
 /**
- * A quality the viewer chose that no node can convert at real speed (core's
- * `TOO_SLOW_TO_PLAY_CODE`), built from the facts where they are known: the
- * quality playing, and which streams the session converts, as one clear,
- * concise sentence: "Macha can't play this quality because...".
+ * A chosen quality that no node can convert at real speed (core's `TOO_SLOW_TO_PLAY_CODE`), naming
+ * the quality and the converted streams where they are known.
  */
 export function tooSlowToPlayText(quality?: QualityClass, transform?: { video: string; audio: string }): string {
   const streams = transform && convertedStreams(transform.video === 'transcode', transform.audio === 'transcode');
@@ -555,24 +499,16 @@ export function qualitySteppedDownText(quality?: QualityClass): string {
 }
 
 /**
- * Why Play chooses the file it does, as one sentence built from every fact
- * core gives (`PlaybackVersions`): the file chosen, a larger one passed over
- * because it would need converting (`passedOver`), and a ceiling that kept a
- * larger one out (`limitedBy`, with its reason). Automatic play is capped
- * with the reason given to the viewer, and the facts are parsed into one
- * sentence rather than a line each.
- *
- * "Which plays without converting" is said only when a larger file was passed
- * over for needing it, since only then is it the reason. Undefined when Play
- * is choosing the largest file there is, which needs no explaining.
+ * Why Play chooses the file it does, as one sentence from `PlaybackVersions`: the file chosen, a
+ * larger one passed over for needing conversion (`passedOver`), and a ceiling that kept one out
+ * (`limitedBy`). Undefined when Play is choosing the largest file there is.
  */
 export function qualityChoiceText(versions: Pick<PlaybackVersions, 'files' | 'automatic' | 'limitedBy' | 'passedOver'>): string | undefined {
   const { automatic, limitedBy, passedOver } = versions;
   if (!automatic) return undefined;
   const clauses: string[] = [];
   const converted = passedOver && convertedStreams(passedOver.converts.video, passedOver.converts.audio);
-  // A node's measured rate for this kind of picture: the conversion is not
-  // only needed but too slow to watch.
+  // The node's measured rate makes the conversion too slow to watch.
   const tooSlow = passedOver?.reasons.includes('transcode-below-real-time');
   if (passedOver && converted) {
     clauses.push(`${qualityLabel(passedOver.quality)} needs ${converted} converted${tooSlow ? ', which the server can\'t do fast enough' : ''}`);
@@ -599,10 +535,8 @@ const AVAILABILITY_NOUN: Record<string, string> = {
 const MEMBER_NOUN: Record<string, string> = { show: 'episodes', season: 'episodes', artist: 'tracks', album: 'tracks' };
 
 /**
- * What an availability marker means, for its tooltip. "Held only by servers
- * that can't be reached" is the fact the server states: no reachable node
- * holds the pieces, which is not the same as lost. A series, season, artist
- * or album with counts says how its members stand.
+ * An availability marker's tooltip. Unavailable means no reachable node holds the pieces, which is
+ * not the same as lost. A container with counts says how its members stand.
  */
 export function availabilityText(
   mark: 'partial' | 'unavailable' | 'unknown',

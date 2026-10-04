@@ -19,8 +19,7 @@ export function navigationLoadType(): NavigationLoadType {
 }
 
 export function shouldShowBootSplash(type: NavigationLoadType = navigationLoadType()): boolean {
-  // BrowserRouter navigation never reaches this module again. Suppress the splash
-  // only when the browser itself restores/reloads the document via history.
+  // Suppressed only when the browser restores the document from history.
   return type !== 'back_forward';
 }
 
@@ -36,10 +35,7 @@ export async function waitForSplashMinimum(startedAt: number, durationMs: number
   }
 }
 
-/**
- * Own the boot splash outside React. Its minimum visual lifetime is independent
- * of application mount and may never delay application work.
- */
+/** Runs outside React: the splash's minimum lifetime never delays application work. */
 export async function runBootSplash(root: HTMLElement, clock: SplashClock = browserClock): Promise<void> {
   const durationMs = uiSettings.splashDurationMs;
   if (durationMs <= 0 || !shouldShowBootSplash()) return;
@@ -70,8 +66,7 @@ export async function runBootSplash(root: HTMLElement, clock: SplashClock = brow
   root.appendChild(splash);
   const startedAt = clock.now();
 
-  // Measure elapsed monotonic time after every wake-up. Timers may be delayed by
-  // the browser, but they must never make the splash shorter than configured.
+  // Re-checks elapsed time after each wake-up, so the splash is never shorter than configured.
   await waitForSplashMinimum(startedAt, durationMs, clock);
 
   while (root.firstChild) root.removeChild(root.firstChild);

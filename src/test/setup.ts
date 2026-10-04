@@ -1,21 +1,17 @@
 import { afterEach } from 'vitest';
 import { configureClientDiagnostics } from '@machafoundation/core';
 
-// Expected playback failure/recovery tests exercise verbose diagnostics. Keep
-// collecting those entries while reserving test stdout/stderr for assertions
-// and unexpected failures.
+// Diagnostics are still collected, but kept out of test output.
 configureClientDiagnostics({ console: false });
 
-// Most suites run in the fast 'node' environment with no DOM at all; only
-// files that opt into '@vitest-environment jsdom' render real elements, so
-// only unmount/clean those.
+// Only suites that opt into jsdom have a DOM to clean up.
 afterEach(async () => {
   if (typeof document === 'undefined') return;
   const { cleanup } = await import('@testing-library/react');
   cleanup();
 });
 
-// jsdom deliberately does no layout, so it never implements scrollIntoView.
+// jsdom does no layout, so it lacks scrollIntoView.
 if (typeof Element !== 'undefined' && !Element.prototype.scrollIntoView) {
   Element.prototype.scrollIntoView = () => undefined;
 }

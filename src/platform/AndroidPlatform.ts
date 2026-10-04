@@ -1,13 +1,7 @@
 import type { Platform, Player } from '@machafoundation/core';
 import type { PlaybackCapabilities } from '@machafoundation/core';
 
-/**
- * Wiring contract for the future Android TV shell.
- *
- * The React bundle remains unchanged. A tiny Kotlin host will inject a bridge
- * implementing capability discovery and Media3/ExoPlayer playback. Keeping the
- * bridge behind Platform prevents Android-specific code leaking into the UI.
- */
+/** Bridge for the future Android TV shell: a Kotlin host injects capability discovery and Media3/ExoPlayer playback. */
 export interface AndroidBridge {
   capabilities(): Promise<PlaybackCapabilities>;
   createPlayer(): Player;

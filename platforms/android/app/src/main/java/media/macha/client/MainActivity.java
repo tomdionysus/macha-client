@@ -20,16 +20,14 @@ public final class MainActivity extends Activity {
     private WebView webView;
     private AudioManager audioManager;
     private AudioFocusRequest audioFocusRequest;
-    /** Set only for a loss we expect to end, so an unrelated resume never restarts a film. */
+    /** Set only on a transient focus loss, so an unrelated resume never restarts playback. */
     private boolean pausedByTransientFocusLoss;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         requestWindowFeature(Window.FEATURE_NO_TITLE);
-        // A film is not idleness. Without this the device runs its ordinary
-        // inactivity sequence — dim, screensaver, sleep — through playback,
-        // because nobody has touched the remote for ninety minutes.
+        // Without this the device dims and sleeps during playback: nobody touches the remote.
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         prepareAudioFocus();
 
@@ -45,7 +43,7 @@ public final class MainActivity extends Activity {
         settings.setMediaPlaybackRequiresUserGesture(false);
         settings.setAllowFileAccess(true);
         settings.setAllowContentAccess(false);
-        // The packaged, trusted UI must be able to reach the user's HTTP Macha nodes.
+        // The packaged UI must reach the user's plain-HTTP Macha nodes.
         settings.setAllowUniversalAccessFromFileURLs(true);
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
 
@@ -57,29 +55,17 @@ public final class MainActivity extends Activity {
             }
         });
         setContentView(webView);
-        // Some TV vendor builds have no DecorView until content is attached.
-        // Defer the insets request rather than making launch depend on it.
+        // Some vendor builds have no DecorView until content is attached, so the insets request is deferred.
         webView.post(this::enterImmersiveMode);
         webView.loadUrl("file:///android_asset/index.html");
         webView.requestFocus();
     }
 
     /**
-     * Hold audio focus for as long as this activity is in front.
-     *
-     * Requested rather than assumed: an Android TV app that never asks holds
-     * nothing, so anything that does ask — a launcher preview, a system sound,
-     * a screensaver warming up — takes the audio device and this app is
-     * silenced with no event and no way back. The picture carries on, because
-     * video is not focus-managed. That is indistinguishable from a decoder
-     * fault from the sofa, and it was the leading explanation for sound
-     * disappearing a couple of minutes into every title.
-     *
-     * Focus is per-activity rather than per-generation because there is no
-     * bridge to hold it per-generation with: `BridgeContract.kt` is a design
-     * stub and nothing in the page can call in. This app is a full-screen
-     * leanback media app, so "in front" and "playing" are close enough to the
-     * same thing that the difference is not worth a JavaScript interface.
+     * Hold audio focus while this activity is in front. An app that never
+     * requests focus is silenced, with no event, by anything that does, while
+     * the picture carries on. Per activity, not per playback: the page has no
+     * bridge to call in.
      */
     private void prepareAudioFocus() {
         audioManager = (AudioManager) getSystemService(AUDIO_SERVICE);
@@ -94,17 +80,9 @@ public final class MainActivity extends Activity {
     }
 
     /**
-     * Yield the audio device when something takes it, and say so on screen.
-     *
-     * Holding focus and playing over whatever took it is the antisocial half
-     * of this feature, and silently losing the sound while the picture runs on
-     * is the mystery this is meant to end. Pausing does neither: the viewer
-     * sees playback stop, which is a thing they can act on.
-     *
-     * Reaching into the page's media elements is not how this should be done
-     * long-term — playback intent belongs to the coordinator — but there is no
-     * bridge to route it through yet, and `onBackPressed` already sets the
-     * precedent for talking to the page this way.
+     * Pause the page's media when something else takes audio focus, so the
+     * viewer sees playback stop rather than silently losing sound. Done by
+     * reaching into the page because there is no bridge to the coordinator.
      */
     private void onAudioFocusChange(int change) {
         if (webView == null) return;
@@ -123,8 +101,7 @@ public final class MainActivity extends Activity {
                 setPagePlayback(true);
                 break;
             default:
-                // AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK: ducking a film for a
-                // notification is what ducking is for. Leave it playing.
+                // AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK: keep playing.
                 break;
         }
     }
@@ -165,13 +142,9 @@ public final class MainActivity extends Activity {
     }
 
     /**
-     * Ask the web app whether it wants to handle back itself before falling
-     * through to WebView history / finishing the activity. The full player
-     * screen uses this to close playback outright instead of letting
-     * WebView.goBack() silently pop the hash route while the video keeps
-     * playing off-screen (the old, TV-unfriendly "mini player" behavior) —
-     * see src/screens/PlayerScreen.tsx's `window.__machaHandleBack`
-     * registration.
+     * Offer Back to the page first (`window.__machaHandleBack`, registered by
+     * PlayerScreen), so the full player closes playback instead of WebView
+     * history popping the route while the video plays on.
      */
     @Override
     public void onBackPressed() {

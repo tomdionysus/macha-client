@@ -2,13 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { hasRole, routes, sessionPermits, type UserRole } from '@machafoundation/core';
 import { navItems } from '../App';
 
-/**
- * The nav decision as `App` makes it, without mounting the application.
- *
- * Roles come from the session token, so `undefined` is the third answer —
- * nothing has said yet — and `sessionPermits` is core's rule that such a
- * session is permitted everything rather than nothing.
- */
+/** The nav decision as `App` makes it. `undefined` roles means not yet stated, which `sessionPermits` permits. */
 function visibleSections(roles: UserRole[] | undefined): string[] {
   const permits = (role: UserRole) => sessionPermits(roles, role);
   const managementAvailable = true;
@@ -29,15 +23,11 @@ describe('navigation role gating', () => {
   });
 
   it('hides every catalogue section from an account that may not read it', () => {
-    // Home is a catalogue screen, so leaving it visible would send a
-    // manage-only account to a wall of 401s just as Movies would.
+    // Home is a catalogue screen too.
     expect(visibleSections(['manage_users'])).toEqual(['Manage']);
   });
 
   it('gives a library manager Manage, but not Status — that is its own role now', () => {
-    // Status has `view_status` of its own, independent of `manager`: managing
-    // the library says nothing about wanting the node roster, and a viewer who
-    // only watches the cluster should not have to be given the library.
     expect(visibleSections(['manager'])).toEqual(['Manage']);
   });
 
@@ -57,9 +47,7 @@ describe('navigation role gating', () => {
   });
 
   it('hides nothing while the roles are unknown', () => {
-    // An unanswered whoami is not an answer of "none", and a node that cannot
-    // say enforces nothing either — emptying the navigation on silence would
-    // be worse than showing a section that later 401s.
+    // Unknown is not "none": emptying the navigation on silence is worse than a section that later 401s.
     expect(visibleSections(undefined)).toEqual(
       ['Home', 'Movies', 'TV Shows', 'Music', 'Search', 'Import', 'Status', 'Manage'],
     );

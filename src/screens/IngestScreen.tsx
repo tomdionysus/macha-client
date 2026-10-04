@@ -16,7 +16,7 @@ import { pageSlice } from '../lists/paging';
 import { useAcquisition } from './ingest/useAcquisition';
 import { jobErrorText, viewerErrorText } from '../text/viewerText';
 
-/** Import's pages: torrents and filesystem imports are different kinds of job, each with its own page. */
+/** Import's pages: torrents and filesystem imports. */
 export type IngestSection = 'torrents' | 'files';
 
 interface Props {
@@ -47,11 +47,9 @@ export function IngestScreen({ api, section }: Props) {
   const [submitting, setSubmitting] = useState<'path' | 'magnet'>();
   const [refreshing, setRefreshing] = useState(false);
   const navigate = useNavigate();
-  // The job already holding a torrent the viewer tried to add again (the
-  // server refuses a second job for it), to offer a way straight to it.
+  // The job already holding a torrent the viewer tried to add again, to link to it.
   const [heldBy, setHeldBy] = useState<string | undefined>(undefined);
-  // A torrent is added to the cluster, to download on any capable node or on one the viewer pins, and can be removed a while after
-  // it completes. '' is "any node" and "the cluster default".
+  // '' is "any node" and "the cluster default".
   const torrentNodes = useAsync(() => section === 'torrents' ? api.torrentNodes() : Promise.resolve(undefined), [api, section]);
   const [nodeChoice, setNodeChoice] = useState('');
   const [removeAfter, setRemoveAfter] = useState('');
@@ -63,8 +61,7 @@ export function IngestScreen({ api, section }: Props) {
       .sort((left, right) => right.created_unix_ms - left.created_unix_ms || (left.id < right.id ? -1 : 1)),
     [snapshot?.ingestJobs],
   );
-  // Keyed on the sort's two fields: the object itself is rebuilt from the
-  // address on every render.
+  // Keyed on the sort's fields: the object is rebuilt on every render.
   const { key: sortKey, direction: sortDirection } = sort;
   const torrentJobs = useMemo(
     () => sortTorrents(
@@ -117,9 +114,8 @@ export function IngestScreen({ api, section }: Props) {
           ...(startPaused ? { paused: true } : {}),
         });
         setMagnet('');
-        // A node older than 0.71.0 ignores the request and starts the job; core
-        // then pauses it at once (`pausedAfterAdd`). Said as it happened, and a
-        // job still not paused is never called paused.
+        // A node older than 0.71.0 starts the job regardless and core pauses it at once
+        // (`pausedAfterAdd`); a job still not paused is never called paused.
         setNotice(!startPaused ? 'Torrent queued.'
           : added.job && added.job.desired !== 'paused'
             ? 'Torrent queued, but this server started it: it cannot add a torrent paused yet. Pause it in the list.'
@@ -136,7 +132,7 @@ export function IngestScreen({ api, section }: Props) {
     }
   };
 
-  /** A refresh the viewer asked for. The list also polls, quietly, and that does not spin the button. */
+  /** A refresh the viewer asked for; the quiet poll does not spin the button. */
   const refreshNow = async () => {
     setRefreshing(true);
     try {
@@ -149,11 +145,9 @@ export function IngestScreen({ api, section }: Props) {
   };
 
   const ingestEnabled = snapshot?.ingestStatus.enabled ?? false;
-  // Torrents are the cluster's: every node takes adds, and /torrents/status
-  // describes only the node that answered, which may run none. So whether
-  // torrents are available is the cluster's node list, and nothing is said
-  // until it has answered. A server older than 0.64.0 has no such list; there
-  // the answering node's status is the whole story.
+  // Any node takes adds and /torrents/status describes only the answering node, so
+  // availability is the cluster's node list. A server older than 0.64.0 has no list;
+  // there the answering node's status decides.
   const clusterAnswered = torrentNodes.value !== undefined;
   const clusterTakesTorrents = (torrentNodes.value?.nodes.length ?? 0) > 0;
   const beforeClusterTorrents = Boolean(torrentNodes.error);

@@ -23,7 +23,7 @@ export function useAsync<T>(factory: (signal: AbortSignal) => Promise<T>, depend
       active = false;
       controller.abort(new DOMException('Async consumer was replaced', 'AbortError'));
     };
-    // Factory is intentionally controlled by the caller's explicit dependency list.
+    // The caller's dependency list controls the factory.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, dependencies);
 

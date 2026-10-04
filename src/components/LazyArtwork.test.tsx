@@ -9,9 +9,8 @@ const FUTURE = '?exp=9999999999999&sig=abc';
 const PAST = '?exp=1&sig=abc';
 
 /**
- * The shape `MachaMediaApi.artworkUrls` returns: the ref's own signed URL,
- * the same capability re-hosted on every node, then each node's
- * authenticated URL — which an `<img>` must not be handed.
+ * Mirrors `MachaMediaApi.artworkUrls`: the ref's signed URL, that capability on
+ * every node, then each node's authenticated URL, which an `<img>` cannot use.
  */
 function fakeApi(
   artwork: MediaApi['artwork'] = vi.fn(() => Promise.reject(new Error('artwork() should not be called'))),
@@ -29,10 +28,8 @@ function fakeApi(
 }
 
 /**
- * jsdom does not implement createObjectURL/revokeObjectURL. Patch them
- * directly, and unmount before restoring them, so the Blob-fetch path —
- * unchanged production code — can run here and revoke on the way out; RTL's
- * own afterEach unmount would otherwise run after the restore.
+ * Patches createObjectURL/revokeObjectURL, which jsdom lacks, and unmounts
+ * before restoring them: RTL's own afterEach unmount would run after the restore.
  */
 async function withObjectUrls(run: () => Promise<void>): Promise<void> {
   const originalCreate = URL.createObjectURL;
@@ -104,10 +101,6 @@ describe('LazyArtwork', () => {
   }));
 
   it('moves a failed image straight to the same capability on the next node, then to the authenticated fetch', () => withObjectUrls(async () => {
-    // A plain <img> never retries a failed load on its own. A different node
-    // is a different failure domain, so there is nothing to wait for before
-    // trying it; and once every node has refused, the Blob path carries the
-    // bearer token and its own recovery. No timers are involved.
     const artworkFetch = vi.fn(() => Promise.resolve(new Blob(['poster-bytes'], { type: 'image/jpeg' })));
     const ref = { id: 'poster-1', mimeType: 'image/jpeg', url: `http://a/api/v1/catalogue/artwork/poster-1${FUTURE}` };
     render(
@@ -132,9 +125,7 @@ describe('LazyArtwork', () => {
   }));
 
   it('goes straight to the authenticated fetch when the cluster offers only one header-free source', () => withObjectUrls(async () => {
-    // Which sources exist is `@machafoundation/core`'s call — an expired capability is
-    // re-hosted nowhere, for instance. This screen only has to spend what it
-    // was given and then hand over, rather than inventing a source of its own.
+    // Which sources exist is core's call; an expired capability is re-hosted nowhere.
     const artworkFetch = vi.fn(() => Promise.resolve(new Blob(['poster-bytes'], { type: 'image/jpeg' })));
     const api = fakeApi(artworkFetch, ['http://a', 'http://b']);
     api.artworkUrls = (ref) => [
@@ -188,9 +179,7 @@ describe('LazyArtwork', () => {
   });
 
   it('adopts a fresh capability URL that arrived before the current one failed, rather than giving up on signed URLs', () => {
-    // The fresh URL is ignored while the current one is still loading (it
-    // may be the cached copy), but it must not be forgotten: when the current
-    // one then fails everywhere, the fresh one is what to try next.
+    // A fresh URL is ignored while the current one is loading, but kept for when that fails.
     const artworkFetch = vi.fn(() => new Promise<Blob>(() => undefined));
     const api = fakeApi(artworkFetch);
     const { rerender } = render(
@@ -230,10 +219,8 @@ describe('LazyArtwork', () => {
   });
 
   it('ignores a re-signed URL for an artwork already loaded, so a re-fetch does not smash the browser cache', () => {
-    // The server re-signs exp/sig on every catalogue re-fetch even when the
-    // image hasn't changed. Once this artwork id has loaded successfully
-    // once, a merely-reissued URL for the same id must not force a new
-    // <img src> — that would be a fresh HTTP-cache key for identical bytes.
+    // The server re-signs exp/sig on every catalogue re-fetch; a new <img src>
+    // would be a fresh HTTP-cache key for identical bytes.
     const api = fakeApi();
     const { rerender } = render(
       <LazyArtwork
@@ -258,9 +245,7 @@ describe('LazyArtwork', () => {
   });
 
   it('adopts a fresh remount of the same artwork id from wherever it last loaded, across component instances', () => {
-    // The point of caching by id (not by component instance) is surviving a
-    // full unmount/remount of the card — e.g. navigating away from Home and
-    // back, which is exactly when the catalogue re-fetch reissues the URL.
+    // Cached by id, not component instance, to survive a remount such as navigating away and back.
     const { unmount } = render(
       <LazyArtwork
         api={fakeApi()}
@@ -285,8 +270,6 @@ describe('LazyArtwork', () => {
   });
 
   it('forgets a remembered URL that fails, and moves on to the fresh one', () => {
-    // "Known good" stops being true the moment the browser reports otherwise:
-    // the cached copy has evaporated or its signature has finally expired.
     const api = fakeApi();
     const { rerender } = render(
       <LazyArtwork
@@ -325,15 +308,8 @@ describe('LazyArtwork', () => {
 
     expect(poster().src).toContain('sig=only');
   });
-  /**
-   * The sticky artwork host lives in core (`ArtworkHostPreference`), because
-   * every client with a URL-keyed image cache has the same bug: the browser's
-   * cache key includes the host, the capability's signature does not, and the
-   * preferred endpoint moves on a 10 s probe cycle, so a swap renames every
-   * poster. Ordering is core's to get right and core's to test. This client's
-   * whole part in it is reporting what actually loaded — success only, so a
-   * single artwork 404 never moves the preference.
-   */
+  // Core's `ArtworkHostPreference` orders the hosts. This client only reports
+  // successful loads, so a single artwork 404 never moves the preference.
   it('reports the URL that actually loaded, so core can prefer that node next time', () => {
     const api = fakeApi();
     const noteArtworkLoaded = vi.fn();

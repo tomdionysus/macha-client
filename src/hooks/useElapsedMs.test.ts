@@ -16,17 +16,8 @@ describe('how long this has been going on', () => {
   });
 
   it('reads the clock rather than counting ticks', () => {
-    // A tab in the background has its timers throttled, so an interval that
-    // adds a second per firing under-reports a wait that really did take
-    // thirty — and a wait is exactly the thing a viewer switches away from.
-    // The number exists to be told to somebody, so it has to be the truth
-    // about the wait rather than the truth about the timer.
-    //
-    // The clock is driven independently of the timer here on purpose:
-    // advancing both together cannot tell the two implementations apart, and a
-    // test that agrees with whichever one is written is not a test. Thirty
-    // seconds of clock against a single firing is the throttled tab in
-    // miniature, and a tick-counter answers 1,000 to it.
+    // Background tabs throttle timers, so counting ticks under-reports. The clock advances thirty
+    // seconds against a single firing, which a tick-counter would read as 1,000.
     vi.useFakeTimers();
     const clock = vi.spyOn(performance, 'now').mockReturnValue(0);
     const { result } = renderHook(() => useElapsedMs(true));

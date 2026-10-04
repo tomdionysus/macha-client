@@ -102,11 +102,8 @@ describe('Web player source reassignment', () => {
     player.attach({ firstChild: null, appendChild: vi.fn() } as unknown as HTMLElement);
 
     const source = { mediaId: 'm1', url: 'https://node.test/stream', isManifest: false, mimeType: 'video/mp4', mode: 'direct' as const };
-    // Two plays share one reused <video> element (the second exercises the
-    // "existingVideo" reset path). Assigning a new src already runs the media
-    // element load algorithm; a redundant removeAttribute('src')/load() call
-    // immediately beforehand races that reassignment and can leave the element
-    // stuck loading forever under an active Service Worker.
+    // The second play reuses the <video>. Assigning src already runs the load algorithm; a
+    // removeAttribute('src')/load() first can leave it loading forever under a Service Worker.
     await player.play(source, 0, true);
     await player.play(source, 0, true);
 
@@ -116,11 +113,7 @@ describe('Web player source reassignment', () => {
   });
 
   it('registers a Direct Play alternative without touching the media element', async () => {
-    // The seamless swap's whole value is that the element never reloads: the
-    // read-ahead worker changes the bytes underneath it and the viewer sees
-    // nothing. Registration is a `postMessage`, so this guards against a
-    // reload being added to this path, which would turn an invisible swap
-    // into a visible one with nothing to catch it.
+    // Registration is a `postMessage`: the element must never reload, or the swap becomes visible.
     const video = fakeVideo();
     vi.stubGlobal('document', { createElement: vi.fn(() => video) });
     const player = new WebPlatform().createPlayer();
@@ -136,10 +129,8 @@ describe('Web player source reassignment', () => {
   });
 
   /**
-   * A native player has no retry policy this client can reach, so a fragment
-   * the node is still producing reaches the coordinator as the node having
-   * failed — and three of those exhaust a healthy cluster. The element is
-   * therefore not given the URL until the node will serve it.
+   * A native player has no retry policy, so a fragment still being produced reads as a node
+   * failure. The element gets the URL only once the node will serve it.
    */
   describe('a native HLS source', () => {
     const hlsSource = {
@@ -164,8 +155,7 @@ describe('Web player source reassignment', () => {
     });
 
     it('attaches the URL at once, and asks the node for nothing', async () => {
-      // Core waits on the session route before handing the source over, so
-      // there is nothing left here to probe.
+      // Core has already waited on the session route, so there is nothing to probe.
       const video = fakeVideo();
       const player = nativePlayer(video);
       const fetch = vi.fn();
@@ -193,12 +183,8 @@ describe('Web player source reassignment', () => {
     }
 
     /**
-     * A fake element that accepts `play()`, so the player's own resume path
-     * runs rather than throwing before it reaches the element.
-     *
-     * The readiness constants live on the `HTMLMediaElement` constructor rather
-     * than on an element, and `publish()` reads one of them, so a suite with no
-     * DOM has to supply it or no fake element is usable at all.
+     * A fake element that accepts `play()`. `publish()` reads `HTMLMediaElement.HAVE_FUTURE_DATA`,
+     * which a suite with no DOM must stub.
      */
     function playableVideo(): HTMLVideoElement {
       vi.stubGlobal('HTMLMediaElement', { HAVE_FUTURE_DATA: 3 });
@@ -207,11 +193,7 @@ describe('Web player source reassignment', () => {
       return video;
     }
 
-    /**
-     * One publish at a new position. The stall watchdog is driven from these
-     * and from nothing else, so arming it takes two: one to establish a
-     * baseline and one to advance past it.
-     */
+    /** One publish at a new position. Arming the stall watchdog takes two: a baseline and an advance. */
     function advanceTo(video: HTMLVideoElement, seconds: number): void {
       (video as { currentTime: number }).currentTime = seconds;
       emit(video, 'timeupdate');
@@ -231,8 +213,7 @@ describe('Web player source reassignment', () => {
         player.subscribeFailure?.((error) => failures.push(error));
 
         await player.play(directSource, 0, false);
-        // Bytes reached the element, which stands the start watchdog down and
-        // leaves the stall budget as the only thing judging what follows.
+        // Bytes reached the element: the start watchdog stands down, leaving only the stall budget.
         emit(video, 'progress');
         setPaused(video, false);
         advanceTo(video, 1);
@@ -241,8 +222,7 @@ describe('Web player source reassignment', () => {
         player.pause();
         setPaused(video, true);
 
-        // Far past the stall budget. Nothing is arriving because nobody asked
-        // for anything, and a viewer who paused has not been let down by a node.
+        // Far past the stall budget, but paused: nobody is waiting on the node.
         vi.advanceTimersByTime(120_000);
         expect(failures).toEqual([]);
       } finally {
@@ -268,9 +248,7 @@ describe('Web player source reassignment', () => {
         vi.advanceTimersByTime(120_000);
         expect(failures).toEqual([]);
 
-        // The node died during the pause. Resuming is the first moment anyone
-        // is waiting on it again, and the budget runs from there — suspending
-        // the watchdog must never amount to switching it off.
+        // The node died during the pause; the budget runs again from the resume.
         player.resume();
         setPaused(video, false);
         emit(video, 'timeupdate');
@@ -297,9 +275,7 @@ describe('Web player source reassignment', () => {
         vi.advanceTimersByTime(1_000);
 
         expect(failures).toHaveLength(1);
-        // 'stream' is what `isEndpointRetryablePlaybackFailure` accepts, which
-        // is what routes this to another node instead of a dead end. A
-        // decoder-flavoured kind here would strand the viewer.
+        // 'stream' is what `isEndpointRetryablePlaybackFailure` accepts, routing this to another node.
         expect(failures[0]).toBeInstanceOf(PlaybackSourceError);
         expect((failures[0] as PlaybackSourceError).kind).toBe('stream');
       } finally {
@@ -317,8 +293,7 @@ describe('Web player source reassignment', () => {
 
         await player.play(directSource, 0, true);
         vi.advanceTimersByTime(5_000);
-        // Bytes arriving, long before readyState leaves HAVE_NOTHING. A slow
-        // node must never be judged by this, only a silent one.
+        // Bytes arriving while readyState is still HAVE_NOTHING: a slow node, not a silent one.
         emit(video, 'progress');
         vi.advanceTimersByTime(600_000);
 
@@ -351,18 +326,9 @@ describe('Web player source reassignment', () => {
 
 describe('What leaves the player is whole milliseconds', () => {
   /**
-   * A position that leaves this client
-   * becomes the resume position, the `seekMs` sent to a node, and the record in
-   * storage, and the seek contract is stated in integer milliseconds with no
-   * rounding slack. A fractional request against a generation starting at the
-   * next whole millisecond reads as `absolute < generationStart` in core, which
-   * refuses to activate and re-asks with the same fraction indefinitely.
-   *
-   * Beyond `positionMs`: the duration reaches `localStorage` through Continue
-   * Watching and sets the scrubber's maximum, which is the one value an
-   * `<input type="range">` hands back off its own step grid; and the buffered
-   * ranges are what core admits a local seek against, where a whole-millisecond
-   * target and a fractional boundary decide differently.
+   * The seek contract is in integer milliseconds: a fractional request against a generation
+   * starting on the next whole millisecond reads as before its start, and core re-asks forever.
+   * Duration and buffered ranges count too: they bound the scrubber and admit local seeks.
    */
   const directSource = {
     mediaId: 'm1', url: 'https://node.test/stream', isManifest: false,
@@ -388,8 +354,7 @@ describe('What leaves the player is whole milliseconds', () => {
     player.subscribe?.((event) => events.push(event));
     await player.play(directSource, 0, true);
 
-    // A real element's figures: seconds carrying float error, which become
-    // fractional milliseconds the moment they are multiplied up.
+    // Seconds carrying float error, which become fractional milliseconds.
     Object.assign(video, {
       currentTime: 12.3456789,
       duration: 2706.336031,
@@ -400,21 +365,17 @@ describe('What leaves the player is whole milliseconds', () => {
 
     const event = events.at(-1)!;
     expect(event.positionMs).toBe(12_346);
-    // Floored, never rounded: a duration must not claim media the element does
-    // not have, because it is what a seek to the end gets clamped against.
+    // Floored: a duration must not claim media the element lacks, as a seek to the end clamps against it.
     expect(event.durationMs).toBe(2_706_336);
     expect(event.forwardBufferMs).toBe(108_654);
-    // Widened outward. The other direction refuses a seek the element could
-    // have served, and the cost of that is a whole generation negotiation
-    // against the sub-frame of media the widening claims.
+    // Widened outward; narrowing would refuse a seek the element could serve.
     expect(event.bufferedRangesMs).toEqual([{ startMs: 40, endMs: 121_000 }]);
   });
 });
 
 describe('Direct Play buffered ranges', () => {
-  // A ten-second file whose first half is cheap and second half dear: the
-  // first 5 s take 200 of its 1,000 bytes. Holding bytes 200-400 is the start
-  // of the second half, which Chrome's even spread places at 2-4 s.
+  // The first 5 s of this ten-second file take 200 of its 1,000 bytes, so bytes 200-400
+  // start the second half, where Chrome's even spread says 2-4 s.
   const uneven: KeyframeIndex = {
     mediaId: 'm1',
     container: 'mp4',
@@ -530,10 +491,7 @@ describe('Web HLS standby preflight', () => {
   });
 
   it('bounds a preflight by the serving node\'s stated deadline, not its own constant', async () => {
-    // A node that states a deadline governs the wait. Asserted against the
-    // observed abort rather than by reading the default, because a budget that
-    // is plumbed but never applied is exactly the silent failure here: the
-    // shorter of two deadlines wins and the other layer looks broken.
+    // Asserted on the observed abort: a budget plumbed but never applied would pass a check of its value.
     let observedSignal: AbortSignal | undefined;
     const fetchMock = vi.fn((_url: string | URL | Request, init?: RequestInit) => {
       observedSignal = init?.signal ?? undefined;
@@ -552,8 +510,7 @@ describe('Web HLS standby preflight', () => {
   });
 
   it('falls back to its own constant when the node states no deadline', async () => {
-    // Absent is not zero. A missing field must lengthen the budget to the
-    // conservative default, never shorten it — so this must NOT abort.
+    // Absent is not zero: the default applies, so this must not abort.
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response('#EXTM3U\n#EXT-X-MAP:URI="init.mp4"\n#EXTINF:4,\nfirst.m4s', { status: 200 }))
       .mockResolvedValueOnce(new Response(new Uint8Array([1, 2]), { status: 206 }))
@@ -584,9 +541,7 @@ describe('Web HLS standby preflight', () => {
   });
 
   it('reads the initial media bytes on a browser with no response streams', async () => {
-    // Chromium 47 (Tizen 3) has fetch and no `response.body`. Reading that as
-    // "no bytes arrived" would reject every standby the Samsung prepares,
-    // leaving the one set that most needs a warm alternate without any.
+    // Chromium 47 (Tizen 3) has fetch but no `response.body`; that must not read as "no bytes arrived".
     const unstreamed = (bytes: number[]) => ({
       ok: true,
       status: 206,
@@ -605,11 +560,8 @@ describe('Web HLS standby preflight', () => {
   });
 
   it('waits longer than a healthy node is entitled to take to start a cold pipeline', async () => {
-    // A standby is a freshly created transcode generation, and the server's
-    // pipeline is lazy: nothing is produced until something asks. The first
-    // fragment of such a generation can take many seconds, and the node's own
-    // `startup_timeout_ms` is 15 s, so anything shorter reads a node working
-    // correctly as "that node cannot serve it" and throws the rescue away.
+    // A standby's pipeline is lazy and its first fragment can take many seconds; the node's
+    // own `startup_timeout_ms` is 15 s, so a shorter wait rejects a healthy node.
     vi.useFakeTimers();
     try {
       const slowFirstFragment = (init?: RequestInit) => new Promise<Response>((resolve, reject) => {
@@ -633,9 +585,7 @@ describe('Web HLS standby preflight', () => {
   });
 
   it('derives the preflight budget from the server contract rather than picking one', () => {
-    // A client gate chosen independently of the server's startup budget can
-    // fall below it unnoticed. Asserted so the budget cannot drift under the
-    // thing it has to clear.
+    // The client's gate must stay above the server's startup budget.
     expect(HLS_PREFLIGHT_TIMEOUT_MS).toBeGreaterThan(SERVER_STARTUP_TIMEOUT_MS + SERVER_SEGMENT_HOLD_MS);
     expect(SERVER_STARTUP_TIMEOUT_MS).toBe(15_000);
   });
@@ -655,10 +605,7 @@ describe('Web HLS standby preflight', () => {
 });
 
 describe('the stream route is the server\'s to choose', () => {
-  // The server can move its stream route without a dual-serve window. That
-  // costs this client nothing only as long as it composes no path of its own
-  // and resolves what the node hands it. Asserted rather than believed: a
-  // hardcoded path fails here instead of on a node.
+  // The client composes no stream path of its own: it resolves what the node hands it.
   const playlist = ['#EXTM3U', '#EXT-X-MAP:URI="init.mp4"', '#EXTINF:4,', 'segment-0.m4s'].join('\n');
 
   it('resolves a playlist against whatever route served it', () => {
@@ -701,27 +648,20 @@ describe('Web HLS buffer policy', () => {
 
 describe('The media in front of a position', () => {
   it('counts only the range the position is actually in', () => {
-    // Media beyond a hole is not runway: the element stops at the hole. A
-    // buffer indicator may draw it; a decision about how long the picture can
-    // survive must not count it.
+    // Media beyond a hole is not runway: the element stops at the hole.
     const ranges = [{ startMs: 0, endMs: 12_000 }, { startMs: 30_000, endMs: 90_000 }];
     expect(forwardBufferMsAt(5_000, ranges)).toBe(7_000);
   });
 
   it('allows a range that begins just ahead of the position', () => {
-    // The element and the ranges it reports do not agree to the millisecond,
-    // and treating 40 ms of disagreement as an empty buffer would decline
-    // every handover at a fragment boundary.
+    // The element and its ranges disagree by milliseconds; a small lead is not an empty buffer.
     expect(forwardBufferMsAt(5_000, [{ startMs: 5_040, endMs: 20_000 }])).toBe(15_000);
     expect(forwardBufferMsAt(5_000, [{ startMs: 5_400, endMs: 20_000 }])).toBe(0);
   });
 
   it('is the quantity a stale sample overstates, by the age of the sample', () => {
-    // Why the handover gate reads the element rather than the event core
-    // replied to. The same buffer, seen 8 s apart with nothing arriving: the
-    // older reading claims 9 s of cover where 1 s is left. `publish()` reports
-    // only while the element is playing, so the sample an element that stopped
-    // emitting leaves behind is precisely the one this would trust.
+    // The same buffer 8 s apart with nothing arriving: the older sample claims 9 s where
+    // 1 s is left, which is why the handover gate reads the element, not the last event.
     const ranges = [{ startMs: 0, endMs: 30_000 }];
     expect(forwardBufferMsAt(21_000, ranges)).toBe(9_000);
     expect(forwardBufferMsAt(29_000, ranges)).toBe(1_000);
@@ -729,15 +669,11 @@ describe('The media in front of a position', () => {
 });
 
 describe('Handover join convergence', () => {
-  // The node encodes a generation sequentially from its own start, so a
-  // transcode replacement can still be diverging from the join when the whole
-  // budget expires. A replacement only arrives at the join if it produces
-  // media faster than the viewer consumes it, and the join recedes at the rate
-  // the viewer is watching.
+  // A generation is encoded sequentially from its start, and the join recedes as the viewer
+  // watches, so a replacement arrives only if it produces faster than realtime.
 
   it('declares the join lost when the replacement is losing ground to it', () => {
-    // The gap opened over the window rather than closing, so no amount of
-    // remaining budget brings the join within reach.
+    // The gap grew over the window.
     expect(handoverJoinLost({
       startDeficitMs: 20_000, deficitMs: 26_000, observedMs: 6_000, remainingMs: 19_000,
     })).toBe(true);
@@ -751,17 +687,14 @@ describe('Handover join convergence', () => {
   });
 
   it('keeps waiting while the replacement is closing fast enough to arrive', () => {
-    // A stream copy produces far faster than realtime: 12 s of gap closed in
-    // 6 s leaves 8 s needing about 4. Nothing here should give up.
+    // 12 s of gap closed in 6 s leaves 8 s needing about 4.
     expect(handoverJoinLost({
       startDeficitMs: 20_000, deficitMs: 8_000, observedMs: 6_000, remainingMs: 19_000,
     })).toBe(false);
   });
 
   it('says nothing before a segment has had time to arrive', () => {
-    // Too early to be a measurement. A segment arrives whole, so a sample taken
-    // inside one reads as zero production for a source that is perfectly
-    // healthy — and abandoning on that would break handovers that work.
+    // A segment arrives whole, so a sample inside one reads as zero production from a healthy source.
     expect(handoverJoinLost({
       startDeficitMs: 20_000, deficitMs: 26_000, observedMs: 900, remainingMs: 24_000,
     })).toBe(false);
@@ -770,35 +703,27 @@ describe('Handover join convergence', () => {
 
 describe('Handover fallback position', () => {
   it('attaches where the viewer got to, not where core asked before the attempt', () => {
-    // Core asked for 3,718 ms into a replacement while the viewer sat at
-    // 29,561 ms on the outgoing generation, so the clocks differ by -25,843 ms.
-    // Thirty seconds later the viewer is at 59,561 ms on the old clock, which
-    // is 33,718 ms on the new one. Falling back to 3,718 would rewind them 30 s.
+    // Core asked for 3,718 ms while the viewer sat at 29,561 ms on the old clock: an offset of
+    // -25,843 ms. At 59,561 ms on the old clock they are at 33,718 ms on the new.
     expect(handoverFallbackPositionMs(3_718, -25_843, 59_561)).toBe(33_718);
   });
 
   it('never moves the viewer backwards when nothing advanced', () => {
-    // An immediate abandonment, or an outgoing element that had already frozen:
-    // the request core made still describes where they are, and a live position
-    // that is behind it is a stale sample, not a destination.
+    // A live position behind core's request is a stale sample, not a destination.
     expect(handoverFallbackPositionMs(3_718, -25_843, 29_561)).toBe(3_718);
     expect(handoverFallbackPositionMs(3_718, -25_843, 20_000)).toBe(3_718);
   });
 
   it('lands at the start of a generation built ahead of the viewer, never before it', () => {
-    // A lead move asks the node for a position ahead of the viewer, so core's
-    // request is negative: the viewer is that far before the generation's
-    // start. Abandoning before they arrive can only attach at the start.
+    // A lead move's request is negative: the viewer is that far before the generation's start.
     expect(handoverFallbackPositionMs(-25_000, -60_000, 40_000)).toBe(0);
     expect(handoverFallbackPositionMs(-25_000, -60_000, 70_000)).toBe(10_000);
   });
 });
 
 describe('Joining a generation that starts ahead of the viewer', () => {
-  // Core's lead move: the node produces from intent + lead, so the
-  // join lies before the incoming generation until the viewer, still watching
-  // the outgoing element, reaches its start. That wait is the point of the
-  // lead, not a race being lost.
+  // Core's lead move has the node produce from intent + lead, so the join lies before the
+  // incoming generation until the viewer reaches its start. Waiting is expected.
   it('waits for the viewer while the join is still before the generation', () => {
     expect(leadJoinStep(-12_000, false)).toBe('wait');
   });
@@ -814,10 +739,8 @@ describe('Joining a generation that starts ahead of the viewer', () => {
 });
 
 describe('Holding the picture through a relocation', () => {
-  // Selecting Transcode from Direct Play mid-playback is a representation
-  // change, so the handover path is never reached and only this hold keeps the
-  // frame up. Whether the *outgoing* source is a manifest must not decide it:
-  // that is a fact about media the hold never touches.
+  // A representation change mid-playback never reaches the handover path; only this hold
+  // keeps the frame up. Whether the outgoing source is a manifest must not decide it.
 
   it('holds a Direct Play frame while a transcode replacement is built', () => {
     expect(canHoldThroughRelocation({
@@ -832,9 +755,7 @@ describe('Holding the picture through a relocation', () => {
   });
 
   it('declines when the replacement is not hls.js-driven', () => {
-    // A native player and a plain URL are both loaded by the element itself,
-    // and that element is the one holding the frame. There is nowhere to
-    // prepare a replacement out of sight.
+    // The element holding the frame would load these itself, so nothing can be prepared out of sight.
     expect(canHoldThroughRelocation({
       incomingIsManifest: true, managedHls: false, outgoingReadyState: 4,
     })).toBe(false);
@@ -844,8 +765,7 @@ describe('Holding the picture through a relocation', () => {
   });
 
   it('declines when there is no frame to hold', () => {
-    // The first generation of a session: nothing is on screen, so blanking
-    // costs the viewer nothing and the teardown path is the cheaper answer.
+    // Nothing is on screen, so teardown costs the viewer nothing.
     expect(canHoldThroughRelocation({
       incomingIsManifest: true, managedHls: true, outgoingReadyState: 1,
     })).toBe(false);

@@ -11,7 +11,7 @@ function nameOf(path: string | undefined, fallback: string): string {
   return path ? fileName(path) : fallback;
 }
 
-/** "1920×1080 HEVC · AAC 6ch · MKV", from what the file states, leaving out what it does not. */
+/** For example "1920×1080 HEVC · AAC 6ch · MKV"; what the file does not state is left out. */
 export function fileSummary(file: PlaybackMediaFacts): string {
   const video = file.profile.streams.find((stream) => stream.type === 'video');
   const audio = file.profile.streams.filter((stream) => stream.type === 'audio');
@@ -24,12 +24,8 @@ export function fileSummary(file: PlaybackMediaFacts): string {
 }
 
 /**
- * The files an item plays from, each with what it is, and a way to add
- * another: a second cut, a better encode, another resolution. Which one plays
- * is the client's choice, made from these same facts.
- *
- * Adding picks an unmatched file and attaches it through core, which adds it
- * beside the item's files and never replaces them.
+ * An item's files, each summarised, with a way to attach another version.
+ * Attaching adds beside the existing files and never replaces them.
  */
 export function ItemFiles({ item, facts, manage }: { item: CatalogueItem; facts: PlaybackFactsApi; manage?: ManageApi }) {
   const [files, setFiles] = useState<PlaybackMediaFacts[]>();
@@ -83,7 +79,6 @@ export function ItemFiles({ item, facts, manage }: { item: CatalogueItem; facts:
   );
 }
 
-/** Choose an unmatched file to add to this item as another version. */
 function AddFileDialog({ open, item, manage, onClose, onAdded }: {
   open: boolean;
   item: CatalogueItem;

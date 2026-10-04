@@ -4,61 +4,28 @@ import type { EndpointRegistry } from '@machafoundation/core';
 
 export interface Session {
   auth: AuthenticatedFetch;
-  /** False only while a cold-start mint attempt is genuinely in flight. */
+  /** False only while a cold-start mint is in flight. */
   ready: boolean;
   /**
-   * What this session may do, or `undefined` when nothing has said yet.
-   *
-   * Comes from the token rather than from a separate request. Both paths that
-   * produce a session already state its roles — the mint response carries them,
-   * and the warm-reload validation is itself the whoami — so there is no second
-   * fetch here to race, fail, or need re-asking after a failover.
-   *
-   * `undefined` is the third answer and the permissive one: a node too old to
-   * state roles leaves it `undefined` for ever, and hiding sections on the
-   * strength of an answer nobody gave would empty the navigation for everyone
-   * the moment a node was slow. Read it through `sessionPermits` /
-   * `sessionLockedOut`, which encode that rule so no call site can forget it.
+   * What this session may do, from the token; `undefined` until stated, and for ever on a node too
+   * old to state roles. Read it through `sessionPermits` / `sessionLockedOut`, which permit the unknown.
    */
   roles: UserRole[] | undefined;
   /**
-   * Why there is no session, or `undefined` when there is one.
-   *
-   * Read with `ready`: not ready means the question is still open. It is the
-   * difference between a cluster that could not be asked and one that answered
-   * and said no — and only the first is a connection problem. Core withholds
-   * the unreachable report for a refusal precisely so that a client does not
-   * send a viewer to check a server that is up and working as configured;
-   * this is the other half, which is having something to say instead.
-   *
-   * The `message` on it is the server's own sentence where it sent one, and
-   * core's contract is that it is never assumed fit to show a viewer.
+   * Why there is no session, or `undefined` when there is one; meaningful only once `ready`. A refusal
+   * is not a connection problem. Its `message` is the server's and is never assumed fit to show a viewer.
    */
   mintFailure: SessionMintFailure | undefined;
   /**
-   * Ends this session server-side and locally, then starts again, so the app
-   * learns what an anonymous viewer may do here: browse, or sign in.
-   *
-   * Core's `signOut` clears the token first and never mints a replacement;
-   * wanting a session afterwards is this client's decision, and it always
-   * does. Starting again happens even when the revoke failed, because the
-   * local token is already gone either way. Rejects when the cluster could
-   * not be told, since the session is then still valid on the server.
+   * Ends the session, then starts again as an anonymous viewer, even when the revoke failed. Rejects
+   * when the cluster could not be told, since the session is then still valid on the server.
    */
   signOut: () => Promise<void>;
 }
 
 /**
- * A thin React interface onto the app-wide `sessionManager` singleton — this
- * hook configures it for the current connection settings and subscribes to
- * its state; it does not own or construct a session. Exactly one session
- * exists for the life of the app (or of a test, when `manager` is injected).
- *
- * `ready` is a presentation signal (hold the splash until the cold-start
- * mint settles), not a correctness gate: a request made through `auth`
- * before the first token exists waits for that mint itself, and a 401 on a
- * live token re-mints and retries — `SessionManager.fetch()` owns both, so
- * no caller has to remember to wait.
+ * Configures the app-wide `sessionManager` for the connection settings and subscribes to its state.
+ * `ready` only holds the splash: `SessionManager.fetch()` itself waits for the first mint and re-mints on a 401.
  */
 export function useSession(options: {
   connectionRequired: boolean;

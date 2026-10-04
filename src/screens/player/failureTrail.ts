@@ -1,15 +1,8 @@
 import { clientDiagnosticsConsole, type ClientLogEntry } from '@machafoundation/core';
 
 /**
- * The evidence behind a playback failure, in the failure's own words.
- *
- * A television has no console. The diagnostics buffer that would explain a
- * fault in one line sits in memory, reachable otherwise only from a developer
- * console the set does not have, so the failure screen reads it out.
- *
- * Deliberately only warnings and errors. The buffer holds nothing else on the
- * Samsung build anyway (it is configured at `warn`), and a screen that also
- * listed every routine step would bury the three lines that matter.
+ * One diagnostics-buffer line, read out on the failure screen because a
+ * television has no console. Warnings and errors only.
  */
 export interface PlaybackFailureTrailEntry {
   atMs: number;
@@ -28,8 +21,7 @@ function detailOf(entry: ClientLogEntry): string | undefined {
   if (typeof data !== 'object') return String(data);
   if (data instanceof Error) return data.message;
   try {
-    // Errors nested in a data object stringify to `{}`, which is the one case
-    // where the whole point of the line is the message inside them.
+    // An Error nested in a data object would stringify to `{}`; keep its message.
     const text = JSON.stringify(data, (_key, value) => (
       value instanceof Error ? value.message : value
     ));

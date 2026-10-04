@@ -3,10 +3,8 @@ import type { PlaybackSource } from '@machafoundation/core';
 import { settle } from '../test/settle';
 
 /**
- * The read-ahead worker is the only way a Direct Play source reports a status,
- * and it is unreachable in a test environment: `serviceWorkerAvailable()` is
- * false, so the player never subscribes and the branch under test never runs.
- * Mocked at the module boundary so the failure can be delivered directly.
+ * The read-ahead worker, the only reporter of a Direct Play source status, is unavailable under
+ * test, so it is mocked at the module boundary and failures are delivered directly.
  */
 const readAheadFailureListeners: Array<(error: Error & { status?: number }) => void> = [];
 /** What the worker says the node answered for the source, when asked. */
@@ -92,19 +90,15 @@ describe('a source the node no longer has must not take the presentation with it
   }
 
   it('reports a 404 without destroying the buffer the viewer is still watching', async () => {
-    // The whole recovery depends on this. Core cannot regenerate into a live
-    // element if the adapter has already paused it and torn the source down,
-    // and that teardown takes the whole buffer of playable video with it. So
-    // `not-found` reports and does nothing else.
+    // Core regenerates into the live element, so `not-found` must only report: a teardown would take
+    // the playable buffer with it.
     const { video, failures } = await playingPlayer();
     expect(readAheadFailureListeners).toHaveLength(1);
 
     const gone: Error & { status?: number } = new Error('Direct Play source returned 404');
     gone.status = 404;
     readAheadFailureListeners[0](gone);
-    // The element then raises its own error, because the worker handed the 404
-    // body to it as though it were media. That is the failure core must not be
-    // allowed to read as "this node is bad".
+    // The element then errors on the 404 body it was handed as media.
     emit(video, 'error');
 
     expect(failures.map((failure) => failure.kind)).toContain('not-found');
@@ -113,10 +107,7 @@ describe('a source the node no longer has must not take the presentation with it
   });
 
   it('still tears down for a failure that is genuinely the end of the road', async () => {
-    // The guard is narrow on purpose. Without a prior `not-found` for this
-    // generation an element error is terminal, and the presentation stops. A
-    // latch that swallowed every media error would leave
-    // a viewer watching nothing with no message.
+    // Without a prior `not-found` for this generation, an element error is terminal.
     const { video, failures } = await playingPlayer();
     emit(video, 'error');
     await settle();
@@ -128,11 +119,7 @@ describe('a source the node no longer has must not take the presentation with it
   });
 
   it('reads a 404 the worker saw even when the element errors before the worker says so', async () => {
-    // The worker hands the element the 404 and posts its report separately,
-    // so the element's error can arrive first, with the latch above still
-    // empty; read as terminal, a reclaimed source would end on "Web media
-    // source is unsupported". Asked, the worker already knows what the node
-    // said.
+    // The element's error can arrive before the worker's report; asked, the worker already knows the status.
     workerSourceStatus = 404;
     const { video, failures } = await playingPlayer();
     emit(video, 'error');

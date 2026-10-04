@@ -33,7 +33,7 @@ export function useMusicController(options: {
   const { api, playlistStore, queueStore, activePlayback, startPlayback, onQueueChange } = options;
   const [playlistEntries, setPlaylistEntries] = useState(() => playlistStore.load());
 
-  // An unavailable track is never queued or added: none of it can be played.
+  // An unavailable track is never queued or added.
   const tracksFor = useCallback(async (item: MediaSummary): Promise<MediaSummary[]> => {
     if (item.kind === 'track') return !availableToPlay(item) ? [] : [item];
     if (item.kind !== 'album') return [];

@@ -1,16 +1,6 @@
 /**
- * Times in, times out: **UTC everywhere except the last inch.**
- *
- * Timezones are a presentation problem. Every instant this client holds,
- * compares, logs or hands to another machine is epoch milliseconds or Zulu,
- * and the only place a zone appears is the pixel a person reads.
- *
- * **Why the presented form still names its zone.** Macha deploys across
- * sites whose nodes run in different zones. A viewer reading `18:51:52` on a
- * screen in one zone, beside a journal written in another, cannot tell a
- * correct reading from an hour's error. Local answers "when was that, for
- * me"; the zone label is what stops it being mistaken for the node's own
- * time. Presented local, labelled, and never used as the interchange format.
+ * Instants are held, compared and exchanged as epoch milliseconds or Zulu. Only the screen
+ * shows local time, labelled with its zone because nodes run in different zones.
  */
 
 function twoDigits(value: number): string {
@@ -23,13 +13,7 @@ function stated(unixMs: number | undefined | null): number | undefined {
   return Number.isNaN(at.getTime()) ? undefined : unixMs;
 }
 
-/**
- * What a person reads: their own clock, with the zone said out loud.
- *
- * `21 Sep 2026, 18:51:52 GMT+3`. Zero and absent are `—` rather than 1970,
- * because a node that has never been observed reports `0` and every system
- * that has rendered that as an epoch date has fooled somebody.
- */
+/** Local time with its zone, as `21 Sep 2026, 18:51:52 GMT+3`. Zero and absent are `—`: a never-observed node reports 0. */
 export function presentedTime(unixMs: number | undefined | null): string {
   const value = stated(unixMs);
   if (value === undefined) return '—';
@@ -39,21 +23,14 @@ export function presentedTime(unixMs: number | undefined | null): string {
   }).format(new Date(value));
 }
 
-/** The same instant with the date left off, for a line where the date is established. */
+/** As `presentedTime`, without the date. */
 export function presentedTimeOfDay(unixMs: number | undefined | null): string {
   const value = stated(unixMs);
   if (value === undefined) return '—';
   return new Intl.DateTimeFormat(undefined, { timeStyle: 'long' }).format(new Date(value));
 }
 
-/**
- * `2026-09-21 15:51:52Z` — the interchange form.
- *
- * For anything that leaves this client for another machine or another
- * person's terminal: log lines, bug reports, a timeline handed to whoever is
- * reading a node's journal. Never for the screen, which is what
- * `presentedTime` is for.
- */
+/** `2026-09-21 15:51:52Z`: the interchange form, for logs and reports, never the screen. */
 export function zuluTimestamp(unixMs: number | undefined | null): string {
   const value = stated(unixMs);
   if (value === undefined) return '—';

@@ -1,244 +1,131 @@
 # Replacing a playing generation
 
-How the Web player replaces a remux or transcode generation with another — on
-the same node or a different one — and what the viewer sees while it happens.
+How the Web player (`WebPlayer` in `src/platform/WebPlatform.ts`) swaps one
+remux or transcode generation for another, on the same node or a different
+one. A *generation* is one stream of a title from one node; each has its own
+timeline, init segment and fragment boundaries, so two are never
+interchangeable.
 
-There are two cases, and they are not the same problem:
+There are two cases:
 
-- **Handover**, where the viewer did not ask to move. The replacement must be
-  invisible, so the outgoing generation keeps playing until the new one can take
-  over at the same content position.
-- **Relocation**, where the viewer asked to move. There is nothing to hide, so
-  the picture is held still at the position they left until the replacement can
-  present the position they asked for. The same hold also catches a handover
-  that could not be set up or did not arrive.
+- **Handover:** the viewer did not ask to move. The old generation keeps
+  playing until the new one can take over at the same content position.
+- **Relocation:** the viewer asked to move (a seek). The picture is held on
+  its last frame until the new generation can show the new position.
 
-Both prepare the replacement on a second media element. They are tried in that
-order: a handover that declines or is abandoned falls to the relocation hold,
-and a hold that declines or is abandoned falls to a teardown of the existing
-element, so neither can be worse than rebuilding in place.
+Both prepare the replacement on a second, hidden media element. A handover that
+declines or is abandoned falls back to the relocation hold, and a hold that
+declines falls back to tearing down and rebuilding the one element.
 
-## Why a second element is required
+Core calls `play(source, positionMs, startPaused, transition)`. The transition
+is `relocate` for a seek or a first start, and `continue` for everything else:
+a mode or quality change, a node move, a failover, a regenerated session, a
+decode fallback.
 
-Direct Play survives a node dying without a flicker, and that method does not
-generalise. The media element is never given a node URL: `directPlayReadAheadUrl()`
-hands it a stable same-origin proxy URL and the Service Worker holds a list of
-upstream URLs behind that key, so `video.src` never changes and the element
-cannot tell which node answered. That works because the resource is identical
-everywhere — a byte range of a file is the same bytes from any node.
+## Why a second element
 
-A transformed generation is not interchangeable. Each has its own timeline
-origin, its own `EXT-X-MAP` initialization segment and its own fragment
-boundaries, so two nodes transcoding one title produce different media.
+Direct Play survives a node change in place: the element plays a stable
+same-origin URL and the Service Worker swaps the node behind it, because a
+byte range of a file is the same from any node. A transformed generation is
+different media, so that does not carry over.
 
-Two in-place alternatives were measured and rejected:
+In-place swaps do not work either. `hls.loadSource()` on a live instance
+detaches the media and empties the buffer, and appending two generations to
+one `SourceBuffer` would need a synthesised playlist and `changeType()` at
+every quality change.
 
-- **`hls.loadSource()` on a live instance** fires `MEDIA_DETACHED`, `BUFFER_RESET`
-  and `emptied` within milliseconds. With 78 s buffered, `currentTime` went to
-  zero and the buffer was gone. It destroys the runway exactly as a teardown
-  does.
-- **Appending both generations to one SourceBuffer** is what
-  `EXT-X-DISCONTINUITY` is for, and hls.js handles discontinuities within one
-  playlist. Spanning two generations would require synthesising a playlist
-  across them through a custom `pLoader` plus `SourceBuffer.changeType()`
-  whenever initialization segments differ, which they do as soon as quality
-  differs.
+## What the player tells core
 
-Core calls `play(source, positionMs, startPaused, transition)` for every case
-and the platform decides how to get there. Core names the transition
-`relocate` for a seek and for a session's first start, and `continue` for
-everything else: a mode or representation change, a node move, a failover, a
-regenerated session and a decode fallback. Other targets are unaffected.
-
-The player also declares two optional facts that core acts on:
-
-- **`holdsThroughLead`**, true on the managed-HLS path. Only a player that can
-  keep the outgoing picture playing may be handed a negative position (see
-  *Node moves and the lead* below).
-- **`needsProducedSource`**, its complement, true on the native-HLS path. A
-  native player handed a playlist whose first fragment answers `500
-  segment_not_ready` fails at once and has no retry this client can reach, so
-  core holds such a source back until the session route reports media
-  produced. The native path attaches with `video.src` and no fragment probe of
-  its own.
-
-**A decode failure on a copied stream is replaced on the same node.** When a
-generation that copied streams fails with a `media` or `unsupported`
-`PlaybackSourceError`, core (`e840d72`) asks the same node for a transcode of
-every copied stream at the viewer's position, once per playback, with the
-notice `decode-fallback` and the reason `player-could-not-decode`. It never
-does this over a mode the viewer chose. The fallback is a representation change
-and arrives as `continue` after the failed generation has been stopped, so it
-takes the paths below like any other.
+- **`holdsThroughLead`** (managed HLS): the player can keep the old picture
+  playing, so core may hand it a negative position (see *Node moves*).
+- **`needsProducedSource`** (native HLS): the player fails permanently on a
+  playlist that is not ready, so core withholds the source until the node
+  reports media produced.
 
 ## Handover
 
-`WebPlayer.handOverToSource`, taken when the transition is `continue`.
+`handOverToSource`, when the transition is `continue`.
 
-1. **Decide.** Both sides must be managed HLS, the player must not be starting
-   paused, the outgoing element must be playing, and there must be at least 3 s
-   of buffered runway to be worth protecting. The runway is read from the
-   element, not from the last published event, whose age has no bound.
+1. **Decide.** Both the old and new sources must be managed HLS, the player
+   must be playing, not starting paused, and hold at least 3 s of buffer. A
+   switch out of Direct Play is therefore never a handover.
+2. **Take the clock offset.** The viewer's position on the old generation and
+   the position core asks for on the new one are the same content;
+   their difference converts between the two clocks.
+3. **Prepare hidden.** Build a muted element with `display: none` and a second
+   hls.js instance. Nothing is installed as active, so its listeners stay
+   inert.
+4. **Wait for the join to be buffered**, not for `canplay`. The join moves,
+   because the old element keeps playing, so it is recomputed each turn. The
+   replacement must also hold 5 s beyond it. `handoverJoinLost()` abandons the
+   handover once the replacement is clearly not catching up (judged over 6 s,
+   within a 25 s budget) and reports `resumeAtMs`, the viewer's live position,
+   so the fallback never puts the viewer back.
+5. **Seek the hidden element** to the join.
+6. **Cut when the old element reaches the join**, in one synchronous block:
+   mute old, show and unmute new, move the bookkeeping across, play new, pause
+   old. The old instance is destroyed after the cut, never before.
 
-   **Both sides** is the guard that is easily missed. The outgoing
-   `activeSource.isManifest` is checked as well as the incoming source's, so a
-   switch out of Direct Play can never be a handover: there is no second
-   managed-HLS element to hand over to. The first transformed generation after a
-   Direct Play session therefore always tears down, however the transition is
-   labelled.
+If the old element stalls first, the cut is forced at once.
 
-2. **Take the clock offset.** At the moment core asks, the viewer is at
-   `lastPublishedEvent.positionMs` on the outgoing generation and core is asking
-   for `positionMs` on the incoming one. Those denote the same content, so
-   `clockOffsetMs = positionMs - outgoingPositionMs` converts between the two
-   clocks for the rest of the handover. It is however far the viewer travelled
-   while core negotiated.
-
-3. **Prepare hidden.** Build a wired element with `display: none`, muted, and
-   attach a second hls.js instance with `startPosition` at the expected join.
-   Nothing is installed as active, so every listener on both instances stays
-   inert — they already guard on `video !== this.video` and `this.hls !== hls`.
-
-4. **Wait for the join to be buffered, not for `canplay`.** `canplay` means the
-   first fragment arrived; the join is `clockOffsetMs` in and must be fetched.
-   Seeking before it is resident makes the element wait for data instead of
-   firing `seeked`. The join is recomputed each turn because the outgoing element
-   keeps moving, and the replacement must also hold 5 s beyond the join, or it
-   starves seconds after being promoted. That margin is waived once the
-   outgoing element has stopped.
-
-   The join is not a fixed point: it recedes at the viewer's rate while the
-   replacement fills at its node's rate. `handoverJoinLost()` compares the
-   distance from the replacement's buffered edge to the join at the start of a
-   six-second observation and now, and abandons the handover as soon as the
-   race is decided — not closing at all, or closing too slowly to arrive
-   inside what is left of the budget — rather than waiting the 25 s budget
-   out. An abandoned handover reports `resumeAtMs`, the live position in the
-   replacement's clock, and the fallback attaches there instead of at the
-   position core computed before the attempt began, so the viewer is never
-   put back.
-
-5. **Seek the hidden element** to the join and wait for `seeked`. This costs the
-   viewer nothing; nobody is looking at that element.
-
-6. **Cut when the outgoing element reaches the join**, in one synchronous block:
-   mute the outgoing, show and unmute the incoming, move the element, hls
-   instance, timeline and generation bookkeeping across, play the incoming,
-   pause the outgoing. The outgoing instance is destroyed and its element
-   removed after the cut, never before.
-
-If the outgoing element **stalls** during this — the normal end of a reaped
-generation — the cut is forced immediately rather than waiting for a position
-that will never arrive.
+**Alignment must be exact.** Promoting the replacement at its own start would
+replay whatever the viewer watched while it buffered.
 
 **A failed generation is stopped where it fails and destroyed where it is
-replaced.** `retireHls()` calls `stopLoad()`, so nothing more is fetched from a
-node that has gone, and the instance is destroyed only on the three paths that
-take the element: the teardown in `play()`, the cut in `promoteHandover()` and
-`stop()`. Destroying it at diagnosis detached the MediaSource and blanked the
-element seconds before anything could replace it.
-
-**Alignment is the part that must be exact.** The replacement is created for the
-position the viewer had reached when core asked, and they keep moving while it
-buffers. Promoting it at its own start replays the difference, which is plainly
-audible.
-
-**What it needs is time.** The lead before activation has to cover session
-creation *and* getting the join point resident, not just negotiation.
+replaced.** `retireHls()` stops loading; the instance is destroyed only by the
+teardown in `play()`, the cut in `promoteHandover()`, or `stop()`. Destroying
+it earlier blanks the picture before anything can replace it.
 
 ### Node moves and the lead
 
-Choosing a node in the player calls core's `PlaybackRuntime.moveTo`, which
-builds a session on the new node while the old one keeps presenting, activates
-it as `continue`, and releases the old session at the cut rather than before
-it. A refused move leaves the viewer on the generation they were watching. A
-failed generation has nothing left to move, so choosing a node then sets the
-preference and retries instead.
+Choosing a node calls core's `PlaybackRuntime.moveTo`: it builds a session on
+the new node while the old one plays, activates it as `continue`, and releases
+the old session at the cut. A refused move leaves the viewer where they were.
 
-A node produces a generation sequentially from where it is asked to start, so a
-generation asked for at the viewer's own position begins one start cost behind
-them and a slow node never catches up. A move therefore asks for the viewer's
-position plus a **lead**: this viewer's latest measured start cost for that
-node plus core's `MOVE_LEAD_MARGIN_MS`, or core's own estimate when there is no
-fresh measurement, or none when there is neither. Core grants a lead only to a
-player declaring `holdsThroughLead`, and never one that would reach past the
-end of the title.
+A node produces a generation from its start point onwards, so one requested at
+the viewer's own position starts a start-up time behind them, and a slow node
+never catches up. A move therefore asks for the viewer's position plus a
+**lead**: the node's measured start cost plus core's `MOVE_LEAD_MARGIN_MS`.
+Core grants a lead only to a `holdsThroughLead` player and never past the end
+of the title.
 
-The player is then handed a negative position: the viewer is that far before
-the new generation's start. `leadJoinStep()` keeps the handover waiting, with
-no budget running, until the viewer reaches the generation; only then does the
-race to the join begin. The wait for the first fragment is the longer of 20 s
-and the lead. If the outgoing picture stops before the viewer arrives, the cut
-goes to the generation's start. Every path that attaches instead clamps the
-position to zero.
+The player then receives a negative position: the viewer is that far before
+the new generation's start. `leadJoinStep()` waits, with no budget running,
+until the viewer reaches it. If the old picture stops first, the cut goes to
+the generation's start.
 
-A change that asks for the viewer's own position has no lead, and on a slow
-link its join can still lose the race. That is recorded as open in
-`TODO/ACTIVE.md`.
+A change at the viewer's own position has no lead, and on a slow node its join
+can lose the race and fall back to the hold.
 
 ## Relocation
 
-`WebPlayer.holdThroughRelocation`, asked on both transitions whenever the
-handover did not take: every `relocate`, and every `continue` whose handover
-declined or was abandoned. A failover reaches it that way, because the failed
-generation has been paused and the handover declines on that. An abandoned
-handover is not a reason to skip the hold: one abandoned at 6 s still had about
-10 s of runway on screen, and whether there is a frame to keep is the only
-question. `canHoldThroughRelocation()` owns the guard and asks only what the
-replacement needs: hls.js must drive it, and the outgoing element must have a
-frame up to hold. It does not ask the outgoing source to be a manifest, which
-is a fact about media the hold never touches, so a switch out of Direct Play
-is held like any other.
+`holdThroughRelocation`, for every `relocate` and for any `continue` whose
+handover did not happen (a failover arrives this way). `canHoldThroughRelocation()`
+requires only that hls.js drives the replacement and the old element has a
+frame to hold, so a switch out of Direct Play is held too.
 
-The teardown path blanks the element, because hls.js is handed a MediaSource
-object URL and attaching a new one resets whatever was showing. That leaves the
-element at `readyState` 0 with nothing buffered and `paused` false — trying to
-play with no media — for as long as the node takes to build the replacement.
+The old element stays paused on its last frame while the replacement is
+prepared beside it, loaded from its start, seeked to the offset, and swapped
+in. Tearing down instead would blank the picture for as long as the node takes
+to start.
 
-Instead the outgoing element stays where it is, paused on its last frame, while
-the replacement is prepared beside it and swapped in once it can present the
-requested position. The replacement is loaded from the generation's own start
-and then seeked to the offset, which is what the teardown path does, so the
-origin rules are the same ones.
+The old generation is not left *playing*: the viewer would watch the previous
+scene under a clock showing the destination. A frozen frame claims nothing. It
+is still a wait, of up to 20 s for the replacement's first fragment.
 
-This is not the same as continuing to *play* the outgoing generation while the
-replacement prepares. That was tried and rejected: the viewer watches the
-previous scene while the clock reads the destination, which is a worse lie than
-the interruption it avoids. A frozen frame claims nothing.
+**The control takes the pause, not the player.** Core tells the player nothing
+until `play()`, a whole negotiation later, so `PlayerScreen` freezes the
+picture when a seek is committed. A seek inside the buffer undoes the freeze
+in the same tick; one outside it carries the freeze through to the swap; a
+refused seek releases it. For a relocation no control asked for,
+`holdThroughRelocation` takes the pause itself.
 
-A frozen frame is still a wait. The hold allows 20 s for the replacement's
-first fragment, and on a slow node a hold with no lead has been measured frozen
-for 15-19 s; that is recorded as open in `TODO/ACTIVE.md`, not solved here.
+**A deliberate hold stands the stall watchdog down.** A watchdog cannot tell a
+requested freeze from a dead node. Core re-arms it once playback advances.
 
-**The pause is taken by the control, not by the player.** Core tells a player
-nothing about a relocation until `play()`, which is a whole negotiation later,
-so `PlayerScreen` freezes the picture the instant a seek is committed and it is
-released by whichever path core then takes: a target inside the buffer reaches
-`player.seek()` synchronously and the hold is undone in the same tick without
-reaching a frame; a target outside it carries the freeze through to the swap; a
-refused seek releases immediately. A relocation no control asked for, such as a
-mode switch or a failover, has the pause taken by `holdThroughRelocation`
-itself.
+## Traps
 
-**A deliberate hold must stand down the stall watchdog.** A countdown measuring
-"nothing is moving" cannot distinguish a freeze the client asked for from a node
-that has died, and left running it ends a held seek in a failure screen while
-the node is still building. Core re-arms on the first report after playback
-advances, so a node that dies during a hold is still judged the moment anyone is
-waiting on it.
-
-## Two things that catch people
-
-**`display: none` does not stop buffering.** An unrendered element still
-buffers; element visibility does not gate MSE.
-
-**Tab visibility is a confound to record, not a settled mechanism.** It has
-been measured both ways. On 2026-09-17 and 2026-09-20 a backgrounded tab sat at
-`readyState` 0 with `networkState` 2 and no error while the node reclaimed an
-idle pipeline, which fits Chrome throttling a background tab's timers and
-hls.js driving its fragment loop on one. On 2026-09-21 hidden-tab starts
-succeeded in 1.0-2.4 s and hidden playback ran at 24 fps with no drops.
-
-`videoState()` therefore reports `document.hidden`, and any sample series taken
-while investigating playback should record it. What the field must not do is
-stand in for a diagnosis: a stall in a visible tab is a stall.
+- **`display: none` does not stop buffering.** Visibility does not gate MSE.
+- **A hidden browser tab may defer media loading.** `videoState()` reports
+  `document.hidden`; record it with any playback measurement, and do not treat
+  it as a diagnosis.

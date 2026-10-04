@@ -13,12 +13,8 @@ export interface FakePlayerPlayCall {
 }
 
 /**
- * Shared deterministic `Player` test double. Implements every optional hook
- * on the interface (subtitle, direct-source alternates, preflight, failure
- * and degradation channels) so one fixture covers both the ownership-level
- * (`PlaybackRuntime`) and generation-level (`PlaybackCoordinator`) suites,
- * plus any full-stack integration test that needs a real node-to-node
- * failover story without a browser.
+ * Deterministic `Player` double implementing every optional hook, so one
+ * fixture serves the runtime, coordinator and full-stack failover suites.
  */
 export class FakePlayer implements Player {
   listener?: PlaybackListener;

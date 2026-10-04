@@ -6,10 +6,8 @@ export type JobAction = 'pause' | 'resume' | 'retry' | 'remove';
 
 const ingestPauseableStates = new Set(['queued', 'scanning', 'importing']);
 const ingestResumableStates = new Set(['paused', 'blocked', 'failed']);
-// `verify_queued`: waiting for another torrent's check, as libtorrent checks
-// one at a time. Pause and cancel are allowed in it.
-// `awaiting_node`: in the cluster, not yet claimed. Actions are intent there
-// too, applied once a node claims it.
+// `verify_queued`: waiting on another torrent's check, as libtorrent checks one at a time.
+// `awaiting_node`: not yet claimed; an action there is intent, applied once a node claims it.
 const torrentPauseableStates = new Set(['awaiting_node', 'queued', 'metadata', 'downloading', 'verify_queued', 'verifying', 'downloaded', 'importing']);
 const torrentResumableStates = new Set(['paused', 'blocked']);
 const terminalStates = new Set(['completed', 'cancelled', 'failed']);
@@ -19,10 +17,8 @@ export function jobKey(kind: JobKind, id: string): string {
 }
 
 /**
- * A torrent's `desired` is what was asked of it, and it decides as much as
- * the state does: a torrent added paused waits for a node, or is held by
- * one, with `desired` "paused" and a state that never says so. The server
- * resumes whenever `desired` is "paused".
+ * A torrent's `desired` decides as much as its state: one added paused has `desired` "paused" and
+ * a state that never says so. The server resumes whenever `desired` is "paused".
  */
 export function canPause(kind: JobKind, state: string, desired?: string): boolean {
   return kind === 'ingest' ? ingestPauseableStates.has(state) : torrentPauseableStates.has(state) && desired !== 'paused';
@@ -54,11 +50,8 @@ export function displayStateOf(job: TorrentJob, linkedIngest?: IngestJob): strin
 }
 
 /**
- * The download still being stored in the cluster, between
- * the download finishing and the import starting: minutes to tens of minutes
- * on a large torrent, after which the import itself takes seconds. Read from
- * the server's own reason, never rebuilt from the state, and only while it is
- * incomplete.
+ * The download being stored in the cluster before its import starts, which can take many minutes.
+ * Read from the server's reason, never rebuilt from the state, and only while incomplete.
  */
 export function storingOf(job: TorrentJob): TorrentPublication | undefined {
   const publication = job.publication;
@@ -72,11 +65,7 @@ export function storingPercent(publication: TorrentPublication): number | undefi
   return publication.extents > 0 ? Math.max(0, Math.min(100, publication.published_extents / publication.extents * 100)) : undefined;
 }
 
-/**
- * "no progress for 4 min" once storing has stood still a minute or more. A
- * flat figure reads the same whether the node is busy or stuck, and the
- * server imports anyway after ten minutes, so stuck is real.
- */
+/** "no progress for 4 min" once storing has stood still for a minute, since a flat figure alone does not say stuck. */
 export function storingStallText(publication: TorrentPublication): string | undefined {
   const minutes = Math.floor(publication.progress_age_ms / 60_000);
   return minutes >= 1 ? `no progress for ${minutes} min` : undefined;
@@ -113,12 +102,7 @@ function stageOf(state: string, done: boolean): Pick<TorrentStage, 'status' | 'l
   return { status: 'active', label: stateLabel(state) };
 }
 
-/**
- * Where a torrent is on its way into the library: downloaded, then copied in
- * by an import job, then catalogued. Each stage says whether it is waiting,
- * running, done or stopped, so the page answers "why is this not finished"
- * by showing which stage it is stuck in.
- */
+/** A torrent's stages into the library (download, import, catalogue), so the page shows which one it is stuck in. */
 export function torrentStages(job: TorrentJob, linkedIngest?: IngestJob): TorrentStage[] {
   const downloaded = Boolean(job.ingest_job_id) || torrentPastDownload.has(job.state) || (job.progress ?? 0) >= 1;
   const download = stageOf(job.state, downloaded);

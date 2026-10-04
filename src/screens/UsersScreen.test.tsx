@@ -56,7 +56,6 @@ async function row(username: string): Promise<HTMLElement> {
   return host;
 }
 
-/** Open a row's action menu and choose one, the way a viewer would. */
 async function chooseAction(username: string, action: string): Promise<void> {
   const host = await row(username);
   fireEvent.click(within(host).getByRole('button', { name: `Actions for ${username}` }));
@@ -70,21 +69,15 @@ function dialogue(): HTMLElement {
 
 describe('roleSummary', () => {
   it('names roles in the canonical order, not the order the server happened to list them', () => {
-    // Two accounts holding the same roles must read identically, or a list is
-    // impossible to scan.
     expect(roleSummary(['manage_users', 'media_viewer'])).toBe('View media · Manage users');
     expect(roleSummary(['media_viewer', 'manage_users'])).toBe('View media · Manage users');
   });
 
   it('says so when an account holds nothing, rather than rendering an empty cell', () => {
-    // An account that can sign in and do nothing is a real state and the one
-    // most worth noticing.
     expect(roleSummary([])).toBe('No roles');
   });
 
   it('counts a role this build does not recognise instead of dropping it', () => {
-    // The server granted it. Showing "View media" alone would under-report
-    // what the account can do, which is the wrong direction to be wrong in.
     expect(roleSummary(['media_viewer', 'future_role' as never])).toBe('View media · 1 other role');
   });
 });
@@ -92,31 +85,25 @@ describe('roleSummary', () => {
 /** The superuser: protected, and able to hold a password. */
 const rootUser = (username = 'root') =>
   user({ id: username, username, mutable: { rename: false, delete: false, set_roles: true, set_password: true } as UserMutability });
-/** The account that exists to be nobody: protected, and holds no credential at all. */
+/** Protected, and holds no credential. */
 const anonymousUser = (username = 'anonymous') =>
   user({ id: username, username, mutable: { rename: false, delete: false, set_roles: true, set_password: false } as UserMutability });
 const ordinary = (username: string) => user({ id: username, username });
 
 describe('byStanding', () => {
   it('puts protected accounts above ordinary ones, whatever they are called', () => {
-    // root and anonymous are the accounts an operator cannot recreate, so they
-    // are worth finding without scrolling. `zulu` beating `alice` is what
-    // proves this is not simply sorting alphabetically.
+    // `zulu` before `alice` proves this is not alphabetical.
     expect([ordinary('alice'), rootUser('zulu')].sort(byStanding).map((each) => each.username))
       .toEqual(['zulu', 'alice']);
   });
 
   it('puts root above anonymous, which alphabetical order would not', () => {
-    // The alphabet gets this backwards. Read from `set_password`: anonymous
-    // is the account that can hold no credential, which is what separates it
-    // from the superuser.
+    // Told apart by `set_password`: anonymous can hold no credential.
     expect([anonymousUser(), rootUser()].sort(byStanding).map((each) => each.username))
       .toEqual(['root', 'anonymous']);
   });
 
   it('keeps that order when the two are named something else entirely', () => {
-    // The flags carry the meaning, not the names. A deployment that calls them
-    // `admin` and `guest` must still get the superuser first.
     expect([anonymousUser('guest'), rootUser('admin')].sort(byStanding).map((each) => each.username))
       .toEqual(['admin', 'guest']);
   });
@@ -128,9 +115,8 @@ describe('byStanding', () => {
   });
 
   it('does not float an ordinary account that merely cannot be deleted', () => {
-    // `delete` is withheld from the last manage_users holder and from your own
-    // account too. Sorting on it would pin whoever happens to be signed in to
-    // the top of the list, which is not what protection means.
+    // `delete` is also withheld from the last manage_users holder and from one's
+    // own account, so it must not decide the order.
     const lastManager = user({ id: 'a', username: 'zoe', mutable: { rename: true, delete: false, set_roles: true, set_password: true } as UserMutability });
     expect([lastManager, ordinary('alice')].sort(byStanding).map((each) => each.username)).toEqual(['alice', 'zoe']);
   });
@@ -138,8 +124,6 @@ describe('byStanding', () => {
 
 describe('UsersScreen', () => {
   it('lists each account with its roles, and puts no input in the list', async () => {
-    // The list is for reading. Anything
-    // editable in a row is a control the viewer can change without meaning to.
     render(<UsersScreen
       api={fakeApi([user({ id: 'a', username: 'alice', roles: ['media_viewer', 'manage_users'] })])}
       session={session()}
@@ -174,16 +158,13 @@ describe('UsersScreen', () => {
     const rows = [...document.querySelectorAll('.record-list > li')];
     const dividers = rows.filter((each) => each.classList.contains('record-divider'));
     expect(dividers).toHaveLength(1);
-    // Immediately after anonymous, immediately before the first ordinary
-    // account: a rule anywhere else groups the wrong things.
+    // After anonymous, before the first ordinary account.
     expect(rows.indexOf(dividers[0])).toBe(2);
     expect(rows[3]?.querySelector('.record-name')?.textContent).toBe('alice');
   });
 
   it('draws no divider when there is nothing on one side of it', async () => {
-    // A line above nothing, or below nothing, is a rule with no two things
-    // either side of it. A fresh install with only the protected pair is the
-    // case that actually happens.
+    // A fresh install holds only the protected pair.
     render(<UsersScreen api={fakeApi([anonymousUser(), rootUser()])} session={session()} />);
 
     await settle();
@@ -199,10 +180,7 @@ describe('UsersScreen', () => {
   });
 
   it('locks rename and removal on a protected account, from the server\'s own flags', async () => {
-    // Root and anonymous are ordinary records that happen to be protected.
-    // Nothing here may test the username: those names are the server's to
-    // choose, and a client-side guess would disable the wrong controls on
-    // every client at once.
+    // Nothing may test the username: the names are the server's to choose.
     render(<UsersScreen
       api={fakeApi([user({ id: 'root', username: 'root', mutable: { rename: false, delete: false, set_roles: true, set_password: true } as UserMutability })])}
       session={session()}
@@ -218,8 +196,7 @@ describe('UsersScreen', () => {
   });
 
   it('leaves an ordinary account fully editable', async () => {
-    // The counterpart to the test above: the flags have to be able to say yes,
-    // or "locked" would be indistinguishable from "always locked".
+    // The counterpart to the test above: the flags must be able to say yes.
     render(<UsersScreen api={fakeApi([user()])} session={session()} />);
 
     const alice = await row('alice');
@@ -242,7 +219,6 @@ describe('UsersScreen', () => {
   });
 
   it('puts a taken username against the username field, not in a general failure', async () => {
-    // Knowing which input was wrong is the whole value of an error code.
     const update = vi.fn(() => Promise.reject(Object.assign(new Error('users request failed: 409'), { detail: 'That username is taken.', code: 'username_taken', status: 409 })));
     render(<UsersScreen api={fakeApi([user()], { update })} session={session()} />);
 
@@ -252,17 +228,13 @@ describe('UsersScreen', () => {
 
     await settle();
     const message = within(dialogue()).getByText('That username is taken.');
-    // "Against the field" means somewhere the reader associates with the
-    // username: not inside the roles fieldset, and not in the dialogue's
-    // form-level slot at the foot.
+    // Not inside the roles fieldset, and not in the dialogue's form-level slot.
     expect(message.closest('fieldset')).toBeNull();
     expect(message.previousElementSibling?.querySelector('input')).toBeTruthy();
     expect(update).toHaveBeenCalledWith('user-1', { username: 'bob' });
   });
 
   it('keeps the dialogue open when the server refuses, so the explanation survives', async () => {
-    // A dialogue that closes on failure takes the only account of what went
-    // wrong with it, and the viewer is left looking at an unchanged list.
     const update = vi.fn(() => Promise.reject(Object.assign(new Error('users request failed: 409'), { detail: 'That username is taken.', code: 'username_taken', status: 409 })));
     render(<UsersScreen api={fakeApi([user()], { update })} session={session()} />);
 
@@ -276,8 +248,7 @@ describe('UsersScreen', () => {
   });
 
   it('puts a rejected password in the password dialogue, not against the account\'s roles', async () => {
-    // The counterpart to the username test, so that one proves a mapping
-    // rather than just that a message rendered somewhere.
+    // The counterpart to the username test: proves a mapping, not just a rendered message.
     const update = vi.fn(() => Promise.reject(Object.assign(new Error('users request failed: 400'), { detail: 'That password is too weak.', code: 'password_rejected', status: 400 })));
     render(<UsersScreen api={fakeApi([user()], { update })} session={session()} />);
 
@@ -291,9 +262,7 @@ describe('UsersScreen', () => {
   });
 
   it('sends only the fields that actually changed', async () => {
-    // A PATCH carrying an unchanged username is a rename request the viewer
-    // never made, and on a protected account the server would refuse the whole
-    // call over a field nobody touched.
+    // An unchanged username in the PATCH is a rename request, which a protected account refuses.
     const update = vi.fn(() => Promise.resolve(user({ roles: ['media_viewer', 'importer'] })));
     render(<UsersScreen api={fakeApi([user()], { update })} session={session()} />);
 
@@ -306,7 +275,6 @@ describe('UsersScreen', () => {
   });
 
   it('cannot save a dialogue nobody has changed', async () => {
-    // Opening an editor to look at it must not be able to spend a request.
     const update = vi.fn();
     render(<UsersScreen api={fakeApi([user()], { update })} session={session()} />);
 
@@ -331,9 +299,7 @@ describe('UsersScreen', () => {
   });
 
   it('checks no password length of its own when the server states no rule', async () => {
-    // An absent field means "no such rule", not "fall back to whatever this
-    // client last believed". Inventing a minimum here would reject passwords
-    // the server accepts.
+    // An absent field means no rule; an invented minimum would reject passwords the server accepts.
     const update = vi.fn(() => Promise.resolve(user()));
     render(<UsersScreen api={fakeApi([user()], { update })} session={session({ password_policy: {} })} />);
 

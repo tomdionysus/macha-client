@@ -13,9 +13,7 @@ function source(): PlaybackSource {
 }
 
 describe('the read-ahead carries the node\'s URL rather than rebuilding it', () => {
-  // The proxy URL is same-origin and the node's URL rides on it as a parameter,
-  // so a server that moves its stream routes moves nothing here. The worker
-  // only checks that what it was handed parses as http(s).
+  // The node's URL rides on the same-origin proxy URL as a parameter; the worker only checks it parses as http(s).
   it('puts either route shape through verbatim', () => {
     for (const url of [
       'https://node.test/api/v1/playback/stream/abc/cap/direct',
@@ -34,18 +32,12 @@ describe('Direct Play read-ahead client', () => {
   afterEach(() => vi.unstubAllGlobals());
 
   /**
-   * The worker's failure message is the only channel Direct Play has. A node
-   * that no longer has the source answers `404`, and without that status the
-   * media element raises only a generic decode/unsupported error, so a session
-   * that needs re-creating becomes a terminal failure on the wrong node.
-   *
    * Fresh module per test: the listener installs once per module instance and
-   * latches, so a stub registered after an earlier test's install would never
-   * be called and this would pass without proving anything.
+   * latches, so a stub registered after an earlier install would never be called.
    */
   async function failureListenerHarness() {
     vi.resetModules();
-    // Each failure fed in is logged as a warning, which is what the code should do; kept out of the run's output.
+    // Keeps the expected warnings out of the run's output.
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     onTestFinished(() => warn.mockRestore());
     let handler: ((event: MessageEvent<unknown>) => void) | undefined;
@@ -80,9 +72,7 @@ describe('Direct Play read-ahead client', () => {
   });
 
   it('leaves a transport failure with no status at all, which is a different claim', async () => {
-    // No status is not "a status I do not recognise". A fetch that never became
-    // a response says something about the node; a 404 says something about the
-    // source. Defaulting the absent case to any number would erase that.
+    // A fetch that never became a response is about the node; a 404 is about the source. A default status would erase that.
     const { failures, fail } = await failureListenerHarness();
     fail({ message: 'Direct Play read-ahead source failed' });
     expect(failures).toHaveLength(1);

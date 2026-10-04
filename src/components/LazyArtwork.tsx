@@ -21,30 +21,15 @@ function isSigned(artwork?: ArtworkRef): artwork is SignedArtwork {
 }
 
 /**
- * Artwork id -> the last URL that actually loaded, so an identical image is
- * never asked for under a second name.
- *
- * This guards the *signature*: a node that re-signs a capability on every
- * catalogue read hands out a fresh `exp`/`sig` for bytes that have not
- * changed, and each fresh signature is a fresh browser cache key. A
- * mixed-version cluster is this client's normal operating condition, so the
- * guard holds whichever node signed.
- *
- * It cannot guard the *host*, which is the larger half of the same problem and
- * is core's `ArtworkHostPreference`: this map is module-scoped, so it
- * dies on reload and does not exist in a new tab, and it only knows about
- * artwork this page has already loaded. A failure forgets the entry and falls
- * through to whatever is next.
+ * Artwork id -> the last URL that loaded. A node may re-sign unchanged bytes, and each
+ * signature is a new browser cache key. A failure forgets the entry. Page-scoped; the
+ * host is core's `ArtworkHostPreference`.
  */
 const lastLoadedUrlById = new Map<string, string>();
 
 /**
- * Everywhere the browser can load this artwork from on its own, best first:
- * the copy already known to be in its cache, then whatever order
- * `@machafoundation/core` gives, which leads with the node that last served
- * artwork so a pre-emptive endpoint swap does not rename every poster.
- * Anything wanting an `Authorization` header is not an `<img>` source at all,
- * and is dropped here rather than silently 401ing.
+ * `<img>`-loadable sources, best first: the URL known to be cached, then core's order.
+ * Sources needing an `Authorization` header are dropped.
  */
 function signedSources(api: MediaApi, artwork: SignedArtwork): string[] {
   const remembered = lastLoadedUrlById.get(artwork.id);
@@ -55,23 +40,10 @@ function signedSources(api: MediaApi, artwork: SignedArtwork): string[] {
 }
 
 /**
- * When the catalogue handed us a signed capability URL, the browser owns
- * fetching, decode and caching — but not retry, and not failover. A plain
- * `<img>` that fails once never tries again, and with an empty `alt` it
- * renders as nothing at all. So a failure moves straight to the same
- * capability on the next node: a different node is a different failure
- * domain, and waiting before trying it would only make the viewer wait too.
- * Once every node has refused, the authenticated Blob path takes over: it
- * carries the bearer token, so it survives an expired signature (a Continue
- * Watching card rendered from storage a day later, say), and it already has
- * its own backoff, cluster walk and recovery. Nothing here needs a timer.
- *
- * A fresh URL for an artwork whose current source is still loading, or has
- * loaded, is ignored: it is a re-signing of identical bytes, and adopting it
- * would throw away the browser's cached copy for nothing. Once a source has
- * failed, the fresh URL is exactly what is wanted, whenever it arrived —
- * including before the failure, which is why a failure checks for one rather
- * than trusting an effect to have fired at the right moment.
+ * Signed-URL artwork. A failed `<img>` moves at once to the next node; when every node
+ * has refused, the authenticated Blob path takes over, which survives an expired signature.
+ * A re-signed URL is ignored unless a source has failed, since adopting it would discard
+ * the browser's cached copy; a failure checks for one itself, as it may have arrived earlier.
  */
 function CapabilityArtwork({ api, artwork, alt = '', placeholder, draggable, eager = false }: Props & { artwork: SignedArtwork }) {
   const [plan, setPlan] = useState(() => ({ signedBy: artwork.url, sources: signedSources(api, artwork) }));
@@ -81,11 +53,10 @@ function CapabilityArtwork({ api, artwork, alt = '', placeholder, draggable, eag
     setPlan({ signedBy: artwork.url, sources: signedSources(api, artwork) });
     setIndex(0);
   };
-  // A different artwork starts over from whatever is known to be good for it.
+  // A different artwork starts over.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(restart, [api, artwork.id]);
-  // The same artwork, re-signed, once the current signature has failed
-  // somewhere — or everywhere, which is when it matters most.
+  // The same artwork re-signed, once the current signature has failed somewhere.
   useEffect(() => {
     if (index > 0) restart();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -132,11 +103,8 @@ export function LazyArtwork(props: Props) {
 }
 
 /**
- * Blob-fetch/cache/viewport-observer path, through this package's
- * authenticated fetch and cluster walk. The only path for artwork without a
- * signed URL — a node that has not upgraded to serve one, and a mixed-version
- * cluster is this client's normal operating condition, not an edge case —
- * and the last resort for artwork whose signed URL no node will honour.
+ * The authenticated Blob path, with its own cache, viewport observer and cluster walk: for
+ * a node that serves no signed URL, and the last resort when no node honours one.
  */
 function LegacyLazyArtwork({ api, artwork, alt = '', placeholder, draggable, eager = false }: Props) {
   const [element, setElement] = useState<HTMLSpanElement | null>(null);

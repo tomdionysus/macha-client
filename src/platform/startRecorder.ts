@@ -1,16 +1,7 @@
 /**
- * One line that says what a start did before its first frame.
- *
- * For an element that accepts a source and then never leaves HAVE_NOTHING,
- * with no error until something else gives up: a fault that cannot be
- * reassembled afterwards from scattered event lines. This is armed before the
- * source is set and reports once, so an occurrence arrives already
- * diagnosable: what the element said and when, what its state was each
- * second, what hls.js complained about, and whether the browser sent any
- * request for this session at all.
- *
- * Pure, with the clock and the request list handed in, so the shape of the
- * record is tested rather than hoped for.
+ * Records what a start did before its first frame, for an element that accepts
+ * a source and never leaves HAVE_NOTHING. Armed before the source is set; reports once.
+ * Pure: the clock and the request list are handed in.
  */
 
 export type StartRole = 'primary' | 'handover' | 'relocation';
@@ -23,7 +14,7 @@ export interface StartSample {
   hidden: boolean;
 }
 
-/** The two Resource Timing fields this reads, which cross-origin entries keep. */
+/** The Resource Timing fields read; cross-origin entries keep them. */
 export interface StartRequestEntry {
   name: string;
   startTime: number;
@@ -37,16 +28,13 @@ export interface StartRecord {
   elapsedMs: number;
   timeline: string[];
   hls: string[];
-  /**
-   * Requests under this session's path that began after arming. Absent when
-   * they could not be observed, which is not the same as none.
-   */
+  /** Requests under this session's path begun after arming. Absent means unobservable, not none. */
   requests?: { count: number; firstAtMs?: number; lastEndMs?: number };
   /** Timeline lines not kept because the record hit its bound. */
   dropped: number;
 }
 
-/** Enough for two minutes of a state that keeps changing, and a log line that stays readable. */
+/** Enough for two minutes of a state that keeps changing. */
 const TIMELINE_LIMIT = 80;
 const HLS_LIMIT = 20;
 /** Below this a first frame is ordinary and not worth a line. */
@@ -125,11 +113,7 @@ export class StartRecorder {
     this.push(`+${this.offset()} sample ${state}`);
   }
 
-  /**
-   * hls.js starting and finishing a fragment. The start is the half Resource
-   * Timing cannot see: it lists a request only once its response has ended,
-   * so an asked-for fragment with no matching `got` is one still in flight.
-   */
+  /** hls.js fragment start and finish. Resource Timing lists a request only once its response ends, so an `asked` with no `got` is in flight. */
   fragment(phase: 'asked' | 'got', sn: unknown): void {
     this.push(`+${this.offset()} frag-${phase} sn${String(sn)}`);
   }
@@ -141,10 +125,7 @@ export class StartRecorder {
     this.hls.push(`+${this.offset()} ${String(data.details ?? 'unknown')}${fatal}${code}${urlTail(data.url)}`);
   }
 
-  /**
-   * The record, once. Every later call answers `undefined`. `entries` is
-   * `undefined` when requests could not be observed at all.
-   */
+  /** The record, once; later calls answer `undefined`. `entries` is `undefined` when requests could not be observed. */
   finish(outcome: StartOutcome, entries: readonly StartRequestEntry[] | undefined): StartRecord | undefined {
     if (this.done) return undefined;
     this.done = true;

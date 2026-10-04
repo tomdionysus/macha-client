@@ -62,11 +62,8 @@ describe('WebMediaTimeline', () => {
   });
 
   it('takes the origin from residency when the loader began at the generation start', () => {
-    // The teardown path: hls.js loads from zero and the initial-seek listener
-    // samples at `currentTime` 0 to establish the origin *before* it seeks. The
-    // requested position is the server's `seek_offset_ms` into the generation,
-    // and says nothing about where the media clock begins. Here: an 18,120 ms
-    // offset, one fragment resident, sampled at zero.
+    // hls.js loads from zero and the origin is sampled at `currentTime` 0 before the seek. The
+    // requested position is an offset into the generation, not where the media clock begins.
     const timeline = new WebMediaTimeline('remux', 18_120, 'generation-start');
     const sample = timeline.sample({
       positionMs: 0,
@@ -75,18 +72,13 @@ describe('WebMediaTimeline', () => {
 
     expect(sample?.originMs).toBe(0);
     expect(sample?.positionMs).toBe(0);
-    // The seek that follows must land at the offset, not at the generation's
-    // own start. A negative origin sends it to zero and presents the pre-roll
-    // the seek contract says is never presented.
+    // The seek that follows must land at the offset; a negative origin would present the pre-roll.
     expect(timeline.toMediaTime(18_120)).toBe(18_120);
   });
 
   it('refuses an origin that would precede the generation start', () => {
-    // The handover shape, sampled too early: the requested position is not
-    // resident yet, so `currentTime` is still behind it and the difference is
-    // negative. A generation's media clock cannot precede its own start, so
-    // nothing is established and the next sample gets another go — rather than
-    // the nonsense being baked into every later mapping.
+    // Sampled before the requested position is resident, the difference is negative: nothing is
+    // established and the next sample tries again.
     const timeline = new WebMediaTimeline('remux', 18_120, 'requested-position');
 
     expect(timeline.sample({
@@ -96,7 +88,6 @@ describe('WebMediaTimeline', () => {
     expect(timeline.established).toBe(false);
     expect(timeline.toMediaTime(18_120)).toBeUndefined();
 
-    // And it establishes normally once the sample is the one the path promises.
     const sample = timeline.sample({
       positionMs: 318_120,
       bufferedRangesMs: [{ startMs: 300_000, endMs: 340_000 }],

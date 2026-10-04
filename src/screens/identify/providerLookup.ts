@@ -9,11 +9,8 @@ import type {
 } from '@machafoundation/core';
 
 /**
- * Finding TMDB and MusicBrainz records from what an unmatched file says
- * about itself. A candidate is the server's local guess, from the file's
- * name, tags or path; the scanner already searched the provider with it and
- * found no match it trusted. Here the same words find the records a person
- * can choose from.
+ * Finds TMDB and MusicBrainz records from a file's candidates: the server's guesses from
+ * its name, tags or path, for which the scanner found no match it trusted.
  */
 
 /** What to ask the provider for one thing a candidate names. */
@@ -30,11 +27,7 @@ export interface Lookup {
   track_number?: number;
 }
 
-/**
- * What to ask the provider for a candidate: a movie by its title, an episode
- * by its series, a track by its album. Undefined when it names nothing a
- * provider lists (a track with no album).
- */
+/** A movie by its title, an episode by its series, a track by its album; undefined when the candidate names none (a track with no album). */
 export function recordLookup(candidate: MediaProbeCandidate): Lookup | undefined {
   if (candidate.kind === 'movie') {
     if (!candidate.title) return undefined;
@@ -72,10 +65,8 @@ const RESULTS_READ = 8;
 const searches = new WeakMap<ManageApi, Map<string, Promise<ProviderSearchResult[]>>>();
 
 /**
- * The provider's results for a lookup, asked once per page's API: the
- * suggestions, the candidates' pictures and a record's thumbnail all start
- * from the same few searches, and MusicBrainz is paced at one a second.
- * A failure is no results, and is not kept, so a later ask tries again.
+ * A lookup's results, asked once per API: several callers share the same searches, and
+ * MusicBrainz is paced at one a second. A failure is no results and is not kept.
  */
 function searchOnce(manage: ManageApi, lookup: Lookup): Promise<ProviderSearchResult[]> {
   let asked = searches.get(manage);
@@ -83,10 +74,8 @@ function searchOnce(manage: ManageApi, lookup: Lookup): Promise<ProviderSearchRe
   const key = `${lookup.searchKind}|${lookup.query}|${lookup.year ?? ''}`;
   let found = asked.get(key);
   if (!found) {
-    // The artist is compared loosely in `agreeingRecords` rather than sent as
-    // the provider's filter, which matches only the exact credit; without the
-    // comparison the first result can be another artist's album of the same
-    // name.
+    // The artist is compared loosely in `agreeingRecords`, not sent as the provider's
+    // filter, which matches only the exact credit.
     found = manage.providerSearch(lookup.query, lookup.searchKind, { year: lookup.year, limit: RESULTS_READ })
       .catch(() => { asked.delete(key); return []; });
     asked.set(key, found);
@@ -102,11 +91,8 @@ export async function agreeingRecords(manage: ManageApi, lookup: Lookup): Promis
 }
 
 /**
- * Records a person could not tell apart, as one: a MusicBrainz album is
- * often several releases (countries, formats, reissues) that the provider
- * answers with the same title, artist and year, and choosing among them by
- * eye is choosing blind. Grouped in the provider's order; each group is shown
- * once and matched by one of its releases.
+ * Groups the releases a person cannot tell apart (same title, artist and year), in the
+ * provider's order. Each group is shown once and matched by one of its releases.
  */
 export function groupRecords(results: readonly ProviderSearchResult[]): ProviderSearchResult[][] {
   const groups = new Map<string, ProviderSearchResult[]>();
@@ -128,11 +114,7 @@ export interface Suggestion {
 /** How many suggestions are shown; past this, searching is quicker than reading. */
 const SUGGESTIONS_SHOWN = 8;
 
-/**
- * The records a file most likely is: for each distinct thing its candidates
- * name, in their order, the provider's results that agree with it. A record
- * two candidates both found is suggested once.
- */
+/** For each distinct thing the candidates name, in order, the provider results that agree; each record once. */
 export async function findSuggestions(manage: ManageApi, candidates: readonly MediaProbeCandidate[]): Promise<Suggestion[]> {
   const lookups = new Map<string, Lookup>();
   for (const candidate of candidates) {
@@ -149,11 +131,8 @@ export async function findSuggestions(manage: ManageApi, candidates: readonly Me
 const queues = new WeakMap<ManageApi, Promise<unknown>>();
 
 /**
- * Ask the provider for a record's pictures, one MusicBrainz record at a
- * time. The server paces MusicBrainz at one request a second, so several
- * asked at once queue there past core's 8 s limit and are cut off and asked
- * again on another node; one after another, each answers in about a second.
- * TMDB is not paced and is asked at once.
+ * A record's pictures, one MusicBrainz request at a time: the server paces it at one a
+ * second, and requests queued there outlast core's 8 s limit. TMDB is asked at once.
  */
 export function pacedArtwork(manage: ManageApi, ref: string, role: ProviderArtworkRole, numbers?: { season_number?: number; episode_number?: number }): Promise<ProviderArtworkOption[]> {
   if (!ref.startsWith('musicbrainz:')) return manage.providerArtwork(ref, role, numbers);
@@ -164,10 +143,7 @@ export function pacedArtwork(manage: ManageApi, ref: string, role: ProviderArtwo
 
 const thumbnails = new WeakMap<ManageApi, Map<string, Promise<string | undefined>>>();
 
-/**
- * The release of a group to show and match by: the first, among the first
- * few, that has a picture, so the picture shown is the one the match brings.
- */
+/** The release a group is shown and matched by: the first of the first few with a picture. */
 export async function pictureRelease(manage: ManageApi, releases: readonly ProviderSearchResult[]): Promise<{ release: ProviderSearchResult; thumbnail?: string }> {
   for (const release of releases.slice(0, RECORDS_TRIED)) {
     const thumbnail = await recordThumbnail(manage, release);
@@ -176,10 +152,7 @@ export async function pictureRelease(manage: ManageApi, releases: readonly Provi
   return { release: releases[0] };
 }
 
-/**
- * The small picture a record is shown with: a movie's or series' poster, an
- * album release's cover. Undefined when it has none or the provider fails.
- */
+/** A record's small picture (poster or cover); undefined when it has none or the provider fails. */
 export function recordThumbnail(manage: ManageApi, result: Pick<ProviderSearchResult, 'ref' | 'kind'>): Promise<string | undefined> {
   let asked = thumbnails.get(manage);
   if (!asked) { asked = new Map(); thumbnails.set(manage, asked); }
@@ -192,11 +165,7 @@ export function recordThumbnail(manage: ManageApi, result: Pick<ProviderSearchRe
   return found;
 }
 
-/**
- * A picture for a candidate, from the provider's record of what it names: a
- * movie's poster, an episode's still, a track's album cover. Applied to what
- * a manual entry creates by naming that record (`chooseArtwork` with `ref`).
- */
+/** A candidate's picture from the provider record it names; a manual entry applies it by `ref` (`chooseArtwork`). */
 export interface CandidatePicture {
   kind: MediaProbeCandidate['kind'];
   ref: string;
@@ -206,11 +175,7 @@ export interface CandidatePicture {
   episode_number?: number;
 }
 
-/**
- * Where a picture comes from, as a viewer would look for it: TMDB's own
- * images for a TMDB record; for a MusicBrainz release, the Cover Art
- * Archive, which holds the covers MusicBrainz itself does not.
- */
+/** The source as named to the viewer: TMDB, or the Cover Art Archive for a MusicBrainz release. */
 export function pictureSource(picture: Pick<CandidatePicture, 'ref'>): string {
   return picture.ref.startsWith('tmdb:') ? 'TMDB' : 'the Cover Art Archive';
 }
@@ -218,11 +183,7 @@ export function pictureSource(picture: Pick<CandidatePicture, 'ref'>): string {
 /** How many agreeing records are asked for a picture before giving up. */
 const RECORDS_TRIED = 3;
 
-/**
- * Find a candidate's picture: the first image for its role from the first
- * agreeing record that has one. An album is several releases and only some
- * have a cover, so the next is tried. An episode's still needs its numbers.
- */
+/** The first image for the candidate's role from the first agreeing record that has one; an episode's still needs its numbers. */
 export async function findCandidatePicture(manage: ManageApi, candidate: MediaProbeCandidate): Promise<CandidatePicture | undefined> {
   const lookup = recordLookup(candidate);
   if (!lookup) return undefined;
@@ -256,11 +217,7 @@ export function findCandidatePictures(manage: ManageApi, candidates: readonly Me
   });
 }
 
-/**
- * Put a candidate's picture on what a manual entry wrote: a cover on the
- * album, a poster or still on the item itself. The written items are manual
- * ones with no provider reference, so the choice names the record.
- */
+/** Puts the picture on what a manual entry wrote: a cover on the album, otherwise on the leaf item. */
 export async function applyCandidatePicture(manage: ManageApi, picture: CandidatePicture, written: ManualMetadataResult): Promise<void> {
   const itemId = picture.role === 'cover' ? written.items.find((item) => item.kind === 'album')?.id : written.leaf_item_id;
   if (!itemId) return;

@@ -1,12 +1,6 @@
 import { clientDiagnosticsConsole, type ClientLogEntry } from '@machafoundation/core';
 
-/**
- * Exposes the core's diagnostics buffer on `window.machaDiagnostics`.
- *
- * The buffer is platform-independent and lives in `@machafoundation/core`; reaching a
- * `window` and the Clipboard API are browser affordances, so `copy()` and the
- * global assignment stay here.
- */
+/** Exposes core's diagnostics buffer on `window.machaDiagnostics`, adding the browser-only `copy()`. */
 export function installClientDiagnosticsConsole(): void {
   if (typeof window === 'undefined') return;
   const console = clientDiagnosticsConsole();

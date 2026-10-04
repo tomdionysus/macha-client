@@ -9,12 +9,9 @@ export function Progress({ value }: { value: number | null }) {
 }
 
 /**
- * Pause, resume, retry and remove for one job.
- *
- * `row` is the slim form for a list line: one toggle and a remove, with the
- * remove asking once inline. `page` is the full set with words, for a job's own
- * page. Removing a job that is still running cancels it first, so it always
- * asks; removing one that has finished only clears it, so it does not.
+ * Pause, resume, retry and remove for one job. `row` is the slim list form,
+ * `page` the full set with words. Removing a running job cancels it, so it
+ * asks first; removing a finished one does not.
  */
 export function JobControls({ variant, kind, id, name, state, desired, retryable = false, busyAction, confirming, onAction, onConfirm }: {
   variant: 'row' | 'page';

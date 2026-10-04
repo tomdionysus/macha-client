@@ -1,12 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 /**
- * Whether the pointer has rested for `delayMs`. A pointer that moves is awake
- * at once and rests again only after a full `delayMs` without movement.
- *
- * For hiding a cursor over video. The cursor answers to the pointer alone and
- * the chrome keeps its own rules; sharing one flag would leave a cursor hidden
- * with the chrome while the mouse moved anywhere but over the control bar.
+ * Whether the pointer has rested for `delayMs`; any movement wakes it at once. For hiding the
+ * cursor over video, separately from the chrome's own idle rules.
  */
 export function usePointerIdle(delayMs: number): { idle: boolean; noteMovement: () => void } {
   const [idle, setIdle] = useState(true);

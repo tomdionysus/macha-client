@@ -36,10 +36,7 @@ export function candidateNumbers(probe?: MediaProbeCandidate): RecordNumbers {
   };
 }
 
-/**
- * Search TMDB or MusicBrainz with any words, when the suggestions are not
- * it. Each result is a record to use, as a suggestion is.
- */
+/** Free-text provider search, for when no suggestion fits. Each result is a record to use. */
 export function ProviderMatch({ detail, probe, manage, onResolved }: {
   detail: UnmatchedDetail;
   probe?: MediaProbeCandidate;

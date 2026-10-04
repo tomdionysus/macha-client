@@ -12,10 +12,7 @@ export function ConnectionGateScreen({ welcome, notice, ...form }: Props) {
       <img className="connection-gate-logo" src={logoUrl} alt="" />
       <p className="eyebrow">Macha media client</p>
       <h1>{welcome ? 'Welcome' : 'Connection'}</h1>
-      {/* "Check or replace the configured endpoints" is the wrong sentence for
-          a client that was using the host it was served from: there is nothing
-          configured to check, and telling somebody to re-read a list they never
-          wrote sends them looking for a mistake they did not make. */}
+      {/* A client using the host it was served from has no configured endpoints to check. */}
       <p>{welcome
         ? 'Configure at least one available Macha node to begin.'
         : form.usingHost

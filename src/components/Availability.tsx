@@ -11,10 +11,8 @@ export function availabilityMark(availability: Availability | undefined): Availa
 }
 
 /**
- * The props that make a title's open control selectable, or not: an
- * unavailable title stays in place, greyed out by its card's own class, but
- * cannot be pressed or reached by the remote. It stays hoverable, so its
- * marker's tooltip still says why.
+ * Props for a title's open control: an unavailable title cannot be pressed or
+ * focused by the remote, but stays hoverable for its marker's tooltip.
  */
 export function openControlProps(item: { availability?: Availability }, open: () => void) {
   return !availableToPlay(item)
@@ -22,7 +20,6 @@ export function openControlProps(item: { availability?: Availability }, open: ()
     : { 'data-tv-focusable': 'true', onClick: open };
 }
 
-/** Outline icons, drawn in the marker's colour. */
 function Icon({ mark }: { mark: AvailabilityMark }) {
   const line = { fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const };
   if (mark === 'partial') {
@@ -49,13 +46,7 @@ function Icon({ mark }: { mark: AvailabilityMark }) {
   );
 }
 
-/**
- * The mark at the top left of a title that is not wholly held by a
- * reachable node: a yellow triangle for partial, a red crossed circle for
- * unavailable, a yellow question mark for unknown, each an outline on a dark disc, with a tooltip saying
- * what it means. Nothing for a complete title, or one the server has not
- * described.
- */
+/** The mark on a title not wholly held by a reachable node, with a tooltip; nothing for a complete or undescribed title. */
 export function AvailabilityMarker({ availability, members, kind, className }: {
   availability: Availability | undefined;
   members?: AvailabilityMembers;
@@ -72,10 +63,7 @@ export function AvailabilityMarker({ availability, members, kind, className }: {
   );
 }
 
-/**
- * The marker's meaning, written out, for a page whose title cannot be
- * played: a remote has no tooltip, and the missing Play needs a reason.
- */
+/** The marker's meaning as text, for an unplayable title's page: a remote has no tooltip. */
 export function AvailabilityNote({ item }: { item: { availability?: Availability; availabilityMembers?: AvailabilityMembers; kind?: MediaKind } }) {
   if (!!availableToPlay(item)) return null;
   return <p className="availability-note">{availabilityText('unavailable', item.kind, item.availabilityMembers)}</p>;

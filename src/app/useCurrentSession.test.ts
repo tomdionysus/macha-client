@@ -5,14 +5,7 @@ import type { CurrentSession, UsersApi } from '@machafoundation/core';
 import { useCurrentSession } from './useCurrentSession';
 import { settle } from '../test/settle';
 
-/**
- * One API object per test, built outside the render callback.
- *
- * `renderHook` re-runs its callback on every render, so constructing this
- * inline would hand the hook a new identity each time and re-trigger the
- * effect that caused the render — an unbounded loop that surfaces as the test
- * runner exhausting its heap.
- */
+/** Built outside the render callback: an inline API object changes identity every render and loops the hook's effect. */
 function api(currentSession: UsersApi['currentSession']): UsersApi {
   return { currentSession } as unknown as UsersApi;
 }
@@ -34,11 +27,7 @@ describe('useCurrentSession', () => {
   });
 
   it('takes the stated roles literally, granting nothing the server did not name', async () => {
-    // A session shape whose role names this build does not know. The array
-    // does not name `importer` or `manager`, so those sections stay hidden
-    // for the reason they would for any other user. Reading an unfamiliar
-    // name as "cannot interpret, so show everything" would be the dangerous
-    // direction to be wrong in.
+    // Role names this build does not know grant nothing; reading them as "show everything" would be the dangerous error.
     const stated = {
       id: 'session-id',
       roles: ['anonymous'],

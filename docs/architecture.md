@@ -1,342 +1,193 @@
 # Architecture
 
-The [principles and scheduling laws](principles-and-laws.md) are constraints on
-this architecture, not aspirations. In particular, control and viewer work stay
-responsive independently of catalogue artwork, ingest, diagnostics and
-speculative activity.
+The [principles and laws](principles-and-laws.md) constrain everything here.
 
 ## Layers
 
 ```text
                           Macha cluster
-                 distributed media + catalogue
                              |
        /api/v1/catalogue       /api/v1/playback
-          JSON + artwork       sessions + streams
                 |                    |
   ==============|====================|=============== @machafoundation/core
-                |                    |
        MachaCatalogueApi     ClusterPlaybackResolver
                 |                    |
           MachaMediaApi         PlaybackRuntime
                 |                /          \
                 |   PlaybackCoordinator   Player (interface)
-                |                    |       |
   ==============|====================|=======|======= macha-client
                 +---------+----------+-------+
                           |
-                  React presentation
-              + browser-history router
+               React presentation + router
                           |
            +--------------+--------------+
-           |              |              |
-          Web          Android TV        Samsung
-    video + hls.js   WebView + hls.js   native HLS,
-                                        MPEG-TS segments
+          Web          Android TV      Samsung
+    video + hls.js   WebView + hls.js  native HLS (MPEG-TS)
 ```
 
-The endpoint registry, health monitoring and failover sit beside the API layer
-in `@machafoundation/core` and are shared with the React Native clients, which
-reuse none of this repo's presentation.
+Core also holds the endpoint registry, health monitoring and failover, shared
+with the React Native clients.
 
 ## Ownership
 
 **The server serves facts; the client negotiates.** The server states what a
-title is, what its streams are and what it can perform. The client reports what
-its platform can decode and chooses Direct Play, remux or transcode from that.
-The chooser lives in `@machafoundation/core`, so every Macha client decides
-identically from the same facts. The server performs the result and does not
-substitute for it.
+title is, what its streams are and what it can do. Core's chooser weighs that
+against what the platform can decode and picks Direct Play, then remux, then
+transcode, so every Macha client decides alike. The server performs the result.
 
-**That includes which file.** A catalogue item can hold several files (a
-second cut, a different resolution, another encode), each with its own media
-information, and choosing among them is the client's decision like any other:
-match every file's facts against this client's capabilities and name the file
-to play (`media_id`) when asking for a session. Tom's ruling, 2026-09-24: "in
-Macha it's the client that makes the decision on what to play, it's the
-client that should match the available media to the client capabilities."
-There is no server pick among an item's files, not even as a fallback (Tom,
-2026-09-24): the ranking the server still runs when only an item is named is
-a violation, and the server has proposed refusing that request (`400` with the
-item's `media_ids`) once a second file exists. The facts seam in `src/App.tsx`
-hands core every file's facts, and core's coordinator (from `284e52e`) runs
-the chooser for each, plays the best (direct, then remux, then transcode) and
-names it as the session's `media_id`, restating it on failover, regeneration
-and moves. Still open, with core and the server: which file when there are no
-facts, or when the viewer chose a mode.
+**That includes which file.** An item can hold several files. The client
+matches each file's facts to its capabilities and names the one to play
+(`media_id`) on every session request. `src/App.tsx` hands core every file's
+facts.
 
 **Any node will do.** One endpoint registry, created in `src/App.tsx`, routes
-catalogue, status, management, import and playback. Core's `seedEndpoints`
-fills it in order of standing: configured API URLs, then a Macha node confirmed
-on the page's own origin while nothing is configured, then endpoints remembered
-from earlier runs. The endpoint that most recently completed real work is
-authoritative and is tried first; on retryable failure the first working
-alternative becomes authoritative. Every known endpoint is checked immediately
-and at a bounded interval, but probe completion updates health only and never
-displaces authority. A viewer can also choose a node from the player; that choice is an
-ordering preference stated through core's `prefer()` and never a health record,
-and playback moves there by creating a new generation on the chosen node.
+every API. It is seeded in order: configured URLs, the page's own origin if it
+is a Macha node and nothing is configured, then endpoints remembered from
+earlier runs. The endpoint that last completed real work is tried first; on a
+retryable failure the next working one takes over. Health probes update health
+only and never change that order. A viewer's choice of node in the player is an
+ordering preference, and playback moves there by starting a new stream on it.
 
-**Cancellation is never node-health evidence.** Health probes are not wired to
-playback, component lifecycle or client timeouts. An `AbortError` represents
-local intent and cannot demote an endpoint or trigger cluster-unreachable
-state. Node identity and API endpoint identity stay separate, because one node
-may advertise several reachable API bases; core's health monitor attaches a
-node id to an endpoint with `claimNodeId`, which changes nothing about
-membership.
+**Cancellation is not health evidence.** An `AbortError` is local intent and
+never demotes an endpoint. Node identity and API endpoint identity are separate:
+one node may advertise several API addresses.
 
-**Cluster transport exhaustion is an application-level state**, not a
-screen-level error. Only the background health scan may publish that
-transition, and only after every configured endpoint fails an independent
-status request. An exhausted foreground catalogue, profile, artwork or
-management operation cannot infer a cluster-wide outage. While a player owns
-playback, recovery UI is deferred so neither playing nor paused presentation is
-unmounted, and recovery is cancelled if any endpoint responds before playback
-ends. Afterwards the application mounts only the Connection gate at
-`/settings/connection` until an endpoint passes a bounded check. With no
-stored endpoints the same gate is presented as first-run setup.
+**Losing the whole cluster is an application state, not a screen error.** Only
+the background health scan may declare it, after every endpoint fails its own
+status request. While a player is up, recovery UI waits. Otherwise the app
+shows only the Connection gate (`/settings/connection`) until an endpoint
+answers; with no stored endpoints the same gate is first-run setup.
 
-**One session for the application.** Core's `SessionManager` holds the bearer
-session, and `useSession` configures it and subscribes. Log out is composed in
-`src/App.tsx`: playback stops first, because a playback session opened under a
-token cannot be closed once the token is gone; then `SessionManager.signOut`
-revokes the session and a fresh one is started.
+**One sign-in session.** Core's `SessionManager` holds it. Log out stops
+playback first, because a playback session cannot be closed once its token is
+revoked, then revokes and starts a fresh session.
 
-**Every word a viewer sees is this client's.** Core hands over facts and codes
-and composes no viewer text; `src/text/viewerText.ts` words them.
+**Every word a viewer sees is this client's.** Core supplies facts and codes;
+`src/text/viewerText.ts` words them.
 
 ## Playback
 
-Playback is split into two planes:
-
 ```text
-user intent ── play / pause / seek ───────────────► active player immediately
-     │
-     └── source-generation change required? ─────► server preparation
-                                                       │
-                                                       ▼
-                                              newest generation ready
-                                                       │
-                                                       ▼
-                                              apply latest user intent
+user intent ── play / pause / seek ───────────► active player, immediately
+     └── needs a different stream? ───────────► server preparation
+                                                     ▼
+                                          newest stream ready
+                                                     ▼
+                                          apply the latest intent
 ```
 
-`PlaybackRuntime` is the application-scoped resource owner and state machine. It
-owns one platform `Player` and at most one `PlaybackCoordinator`; the
-coordinator owns the active server session lease and source-generation
-transitions. React renders snapshots and provides presentation hosts. A
-full-screen or mini-player route change may rebind the player surface but
-cannot create, replace or destroy a playback session.
+`PlaybackRuntime` owns one platform `Player` and at most one
+`PlaybackCoordinator`; the coordinator owns the server session and each
+*generation* (one stream of one title from one node). React renders snapshots
+and provides the surface. A route change may rebind the surface but never
+creates or destroys a session.
 
-A playback session is bound to the node that created it and is admitted
-against that node's own limits: a per-account session cap counted per node
-(server 0.48.0), a node-wide session limit, and one video transcode at a time
-on the nodes here. No viewer-identity header travels on the wire any more;
-core keys each session by endpoint and node session id, closes it by that id,
-and can ask a node whether a session it was handed is still alive.
+A session belongs to the node that created it and counts against that node's
+limits. A replacement generation waits for the previous coordinator's teardown.
+Stored queue and progress are history, never proof of a live session.
 
-Generations are ordered: a replacement cannot acquire a new lease until the
-prior coordinator has finished teardown. Persisted queue and progress state is
-resumable history, never proof of a live lease.
-
-Replacing a *playing* generation without an interruption is described in
+Replacing a playing generation without interruption is covered in
 [playback handover](playback-handover.md).
-
-### Preparation
-
-Local player preparation consumes one normalized technical profile regardless of
-where its facts came from. An immutable catalogue profile may arrive while the
-detail screen is open and opportunistically wires the reusable media element and
-starts the runtime's single cached capability probe. The session response always
-supplies the authoritative fallback and augments the same preparation with
-negotiated mode, MIME type, output format and source size. Neither path waits
-for the other, and profile absence never delays the session POST. Source
-acquisition begins only once the session returns its capability URL.
-
-Profile consumers are cancellable. Leaving or replacing a detail view detaches
-the consumer immediately so a stale result cannot prepare the wrong media. Up to
-two consumerless profile requests continue as a bounded corpus-building tail;
-further abandonment aborts the oldest.
 
 ### Invariants
 
-- `PlaybackRuntime.phase === 'idle'` implies no owned coordinator, session or
-  source acquisition.
-- Viewer demand is never queued behind caching, bookkeeping or speculative work.
-- Catalogue-derived preparation is idempotent and advisory; session-derived
-  preparation is always sufficient alone.
-- Play, pause and any seek representable by the active generation are local
-  transport commands. A server playback update requests a new generation and is
-  not a transport operation.
-- Newer user intent supersedes older intent while server work is in flight.
-- Buffering is observable state, never a lock that disables or serializes
-  controls.
-- Exit performs best-effort explicit session teardown; server idle expiry is the
-  crash and network-loss fallback only.
+- `PlaybackRuntime.phase === 'idle'` means no coordinator, session or source.
+- Viewer demand never queues behind caching, bookkeeping or speculative work.
+- Play, pause and seeks within the active generation are local. A change that
+  needs the server requests a new generation.
+- Newer intent supersedes older intent while server work is in flight.
+- Buffering is state to show, never a lock on the controls.
+- Leaving the player deletes the session; server idle expiry is only the
+  fallback for a crash or lost network.
+- A media profile from the catalogue is advisory. The session response alone
+  is always enough to play, and nothing waits for a profile.
 
-### Transformed playback on Web and Android TV
+### Web and Android TV
 
-hls.js/MSE with a bounded forward buffer. Pause freezes presentation without
-stopping acquisition: in-flight fragments finish and the buffer continues
-filling to its ceiling so Resume stays local. Healthy playback owns no standby.
+hls.js/MSE with a bounded forward buffer. Pause keeps filling the buffer so
+Resume is local. Healthy playback holds no standby.
 
-HLS network evidence may open a recovery window in which one alternate
-generation is created and its manifest, initialization data and first segment
-are preflighted without attaching a second decoder. If the primary continues the
-alternate is closed; if it fails the prepared generation is promoted. Fatal
-media recovery must demonstrate playback progress before another is allowed.
-Proven decoder or unsupported-source failures are terminal and do not condemn a
-healthy endpoint.
+When HLS network errors suggest the node is failing, one alternate generation
+is created and its manifest, init segment and first fragment are checked
+without a second decoder. If the primary recovers the alternate is closed; if
+it fails the alternate takes over. Decoder and unsupported-source failures are
+terminal and do not mark a healthy node down.
 
-Attempt, stall and segment-hold budgets come from the serving node through
-`PlaybackSource.budgets`, which core derives from what each node reports. The
-client's own constants are the fallback for a node that does not state them, and
-absence lengthens a budget rather than shortening it.
+Start, stall and segment timeouts come from the serving node
+(`PlaybackSource.budgets`). The client's constants are the fallback, and a
+missing value lengthens a timeout rather than shortening it.
 
 ### Direct Play
 
-Direct Play starts and retains exactly one session while its source is healthy.
-Its rolling read-ahead Service Worker treats pause as acquisition-active: it
-preserves in-flight ranges and continues contiguous reads to the bounded cache
-frontier. Only new viewer demand, seeking, source replacement, release or
-failure interrupts speculative work.
-
-A failed speculative range read is non-terminal node-health evidence: buffered
-playback continues while the client creates at most one byte-compatible
-alternate for a recovery window. Cleanup of the superseded session begins only
-after replacement bytes are buffered, and retries with backoff. Immutable media
-identity, size and MIME compatibility are required before any handoff.
-
-Read-ahead is optional. If the Service Worker is not already usable, playback
-takes the native URL immediately.
+One session for as long as the source is healthy. The read-ahead Service Worker
+keeps reading while paused, up to its cache limit; only new viewer demand, a
+seek, a source change or a failure interrupts it. A failed read-ahead does not
+stop playback: the client prepares at most one byte-identical alternate on
+another node and releases the old session once replacement bytes are buffered.
+If the Service Worker is not ready, playback uses the plain URL at once.
 
 ### Samsung
 
-The Samsung target keeps the native HLS path with MPEG-TS segments. It has no
-degradation channel and prepares no standby; a stall watchdog stands in for one.
-A native player handed a not-yet-ready playlist reports a permanent network
-failure the coordinator can only read as node failure, so the player declares
-`needsProducedSource` and core holds the source back until the session reports
-media produced. Nothing probes a fragment before attaching.
+Native HLS with MPEG-TS segments, no standby, and a stall watchdog. A native
+player given a playlist that is not ready reports a permanent failure, so the
+player declares `needsProducedSource` and core withholds the source until the
+node reports media produced.
 
 ## Catalogue
 
-A series page loads its series record and direct season children; a season page
-loads its direct episode children. This maps onto Macha's `parent_id` hierarchy
-and keeps catalogue work proportional to what is on screen.
+Pages load only what they show: a series its seasons, a season its episodes,
+following `parent_id`.
 
-Season pages prefer season artwork and fall back to series artwork. Episode
-cards prefer still or thumbnail artwork.
+Artwork is non-critical. Cards request it when near the viewport
+(`IntersectionObserver`), identical requests are shared, and a node's `404`
+tries the other nodes without marking that node unhealthy. Failures retry only
+while the card is near the viewport and never surface as errors.
 
-Artwork is a non-critical, content-addressed data plane. Near-viewport requests
-are triggered by `IntersectionObserver` rather than scroll polling, so a card
-revealed by any layout change is never missed. Demand for the same immutable
-artwork ID is coalesced and successful Blobs remain cached across authoritative
-endpoint changes. There is no client-side concurrency cap; the browser's
-connection management governs that. Each node attempt has a bounded deadline,
-and a node-local `404` searches the remaining nodes without changing API
-authority or declaring the responding node unhealthy. Network exhaustion and
-decode failures cool down and re-arm only while the card is again near the
-viewport. These are diagnostic events, not global UI errors.
+Each title carries an availability (`complete`, `partial`, `unavailable`,
+`unknown`): how much of it reachable nodes hold. `src/components/Availability.tsx`
+marks it; only `unavailable` titles cannot be played (core's `availableToPlay`).
 
 ## Routing
 
-The React application owns URL routes. Browser Back and Forward work on Web
-without special state handling; packaged Android and Samsung builds use hash
-routing so navigation stays inside the application asset.
+React Router owns the URLs; packaged builds use hash routing. Music, Import,
+Status and Manage have secondary routes under one shared navigation row, and
+records with their own page (a torrent, an unmatched file, a node) are reached
+from their list. A static host must fall back to `index.html`.
 
-Music, Import, Status and Manage expose secondary routes through one shared
-shell navigation row, styled and focused like the primary navigation. Import is
-partitioned into Torrents and Files, and each torrent has its own page at
-`/ingest/torrents/:id`. Manage is partitioned into Unmatched, Files and Users,
-and each unmatched file has its own page. Status is partitioned into Overview,
-Client and Connectivity; the Client route is strictly local and neither waits
-for nor polls cluster status. Node detail pages at `/status/nodes/:nodeId` open
-from the node cards. Settings is a top-level section, with Connection beneath
-it, and no role gates it.
+## TV focus
 
-Production hosting must fall back to `index.html` for unknown application paths.
+Samsung and Android D-pad focus share one geometric model
+(`src/hooks/useTvNavigation.ts`), judged from the focused element's edges. Left
+and Right stay in the row and stop at its end; Up and Down go to the nearest
+row. DOM order is the fallback where geometry is unusable. Text inputs, selects
+and range controls keep their own keys, except that Up and Down always leave a
+text input, since a D-pad has no other way out.
 
-## TV focus navigation
-
-Samsung and Android D-pad focus use a shared geometry-based spatial model.
-Direction is judged from the focused element's edges, not its centre. Left and
-Right keep to the current row and stop at its end; Up and Down go to the
-nearest row. Within the row, candidates are scored by primary-axis distance,
-secondary-axis distance and a penalty for leaving the current visual lane.
-Where a constrained browser has not produced usable geometry, DOM order is the
-fallback.
-
-Visible full-player chrome is scoped independently of the current page. Active,
-selected and explicit default focus are preferred before the first control. Text
-editors, selects and focused playback ranges retain native key ownership rather
-than participating in spatial movement, except that no editor keeps Up or Down:
-on a D-pad they are the only way out of a form.
+Every focusable control carries `data-tv-focusable="true"`.
 
 ## Managing records
 
-One idiom for everything the viewer manages — accounts, files, playlists,
-unmatched media.
+One pattern for accounts, files, playlists and unmatched media:
 
-A **list** presents records compactly and read-only: identity, a one-line
-summary, and an actions menu. **A row contains no editable fields**; the one
-input a row may carry is its selection box for bulk actions. An editable field
-in a list can be changed by accident, makes every row as tall as its longest
-form, and forces each row to carry its own busy, dirty and error state. Lists
-share their parts: headings, pager and selection (`useListSelection`,
-`SelectPageBox`, `SelectRowBox`, `BulkActions`, `runBulkOperation`) in
-`src/components/ListParts.tsx`, sort controls in
-`src/components/ListSortControls.tsx`, sorting and paging in `src/lists/`, and
-styles in `src/styles/lists.css`.
-
-A record with more to show than a row holds, such as a torrent or an unmatched
-file, has its own page instead, reached from its row and built from the same
-parts. The page carries the record's facts and actions; destruction is still
-confirmed in a `ConfirmModal`.
-
-Every mutation opens a **dialogue**: `FormModal` to edit, `ConfirmModal` to
-destroy. The dialogue owns the form, the busy state and the failure, and stays
-open when the server refuses, because a dialogue that closes on failure takes
-the explanation with it. Field-level errors sit beside their field; the
-dialogue's own error slot is for failures with no field to sit against.
-
-Two rules follow from the television, which has no pointer:
-
-- The row itself is the edit control, not a separate button beside it.
-  Secondary and destructive actions go in the row's overflow menu.
-- Every control carries `data-tv-focusable="true"`, including inside a dialogue.
-
-Acts with different consequences get different dialogues rather than more fields
-in one. Setting an account's password signs that account out everywhere, so it
-is not part of editing the account.
-
-Browser `alert`, `confirm` and `prompt` are not used: they are visually
-inconsistent, block the event loop, and give no reliable Web or TV focus
-behaviour.
-
-## Android TV shell
-
-A thin full-screen WebView shell around the Android-mode bundle, using hash
-routing, the shared D-pad model and hls.js/MSE. The shell holds
-`AUDIOFOCUS_GAIN` and `FLAG_KEEP_SCREEN_ON` while in front. A future Media3 host
-would sit behind the existing `Platform`/`Player` boundary and would not require
-a second UI.
+- **Lists are read-only.** A row shows identity, a summary and an actions
+  menu; its only input is a selection box. Shared parts are in
+  `src/components/ListParts.tsx`, `ListSortControls.tsx`, `src/lists/` and
+  `src/styles/lists.css`.
+- **A record too big for a row gets its own page**, built from the same parts.
+- **Every change opens a dialogue**: `FormModal` to edit, `ConfirmModal` to
+  destroy. It stays open when the server refuses, so the reason is not lost.
+- **The row is the edit control** (a television has no pointer); secondary and
+  destructive actions go in its overflow menu.
+- Acts with different consequences get different dialogues.
+- No browser `alert`, `confirm` or `prompt`.
 
 ## Rules
 
-- The client does not know about DHT extents, replicas, peers or routing.
-- The catalogue wire model mirrors Macha rather than inventing a client-specific
-  server API.
+- The client knows nothing of extents, replicas, peers or routing.
+- The wire model mirrors the server's; no client-specific server API.
 - The client never transcodes.
-- The client chooses Direct Play first, remux second, transcode only when
-  required, from its own measured capabilities.
-- Anything a non-DOM client would also need belongs in
-  `@machafoundation/core`.
-- Platform-specific code is restricted to capabilities, playback, application
-  lifecycle and remote-key integration.
-- React owns browsing, routes, search, hierarchy, focus navigation and playback
-  chrome. It does not own playback resources.
-- Continue Watching is installation-local, bounded to three unfinished items,
-  and never uploaded.
-- There is no cloud service, advertising, recommendation engine, social
-  activity or global watchlist.
+- Platform-specific code is limited to capabilities, playback, lifecycle and
+  remote keys.
+- React owns browsing, routes, focus and player chrome, not playback resources.
+- Continue Watching is local to the installation, holds three unfinished
+  items, and is never uploaded.

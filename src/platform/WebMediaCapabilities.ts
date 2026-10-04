@@ -1,35 +1,16 @@
 export interface WebMediaCodecCapabilities {
   videoCodecs: string[];
-  /**
-   * The subset of `videoCodecs` the HLS delivery decoder will accept. Equal to
-   * `videoCodecs` where no delivery probe was supplied.
-   */
+  /** The subset of `videoCodecs` the HLS delivery decoder accepts; all of them where no delivery probe was supplied. */
   hlsVideoCodecs: string[];
   audioCodecs: string[];
-  /**
-   * The subset of `audioCodecs` the HLS delivery decoder will accept.
-   *
-   * Symmetrical with `hlsVideoCodecs` and needed for the same reason: the
-   * chooser asks what will survive delivery, and answering that with the
-   * progressive-file decoder's opinion is how a set ends up copying E-AC-3
-   * into fMP4 that its own HLS pipeline then plays intermittently.
-   */
+  /** The subset of `audioCodecs` the HLS delivery decoder accepts, which can be narrower than the progressive-file decoder. */
   hlsAudioCodecs: string[];
   containers: string[];
-  /**
-   * Deepest sample depth this pipeline actually decodes. 8 unless a 10- or
-   * 12-bit profile probes true — a source deeper than this is the server's cue
-   * to transcode rather than hand over something that decodes to nothing.
-   */
+  /** Deepest sample depth decoded: 8 unless a 10- or 12-bit profile probes true. A deeper source is the server's cue to transcode. */
   videoBitDepth: number;
   /** Dolby Vision profile numbers this client decodes. Empty means none, never "unknown". */
   dolbyVision: number[];
-  /**
-   * HDR transfers this client can *present*, not merely decode. Empty unless
-   * both a deep-colour decoder and a high-dynamic-range presentation path are
-   * established: claiming HDR off a codec probe alone is how a TV ends up
-   * displaying PQ content as washed-out SDR.
-   */
+  /** HDR transfers this client can present, not merely decode: needs both a deep-colour decoder and an HDR display path. */
   hdrTransfers: string[];
 }
 
@@ -45,13 +26,7 @@ const TEN_BIT_PROFILES = [
   'video/mp4; codecs="av01.0.05M.10"',
 ] as const;
 
-/**
- * Dolby Vision profiles, probed individually rather than as one flag.
- *
- * A set that handles profile 8 but not 5 is common, and a boolean forces it to
- * either over-claim and fail or under-claim and lose titles it could play.
- * Both fourCCs are tried: engines disagree on which they advertise.
- */
+/** Dolby Vision profiles, probed individually: a set often handles 8 but not 5. Both fourCCs are tried, since engines differ. */
 const DOLBY_VISION_PROFILES: ReadonlyArray<readonly [profile: number, codecs: readonly string[]]> = [
   [4, ['dvhe.04.06', 'dvh1.04.06']],
   [5, ['dvhe.05.06', 'dvh1.05.06']],
@@ -69,64 +44,18 @@ function anySupported(probe: MimeProbe, mimeTypes: readonly string[]): boolean {
   return mimeTypes.some((mime) => probe(mime));
 }
 
-/** The playlist type a native HLS pipeline is actually asked about. */
+/** The type a native HLS pipeline is asked about. */
 const HLS_MIME = 'application/vnd.apple.mpegurl';
 
-/**
- * What the HLS delivery decoder accepts, which is not what the media element
- * accepts for a progressive file.
- *
- * Delivery runs through one of two decoders and neither is the one that
- * answers a plain `canPlayType` for an `.mp4`. With hls.js driving,
- * MediaSource is asked, and it is frequently the narrower of the two. With the
- * platform's own HLS player driving, the engine must be asked about the
- * playlist type instead — nothing else describes that pipeline.
- *
- * The catch is that an engine may not read the `codecs` parameter for a
- * playlist at all, in which case every answer it gives is the same answer and
- * none of them carry information. So it is asked about a codec that cannot
- * exist first: an engine that accepts that is not discriminating, and its
- * opinion is better discarded than believed. Returning undefined then leaves
- * the element's list standing, which is where we already were — this can
- * narrow a claim, never widen one.
- *
- * A raw type carrying no `codecs` parameter — `audio/eac3`, `audio/mpeg` —
- * has no codec to ask about, and rewriting it would ask only whether the
- * engine plays HLS at all, which is yes by the time we are here. There is no
- * question to put, so the element's own answer stands rather than a
- * meaningless yes.
- */
-/**
- * Matroska spellings, and a codec known to exist inside one. Both spellings
- * are asked because engines disagree about which is the real name.
- */
+/** Both spellings are asked, because engines disagree on the name. */
 const MATROSKA_MIMES = ['video/x-matroska', 'video/matroska'] as const;
 const MATROSKA_CODECS = ['avc1.42E01E', 'hvc1.1.6.L93.B0'] as const;
 
 /**
- * Whether this engine demuxes Matroska, asked so that a blanket "yes" cannot
- * pass for an answer.
- *
- * Some media elements (the Samsung's among them) accept Matroska and render
- * corrupt video, so `canPlayType` cannot simply be believed; yet refusing the
- * container everywhere sends a large share of the library through a remux
- * whose streams are already `copy`, for no reason a decoder would recognise.
- *
- * So the question is not whether to trust `canPlayType` here — it is how to
- * ask it something it cannot answer dishonestly. An engine that agrees to an
- * impossible codec inside the container is not discriminating on the
- * container at all, and its yes carries no information; Chrome answers
- * `probably` for `video/x-matroska; codecs="avc1.42E01E"` and `""` for the
- * same container with a nonsense codec. That is the identical discipline
- * `hlsDeliveryProbe` above applies for the identical reason, and it makes
- * "this host's oracle lies" something each host demonstrates about itself
- * rather than a name hardcoded here.
- *
- * The audio inside is not this function's business and must not become it: a
- * Matroska carrying E-AC-3, TrueHD or DTS still has nowhere to decode on the
- * web, and the chooser already objects per stream (`audio-codec-not-playable`)
- * before it ever reaches direct play. A container claim states that the
- * wrapper can be opened, nothing more.
+ * Whether this engine demuxes Matroska. Some elements accept the container and
+ * render corrupt video, so an engine that also accepts an impossible codec
+ * inside it is not believed. A container claim says nothing about the audio
+ * inside; the chooser objects per stream.
  */
 export function detectMatroskaSupport(probe: MimeProbe): boolean {
   return MATROSKA_MIMES.some((mime) =>
@@ -135,21 +64,19 @@ export function detectMatroskaSupport(probe: MimeProbe): boolean {
 }
 
 /**
- * Whether this engine can take HLS segments as MPEG-TS.
- *
- * Worth asking separately from `hlsFmp4` rather than assuming one implies the
- * other. They are different packagings and a set can be sound at one and
- * broken at the other — an older set's native HLS player may predate fMP4
- * carriage of HEVC and the Dolby codecs, and hand back a black screen,
- * stuttering sound or silence depending on which stream it is given that way. MPEG-TS is what such a player was actually built for.
- *
- * `video/mp2t` is the transport stream's own media type, so this asks the
- * engine about the packaging directly rather than inferring it.
+ * Whether this engine takes HLS segments as MPEG-TS. Asked separately from
+ * fMP4: an older native HLS player can be sound at one packaging and broken at the other.
  */
 export function detectHlsTsSupport(probe: MimeProbe): boolean {
   return anySupported(probe, ['video/mp2t', 'video/mp2t; codecs="avc1.42E01E"']);
 }
 
+/**
+ * What the HLS delivery decoder accepts: MediaSource under hls.js, otherwise
+ * the engine asked about the playlist type. An engine that accepts an
+ * impossible codec is not reading `codecs`, so undefined is returned and the
+ * element's list stands. A type with no `codecs` parameter is asked as it is.
+ */
 export function hlsDeliveryProbe(probe: MimeProbe, mseProbe?: MimeProbe): MimeProbe | undefined {
   if (mseProbe !== undefined) return mseProbe;
   if (!probe(HLS_MIME)) return undefined;
@@ -160,18 +87,12 @@ export function hlsDeliveryProbe(probe: MimeProbe, mseProbe?: MimeProbe): MimePr
 }
 
 /**
- * @param probe        `canPlayType` — what the media element decodes.
+ * @param probe        `canPlayType`: what the media element decodes.
  * @param mediaFeature `matchMedia`, for the dynamic-range claim.
  * @param deliveryProbe what the HLS delivery decoder accepts, from
- *   `hlsDeliveryProbe`. Supply it whenever delivery goes through HLS at all,
- *   by either path: MediaSource and the platform's own HLS player are both
- *   different decoders from the media element, and frequently narrower ones. A
- *   TV can decode HEVC Main 10 natively and refuse it through MSE, or accept
- *   E-AC-3 in a progressive file and play it intermittently inside fMP4
- *   segments. Advertising the element's answer for a stream neither will
- *   handle is a black screen or broken sound; the honest claim is the
- *   intersection, because over-claiming loses the title and under-claiming
- *   only costs a transcode.
+ *   `hlsDeliveryProbe`. Supply it whenever delivery goes through HLS: that
+ *   decoder is often narrower than the element, and over-claiming loses the
+ *   title where under-claiming only costs a transcode.
  */
 export function detectWebMediaCodecCapabilities(
   probe: MimeProbe,
@@ -182,9 +103,7 @@ export function detectWebMediaCodecCapabilities(
   const hlsVideoCodecs: string[] = [];
   const audioCodecs: string[] = [];
   const hlsAudioCodecs: string[] = [];
-  // The element decides whether we claim the codec at all; the delivery
-  // decoder decides whether we claim it survives HLS. Where they differ, the
-  // difference is real rather than a probe being pedantic.
+  // The element decides whether a codec is claimed; the delivery decoder, whether it survives HLS.
   const claim = (into: string[], hlsInto: string[]) => (codec: string, mimeTypes: readonly string[]) => {
     if (!anySupported(probe, mimeTypes)) return;
     into.push(codec);
@@ -201,9 +120,7 @@ export function detectWebMediaCodecCapabilities(
   claimAudio('aac', ['audio/mp4; codecs="mp4a.40.2"', 'video/mp4; codecs="mp4a.40.2"']);
   claimAudio('opus', ['audio/webm; codecs="opus"', 'video/webm; codecs="opus"']);
   claimAudio('vorbis', ['audio/ogg; codecs="vorbis"']);
-  // ISO BMFF/fMP4 codec identifiers are the important probes for Macha's
-  // remux path. Raw MIME names are retained as compatibility fallbacks for
-  // browsers which expose Dolby support that way.
+  // ISO BMFF identifiers matter for the remux path; raw MIME names are fallbacks for browsers that expose Dolby that way.
   claimAudio('ac3', ['audio/mp4; codecs="ac-3"', 'video/mp4; codecs="ac-3"', 'audio/ac3', 'audio/x-ac3']);
   claimAudio('eac3', ['audio/mp4; codecs="ec-3"', 'video/mp4; codecs="ec-3"', 'audio/eac3', 'audio/x-eac3']);
   claimAudio('mp3', ['audio/mpeg']);
@@ -221,21 +138,13 @@ export function detectWebMediaCodecCapabilities(
     : anySupported(probe, TEN_BIT_PROFILES) ? 10
       : 8;
 
-  // Both halves are required: a decoder deep enough to carry the signal, and a
-  // display path that says it can present it. Older engines expose no such
-  // media query at all, which correctly yields no claim.
+  // Needs both a deep enough decoder and a display path that claims HDR; engines without the media query claim nothing.
   const highDynamicRange = videoBitDepth >= 10 && mediaFeature !== undefined && [
     '(video-dynamic-range: high)',
     '(dynamic-range: high)',
   ].some((query) => mediaFeature(query));
 
-  // A DV fourCC embeds an HEVC profile, so an engine can answer true having
-  // recognised only the base layer, with nothing having assessed the
-  // enhancement layer or the display path. The codec query is therefore not a
-  // sufficient oracle on its own, and over-claiming Dolby Vision is the
-  // failure that ends in a black screen. Require the same corroboration HDR
-  // does — Dolby Vision is an HDR format, so a client that cannot establish an
-  // HDR presentation path cannot present it, whatever the string says.
+  // A DV fourCC embeds an HEVC profile, so an engine can say yes on the base layer alone; require the HDR presentation path too.
   const dolbyVision = highDynamicRange
     ? DOLBY_VISION_PROFILES
       .filter(([, codecs]) => anySupported(probe, codecs.map((codec) => `video/mp4; codecs="${codec}"`)))

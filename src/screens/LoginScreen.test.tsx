@@ -12,13 +12,7 @@ import { settle } from '../test/settle';
 let navigated: string[] = [];
 beforeEach(() => { navigated = []; });
 
-/**
- * Records where the router actually went, skipping the initial entry — which
- * is where the test placed the screen, not somewhere it chose to go.
- *
- * Observing the real router rather than mocking `useNavigate`, so these tests
- * fail if the screen navigates by some other means.
- */
+/** Records where the real router went, skipping the initial entry. `useNavigate` is not mocked, so any navigation shows. */
 function NavigationSpy() {
   const location = useLocation();
   const initial = useRef(true);
@@ -51,9 +45,7 @@ describe('LoginScreen', () => {
   });
 
   it('offers no way past itself where the anonymous account may do nothing', () => {
-    // The wall case. A "Browse as guest" button here would navigate home and
-    // be bounced straight back by the redirect, so it is removed rather than
-    // left to fail — and this is the assertion that keeps it removed.
+    // A guest button here would navigate home and be bounced straight back.
     renderLogin({ guestAllowed: false });
     expect(screen.queryByRole('button', { name: 'Browse as guest' })).toBeNull();
     expect(screen.getByText('This server requires an account. Sign in to continue.')).toBeTruthy();
@@ -73,10 +65,8 @@ describe('LoginScreen', () => {
   });
 
   it('says a refusal in words a viewer can act on, and clears the password', async () => {
-    // Core hands up "Could not start a session: 401", which describes the
-    // transport rather than the situation and reads like a fault in the
-    // software. One message covers a wrong password and an unknown username
-    // alike, because the server answers those identically on purpose.
+    // Core's error names the transport ("Could not start a session: 401"). One message covers a wrong
+    // password and an unknown username, which the server answers identically.
     const refusal = Object.assign(new Error('Could not start a session: 401'), { status: 401 });
     const onSignIn = vi.fn(() => Promise.reject(refusal));
     renderLogin({ guestAllowed: false, onSignIn });
@@ -91,9 +81,7 @@ describe('LoginScreen', () => {
   });
 
   it('says an unreachable server is unreachable, not a wrong password', async () => {
-    // An unreachable node is not a wrong password, and saying so sends someone
-    // hunting for a typo that is not there. The error's message is core's log
-    // text, so the sentence is this client's.
+    // The error's message is core's log text, so the sentence is this client's.
     renderLogin({ onSignIn: vi.fn(() => Promise.reject(new MachaConnectionError())) });
     fireEvent.change(screen.getByLabelText('Username'), { target: { value: 'alice' } });
     fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'hunter2' } });
@@ -115,10 +103,7 @@ describe('LoginScreen', () => {
   });
 
   it('waits for the new roles before navigating, so it cannot bounce back here', async () => {
-    // The token is live at once but the roles are not. Navigating in between is
-    // judged against the session just replaced, which on a cluster whose
-    // anonymous account holds nothing means landing back on this screen with
-    // no sign anything happened.
+    // The token is live at once but the roles are not; navigating early is judged against the old session.
     let rolesKnown: (() => void) | undefined;
     const onSignedIn = vi.fn(() => new Promise<void>((resolve) => { rolesKnown = resolve; }));
     renderLogin({ guestAllowed: false, onSignedIn });
@@ -158,8 +143,6 @@ describe('LoginScreen return destination', () => {
   });
 
   it('refuses to send them back to the login screen itself', async () => {
-    // Signing in and landing on the sign-in form reads as a failure even
-    // though it worked.
     renderLogin({ guestAllowed: false }, routes.login);
     fireEvent.change(screen.getByLabelText('Username'), { target: { value: 'alice' } });
     fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'hunter2' } });

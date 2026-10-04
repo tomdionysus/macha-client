@@ -14,11 +14,7 @@ export interface DirectPlayReadAheadMetrics {
   activeFetches: number;
   peakFetches: number;
   lastFetchMbps: number;
-  /**
-   * Cumulative milliseconds spent actually transferring, across every fetch
-   * this worker has made for the source. Paired with `fetchedBytes` it gives a
-   * throughput figure that excludes idle time, which wall-clock cannot.
-   */
+  /** Cumulative milliseconds spent transferring; with `fetchedBytes`, throughput excluding idle time. */
   fetchActiveMs: number;
   demandWaitCount: number;
   demandWaitMs: number;
@@ -45,23 +41,14 @@ interface ReadAheadFailureMessage {
   sourceUrl?: string;
   message?: string;
   /**
-   * The HTTP status that failed the source, when there was one.
-   *
-   * Absent for a transport failure that never became a response, which is the
-   * difference that matters: no status is not the same claim as a status the
-   * client does not recognise. A `404` here is the Direct Play equivalent of
-   * the managed-HLS `response.code` — the node declining to serve this source
-   * rather than the node being unwell — and it is what lets a reaped session be
-   * re-created instead of failing the node over.
+   * The HTTP status that failed the source; absent for a transport failure. A `404` is the
+   * node declining this source, not being unwell, so a reaped session is re-created rather
+   * than failed over.
    */
   status?: number;
 }
 
-/**
- * A read-ahead failure that reached a response, carrying the status that failed
- * it. Plain `Error` everywhere else, so a listener that does not care is
- * unaffected and a transport failure simply has no `status`.
- */
+/** A read-ahead failure; `status` is set only when a response was reached. */
 export interface DirectPlayReadAheadError extends Error {
   status?: number;
 }
@@ -163,16 +150,8 @@ function installMessageListener(): void {
 export type MediaTransferListener = (origin: string, bytes: number, durationMs: number) => void;
 
 /**
- * Report media throughput to whoever ranks endpoints.
- *
- * This is where the client measures the traffic that actually matters.
- * `EndpointBandwidth` is otherwise fed only from JSON response bodies, which
- * describe catalogue payloads, so without byte-range media a node that only
- * serves media would have no throughput evidence for endpoint ranking to
- * prefer it or reject it with.
- *
- * Injected rather than imported for the same reason the HTTP layer's recorder
- * is: playback has no business reaching into cluster bookkeeping.
+ * Reports media throughput for endpoint ranking, which otherwise sees only JSON payloads.
+ * Injected so playback does not import cluster code.
  */
 export function setMediaTransferListener(listener: MediaTransferListener | undefined): void {
   transferListener = listener;
@@ -180,16 +159,8 @@ export function setMediaTransferListener(listener: MediaTransferListener | undef
 }
 
 /**
- * One hls.js fragment, reported through the same listener as Direct Play.
- *
- * **Without it a transcode or remux session produces no media evidence at
- * all**, and core's throughput record for a node served only that way would
- * answer whether it can carry a stream to this viewer from catalogue payloads.
- *
- * Timed from the first byte to the last, not from the request: the wait
- * before the first byte is the node deciding, and the rest is the link. A
- * node can answer quickly and still deliver slower than the stream, and only
- * the second figure says whether it can keep up.
+ * One hls.js fragment, reported through the same listener as Direct Play. Timed from first
+ * byte to last: the wait before the first byte is the node deciding, not the link.
  */
 export function reportFragmentTransfer(url: string, bytes: number, firstByteAtMs: number, endAtMs: number): void {
   if (!transferListener || !(bytes > 0)) return;
@@ -210,24 +181,17 @@ function reportTransfer(sourceUrl: string, metrics: DirectPlayReadAheadMetrics):
   if (!transferListener || !metrics.sourceOrigin || !previous) return;
   const bytes = metrics.fetchedBytes - previous.fetchedBytes;
   const durationMs = metrics.fetchActiveMs - previous.fetchActiveMs;
-  // Non-positive covers three cases at once and needs no separate handling: an
-  // idle window that moved nothing, and a counter reset when the worker
-  // reconfigures a source — which makes both deltas negative, never a negative
-  // transfer. The baseline above has already advanced either way, so the next
-  // message measures from the new generation.
+  // Non-positive: an idle window, or the worker resetting its counters. The baseline has already advanced.
   if (bytes <= 0 || durationMs <= 0) return;
   transferListener(metrics.sourceOrigin, bytes, durationMs);
 }
 
-/** Long enough for a worker that is running; a worker that is not has nothing to say. */
+/** How long to wait for the worker's answer. */
 const SOURCE_STATUS_TIMEOUT_MS = 1_000;
 
 /**
- * What the node last answered the worker for this source, when that was a
- * failure status, or undefined when there is none, no worker, or no answer in
- * time. For an element that errors before the worker's own report arrives:
- * the worker records the status before the response reaches the element, so
- * asking settles what the report's ordering cannot.
+ * The failure status the node last answered the worker for this source, if any. For an
+ * element that errors before the worker's report arrives: the worker records the status first.
  */
 export function directPlayReadAheadSourceStatus(sourceUrl: string | undefined): Promise<number | undefined> {
   const sourceKey = sourceUrl ? keyBySource.get(sourceUrl) : undefined;
@@ -306,9 +270,7 @@ export function buildDirectPlayReadAheadProxyUrl(
     ? proxyBaseUrl()
     : new URL(`/${PROXY_PATH}`, origin);
   proxy.searchParams.set('key', sourceKey);
-  // Self-describe the proxy request so a fetch can never wait for Service Worker
-  // message ordering. The configure message still establishes mode/metrics state,
-  // but demand has everything it needs in the URL and can start immediately.
+  // The URL describes the source itself, so demand never waits on the configure message.
   if (source?.sizeBytes && source.sizeBytes > 0) {
     proxy.searchParams.set('source', source.url);
     proxy.searchParams.set('size', String(Math.floor(source.sizeBytes)));
@@ -331,8 +293,7 @@ function configureSource(activeController: ServiceWorker, source: PlaybackSource
   const existing = keyBySource.get(source.url);
   if (existing) return existing;
   const sourceKey = newSourceKey();
-  // Configuration is intentionally fire-and-forget. The proxy URL itself is
-  // self-describing, so Service Worker message ordering can never delay demand.
+  // Fire-and-forget: the proxy URL is self-describing.
   keyBySource.set(source.url, sourceKey);
   sourceByKey.set(sourceKey, source.url);
   activeController.postMessage({
@@ -345,17 +306,13 @@ function configureSource(activeController: ServiceWorker, source: PlaybackSource
   return sourceKey;
 }
 
-/** Warm the worker during application boot. This never delays application mount. */
+/** Registers the worker at boot without delaying mount. */
 export function warmDirectPlayReadAhead(): void {
   if (!serviceWorkerAvailable()) return;
   void ensureRegistration().catch(() => undefined);
 }
 
-/**
- * Return a read-ahead proxy only when a Service Worker already controls this
- * page. Registration/configuration are never awaited by playback; first use
- * simply falls back to the native source if the optional cache is not ready.
- */
+/** The read-ahead proxy URL when a Service Worker already controls the page, else the source's own. Nothing is awaited. */
 export function directPlayReadAheadUrl(source: PlaybackSource): string {
   if (!eligible(source) || !serviceWorkerAvailable()) return source.url;
   installMessageListener();

@@ -1,20 +1,12 @@
 import { MachaClientConfiguration, parseEndpointList } from '@machafoundation/core';
 
 /**
- * The web build's binding of the core's client configuration.
- *
- * The values and all their migration logic live in `MachaClientConfiguration`;
- * only their provenance is web-specific, and this is the one place that reads
- * it. `import.meta.env` exists in a Vite build and nowhere else, which is
- * why it stays at this boundary rather than in the package.
- *
- * The Samsung package pins its build-time endpoints: stale storage from an
- * earlier development install on the same TV must not override them.
+ * The web build's binding of core's client configuration: `import.meta.env`
+ * exists only in a Vite build, so it is read here. The Samsung package pins its
+ * build-time endpoints so stale storage on the TV cannot override them.
  */
 export const clientConfiguration = new MachaClientConfiguration({
-  // Precedence lives in the core: the first candidate yielding a usable
-  // endpoint wins. A `.env` leaves a variable unset by defining it empty, so
-  // deciding this at the call site invites an `??` that swallows the fallback.
+  // Precedence lives in core. A `.env` unsets a variable by defining it empty, which an `??` here would not fall through.
   environmentEndpoints: parseEndpointList(
     import.meta.env.VITE_MACHA_SERVERS as string | undefined,
     import.meta.env.VITE_MACHA_SERVER as string | undefined,

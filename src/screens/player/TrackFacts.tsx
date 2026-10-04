@@ -2,11 +2,7 @@ import type { MediaSummary } from '@machafoundation/core';
 import { albumLabel, trackNumberLabel } from '../../text/viewerText';
 import { MediaLine } from '../../components/MediaLine';
 
-/**
- * What a track is, beside its artwork: the artist, the album with its year,
- * where it sits on the album, and its file's format line. A track restored
- * from an older saved queue may carry no music context; it shows what it has.
- */
+/** A track's artist, album and year, position and format line. A track from a saved queue may carry no music context. */
 export function TrackFacts({ track, format }: { track: MediaSummary; format?: readonly string[] }) {
   const artist = track.musicContext?.artist?.title;
   const album = track.musicContext ? albumLabel(track.musicContext) : undefined;

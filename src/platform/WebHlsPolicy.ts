@@ -1,11 +1,6 @@
 /**
- * hls.js's own error-type values, restated rather than imported.
- *
- * These are two short strings, and importing the library for them would pull
- * 518 KB into the boot bundle for code that only runs during HLS playback —
- * defeating the on-demand load entirely. `WebHlsPolicy.test.ts` imports the
- * real library and asserts these still match, so a change upstream fails a
- * test rather than silently misclassifying every error.
+ * hls.js's error-type values, restated so the library stays out of the boot
+ * bundle. `WebHlsPolicy.test.ts` asserts they match the real library.
  */
 const HLS_NETWORK_ERROR = 'networkError';
 const HLS_MEDIA_ERROR = 'mediaError';
@@ -39,83 +34,30 @@ export type ManagedHlsErrorAction =
   | { action: 'fail-terminal'; details: string };
 
 /**
- * The status a node answers when a segment exists in the plan but has not been
- * produced yet — "come back", not "I am broken".
+ * The status for a segment that is in the plan but not produced yet: wait, do
+ * not fail over.
  *
- * **500, and deliberately not 503, which reads backwards on purpose.** The
- * obvious assignment is the other way round: 503 is "temporarily unavailable",
- * which is precisely what a hold is. It is not, because the two mistakes are
- * not the same size.
- *
- * 503 is what every intermediary — proxy, gateway, load balancer — emits when
- * a service is genuinely down, and none of them will ever emit
- * `segment_not_ready`. A client taught that 503 means "hold, stay on this
- * node" therefore reads a dead node as a healthy one and never fails over:
- * silent, not self-correcting, and worst exactly where a proxy makes it most
- * likely. The inverse mistake — reading an infrastructure 500 as a hold —
- * costs one pointless retry and then behaves. Given an asymmetry like that,
- * the recoverable fault is the one to take, so the node speaks the
- * counter-intuitive dialect and the intermediaries keep the intuitive one.
- *
- * Server contract: `500` carries `segment_not_ready`; a broken generation is
- * `503` (`stream_failed`) and does fail over. Both are 5xx deliberately, so
- * hls.js keeps retrying each — `retryForHttpStatus()` refuses only 4xx and
- * status 0.
- *
- * Discriminated on the HTTP status rather than the JSON error code because the
- * code is not reachable. hls.js's XHR loader reports a bad status as
- * `{ code: xhr.status, text: xhr.statusText }` with `data.response.data`
- * undefined, so the body never reaches the error event; it exists only behind
- * `networkDetails`, which is loader-specific and undocumented. The status is
- * the one field every loader populates the same way.
+ * It is 500, not 503, because intermediaries emit 503 for a node that is down,
+ * and reading that as a hold would prevent failover. A broken generation is
+ * `503 stream_failed` and does fail over. Matched on the HTTP status because
+ * hls.js's loader drops the response body, so the JSON error code is unreachable.
  */
 export const SEGMENT_NOT_READY_STATUS = coreSegmentNotReadyStatus;
 
 /**
- * The status a node answers for a source it will not serve: the session it
- * names does not exist, or the fragment is past the end of the plan.
- *
- * **Both, and the client cannot tell which.** A segment past the end of a live
- * session's plan answers `404 {"code":"not_found","message":"stream object not
- * found"}`, and a session the node has reaped answers `404
- * {"code":"not_found","message":"stream not found"}`. Same status, same
- * machine-readable code, one word of English apart — and the body never arrives anyway, because hls.js reports
- * `{ code, text }` and drops it (see the constant above).
- *
- * So this says only what the node said. Deciding *which* 404 it is takes a
- * question this layer has no business asking — `GET` the session and see — and
- * core asks it, on the failure this raises. An adapter that guessed "the
- * session was reaped" would regenerate forever against a player that simply
- * asked for a fragment beyond the end.
- *
- * Core's number, not a copy of it — as is the one above — because a server
- * constant must not drift between clients. They are re-exported from here so
- * the names read the same at the call sites, and so this file remains the one
- * place the web adapter's HLS status vocabulary is explained.
+ * The status for a source the node will not serve: the session is gone, or the
+ * fragment is past the end of the plan. The two are indistinguishable here, so
+ * core asks the node which; an adapter that assumed a reaped session would
+ * regenerate for ever.
  */
 export const SOURCE_NOT_FOUND_STATUS = coreSourceNotFoundStatus;
 
-/**
- * `410 generation_superseded`: the generation has been replaced, and the node
- * saying so is working perfectly.
- *
- * From core, like its sibling above, and for the same reason.
- */
+/** `410 generation_superseded`: the generation has been replaced; the node is healthy. */
 export const SOURCE_SUPERSEDED_STATUS = coreSourceSupersededStatus;
 
 /**
- * Whether a status says *this object is gone* rather than *this node is unwell*.
- *
- * **The mapping is core's and is asked for rather than repeated here.** Which
- * statuses mean what is a property of the server contract that every client
- * must agree on, so `playbackFailureKindForStatus` is the authority and this
- * only narrows for the one thing that is web-specific: hls.js hands over
- * `response.code` as `unknown`, and a payload carrying no status at all must
- * not be read as a gone source.
- *
- * Written as a question about the *kind* rather than a list of statuses so the
- * next one core adds arrives here for free; a list here would go on condemning
- * healthy nodes for any status it had not been told about.
+ * Whether a status says the object is gone rather than the node is unwell.
+ * Core owns the mapping; this only rejects a `response.code` that is not a number.
  */
 export function isSourceGoneStatus(status: unknown): boolean {
   return typeof status === 'number' && playbackFailureKindForStatus(status) === 'not-found';
@@ -123,60 +65,36 @@ export function isSourceGoneStatus(status: unknown): boolean {
 
 type HlsErrorShape = { type?: unknown; response?: { code?: unknown } | null };
 
-/**
- * A held segment: the node is working, and this is the frontier, not a fault.
- *
- * Kept separate from failure classification because it is the *absence* of
- * evidence rather than a kind of it. Failing over here would be actively
- * harmful: a replacement node would start its own generation from nothing,
- * which is strictly slower than waiting for the one already being produced.
- */
+/** A held segment: the node is working. Failing over would start a slower generation from nothing elsewhere. */
 export function isHlsSegmentHold(data: HlsErrorShape): boolean {
   return data.type === HLS_NETWORK_ERROR && data.response?.code === SEGMENT_NOT_READY_STATUS;
 }
 
 /**
- * The node declined to serve this source — it has no record of it (404), or the
- * generation it belonged to has been superseded (410). Not a fault in the node,
- * and never evidence against it.
- *
- * Reached on the *nonfatal* events, which is the point: `response.code` is
- * populated on the very first one, so a source that has gone away is knowable
- * while the buffer built before it still has a minute to run.
+ * The node has no record of this source (404) or its generation is superseded
+ * (410); never evidence against the node. `response.code` is set on non-fatal
+ * events too, so this is knowable while the buffer still has time to run.
  */
 export function isHlsSourceNotFound(data: HlsErrorShape): boolean {
   return data.type === HLS_NETWORK_ERROR && isSourceGoneStatus(data.response?.code);
 }
 
 /**
- * Any HLS network error is early node-health evidence, even before it is
- * fatal — except the two that say nothing about the node at all: a held
- * segment, and a source the node will not serve because it is gone.
- *
- * Note what the default costs if this is wrong in the permissive direction:
- * `@machafoundation/core` treats a `'stream'` failure as endpoint evidence, so an
- * unclassified hold prepares a standby elsewhere and can escalate to failover
- * off a node that was working correctly. A 404 from a session reaped during a
- * pause, read as degradation, would start a standby on a different node before
- * the viewer had even pressed play.
+ * An HLS network error is node-health evidence even before it is fatal, and
+ * core may prepare a standby or fail over on it. A held segment and a gone
+ * source are excluded: neither says anything about the node.
  */
 export function isHlsNetworkDegradation(data: HlsErrorShape): boolean {
   return data.type === HLS_NETWORK_ERROR && !isHlsSegmentHold(data) && !isHlsSourceNotFound(data);
 }
 
 /**
- * @param viewerWaiting Whether the viewer currently wants this playing. Every
- *   judgement below asks "is this node failing the person watching", and while
- *   playback is paused there is nobody to fail: hls.js is topping up a buffer
- *   on its own initiative, against a frontier the viewer will not reach for
- *   minutes or hours. Defaults to true, so a caller that has not thought about
- *   it gets the judging behaviour rather than the silent one.
+ * @param viewerWaiting Whether the viewer wants this playing. While paused
+ *   there is nobody to fail, so fatal errors are parked rather than judged.
  */
 export function managedHlsErrorAction(
-  // `response` is part of the contract, not an incidental extra: the 404 branch
-  // reads it, and an `HlsErrorShape` without one classifies as an ordinary
-  // network error. Declared so a caller that drops it fails to compile rather
-  // than quietly misclassifying.
+  // `response` is declared so a caller that drops it fails to compile; without
+  // it a 404 classifies as an ordinary network error.
   data: HlsErrorShape & { fatal?: boolean; details?: unknown },
   recovery: ManagedHlsMediaRecoveryBudget,
   positionMs: number,
@@ -184,12 +102,9 @@ export function managedHlsErrorAction(
   viewerWaiting = true,
 ): ManagedHlsErrorAction {
   if (!data.fatal) {
-    // A non-fatal media error while nothing has ever buffered is only
-    // non-fatal in hls.js's sense: it will keep retrying, and it recovers some
-    // of these without consulting us at all. Nothing buffered after several is
-    // a stream this browser cannot take, and continuing costs the node a full
-    // segment per attempt. Network errors keep their own path — those recover
-    // by moving to another node, and this client can do that.
+    // Repeated non-fatal media errors with nothing buffered mean a stream this
+    // browser cannot take, which hls.js would retry for ever. Network errors
+    // recover by moving node instead.
     if (data.type === HLS_MEDIA_ERROR && !buffered) {
       const decision = recovery.unbufferedMediaError();
       if (decision.action === 'fail') {
@@ -202,31 +117,17 @@ export function managedHlsErrorAction(
     }
     return { action: 'nonfatal' };
   }
-  // Fatal, and nobody is watching. Judging here spends the one network restart
-  // the viewer will need when they come back, and a second fatal error during a
-  // long pause tears down a generation nothing was using — which is how a pause
-  // could end on a failure screen naming a node the viewer never asked for. Stop
-  // asking, and ask again on resume with the viewer actually present.
-  //
-  // Deliberately every fatal class and not just the network one. A media
-  // pipeline that died while paused is in the same position: the recovery is
-  // worth attempting when it can be seen to work, and worth nothing beforehand.
+  // Fatal while paused, of any class: judging now would spend the recovery
+  // budget the viewer needs on resume, so park and ask again then.
   if (!viewerWaiting) {
     return {
       action: 'park-paused',
       details: typeof data.details === 'string' ? data.details : String(data.type ?? 'unknown'),
     };
   }
-  // A node that answered 404 will answer 404 again. The network restart exists
-  // for a transport that might recover, and this is not one: the source is
-  // gone, and no amount of reloading the same URL brings it back; spending the
-  // budget here only delays a certain failure. Reported straight away
-  // instead, while the buffer built before the source went away still has time
-  // left to run — which is the whole margin a recovery has to be invisible in.
-  //
-  // Checked before the network branch and after the pause branch, deliberately:
-  // this is a network error, but it is the one kind of network error that is
-  // not about the network.
+  // A gone source will not come back, so it is reported at once rather than
+  // spending the network restart, while the buffer still has time to run. Must
+  // come before the network branch and after the pause branch.
   if (isHlsSourceNotFound(data)) {
     return {
       action: 'fail-not-found',

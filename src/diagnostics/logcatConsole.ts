@@ -1,19 +1,6 @@
 /**
- * Flatten console arguments so Android's WebView bridge does not throw the
- * detail away.
- *
- * Chromium forwards `console.*` to logcat as a single string, and an object
- * argument becomes `[object Object]`. Every diagnostic this client writes
- * passes its detail as that second argument, so unflattened, an Android
- * capture reads `[playback.web] media-time [object Object]` — timings and
- * event names survive, and the endpoint, the mode, the byte counts and the
- * error do not. That is the difference between knowing when something
- * happened and knowing what it was.
- *
- * Only installed on the Android build. A browser console renders objects
- * properly and expandably, and `window.machaDiagnostics.snapshot()` is there
- * for structured access, so flattening everywhere would cost the web target
- * something real to fix a problem it does not have.
+ * Flattens console arguments to strings: Android's WebView forwards `console.*` to logcat as one
+ * string, turning an object argument into `[object Object]`. Installed on the Android build only.
  */
 const MAX_SERIALISED_CHARS = 4_000;
 
@@ -22,8 +9,7 @@ function flatten(value: unknown): unknown {
   const seen = new WeakSet<object>();
   try {
     const text = JSON.stringify(value, (_key, nested: unknown) => {
-      // Errors serialise to `{}`, which is the one case where the message is
-      // the entire point of the line.
+      // Errors serialise to `{}`, losing the message.
       if (nested instanceof Error) return { name: nested.name, message: nested.message };
       if (typeof nested === 'object' && nested !== null) {
         if (seen.has(nested)) return '[circular]';

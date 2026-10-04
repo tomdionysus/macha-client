@@ -46,10 +46,8 @@ function canResume(media: MediaSummary, progress?: PlaybackProgress): boolean {
 
 export function DetailScreen({ api, itemId, onBack, onPlay, onPlayFromStart, loadVersions, onPlayVersion, progress, onEdit, onMediaProfile }: Props) {
   const details = useRefreshableAsync(() => api.details(itemId), [api, itemId]);
-  // Every file's own profile, so a title with several files shows each
-  // file's format. A file whose profile cannot be read is left out rather
-  // than failing the others. Keyed on the ids, not the details object, so a
-  // background refresh does not ask again.
+  // Each file's profile; one that cannot be read is left out. Keyed on the ids so a background
+  // refresh does not ask again.
   const immutableMediaIds = details.value?.mediaIds.filter((mediaId) => mediaId.startsWith('macha:')) ?? [];
   const profiles = useAsync(
     async (signal) => api.mediaProfile
@@ -68,9 +66,7 @@ export function DetailScreen({ api, itemId, onBack, onPlay, onPlayFromStart, loa
   useEffect(() => {
     if (firstProfile) onMediaProfile?.(firstProfile);
   }, [onMediaProfile, firstProfile]);
-  // Play means "make the decision for me"; beside it, one button per quality
-  // the item can be played at. Keyed on the
-  // item, not the details object, so a background refresh does not ask again.
+  // One button per playable quality beside Play. Keyed on the item id so a background refresh does not ask again.
   const versionsFor = details.value && hasPicture(details.value) && details.value.mediaIds.length > 0 && onPlayVersion ? details.value : undefined;
   const versions = useAsync(
     () => versionsFor && loadVersions ? loadVersions(versionsFor) : Promise.resolve(undefined),
@@ -93,8 +89,7 @@ export function DetailScreen({ api, itemId, onBack, onPlay, onPlayFromStart, loa
       <MediaPageTitle leading={titleMarker(media)} refreshing={details.refreshing} onRefresh={details.refresh}>{media.title}</MediaPageTitle>
       <AvailabilityNote item={media} />
       {media.kind === 'episode' && episodeCode(media) && <p className="subtitle">{episodeCode(media)}</p>}
-      {/* One line per distinct file; core combines files whose summaries read
-          the same. */}
+      {/* One line per distinct file; core combines files with identical summaries. */}
       {profiles.value && fileSummaries(profiles.value).map(({ summary, mediaIds }) => <MediaLine key={mediaIds[0]} className="media-profile-summary" parts={summary.parts} />)}
       {media.synopsis && <p className="synopsis">{media.synopsis}</p>}
       {playable && (

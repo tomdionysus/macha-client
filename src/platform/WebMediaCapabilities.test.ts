@@ -7,8 +7,7 @@ function probeFrom(supported: readonly string[]): (mime: string) => boolean {
 }
 
 describe('detectMatroskaSupport', () => {
-  // Chrome's answers: both spellings accept a real codec and refuse a
-  // nonsense one.
+  // Chrome's answers: both spellings accept a real codec and refuse a nonsense one.
   const chrome = [
     'video/x-matroska',
     'video/x-matroska; codecs="avc1.42E01E"',
@@ -24,10 +23,7 @@ describe('detectMatroskaSupport', () => {
   });
 
   it('refuses an engine that agrees to an impossible codec in the container', () => {
-    // The Samsung's shape of failure: accepts Matroska, renders it corrupt.
-    // A host that says yes to everything has said nothing, so it gets no claim
-    // — and this is the assertion that has to be able to fail, because it is
-    // the only thing standing between an honest probe and a corrupt picture.
+    // A TV that accepts Matroska blindly renders it corrupt; a yes to everything is no claim.
     const blanket = (mime: string) => mime.startsWith('video/x-matroska') || mime.startsWith('video/matroska');
     expect(detectMatroskaSupport(blanket)).toBe(false);
     expect(detectWebMediaCodecCapabilities(blanket).containers).not.toContain('matroska');
@@ -107,8 +103,7 @@ describe('detectWebMediaCodecCapabilities', () => {
     });
 
     it('makes no claim at all on an engine with no media-query support', () => {
-      // Tizen 3 has no matchMedia; the safe answer is "not HDR", which sends
-      // a 10-bit source down the transcode path rather than showing nothing.
+      // Tizen 3 has no matchMedia; "not HDR" sends a 10-bit source to transcode rather than showing nothing.
       const capabilities = detectWebMediaCodecCapabilities(probeFrom(['video/mp4; codecs="hev1.2.4.L120.B0"']), undefined);
       expect(capabilities.hdrTransfers).toEqual([]);
     });
@@ -123,9 +118,8 @@ describe('detectWebMediaCodecCapabilities', () => {
     });
 
     it('ignores a DV codec answer from an engine with no HDR presentation path', () => {
-      // A DV fourCC embeds an HEVC profile, so an engine can answer true about
-      // the base layer alone. Without a display path that is a false positive,
-      // and believing it is a black screen rather than a needless transcode.
+      // A DV fourCC embeds an HEVC profile, so an engine can answer true for the base layer alone.
+      // Believed without a display path, that is a black screen.
       const claimsDv = probeFrom([deep, 'video/mp4; codecs="dvhe.05.06"']);
       expect(detectWebMediaCodecCapabilities(claimsDv).dolbyVision).toEqual([]);
       expect(detectWebMediaCodecCapabilities(claimsDv, () => false).dolbyVision).toEqual([]);
@@ -133,8 +127,7 @@ describe('detectWebMediaCodecCapabilities', () => {
     });
 
     it('reports only the profiles that actually probe, not a blanket yes', () => {
-      // A set handling profile 8 but not 5 is the common case, and the whole
-      // reason this is a list: a boolean would force it to lie either way.
+      // Profile 8 without 5 is the common case, which a boolean could not express.
       const capabilities = detectWebMediaCodecCapabilities(probeFrom([deep, 'video/mp4; codecs="dvhe.08.09"']), highDynamicRange);
       expect(capabilities.dolbyVision).toEqual([8]);
     });
@@ -155,10 +148,7 @@ describe('detectWebMediaCodecCapabilities', () => {
   });
 
   describe('when MediaSource is the decoder', () => {
-    // An HEVC Main 10, bt709 title that a TV decodes natively and refuses
-    // through MSE: with hls.js driving, the element's answer ends in "Web
-    // media decode failure" on a stream the server has every reason to
-    // believe is playable.
+    // A TV can decode HEVC Main 10 natively and refuse it through MSE, which hls.js uses.
     const element = probeFrom([
       'video/mp4; codecs="avc1.42E01E"',
       'video/mp4; codecs="hev1.1.6.L93.B0"',
@@ -173,9 +163,7 @@ describe('detectWebMediaCodecCapabilities', () => {
     });
 
     it('keeps a codec the element decodes while narrowing the HLS subset', () => {
-      // Direct play uses the media element, so `videoCodecs` must keep hevc or
-      // a perfectly playable file gets transcoded for nothing. Only streams
-      // delivered through MediaSource are narrowed.
+      // Direct play uses the element, so `videoCodecs` keeps hevc; only MediaSource delivery is narrowed.
       const capabilities = detectWebMediaCodecCapabilities(element, undefined, mseWithoutHevc);
       expect(capabilities.videoCodecs).toEqual(['h264', 'hevc']);
       expect(capabilities.hlsVideoCodecs).toEqual(['h264']);
@@ -205,15 +193,12 @@ describe('hlsDeliveryProbe', () => {
     const probe = probeFrom([HLS, `${HLS}; codecs="mp4a.40.2"`]);
     const delivery = hlsDeliveryProbe(probe);
 
-    // Rewritten from the fMP4 mime the caller passes to the playlist type the
-    // native pipeline is actually asked about.
+    // The caller's fMP4 mime is rewritten to the playlist type the native pipeline is asked about.
     expect(delivery?.('audio/mp4; codecs="mp4a.40.2"')).toBe(true);
     expect(delivery?.('audio/mp4; codecs="ec-3"')).toBe(false);
   });
 
   it('discards an engine that accepts a codec which cannot exist', () => {
-    // Answers yes to everything, so every answer is the same answer and none
-    // of them carry information. Better to fall back than to believe it.
     expect(hlsDeliveryProbe(() => true)).toBeUndefined();
   });
 
@@ -226,9 +211,7 @@ describe('HLS delivery codec lists', () => {
   const HLS = 'application/vnd.apple.mpegurl';
 
   it('narrows audio to what the delivery decoder accepts, not what the element plays', () => {
-    // The shape of the Samsung fault: the element plays E-AC-3 in a
-    // progressive file, the HLS pipeline does not, and copying it into fMP4
-    // gives sound that is present but broken.
+    // The element plays E-AC-3 in a progressive file; the HLS pipeline does not, and copying it into fMP4 breaks the sound.
     const probe = probeFrom([
       'video/mp4',
       'audio/mp4; codecs="mp4a.40.2"',
@@ -259,8 +242,7 @@ describe('detectHlsTsSupport', () => {
   });
 
   it('does not infer TS support from HLS support', () => {
-    // The two packagings are independent: a set can play fMP4 HLS and refuse
-    // MPEG-TS, or the reverse, which is the whole reason this is asked.
+    // The packagings are independent: a set can play fMP4 HLS and refuse MPEG-TS, or the reverse.
     expect(detectHlsTsSupport(probeFrom(['application/vnd.apple.mpegurl', 'video/mp4']))).toBe(false);
   });
 });
