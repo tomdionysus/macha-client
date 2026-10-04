@@ -24,7 +24,7 @@ are related. Core is addressed as the `Macha Client Core` session.
 
 **Where the repo is.** All work is on **`experiment/object-ledger`** (Tom,
 2026-10-01): never commit to, merge into or push `develop` or `main`. It is
-at `f264b72`, **four commits ahead of `origin`**, which holds the tag
+at `0aaef30` plus this note, **six commits ahead of `origin`**, which holds the tag
 **0.20.1** (`74a5caf`, pushed 2026-10-02 on Tom's word, tagged on the
 experiment and not merged). It links core's tree on core's own
 `experiment/object-ledger` (`22e0620`), whose types the published core
