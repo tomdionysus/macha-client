@@ -324,7 +324,7 @@ export function playbackNoticeText(notice: PlaybackNotice, quality?: QualityClas
   switch (notice.code) {
     case 'quality-stepped-down': return qualitySteppedDownText(quality);
     case 'copy-refused': return 'This node could not copy the original streams, so they are being converted.';
-    case 'decode-fallback': return 'This device could not play the original streams, so they are being converted.';
+    case 'decode-fallback': return 'Converting streams…';
     case 'cannot-seek': return 'This stream cannot seek.';
     case 'not-ready': return 'Playback is still loading.';
     case 'instruction-failed': return `Could not start this way: ${playbackRefusalText(notice.error, notice.refusal)}`;
