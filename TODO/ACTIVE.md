@@ -71,10 +71,19 @@ and records the same day). `docs/server-api.md` points to the server's
 documents, which are canon, and does not copy the route list. The bundling
 principle is restored, reworded. The repair-paced flag is wanted, surfaced
 in this client. The posters lost with es-1 are let go. The ~15 s artwork
-hang is fixed by racing a second host (below). Requests for the tracklist
-route and the repair-paced flag went to the Server and Core 2026-10-04;
-the Server is confirming both with Tom before building, and Core has asked
-him whether they lift the hold on new server API during the experiment.
+hang is fixed by racing a second host (below). Both are in server 0.87.0
+(Tom confirmed; deploying to fi-1 and gbni-1 2026-10-04), documented in the
+server's `docs/management.md` and `docs/operations.md`:
+`GET /api/v1/manage/providers/musicbrainz/releases/{mbid}/tracks` (manager;
+`tracks` of `disc_number`, `track_number`, `title`, `length_ms`,
+`recording_id`, any but `title` may be null; the release's own order; paced
+at 1/s, never refused for pacing), and each node's own status
+`diagnostics.repair` (`pace`: paced, running, settling, awaiting_credit or
+unknown; `paced_by`: playback, mounted_filesystem, loader, peer_playback).
+Repair pace is per node, not in the cluster listing. **Next:** once core
+wraps both, show each folder-list track's title beside its number (and
+flag a number the release lacks), and the pace and its causes on the
+status screen's node rows.
 
 **Two business P0s outrank the rest:** slow artwork (host choice and caching
 fixed 2026-09-24; the server's slow first read and poster size remain, and
