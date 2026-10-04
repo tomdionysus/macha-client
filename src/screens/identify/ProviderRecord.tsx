@@ -7,11 +7,12 @@ import {
   type ProviderArtworkOption,
   type ProviderArtworkRole,
   type ProviderMatchRef,
+  type ProviderReleaseTrack,
   type ProviderSearchResult,
   type UnmatchedFile,
 } from '@machafoundation/core';
 import { Waiting } from '../../components/Status';
-import { AlbumFiles, type FileStatus } from './AlbumFiles';
+import { AlbumFiles, onRelease, type FileStatus, type ReleaseTracks } from './AlbumFiles';
 import { albumSiblings, type Sibling } from './folderSiblings';
 import { viewerErrorText } from '../../text/viewerText';
 import { NumberField, numberText, wholeNumber } from './fields';
@@ -80,6 +81,7 @@ export function ProviderRecord({ releases, file, manage, numbers: initial, disab
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   const [statuses, setStatuses] = useState<Record<string, FileStatus>>({});
   const [someLeft, setSomeLeft] = useState(false);
+  const [tracks, setTracks] = useState<ReleaseTracks>();
 
   useEffect(() => {
     let cancelled = false;
@@ -121,6 +123,25 @@ export function ProviderRecord({ releases, file, manage, numbers: initial, disab
       });
     return () => { cancelled = true; };
   }, [open, result, siblings, manage, file]);
+
+  useEffect(() => {
+    if (!open || result.kind !== 'album') return undefined;
+    let cancelled = false;
+    setTracks(undefined);
+    manage.providerReleaseTracks(result.ref)
+      .then((found: ProviderReleaseTrack[]) => { if (!cancelled) setTracks(found); })
+      .catch((caught: unknown) => { if (!cancelled) setTracks({ unread: viewerErrorText(caught) }); });
+    return () => { cancelled = true; };
+  }, [open, result, manage]);
+
+  // A sibling whose track the release lacks would only be refused, so it is not chosen.
+  useEffect(() => {
+    if (!Array.isArray(tracks) || siblings === undefined) return;
+    setSelected((current) => new Set([...current].filter((id) => {
+      const sibling = siblings.find((candidate) => candidate.file.id === id);
+      return !sibling || onRelease(tracks, sibling.track, sibling.disc) !== null;
+    })));
+  }, [tracks, siblings]);
 
   const mark = (id: string, status: FileStatus) => setStatuses((current) => ({ ...current, [id]: status }));
 
@@ -227,6 +248,7 @@ export function ProviderRecord({ releases, file, manage, numbers: initial, disab
                 track={numbers.track}
                 disc={numbers.disc}
                 siblings={siblings}
+                tracks={tracks}
                 selected={selected}
                 statuses={statuses}
                 disabled={held}

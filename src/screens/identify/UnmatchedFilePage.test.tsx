@@ -3,7 +3,7 @@ import { fireEvent, render, screen, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { describe, expect, it, vi } from 'vitest';
 import type {
-  CatalogueApi, CatalogueItem, CatalogueKind, ManageApi, ManageCatalogueMatch, MediaProbeCandidate, ProviderArtworkOption, ProviderSearchResult, UnmatchedFile,
+  CatalogueApi, CatalogueItem, CatalogueKind, ManageApi, ManageCatalogueMatch, MediaProbeCandidate, ProviderArtworkOption, ProviderReleaseTrack, ProviderSearchResult, UnmatchedFile,
 } from '@machafoundation/core';
 import { endpointFailure, MachaConnectionError } from '@machafoundation/core';
 import { UnmatchedFilePage } from './UnmatchedFilePage';
@@ -47,6 +47,8 @@ function show(probes: MediaProbeCandidate[], options: {
   detailFails?: boolean;
   /** The server's catalogue suggestions never arrive. */
   suggestionsPending?: boolean;
+  /** The release's tracks; never read when absent. */
+  tracks?: ProviderReleaseTrack[] | Error;
 } = {}) {
   const manage = {
     unmatchedDetail: vi.fn(async () => ({ item: file, probes })),
@@ -59,6 +61,8 @@ function show(probes: MediaProbeCandidate[], options: {
     })),
     providerSearch: vi.fn(async () => options.providerResults ?? []),
     providerArtwork: vi.fn(async () => options.artwork ?? []),
+    providerReleaseTracks: vi.fn(() => (options.tracks === undefined ? new Promise(() => undefined)
+      : options.tracks instanceof Error ? Promise.reject(options.tracks) : Promise.resolve(options.tracks))),
     chooseArtwork: vi.fn(async () => ({})),
     retry: vi.fn(),
     deleteUnmatched: vi.fn(),
@@ -220,6 +224,47 @@ describe('suggestions, where identifying a file starts', () => {
     expect(files.getAllByRole('row').map((tr) => tr.lastChild?.textContent)).toEqual(['Matched', 'Not matched: No track 3 on that release.', '']);
     fireEvent.click(within(row).getByRole('button', { name: 'Back to the list' }));
     screen.getByText('the list');
+  });
+
+  it('names each file\'s track from the release, and will not send one the release lacks', async () => {
+    const releaseTrack = (n: number, title: string): ProviderReleaseTrack => ({ disc_number: 1, track_number: n, title, length_ms: null, recording_id: null });
+    const { manage } = show([track], { providerResults: [record], tracks: [releaseTrack(1, 'First'), releaseTrack(2, 'Second')] });
+    const sibling = (id: string, name: string): UnmatchedFile => ({ ...file, id, path: `/incoming/${name}` });
+    vi.mocked(manage).unmatched = vi.fn(async () => [file, sibling('f2', '01.mp3'), sibling('f3', '09.mp3')]);
+    const details: Record<string, MediaProbeCandidate[]> = {
+      f1: [track],
+      f2: [probe({ kind: 'track', title: 'One', artist: 'A Band', album: 'A Record', track_number: 1 })],
+      f3: [probe({ kind: 'track', title: 'Nine', artist: 'A Band', album: 'A Record', track_number: 9 })],
+    };
+    vi.mocked(manage.unmatchedDetail).mockImplementation(async (id: string) => ({ item: file, probes: details[id] ?? [] }));
+    await settle();
+    const row = rowOf('A Record · 1999', suggestions());
+    fireEvent.click(within(row).getByRole('button', { name: 'Use this' }));
+    await settle();
+    expect(manage.providerReleaseTracks).toHaveBeenCalledWith('musicbrainz:release:r1');
+    const files = within(row.querySelector('.identify-album-files') as HTMLElement);
+    expect(files.getAllByRole('row').map((tr) => tr.textContent)).toEqual([
+      'some.file.mkv (this file)A Record · track 2, "Second"',
+      '01.mp3A Record · track 1, "First"',
+      '09.mp3A Record · track 9, which this release does not have',
+    ]);
+    const nine = files.getByLabelText('Match 09.mp3') as HTMLInputElement;
+    expect([nine.checked, nine.disabled]).toEqual([false, true]);
+    fireEvent.click(within(row).getByRole('button', { name: 'Match' }));
+    await settle();
+    expect(vi.mocked(manage.matchProvider).mock.calls.map(([id]) => id)).toEqual(['f1', 'f2']);
+  });
+
+  it('says why when the release\'s tracks cannot be read, and lists the files as before', async () => {
+    const { manage } = show([track], { providerResults: [record], tracks: Object.assign(new Error('log'), { detail: 'MusicBrainz did not answer.' }) });
+    vi.mocked(manage).unmatched = vi.fn(async () => [file]);
+    await settle();
+    const row = rowOf('A Record · 1999', suggestions());
+    fireEvent.click(within(row).getByRole('button', { name: 'Use this' }));
+    await settle();
+    within(row).getByText(/track titles could not be read/);
+    const files = within(row.querySelector('.identify-album-files') as HTMLElement);
+    expect(files.getAllByRole('row').map((tr) => tr.textContent)).toEqual(['some.file.mkv (this file)A Record · track 2']);
   });
 
   it('stops sending the album\'s files once the server leaves one unanswered', async () => {

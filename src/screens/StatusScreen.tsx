@@ -8,6 +8,7 @@ import type {
   ClusterStatusApi,
   ClusterStatusSnapshot,
   ConnectivityCheck,
+  NodeRepairDiagnostics,
   NodeRuntimeStatus,
   NodeTrafficClassStatus,
   NodeTrafficStatus,
@@ -290,7 +291,7 @@ function PublicConnectivity({ connectivity }: { connectivity: PublicConnectivity
   );
 }
 
-function NodeCard({ node, canManage, resetting, onReset }: { node: ClusterNodeStatus; canManage: boolean; resetting: boolean; onReset: (node: ClusterNodeStatus) => void }) {
+function NodeCard({ node, repair, canManage, resetting, onReset }: { node: ClusterNodeStatus; repair?: NodeRepairDiagnostics; canManage: boolean; resetting: boolean; onReset: (node: ClusterNodeStatus) => void }) {
   const canReset = canManage && Boolean(node.host && node.port);
   const memory = systemMemoryBytes(node.runtime);
   return (
@@ -317,6 +318,7 @@ function NodeCard({ node, canManage, resetting, onReset }: { node: ClusterNodeSt
           <div><dt>Memory</dt><dd>{memory != null ? formatBytes(memory) : '—'}</dd></div>
           <div><dt>Cluster traffic</dt><dd>{clusterTrafficText(node.traffic) ?? '—'}</dd></div>
           <div><dt>Peers</dt><dd>{node.runtime.peers_active != null ? `${node.runtime.peers_active}/${node.runtime.peers_known ?? node.runtime.peers_active}` : '—'}</dd></div>
+          <div><dt>Repair</dt><dd>{repairPaceText(repair) ?? '—'}</dd></div>
         </dl>
       </Link>
       {canManage && <div className="cluster-node-actions">
@@ -377,6 +379,7 @@ export function StatusScreen({ api, endpointRegistry, manageApi, platform, secti
   const [resetCandidate, setResetCandidate] = useState<ClusterNodeStatus>();
   const [managementMessage, setManagementMessage] = useState<string>();
   const retiredNodeIds = useRef(new Set<string>());
+  const repair = useNodeRepair(api, (snapshot?.nodes ?? []).filter((node) => node.state === 'online').map((node) => node.id), section !== 'client');
 
   const omitRetiredNodes = useCallback((value: ClusterStatusSnapshot) => {
     let operational = value;
@@ -505,7 +508,7 @@ export function StatusScreen({ api, endpointRegistry, manageApi, platform, secti
 
       {managementMessage && <p className="cluster-check-result reachable">{managementMessage}</p>}
       <div className="cluster-nodes-heading"><h2>Nodes</h2><span>Metadata generation {cluster.metadata_generation}</span></div>
-      <div className="cluster-node-grid">{snapshot.nodes.map((node) => <NodeCard key={node.id} node={node} canManage={Boolean(manageApi)} resetting={resettingNodeId === node.id} onReset={setResetCandidate} />)}</div>
+      <div className="cluster-node-grid">{snapshot.nodes.map((node) => <NodeCard key={node.id} node={node} repair={repair[node.id]} canManage={Boolean(manageApi)} resetting={resettingNodeId === node.id} onReset={setResetCandidate} />)}</div>
       </>}
 
       {visible.connectivity && <>
@@ -538,6 +541,58 @@ const TRAFFIC_CLASS_LABELS: Record<string, string> = {
   speculative: 'Repair and sync',
   control: 'Control',
 };
+
+const REPAIR_PACE_LABELS: Record<string, string> = {
+  running: 'Running',
+  settling: 'Settling',
+  awaiting_credit: 'Waiting for transfer credit',
+  unknown: 'Not yet run',
+};
+
+const REPAIR_PACED_BY_LABELS: Record<string, string> = {
+  playback: 'playback here',
+  peer_playback: 'playback on another node',
+  loader: 'loading',
+  mounted_filesystem: 'a mounted filesystem',
+};
+
+/** A node's repair as it stated it at its latest maintenance pass; undefined when it did not. */
+export function repairPaceText(repair: NodeRepairDiagnostics | undefined): string | undefined {
+  if (!repair?.pace) return undefined;
+  if (repair.pace !== 'paced') return REPAIR_PACE_LABELS[repair.pace] ?? repair.pace;
+  const causes = (repair.paced_by ?? []).map((code) => REPAIR_PACED_BY_LABELS[code] ?? code);
+  return causes.length > 0 ? `Paced for ${causes.join(', ')}` : 'Paced';
+}
+
+/** How often each node is asked for its own repair pace, which changes once a maintenance pass. */
+const REPAIR_POLL_MS = 15_000;
+
+/**
+ * Each listed node's repair, asked of that node, since a node states only its own. A node
+ * that cannot be asked, or a core without `statusOf`, leaves its entry out.
+ */
+function useNodeRepair(api: ClusterStatusApi, nodeIds: readonly string[], enabled: boolean): Readonly<Record<string, NodeRepairDiagnostics>> {
+  const [repair, setRepair] = useState<Record<string, NodeRepairDiagnostics>>({});
+  const key = nodeIds.join(',');
+  usePollingTask({
+    load: async () => {
+      const statusOf = api.statusOf?.bind(api);
+      if (!statusOf) return {};
+      const answers = await Promise.allSettled(nodeIds.map(async (id) => [id, (await statusOf(id)).diagnostics?.repair] as const));
+      const found: Record<string, NodeRepairDiagnostics> = {};
+      for (const answer of answers) {
+        if (answer.status === 'fulfilled' && answer.value[1]) found[answer.value[0]] = answer.value[1];
+      }
+      return found;
+    },
+    onValue: setRepair,
+    onError: () => undefined,
+    intervalMs: REPAIR_POLL_MS,
+    dependencies: [api, key],
+    enabled: enabled && nodeIds.length > 0,
+  });
+  return repair;
+}
 
 export function trafficClassLabel(code: string): string {
   return TRAFFIC_CLASS_LABELS[code] ?? code;
@@ -593,6 +648,7 @@ export function NodeStatusScreen({ api }: { api: ClusterStatusApi }) {
   const [error, setError] = useState<string>();
   const [refreshing, setRefreshing] = useState(false);
   const [check, setCheck] = useState<ConnectivityCheck>();
+  const repair = useNodeRepair(api, nodeId && node?.state === 'online' ? [nodeId] : [], true);
 
   const refresh = useCallback(async () => {
     if (!nodeId) return;
@@ -657,6 +713,7 @@ export function NodeStatusScreen({ api }: { api: ClusterStatusApi }) {
           <DetailItem label="Failure domain">{node.failure_domain || '—'}</DetailItem>
           <DetailItem label="Roles">{node.roles.join(', ') || '—'}</DetailItem>
           <DetailItem label="Telemetry"><span className={telemetryAgeClassName(node)}>{freshnessLabel(node)}</span></DetailItem>
+          <DetailItem label="Repair">{repairPaceText(nodeId ? repair[nodeId] : undefined) ?? '—'}</DetailItem>
           <DetailItem label="Uptime">{runtime.uptime_ms != null ? formatDuration(runtime.uptime_ms) : '—'}</DetailItem>
         </dl></article>
         <article className="node-detail-card"><h2>Storage</h2><dl>

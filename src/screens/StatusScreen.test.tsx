@@ -4,6 +4,10 @@ import { describe, expect, it, vi } from 'vitest';
 import type { EndpointCandidate } from '@machafoundation/core';
 import type { ClusterNodeStatus, ClusterStatusSnapshot } from '@machafoundation/core';
 import type { IdentityAssociationResetResult, ManageApi } from '@machafoundation/core';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import type { ClusterStatusApi } from '@machafoundation/core';
+import { settle } from '../test/settle';
+import { NodeStatusScreen, repairPaceText } from './StatusScreen';
 import { acceptNodeIdentityAssociationReset, availableOfTotal, usedOfTotal, clientEndpointHealth, conditionStatedPerNode, identityResetAcceptanceMessage, nodeInboundCapable, nodeNotYetReady, nodeStatusLabel, StatusHeader, clusterTrafficText, statusNodeName, statusSectionVisibility, trafficClassLabel, trafficClassText, systemMemoryBytes, TELEMETRY_AGEING_MS, TELEMETRY_STALE_MS, telemetryAge, withoutRetiredNodeIdentity } from './StatusScreen';
 
 function candidate(health: EndpointCandidate['health'], ready = true): EndpointCandidate {
@@ -241,5 +245,43 @@ describe("a node's traffic to and from the other nodes (server 0.73.0)", () => {
     expect(trafficClassLabel('speculative')).toBe('Repair and sync');
     expect(trafficClassLabel('replication_v2')).toBe('replication_v2');
     expect(trafficClassText(traffic.classes[1])).toBe('in 0 B/s · out 3.00 MB/s');
+  });
+});
+
+describe('repair pace, as each node states its own', () => {
+  it('says what repair is giving way to, and shows a code it does not know as it came', () => {
+    expect(repairPaceText({ pace: 'paced', paced_by: ['playback', 'peer_playback'] })).toBe('Paced for playback here, playback on another node');
+    expect(repairPaceText({ pace: 'paced', paced_by: ['mounted_filesystem', 'loader', 'ingest_v2'] })).toBe('Paced for a mounted filesystem, loading, ingest_v2');
+    expect(repairPaceText({ pace: 'paced', paced_by: [] })).toBe('Paced');
+    expect(repairPaceText({ pace: 'running', paced_by: [] })).toBe('Running');
+    expect(repairPaceText({ pace: 'awaiting_credit' })).toBe('Waiting for transfer credit');
+    expect(repairPaceText({ pace: 'unknown' })).toBe('Not yet run');
+    expect(repairPaceText({ pace: 'draining' })).toBe('draining');
+  });
+
+  it('says nothing for a node that stated no pace, an older server among them', () => {
+    expect(repairPaceText(undefined)).toBeUndefined();
+    expect(repairPaceText({})).toBeUndefined();
+  });
+
+  it('asks the node itself for its pace on the node page, not whichever node answered the listing', async () => {
+    const node = {
+      id: 'node-a', state: 'online', roles: [], version: '0.87.0', host: '', port: 0,
+      runtime: {}, storage: { used_bytes: 0, capacity_bytes: 0 }, cache: { used_bytes: 0, capacity_bytes: 0 },
+    } as unknown as ClusterNodeStatus;
+    const api = {
+      node: vi.fn(async () => node),
+      statusOf: vi.fn(async () => ({ diagnostics: { repair: { pace: 'paced', paced_by: ['loader'] } } }) as unknown as ClusterStatusSnapshot),
+      checkConnectivity: vi.fn(),
+    } as unknown as ClusterStatusApi;
+    render(
+      <MemoryRouter initialEntries={['/status/node-a']}>
+        <Routes><Route path="/status/:nodeId" element={<NodeStatusScreen api={api} />} /></Routes>
+      </MemoryRouter>,
+    );
+    await settle();
+    await settle();
+    expect(api.statusOf).toHaveBeenCalledWith('node-a');
+    expect(screen.getByText('Repair').nextSibling?.textContent).toBe('Paced for loading');
   });
 });

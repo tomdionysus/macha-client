@@ -120,6 +120,7 @@
 .identify-album-file { overflow-wrap: anywhere; }
 .identify-album-status { color: var(--text-dim); white-space: nowrap; }
 .identify-album-left .identify-album-status { color: var(--red-400); white-space: normal; }
+.identify-album-missing { color: var(--red-400); }
 /* Where a new track or episode goes. */
 .identify-placement { display: grid; gap: .35rem; margin: 0; padding: .6rem .8rem; border: 1px solid #ffffff12; border-radius: .55rem; }
 .identify-placement legend { padding: 0 .3rem; color: var(--text-dim); font-size: .85rem; }

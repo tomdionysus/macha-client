@@ -1,7 +1,7 @@
 # Active tasks and concepts to explore
 
 Last updated: 2026-10-04 (after Tom's rulings on the open questions and the artwork race), rationalised against the
-code, `git log`, core `347afd2` (its `experiment/object-ledger`) and server
+code, `git log`, core `e864856` (its `experiment/object-ledger`) and server
 0.84.0. Read [2026-10-04-handover.md](2026-10-04-handover.md) first, for
 what is running, what is in flight with the sibling sessions, Tom's rulings
 and the method; where this file and a dated document in this directory
@@ -27,9 +27,9 @@ are related. Core is addressed as the `Macha Client Core` session.
 **ahead of `origin`, unpushed** (`git log origin/experiment/object-ledger..`), which holds the tag
 **0.20.1** (`74a5caf`, pushed 2026-10-02 on Tom's word, tagged on the
 experiment and not merged). It links core's tree on core's own
-`experiment/object-ledger` (`347afd2`), whose types the published core
+`experiment/object-ledger` (`e864856`), whose types the published core
 0.21.0 lacks, so it cannot resolve core from npm until core's next release.
-`main` is `1fa0bc4` (0.20.0), `develop` `e543e0e`. Suite **716**,
+`main` is `1fa0bc4` (0.20.0), `develop` `e543e0e`. Suite **721**,
 typecheck and build clean.
 
 **The cluster.** Corvus FI-1 (10.35.1.50:7438, also .10) and Corvus GBNI-1
@@ -80,10 +80,14 @@ server's `docs/management.md` and `docs/operations.md`:
 at 1/s, never refused for pacing), and each node's own status
 `diagnostics.repair` (`pace`: paced, running, settling, awaiting_credit or
 unknown; `paced_by`: playback, mounted_filesystem, loader, peer_playback).
-Repair pace is per node, not in the cluster listing. **Next:** once core
-wraps both, show each folder-list track's title beside its number (and
-flag a number the release lacks), and the pace and its causes on the
-status screen's node rows.
+Repair pace is per node, not in the cluster listing. **Built 2026-10-04**
+on core `74bb006` and `e864856`: the album folder list names each file's
+track from the release (`track 2, "..."`), marks a number the release
+lacks and will not send it, and says why when the tracks cannot be read;
+each node card and node page shows "Repair", asked of that node through
+`statusOf` every 15 s (online nodes only). **Owed:** a live look once the
+nodes run 0.87.0 (both on 0.85.0 at 14:33 local): an album match with a
+real release, and the Repair line on both nodes during playback.
 
 **Two business P0s outrank the rest:** slow artwork (host choice and caching
 fixed 2026-09-24; the server's slow first read and poster size remain, and
