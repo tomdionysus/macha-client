@@ -2,6 +2,20 @@
 
 Last updated: 2026-10-04, at a break for a clear: finished work moved here, the backlog rationalised
 
+## Documentation and comments: concise and current — 2026-10-04
+
+`0aaef30`. Tom: "rationalise all documentation and code comments. Go for
+concise and helpful to an installer or contributor, and current - no
+historical comments. Brevity is the soul of wit." Docs from about 1,430
+lines to 660: the README now says how to point the client at a node;
+`server-api.md` records what this client relies on and points to the
+server's own route reference instead of copying it; the "eagerly bundled"
+principle is gone (the hls chunk loads at first playback). Comments from
+about 5,450 lines to 2,200 across 184 files, by eight parallel agents under
+one rule. No code changed: the web build is the deployed
+`index-Cz2VNMGA.js`, and the comment-only checker agrees for every source
+file. Typecheck clean, 707 tests, web and Samsung builds clean.
+
 ## 0.20.1 tagged on the experiment, and deployed — 2026-10-02 and 04
 
 - **0.20.1** (`74a5caf`, annotated tag `0.20.1`): version, README and

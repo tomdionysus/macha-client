@@ -1,6 +1,6 @@
 # Active tasks and concepts to explore
 
-Last updated: 2026-10-04, at a break for a clear, rationalised against the
+Last updated: 2026-10-04 (after the documentation and comment pass), at a break for a clear, rationalised against the
 code, `git log`, core `22e0620` (its `experiment/object-ledger`) and server
 0.84.0. Read [2026-10-04-handover.md](2026-10-04-handover.md) first, for
 what is running, what is in flight with the sibling sessions, Tom's rulings
@@ -24,7 +24,7 @@ are related. Core is addressed as the `Macha Client Core` session.
 
 **Where the repo is.** All work is on **`experiment/object-ledger`** (Tom,
 2026-10-01): never commit to, merge into or push `develop` or `main`. It is
-at `0aaef30` plus this note, **six commits ahead of `origin`**, which holds the tag
+**ahead of `origin`, unpushed** (`git log origin/experiment/object-ledger..`), which holds the tag
 **0.20.1** (`74a5caf`, pushed 2026-10-02 on Tom's word, tagged on the
 experiment and not merged). It links core's tree on core's own
 `experiment/object-ledger` (`22e0620`), whose types the published core
@@ -56,7 +56,9 @@ untested since.
 **Open decisions that are Tom's alone:** any push, merge, version bump, tag,
 deploy or core publish; the tracklist route (server, or MusicBrainz from the
 browser); the availability tooltip's "right now"; reporting the torrent
-placement defect to the Server and routing a pinned add to its node; driven playback for the Server's soak (Server will
+placement defect to the Server and routing a pinned add to its node;
+whether `docs/server-api.md` should list every route again; whether the
+"eagerly bundled" principle comes back, reworded; real titles in test data; driven playback for the Server's soak (Server will
 send a concrete request only once Tom agrees); a per-node "repair is being
 paced" flag (Server offered to put it to him); the artwork lost with es-1
 and the replication capacity (with the server); the ~15 s artwork hang on a
