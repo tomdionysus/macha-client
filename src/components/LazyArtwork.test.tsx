@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ArtworkRef, MediaApi } from '@machafoundation/core';
-import { LazyArtwork } from './LazyArtwork';
+import { ARTWORK_HEDGE_DELAY_MS, LazyArtwork } from './LazyArtwork';
 import { settle } from '../test/settle';
 
 const FUTURE = '?exp=9999999999999&sig=abc';
@@ -343,5 +343,136 @@ describe('LazyArtwork', () => {
 
     fireEvent.error(poster());
     expect(noteArtworkLoaded).not.toHaveBeenCalled();
+  });
+
+  describe('a node that neither loads nor fails', () => {
+    // A fresh id each time: the page remembers where each id last loaded.
+    let id = '';
+    let A = '';
+    let B = '';
+    beforeEach(() => {
+      id = `hedged-${Math.random()}`;
+      A = `http://a/api/v1/catalogue/artwork/${id}${FUTURE}`;
+      B = `http://b/api/v1/catalogue/artwork/${id}${FUTURE}`;
+    });
+
+    function renderPoster(props: { eager?: boolean } = { eager: true }) {
+      return render(
+        <LazyArtwork
+          api={fakeApi(undefined, ['http://a', 'http://b'])}
+          artwork={{ id, mimeType: 'image/jpeg', url: A }}
+          alt="Movie poster"
+          placeholder={<span>placeholder</span>}
+          {...props}
+        />,
+      );
+    }
+
+    function sources(container: HTMLElement): string[] {
+      return [...container.querySelectorAll('img')].map((image) => image.src);
+    }
+
+    function elapse(ms: number) {
+      act(() => { vi.advanceTimersByTime(ms); });
+    }
+
+    it('asks the next node as well once the delay passes, keeping the first request', () => {
+      vi.useFakeTimers();
+      try {
+        const { container } = renderPoster();
+        elapse(ARTWORK_HEDGE_DELAY_MS - 1);
+        expect(sources(container)).toEqual([A]);
+        elapse(1);
+        expect(sources(container)).toEqual([A, B]);
+        expect(poster().src).toBe(A);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('shows whichever node loads first and drops the other request', () => {
+      vi.useFakeTimers();
+      try {
+        const { container } = renderPoster();
+        elapse(ARTWORK_HEDGE_DELAY_MS);
+        fireEvent.load(container.querySelectorAll('img')[1]);
+        expect(sources(container)).toEqual([B]);
+        expect(poster().src).toBe(B);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('does not race a poster that loaded in time', () => {
+      vi.useFakeTimers();
+      try {
+        const { container } = renderPoster();
+        fireEvent.load(poster());
+        elapse(ARTWORK_HEDGE_DELAY_MS * 2);
+        expect(sources(container)).toEqual([A]);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('lets the raced request carry on alone when the first then fails', () => {
+      vi.useFakeTimers();
+      try {
+        const { container } = renderPoster();
+        elapse(ARTWORK_HEDGE_DELAY_MS);
+        fireEvent.error(poster());
+        expect(sources(container)).toEqual([B]);
+        expect(poster().src).toBe(B);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('races a source on another host, not the next entry when that is the same host', () => {
+      vi.useFakeTimers();
+      try {
+        const sameHost = `http://a/api/v1/catalogue/artwork/${id}?exp=9999999999999&sig=other`;
+        const api = {
+          artworkUrls: () => [A, sameHost, B].map((url) => ({ url, requiresAuthorization: false })),
+          invalidateArtwork: vi.fn(),
+        } as unknown as MediaApi;
+        const { container } = render(
+          <LazyArtwork api={api} artwork={{ id, mimeType: 'image/jpeg', url: A }} alt="Movie poster" placeholder={<span>placeholder</span>} eager />,
+        );
+        elapse(ARTWORK_HEDGE_DELAY_MS);
+        expect(sources(container)).toEqual([A, B]);
+        // Both fail: the same-host entry is still tried before giving up on signed URLs.
+        fireEvent.error(container.querySelectorAll('img')[1]);
+        fireEvent.error(poster());
+        expect(sources(container)).toEqual([sameHost]);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('does not start the clock for a lazy poster until it nears the viewport', () => {
+      vi.useFakeTimers();
+      let reveal: (() => void) | undefined;
+      const original = globalThis.IntersectionObserver;
+      globalThis.IntersectionObserver = class {
+        constructor(callback: IntersectionObserverCallback) {
+          reveal = () => callback([{ isIntersecting: true, target: document.querySelector('.lazy-artwork')! } as IntersectionObserverEntry], this as unknown as IntersectionObserver);
+        }
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      } as unknown as typeof IntersectionObserver;
+      try {
+        const { container } = renderPoster({ eager: false });
+        elapse(ARTWORK_HEDGE_DELAY_MS * 2);
+        expect(sources(container)).toEqual([A]);
+        act(() => reveal?.());
+        elapse(ARTWORK_HEDGE_DELAY_MS);
+        expect(sources(container)).toEqual([A, B]);
+      } finally {
+        globalThis.IntersectionObserver = original;
+        vi.useRealTimers();
+      }
+    });
   });
 });

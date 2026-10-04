@@ -1,6 +1,6 @@
 # Active tasks and concepts to explore
 
-Last updated: 2026-10-04 (after the documentation and comment pass), at a break for a clear, rationalised against the
+Last updated: 2026-10-04 (after Tom's rulings on the open questions and the artwork race), rationalised against the
 code, `git log`, core `22e0620` (its `experiment/object-ledger`) and server
 0.84.0. Read [2026-10-04-handover.md](2026-10-04-handover.md) first, for
 what is running, what is in flight with the sibling sessions, Tom's rulings
@@ -29,7 +29,7 @@ are related. Core is addressed as the `Macha Client Core` session.
 experiment and not merged). It links core's tree on core's own
 `experiment/object-ledger` (`22e0620`), whose types the published core
 0.21.0 lacks, so it cannot resolve core from npm until core's next release.
-`main` is `1fa0bc4` (0.20.0), `develop` `e543e0e`. Suite **707**,
+`main` is `1fa0bc4` (0.20.0), `develop` `e543e0e`. Suite **713**,
 typecheck and build clean.
 
 **The cluster.** Corvus FI-1 (10.35.1.50:7438, also .10) and Corvus GBNI-1
@@ -54,17 +54,27 @@ untested since.
 4. **The playback P0s** as before.
 
 **Open decisions that are Tom's alone:** any push, merge, version bump, tag,
-deploy or core publish; the tracklist route (server, or MusicBrainz from the
-browser); the availability tooltip's "right now"; reporting the torrent
-placement defect to the Server and routing a pinned add to its node;
-whether `docs/server-api.md` should list every route again; whether the
-"eagerly bundled" principle comes back, reworded; real titles in test data; driven playback for the Server's soak (Server will
-send a concrete request only once Tom agrees); a per-node "repair is being
-paced" flag (Server offered to put it to him); the artwork lost with es-1
-and the replication capacity (with the server); the ~15 s artwork hang on a
-silently dead node; the player options panel's sideways move; sized artwork
-variants; core's "Plan A" and "Season 0 Episode 1". A television is needed
-for the Samsung items and the TVs' saved endpoints.
+deploy or core publish; driven playback for the Server's soak (Server will
+send a concrete request only once Tom agrees); the replication capacity
+(with the server); the player options panel's sideways move; sized artwork
+variants; core's trailing "A" ("Example A" searched as "Example") and
+"Season 0 Episode 1"; whether core owns the artwork hedge's delay and
+second-source rule (core has asked him). A television is needed for the
+Samsung items and the TVs' saved endpoints.
+
+**Tom's rulings, 2026-10-04:** track titles must show in the album folder
+list, from a server route core wraps; **the browser never talks to
+MusicBrainz directly, in any context**. The availability tooltips keep
+"right now". The torrent placement defect waits for the experiment's end,
+then goes to the Server. No real titles anywhere committed (swept from code
+and records the same day). `docs/server-api.md` points to the server's
+documents, which are canon, and does not copy the route list. The bundling
+principle is restored, reworded. The repair-paced flag is wanted, surfaced
+in this client. The posters lost with es-1 are let go. The ~15 s artwork
+hang is fixed by racing a second host (below). Requests for the tracklist
+route and the repair-paced flag went to the Server and Core 2026-10-04;
+the Server is confirming both with Tom before building, and Core has asked
+him whether they lift the hold on new server API during the experiment.
 
 **Two business P0s outrank the rest:** slow artwork (host choice and caching
 fixed 2026-09-24; the server's slow first read and poster size remain, and
@@ -166,8 +176,8 @@ batch; the parent pickers; an editor save.
   (core `c211268`).
 - **No tracklist reaches the client:** the folder list says "track 4", not
   that track's title, so nothing checks that a file's track number is the
-  release's. Tom to choose: a server route core wraps (recommended), or
-  asking MusicBrainz from the browser.
+  release's. Tom, 2026-10-04: a server route core wraps, never MusicBrainz
+  from the browser; requested of the Server and Core, not built.
 - **A candidate's MusicBrainz ids** from the file's own tags are held by
   the server's probe but not sent; they would name the exact release.
 - **A candidate's embedded picture** is recorded (`attached_picture`) but
@@ -204,9 +214,8 @@ music playlist) are read fresh with core's `currentAvailability`.
   season, album, artist and detail pages; track rows; the playlist; an
   unavailable title's missing Play and its note.
 - **Server 0.84.0** (deploying): availability is the node's best
-  knowledge, kept across restarts; "unknown" becomes rare. Tom to decide
-  whether the partial and unavailable tooltips say "as far as Macha knows"
-  rather than "right now" (pass any change to the TV and phone).
+  knowledge, kept across restarts; "unknown" becomes rare. The tooltips
+  keep "right now" (Tom, 2026-10-04).
 
 ## Server defects found from this side, for after the experiment
 
@@ -215,8 +224,8 @@ music playlist) are read fresh with core's `currentAvailability`.
   node_.membership().active().end(), ...)`; `active()` returns a vector by
   value, so begin and end come from two temporaries. Tom saw "That node is
   not in this cluster." choosing macnessa (GBNI-1) for a torrent, though
-  both nodes list it online and torrent-capable. Not reported to the
-  Server (Tom's call); a pinned add sent to the pinned node itself would
+  both nodes list it online and torrent-capable. Tom, 2026-10-04: raise
+  it with the Server when the experiment ends, not before; a pinned add sent to the pinned node itself would
   sidestep it (a core routing change, also Tom's call).
 
 ## Built 2026-09-24 to 30, owed a live look
@@ -744,9 +753,18 @@ poster 56 ms after its cards. The measurements before and after are in
   timeout on a 10 s cycle), and since `75c2d27` `ready` stays false from the
   first failure until the node answers again, so no new poster leads with it
   after that. The window is therefore up to ~18 s in which posters on that
-  node hang 14.7 s each. Watching `ready` would gain little and a client
-  time limit would abandon slow but working loads on a weak link, so neither
-  is built; core agrees. Tom's call if the window matters.
+  node hang 14.7 s each. **Built 2026-10-04 (Tom: "we need to fix
+  this"):** a race, not a time limit. A poster near the viewport that has
+  not loaded after `ARTWORK_HEDGE_DELAY_MS` (2000 ms) also asks the next
+  source on a different host (core's `artworkHostOf`); the first request
+  keeps going, the first to load is shown and the loser is unmounted. So a
+  silent node costs ~2 s per poster instead of ~15 s, and a slow but working
+  link is never abandoned. Core has offered to own the delay and the
+  second-source rule so the TV and phone match (asking Tom). Core's
+  `switched` latch means a silently dead chosen host costs every poster the
+  2 s until the next probe marks it unready. **Owed:** a live look against a
+  silently dropping host (a firewall DROP on one node's port from this
+  machine), counting `capability-hedged` lines and time to first poster.
 - **An https page gains less.** On an https page the http nodes are not
   candidates, so a deployed https client gains only where a nearer https
   node exists. The https layer on macnessa also adds ~1.5 RTT per request
