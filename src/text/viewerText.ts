@@ -350,6 +350,9 @@ export function playbackFailureCodeText(code: string | undefined): string | unde
       return 'The node stopped making progress starting this stream.';
     case TOO_SLOW_TO_PLAY_CODE:
       return tooSlowToPlayText();
+    // Worded here from the code: the server's message for it is a fixed "Provider unavailable".
+    case 'provider_unavailable':
+      return 'TMDB and MusicBrainz cannot be reached from the server right now. Try again in a minute.';
     default:
       return undefined;
   }

@@ -101,6 +101,11 @@ describe('what a viewer is told about an error', () => {
     expect(viewerErrorText(new MachaNoReachableEndpointError(['fi-1', 'gbni-1']))).toBe(INSECURE_FROM_SECURE_PAGE_TEXT);
   });
 
+  it('words a metadata provider being out of reach from its code, not the server\'s message', () => {
+    const refused = Object.assign(new Error('log'), { status: 503, code: 'provider_unavailable', detail: 'Provider unavailable' });
+    expect(viewerErrorText(refused)).toBe('TMDB and MusicBrainz cannot be reached from the server right now. Try again in a minute.');
+  });
+
   it('gives the server\'s own sentence when the nodes answered and refused', () => {
     const refused = Object.assign(new Error('log'), { detail: 'That file changed since matching failed.' });
     expect(viewerErrorText(new MachaClusterRouteError(['fi-1'], false, refused))).toBe('That file changed since matching failed.');
