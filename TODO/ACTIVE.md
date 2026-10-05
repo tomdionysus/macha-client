@@ -29,16 +29,16 @@ are related. Core is addressed as the `Macha Client Core` session.
 experiment and not merged). It links core's tree on core's own
 `experiment/object-ledger` (`e864856`), whose types the published core
 0.21.0 lacks, so it cannot resolve core from npm until core's next release.
-`main` is `1fa0bc4` (0.20.0), `develop` `e543e0e`. Suite **721**,
+`main` is `1fa0bc4` (0.20.0), `develop` `e543e0e`. Suite **734**,
 typecheck and build clean.
 
 **The cluster.** Corvus FI-1 (10.35.1.50:7438, also .10) and Corvus GBNI-1
 (10.44.1.50:7438; **macnessa.macha.network is GBNI-1's public front, not a
 third node**) run server **0.84.0**. Node names come from the server
 (`node_name`). es-1 and `ramaroja` have been down since 2026-09-24. Both
-nodes serve `index-Cz2VNMGA.js` from `7d0dace` (deployed 2026-10-04 00:28
-local, on Tom's word; backups `/etc/macha/web.bak-20261004-002836.tar.gz`
-on each node). FI-1 runs torrents as well as GBNI-1. FI-1's catalogue
+nodes serve `index-DGOQlBPw.js` from `8c94e41` (deployed 2026-10-05 20:53
+local, on Tom's word, against core `cb55882`; backups
+`/etc/macha/web.bak-20261005-205337.tar.gz` on each node). FI-1 runs torrents as well as GBNI-1. FI-1's catalogue
 conflict loop (section "Identify and edit") logged its last conflict at
 17:03Z on 2026-10-03; none since its restart onto 0.84.0. Matching is
 untested since.
