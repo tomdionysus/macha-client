@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore, type ReactElement } from 'react';
 import { Navigate, NavLink, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom';
-import type { CatalogueApi, CatalogueMediaProfile, ManageApi, PlaybackFactsApi } from '@machafoundation/core';
+import type { CatalogueApi, CatalogueMediaProfile, ManageApi, PlaybackFactsApi, PlaybackMediaFacts } from '@machafoundation/core';
 import type { MediaApi } from '@machafoundation/core';
 import { AppLogo } from './components/AppLogo';
 import { MusicNav } from './components/MusicNav';
@@ -114,11 +114,12 @@ function required(value: string | undefined, name: string): string {
   return value;
 }
 
-function DetailRoute({ api, onPlay, onPlayFromStart, loadVersions, onPlayVersion, progressById, parameter, onEdit, onMediaProfile }: {
+function DetailRoute({ api, onPlay, onPlayFromStart, loadFiles, versionsOf, onPlayVersion, progressById, parameter, onEdit, onMediaProfile }: {
   api: MediaApi;
   onPlay: (item: MediaSummary) => void;
   onPlayFromStart: (item: MediaSummary) => void;
-  loadVersions?: (item: MediaSummary) => Promise<PlaybackVersions>;
+  loadFiles?: (item: MediaSummary) => Promise<PlaybackMediaFacts[]>;
+  versionsOf?: (item: MediaSummary, files: PlaybackMediaFacts[]) => Promise<PlaybackVersions>;
   onPlayVersion?: (item: MediaSummary, version: VersionStep) => void;
   progressById: Map<string, PlaybackProgress>;
   parameter: 'movieId' | 'episodeId' | 'trackId' | 'itemId';
@@ -135,7 +136,8 @@ function DetailRoute({ api, onPlay, onPlayFromStart, loadVersions, onPlayVersion
       onBack={back}
       onPlay={onPlay}
       onPlayFromStart={onPlayFromStart}
-      loadVersions={loadVersions}
+      loadFiles={loadFiles}
+      versionsOf={versionsOf}
       onPlayVersion={onPlayVersion}
       progress={progressById.get(itemId)}
       onEdit={onEdit ? () => onEdit(itemId) : undefined}
@@ -391,12 +393,13 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
     qualityCeiling: deviceCeiling,
     offerAll: offerAllNow,
   }), [deviceCeiling, offerAllNow, playbackFactsApi, policyOverrides]);
+  const loadFiles = useCallback((item: MediaSummary) => playbackFactsApi.facts({ itemId: item.id }), [playbackFactsApi]);
   // The qualities a detail page offers beside Play, from the runtime's own inputs, so a button plays what it says.
-  const loadVersions = useCallback(async (item: MediaSummary): Promise<PlaybackVersions> => playbackVersions(
-    await playbackFactsApi.facts({ itemId: item.id }),
+  const versionsOf = useCallback(async (item: MediaSummary, files: PlaybackMediaFacts[]): Promise<PlaybackVersions> => playbackVersions(
+    files,
     await platform.capabilities(),
     { overrides: policyOverrides, mediaIds: item.mediaIds, ceiling: deviceCeiling(), offerAll: offerAllNow() },
-  ), [deviceCeiling, offerAllNow, platform, playbackFactsApi, policyOverrides]);
+  ), [deviceCeiling, offerAllNow, platform, policyOverrides]);
   // Times every session from its request, so the first fragment measures the node's start cost.
   const measuredResolver = useMemo(() => measureStartCosts(playbackResolver), [playbackResolver]);
   const { runtime: playbackRuntime, state: playbackRuntimeState } = usePlaybackRuntime(platform, measuredResolver, playbackRuntimeOptions);
@@ -534,7 +537,8 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
     api,
     onPlay: openPlayer,
     onPlayFromStart: openPlayerFromStart,
-    loadVersions,
+    loadFiles,
+    versionsOf,
     onPlayVersion: openPlayerVersion,
     progressById: playback.progressById,
     onEdit: metadataEditingAvailable ? openMetadataEditor : undefined,

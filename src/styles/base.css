@@ -476,6 +476,8 @@ h2 { font-size: clamp(1.2rem, 2vw, 1.75rem); letter-spacing: -.01em; margin: 1.1
 .eyebrow { color: var(--text-dim); text-transform: uppercase; letter-spacing: .12em; font-size: .78rem; }
 .subtitle { color: var(--text-dim); font-size: 1.1rem; }
 .media-profile-summary { color: var(--text-dim); font-size: .95rem; letter-spacing: .025em; }
+.media-profile-file { display: flex; align-items: center; }
+.media-profile-file > .availability-marker { vertical-align: 0; }
 .synopsis { max-width: 70ch; line-height: 1.65; font-size: clamp(1rem, 1.35vw, 1.25rem); color: #d1d1d5; }
 .primary-button, .secondary-button, .settings button {
   border: 0;
@@ -1207,7 +1209,6 @@ h2 { font-size: clamp(1.2rem, 2vw, 1.75rem); letter-spacing: -.01em; margin: 1.1
 .availability-partial, .availability-unknown { color: var(--availability-yellow); }
 .poster > .availability-marker, .episode-still > .availability-marker { position: absolute; top: .45rem; left: .45rem; z-index: 1; }
 .availability-inline { width: 1.4em; height: 1.4em; padding: .14em; margin-right: .4em; vertical-align: -.3em; }
-.availability-title { width: .95em; height: .95em; padding: .1em; vertical-align: -.1em; }
 .availability-note { margin: .2rem 0 .8rem; color: var(--text-dim); }
 .is-unavailable { cursor: not-allowed; }
 .is-unavailable .poster > :not(.availability-marker),

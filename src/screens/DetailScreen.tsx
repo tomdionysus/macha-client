@@ -1,9 +1,9 @@
 import type { MediaApi } from '@machafoundation/core';
 import { availableToPlay } from '@machafoundation/core';
-import { AvailabilityNote, titleMarker } from '../components/Availability';
+import { AvailabilityMarker, AvailabilityNote, filesMark } from '../components/Availability';
 import type { CatalogueMediaProfile } from '@machafoundation/core';
 import { PlayIcon, RestartIcon } from '../components/PlaybackIcons';
-import { fileSummaries, qualityLabel, type MediaDetails, type MediaSummary, type PlaybackProgress, type PlaybackVersions, type VersionStep } from '@machafoundation/core';
+import { fileSummaries, qualityLabel, type MediaDetails, type MediaSummary, type PlaybackMediaFacts, type PlaybackProgress, type PlaybackVersions, type VersionStep } from '@machafoundation/core';
 import { useAsync } from '../hooks/useAsync';
 import { useRefreshableAsync } from '../hooks/useRefreshableAsync';
 import { ErrorMessage, Loading } from '../components/Status';
@@ -22,8 +22,10 @@ interface Props {
   onBack: () => void;
   onPlay: (item: MediaSummary) => void;
   onPlayFromStart: (item: MediaSummary) => void;
-  /** The qualities to offer beside Play; absent offers Play alone. */
-  loadVersions?: (item: MediaSummary) => Promise<PlaybackVersions>;
+  /** The server's facts for the item's files, each with its availability; read once, for the marks and the qualities. */
+  loadFiles?: (item: MediaSummary) => Promise<PlaybackMediaFacts[]>;
+  /** The qualities to offer beside Play, from those facts; absent offers Play alone. */
+  versionsOf?: (item: MediaSummary, files: PlaybackMediaFacts[]) => Promise<PlaybackVersions>;
   onPlayVersion?: (item: MediaSummary, version: VersionStep) => void;
   progress?: PlaybackProgress;
   onEdit?: () => void;
@@ -44,7 +46,7 @@ function canResume(media: MediaSummary, progress?: PlaybackProgress): boolean {
     && Boolean(progress && progress.positionMs > 0 && progress.durationMs > 0);
 }
 
-export function DetailScreen({ api, itemId, onBack, onPlay, onPlayFromStart, loadVersions, onPlayVersion, progress, onEdit, onMediaProfile }: Props) {
+export function DetailScreen({ api, itemId, onBack, onPlay, onPlayFromStart, loadFiles, versionsOf, onPlayVersion, progress, onEdit, onMediaProfile }: Props) {
   const details = useRefreshableAsync(() => api.details(itemId), [api, itemId]);
   // Each file's profile; one that cannot be read is left out. Keyed on the ids so a background
   // refresh does not ask again.
@@ -66,12 +68,19 @@ export function DetailScreen({ api, itemId, onBack, onPlay, onPlayFromStart, loa
   useEffect(() => {
     if (firstProfile) onMediaProfile?.(firstProfile);
   }, [onMediaProfile, firstProfile]);
-  // One button per playable quality beside Play. Keyed on the item id so a background refresh does not ask again.
-  const versionsFor = details.value && hasPicture(details.value) && details.value.mediaIds.length > 0 && onPlayVersion ? details.value : undefined;
-  const versions = useAsync(
-    () => versionsFor && loadVersions ? loadVersions(versionsFor) : Promise.resolve(undefined),
-    [loadVersions, versionsFor?.id],
+  // Keyed on the item id so a background refresh does not ask again.
+  const filesFor = details.value && canPlayDirectly(details.value) && details.value.mediaIds.length > 0 ? details.value : undefined;
+  const files = useAsync(
+    () => filesFor && loadFiles ? loadFiles(filesFor) : Promise.resolve(undefined),
+    [loadFiles, filesFor?.id],
   );
+  // One button per playable quality beside Play.
+  const versionsFor = filesFor && hasPicture(filesFor) && onPlayVersion ? filesFor : undefined;
+  const versions = useAsync(
+    () => versionsFor && versionsOf && files.value ? versionsOf(versionsFor, files.value) : Promise.resolve(undefined),
+    [versionsOf, versionsFor?.id, files.value],
+  );
+  const availabilityOf = new Map(files.value?.map((file) => [file.mediaId, file.availability?.availability]) ?? []);
   if (!details.value) return <section className="detail"><div className="detail-content">
     <button className="back-button" data-tv-focusable="true" onClick={onBack} type="button">← Back</button>
     <MediaPageTitle refreshing={details.refreshing} onRefresh={details.refresh}>Media</MediaPageTitle>
@@ -86,11 +95,16 @@ export function DetailScreen({ api, itemId, onBack, onPlay, onPlayFromStart, loa
   const copy = (
     <div className="detail-copy">
       <p className="eyebrow">{media.kind}{media.year ? ` · ${media.year}` : ''}</p>
-      <MediaPageTitle leading={titleMarker(media)} refreshing={details.refreshing} onRefresh={details.refresh}>{media.title}</MediaPageTitle>
+      <MediaPageTitle refreshing={details.refreshing} onRefresh={details.refresh}>{media.title}</MediaPageTitle>
       <AvailabilityNote item={media} />
       {media.kind === 'episode' && episodeCode(media) && <p className="subtitle">{episodeCode(media)}</p>}
       {/* One line per distinct file; core combines files with identical summaries. */}
-      {profiles.value && fileSummaries(profiles.value).map(({ summary, mediaIds }) => <MediaLine key={mediaIds[0]} className="media-profile-summary" parts={summary.parts} />)}
+      {profiles.value && fileSummaries(profiles.value).map(({ summary, mediaIds }) => (
+        <div key={mediaIds[0]} className="media-profile-file">
+          <AvailabilityMarker availability={filesMark(mediaIds.map((mediaId) => availabilityOf.get(mediaId)))} kind="file" className="availability-inline" />
+          <MediaLine className="media-profile-summary" parts={summary.parts} />
+        </div>
+      ))}
       {media.synopsis && <p className="synopsis">{media.synopsis}</p>}
       {playable && (
         <div className="play-actions detail-play-controls" aria-label="Playback controls">

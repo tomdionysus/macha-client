@@ -1,5 +1,5 @@
 import type { MediaApi } from '@machafoundation/core';
-import { AvailabilityNote, titleMarker } from '../components/Availability';
+import { AvailabilityNote } from '../components/Availability';
 import { EpisodeRail } from '../components/EpisodeRail';
 import { ErrorMessage, Loading } from '../components/Status';
 import { useArtworkUrl } from '../hooks/useArtworkUrl';
@@ -50,7 +50,7 @@ export function SeasonScreen({ api, seriesId, seasonId, onBack, progress, onPlay
       <div className="detail-content season-content">
         <button className="back-button" data-tv-focusable="true" onClick={onBack} type="button">← Back</button>
         {onEdit && <EditButton onClick={onEdit} />}
-        <MediaPageTitle leading={titleMarker(season)} refreshing={result.refreshing} onRefresh={result.refresh}>{series.title}</MediaPageTitle>
+        <MediaPageTitle refreshing={result.refreshing} onRefresh={result.refresh}>{series.title}</MediaPageTitle>
         <AvailabilityNote item={season} />
         {result.error && <p className="manage-error media-refresh-error">Refresh failed: {result.error.message}</p>}
         <p className="eyebrow">{season.title || `Season ${season.seasonNumber}`}</p>

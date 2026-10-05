@@ -1,6 +1,6 @@
 import type { MediaApi } from '@machafoundation/core';
 import { availableToPlay } from '@machafoundation/core';
-import { AvailabilityMarker, AvailabilityNote, openControlProps, titleMarker } from '../components/Availability';
+import { AvailabilityMarker, AvailabilityNote, openControlProps } from '../components/Availability';
 import { OverflowMenu, type OverflowMenuAction } from '../components/OverflowMenu';
 import { ErrorMessage, Loading } from '../components/Status';
 import { useArtworkUrl } from '../hooks/useArtworkUrl';
@@ -48,7 +48,7 @@ export function AlbumScreen({ api, albumId, onBack, onPlayTrack, onPlayAll, onOp
         </div>
         <div>
           <p className="eyebrow">Album{album.year ? ` · ${album.year}` : ''}</p>
-          <MediaPageTitle leading={titleMarker(album)} refreshing={details.refreshing} onRefresh={details.refresh}>{album.title}</MediaPageTitle>
+          <MediaPageTitle refreshing={details.refreshing} onRefresh={details.refresh}>{album.title}</MediaPageTitle>
           <AvailabilityNote item={album} />
           {details.error && <p className="manage-error media-refresh-error">Refresh failed: {details.error.message}</p>}
           {album.synopsis && <p className="synopsis">{album.synopsis}</p>}

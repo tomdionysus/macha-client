@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import type { CatalogueMediaProfile, MediaApi, MediaDetails, PlaybackVersions, VersionStep } from '@machafoundation/core';
+import type { CatalogueMediaProfile, MediaApi, MediaDetails, PlaybackMediaFacts, PlaybackVersions, VersionStep } from '@machafoundation/core';
 import { DetailScreen } from './DetailScreen';
 import { settle } from '../test/settle';
 
@@ -13,12 +13,13 @@ const step = (quality: VersionStep['quality'], source: VersionStep['source']): V
   ...(source === 'transcode' ? { maxHeight: quality } : {}),
 });
 
-function show(details: MediaDetails, versions: PlaybackVersions) {
+function show(details: MediaDetails, versions: PlaybackVersions, files: PlaybackMediaFacts[] = []) {
   const api = { details: vi.fn(async () => details) } as unknown as MediaApi;
+  const loadFiles = vi.fn(async () => files);
   const loadVersions = vi.fn(async () => versions);
   const onPlayVersion = vi.fn();
-  render(<DetailScreen api={api} itemId={details.id} onBack={vi.fn()} onPlay={vi.fn()} onPlayFromStart={vi.fn()} loadVersions={loadVersions} onPlayVersion={onPlayVersion} />);
-  return { loadVersions, onPlayVersion };
+  render(<DetailScreen api={api} itemId={details.id} onBack={vi.fn()} onPlay={vi.fn()} onPlayFromStart={vi.fn()} loadFiles={loadFiles} versionsOf={loadVersions} onPlayVersion={onPlayVersion} />);
+  return { loadFiles, loadVersions, onPlayVersion };
 }
 
 const film = { id: 'film', kind: 'movie', title: 'A film', mediaIds: ['macha:big'] } as MediaDetails;
@@ -125,5 +126,25 @@ describe('files that are the same', () => {
       '2h 31m · 3840×2160 (4K) · HEVC · TRUEHD · 7.1 · 47.4 Mbps',
       '2h 31m · 1920×1080 (1080p) · H.264 · AAC · 7.1 · 8.0 Mbps',
     ]);
+  });
+});
+
+describe('which files can be played', () => {
+  const fileFacts = (mediaId: string, availability?: string) => ({ mediaId, ...(availability ? { availability: { availability } } : {}) }) as unknown as PlaybackMediaFacts;
+
+  it('marks each file line that cannot be played in full, and never the title', async () => {
+    const twoFiles = { ...film, availability: 'partial', mediaIds: ['macha:uhd', 'macha:hd'] } as MediaDetails;
+    const profiles: Record<string, CatalogueMediaProfile> = {
+      'macha:uhd': profileOf('macha:uhd', 3840, 2160, 'hevc', 'truehd', 47_400_000),
+      'macha:hd': profileOf('macha:hd', 1920, 1080, 'h264', 'aac', 8_000_000),
+    };
+    const api = { details: vi.fn(async () => twoFiles), mediaProfile: vi.fn(async (id: string) => profiles[id]) } as unknown as MediaApi;
+    const files = [fileFacts('macha:uhd', 'partial'), fileFacts('macha:hd', 'complete')];
+    const { container } = render(<DetailScreen api={api} itemId="film" onBack={vi.fn()} onPlay={vi.fn()} onPlayFromStart={vi.fn()} loadFiles={async () => files} />);
+    await settle();
+    screen.getByText(/3840×2160/);
+    expect(container.querySelector('h1 .availability-marker')).toBeNull();
+    expect([...container.querySelectorAll('.media-profile-file')].map((line) => line.querySelector('.availability-marker')?.className ?? 'none'))
+      .toEqual([expect.stringContaining('availability-partial'), 'none']);
   });
 });

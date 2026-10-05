@@ -1,5 +1,5 @@
 import type { MediaApi } from '@machafoundation/core';
-import { AvailabilityNote, titleMarker } from '../components/Availability';
+import { AvailabilityNote } from '../components/Availability';
 import { MediaCard, type MediaCardAction } from '../components/MediaCard';
 import { ErrorMessage, Loading } from '../components/Status';
 import { useArtworkUrl } from '../hooks/useArtworkUrl';
@@ -49,7 +49,7 @@ export function ArtistScreen({ api, artistId, onBack, onOpenAlbum, onAddToPlayli
         <button className="back-button" data-tv-focusable="true" onClick={onBack} type="button">← Music</button>
         {onEdit && <EditButton onClick={onEdit} />}
         <p className="eyebrow">Artist</p>
-        <MediaPageTitle leading={titleMarker(artist)} refreshing={details.refreshing} onRefresh={details.refresh}>{artist.title}</MediaPageTitle>
+        <MediaPageTitle refreshing={details.refreshing} onRefresh={details.refresh}>{artist.title}</MediaPageTitle>
         <AvailabilityNote item={artist} />
         {details.error && <p className="manage-error media-refresh-error">Refresh failed: {details.error.message}</p>}
         {artist.synopsis && <p className="synopsis">{artist.synopsis}</p>}

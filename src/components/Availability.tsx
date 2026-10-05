@@ -25,8 +25,8 @@ function Icon({ mark }: { mark: AvailabilityMark }) {
   if (mark === 'partial') {
     return (
       <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M12 3.5 2.5 20h19L12 3.5Z" {...line} />
-        <path d="M12 10v4.5M12 17.2v.1" {...line} />
+        <path d="M12 2.5 2.5 19h19L12 2.5Z" {...line} />
+        <path d="M12 9v4.5M12 16.2v.1" {...line} />
       </svg>
     );
   }
@@ -50,7 +50,8 @@ function Icon({ mark }: { mark: AvailabilityMark }) {
 export function AvailabilityMarker({ availability, members, kind, className }: {
   availability: Availability | undefined;
   members?: AvailabilityMembers;
-  kind?: MediaKind;
+  /** `file` for one of a title's files rather than the title. */
+  kind?: MediaKind | 'file';
   className?: string;
 }) {
   const mark = availabilityMark(availability);
@@ -69,7 +70,13 @@ export function AvailabilityNote({ item }: { item: { availability?: Availability
   return <p className="availability-note">{availabilityText('unavailable', item.kind, item.availabilityMembers)}</p>;
 }
 
-/** A page title's marker, for `MediaPageTitle`'s `leading`. */
-export function titleMarker(item: { availability?: Availability; availabilityMembers?: AvailabilityMembers; kind?: MediaKind }) {
-  return <AvailabilityMarker availability={item.availability} members={item.availabilityMembers} kind={item.kind} className="availability-inline availability-title" />;
+/**
+ * One file line's mark, for files core has combined because their summaries match: unavailable
+ * only when none of them can play, partial when some of them are short, else unknown or none.
+ */
+export function filesMark(availabilities: readonly (Availability | undefined)[]): AvailabilityMark | undefined {
+  const marks = availabilities.map(availabilityMark);
+  if (marks.length > 0 && marks.every((mark) => mark === 'unavailable')) return 'unavailable';
+  if (marks.some((mark) => mark === 'partial' || mark === 'unavailable')) return 'partial';
+  return marks.includes('unknown') ? 'unknown' : undefined;
 }
