@@ -36,9 +36,9 @@ typecheck and build clean.
 (10.44.1.50:7438; **macnessa.macha.network is GBNI-1's public front, not a
 third node**) run server **0.84.0**. Node names come from the server
 (`node_name`). es-1 and `ramaroja` have been down since 2026-09-24. Both
-nodes serve `index-DGOQlBPw.js` from `8c94e41` (deployed 2026-10-05 20:53
+nodes serve `index-DamXWl6U.js` from `2dc22b8` (deployed 2026-10-05 22:23
 local, on Tom's word, against core `cb55882`; backups
-`/etc/macha/web.bak-20261005-205337.tar.gz` on each node). FI-1 runs torrents as well as GBNI-1. FI-1's catalogue
+`/etc/macha/web.bak-20261005-222340.tar.gz` on each node). FI-1 runs torrents as well as GBNI-1. FI-1's catalogue
 conflict loop (section "Identify and edit") logged its last conflict at
 17:03Z on 2026-10-03; none since its restart onto 0.84.0. Matching is
 untested since.
