@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import {
   identifyUnmatched,
   mutationOutcomeUnknown,
+  playbackFailureCode,
   type ManageApi,
   type ManualMetadataResult,
   type ProviderArtworkOption,
@@ -12,7 +13,7 @@ import {
   type UnmatchedFile,
 } from '@machafoundation/core';
 import { Waiting } from '../../components/Status';
-import { FolderFiles, onRelease, type FileStatus, type FolderSet, type ReleaseTracks } from './FolderFiles';
+import { FolderFiles, onRelease, trackText, type FileStatus, type FolderSet, type ReleaseTracks } from './FolderFiles';
 import { albumSet, folderSiblings, seriesSet, type Sibling } from './folderSiblings';
 import { viewerErrorText } from '../../text/viewerText';
 import { NumberField, numberText, wholeNumber } from './fields';
@@ -47,6 +48,21 @@ export function providerMatchTarget(result: Pick<ProviderSearchResult, 'ref' | '
     return { ref: result.ref, track_number: numbers.track, ...(numbers.disc != null ? { disc_number: numbers.disc } : {}) };
   }
   return { ref: result.ref };
+}
+
+/**
+ * A refused match in this client's words. A record without the numbers asked for says
+ * which numbers; an episode 0 is usually a special, which TMDB numbers under season 0.
+ */
+export function matchRefusalText(cause: unknown, record: Pick<ProviderSearchResult, 'title' | 'provider'>, target: ProviderMatchRef): string {
+  if (playbackFailureCode(cause) !== 'provider_not_found') return viewerErrorText(cause);
+  const provider = PROVIDER_LABEL[record.provider] ?? record.provider;
+  if (target.episode_number != null) {
+    const asked = `${provider} has no season ${target.season_number} episode ${target.episode_number} of ${record.title}.`;
+    return target.episode_number === 0 ? `${asked} ${provider} lists specials under season 0: enter the special's season 0 episode number.` : asked;
+  }
+  if (target.track_number != null) return `${provider} has no ${trackText(target.track_number, target.disc_number)} on this release.`;
+  return viewerErrorText(cause);
 }
 
 /**
@@ -169,7 +185,7 @@ export function ProviderRecord({ releases, file, manage, numbers: initial, disab
         await identifyUnmatched(manage, sibling.file.id, { from: 'provider', target: siblingRef });
         mark(sibling.file.id, 'matched');
       } catch (cause) {
-        mark(sibling.file.id, { left: viewerErrorText(cause) });
+        mark(sibling.file.id, { left: matchRefusalText(cause, result, siblingRef) });
         left = true;
         unanswered = mutationOutcomeUnknown(cause);
       }
@@ -191,7 +207,7 @@ export function ProviderRecord({ releases, file, manage, numbers: initial, disab
       mark(file.id, 'matched');
     } catch (cause) {
       setStatuses({});
-      setError(viewerErrorText(cause));
+      setError(matchRefusalText(cause, result, target));
       setBusy(false);
       return;
     }

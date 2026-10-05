@@ -161,6 +161,19 @@ describe('suggestions, where identifying a file starts', () => {
     ]);
   });
 
+  it('says which episode the provider lacks when a match is refused for it, and where an episode 0 special is', async () => {
+    const { manage } = show([probe({ kind: 'episode', title: 'Making of', series: 'A Series', season_number: 2, episode_number: 0 })], { providerResults: [series] });
+    vi.mocked(manage.matchProvider).mockRejectedValue(Object.assign(new Error('log'), { status: 404, code: 'provider_not_found' }));
+    await settle();
+    const row = rowOf('A Series · 2010', suggestions());
+    fireEvent.click(within(row).getByRole('button', { name: 'Use this' }));
+    await settle();
+    fireEvent.click(within(row).getByRole('button', { name: 'Match' }));
+    await settle();
+    expect(manage.matchProvider).toHaveBeenCalledWith('f1', { ref: 'tmdb:tv:42', season_number: 2, episode_number: 0 });
+    expect(within(row).getByRole('alert').textContent).toBe('TMDB has no season 2 episode 0 of A Series. TMDB lists specials under season 0: enter the special\'s season 0 episode number.');
+  });
+
   it('asks for the episode a series record needs when the file did not say, and its stills once it has it', async () => {
     const { manage } = show([probe({ kind: 'episode', title: 'Pilot', series: 'A Series', season_number: 1, episode_number: null })], { providerResults: [series] });
     await settle();
