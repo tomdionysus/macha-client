@@ -12,8 +12,8 @@ import {
   type UnmatchedFile,
 } from '@machafoundation/core';
 import { Waiting } from '../../components/Status';
-import { AlbumFiles, onRelease, type FileStatus, type ReleaseTracks } from './AlbumFiles';
-import { albumSiblings, type Sibling } from './folderSiblings';
+import { FolderFiles, onRelease, type FileStatus, type FolderSet, type ReleaseTracks } from './FolderFiles';
+import { albumSet, folderSiblings, seriesSet, type Sibling } from './folderSiblings';
 import { viewerErrorText } from '../../text/viewerText';
 import { NumberField, numberText, wholeNumber } from './fields';
 import { pacedArtwork, pictureRelease } from './providerLookup';
@@ -75,9 +75,9 @@ export function ProviderRecord({ releases, file, manage, numbers: initial, disab
   const [busy, setBusy] = useState(false);
   const [matched, setMatched] = useState(false);
   const [error, setError] = useState<string>();
-  // The album's other files in this folder; undefined while looked for.
+  // The album's or series' other files in this folder; undefined while looked for.
   const [siblings, setSiblings] = useState<Sibling[]>();
-  // Siblings to match too: initially every one that states its track.
+  // Siblings to match too: initially every one that states its track or episode.
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   const [statuses, setStatuses] = useState<Record<string, FileStatus>>({});
   const [someLeft, setSomeLeft] = useState(false);
@@ -95,6 +95,13 @@ export function ProviderRecord({ releases, file, manage, numbers: initial, disab
 
   const numbers: RecordNumbers = { season: wholeNumber(season), episode: wholeNumber(episode), disc: wholeNumber(disc), track: wholeNumber(track) };
   const target = providerMatchTarget(result, numbers);
+  const set: FolderSet | undefined = result.kind === 'album' ? 'album' : result.kind === 'show' ? 'season' : undefined;
+  // A series' files follow only into the season this file is being matched to.
+  const shown = set === 'season' ? siblings?.filter((sibling) => sibling.group === numbers.season) : siblings;
+  /** Where a sibling goes in the record, as this file's numbers say it for this file. */
+  const siblingTarget = (sibling: Sibling) => providerMatchTarget(result, set === 'album'
+    ? { track: sibling.number, disc: sibling.group }
+    : { season: numbers.season, episode: sibling.number });
   // An episode's pictures are its stills, so they are asked for once its numbers are known.
   const picturesKey = open && typeof target !== 'string' ? `${target.season_number ?? ''}|${target.episode_number ?? ''}` : undefined;
 
@@ -112,17 +119,17 @@ export function ProviderRecord({ releases, file, manage, numbers: initial, disab
   }, [manage, result, picturesKey]);
 
   useEffect(() => {
-    if (!open || result.kind !== 'album' || siblings !== undefined) return undefined;
+    if (!open || !set || siblings !== undefined) return undefined;
     let cancelled = false;
-    void albumSiblings(manage, file, result.title, result.artist)
+    void folderSiblings(manage, file, set === 'album' ? albumSet(result.title, result.artist) : seriesSet(result.title))
       .catch(() => [])
       .then((found) => {
         if (cancelled) return;
         setSiblings(found);
-        setSelected(new Set(found.filter((sibling) => sibling.track != null).map((sibling) => sibling.file.id)));
+        setSelected(new Set(found.filter((sibling) => sibling.number != null).map((sibling) => sibling.file.id)));
       });
     return () => { cancelled = true; };
-  }, [open, result, siblings, manage, file]);
+  }, [open, set, result, siblings, manage, file]);
 
   useEffect(() => {
     if (!open || result.kind !== 'album') return undefined;
@@ -139,17 +146,19 @@ export function ProviderRecord({ releases, file, manage, numbers: initial, disab
     if (!Array.isArray(tracks) || siblings === undefined) return;
     setSelected((current) => new Set([...current].filter((id) => {
       const sibling = siblings.find((candidate) => candidate.file.id === id);
-      return !sibling || onRelease(tracks, sibling.track, sibling.disc) !== null;
+      return !sibling || onRelease(tracks, sibling.number, sibling.group) !== null;
     })));
   }, [tracks, siblings]);
 
   const mark = (id: string, status: FileStatus) => setStatuses((current) => ({ ...current, [id]: status }));
 
-  /** Matches the chosen siblings in turn against the same release, each by its own track. Answers whether any was left unmatched. */
-  const matchSiblings = async (ref: string): Promise<boolean> => {
+  /** Matches the chosen siblings in turn against the same record, each by its own number. Answers whether any was left unmatched. */
+  const matchSiblings = async (): Promise<boolean> => {
     let left = false;
     let unanswered = false;
-    for (const sibling of (siblings ?? []).filter((candidate) => selected.has(candidate.file.id) && candidate.track != null)) {
+    for (const sibling of (shown ?? []).filter((candidate) => selected.has(candidate.file.id) && candidate.number != null)) {
+      const siblingRef = siblingTarget(sibling);
+      if (typeof siblingRef === 'string') continue;
       // An unanswered change is still running on the server; the next would queue behind it and end in a conflict.
       if (unanswered) {
         mark(sibling.file.id, { left: 'not tried, because the server did not answer the one before.' });
@@ -157,9 +166,7 @@ export function ProviderRecord({ releases, file, manage, numbers: initial, disab
       }
       mark(sibling.file.id, 'matching');
       try {
-        await identifyUnmatched(manage, sibling.file.id, {
-          from: 'provider', target: { ref, track_number: sibling.track!, ...(sibling.disc != null ? { disc_number: sibling.disc } : {}) },
-        });
+        await identifyUnmatched(manage, sibling.file.id, { from: 'provider', target: siblingRef });
         mark(sibling.file.id, 'matched');
       } catch (cause) {
         mark(sibling.file.id, { left: viewerErrorText(cause) });
@@ -200,7 +207,7 @@ export function ProviderRecord({ releases, file, manage, numbers: initial, disab
         return;
       }
     }
-    if (await matchSiblings(target.ref)) {
+    if (await matchSiblings()) {
       // This file is matched and cannot be redone; each row says what was left.
       setMatched(true);
       setBusy(false);
@@ -241,13 +248,15 @@ export function ProviderRecord({ releases, file, manage, numbers: initial, disab
               </div>
             )}
             <Pictures options={picturesKey === undefined ? [] : options} optionId={optionId} disabled={held} onChoose={setOptionId} />
-            {result.kind === 'album' && (
-              <AlbumFiles
-                release={result}
+            {set && (
+              <FolderFiles
+                set={set}
+                record={result}
+                provider={PROVIDER_LABEL[result.provider] ?? result.provider}
                 file={file}
-                track={numbers.track}
-                disc={numbers.disc}
-                siblings={siblings}
+                number={set === 'album' ? numbers.track : numbers.episode}
+                group={set === 'album' ? numbers.disc : numbers.season}
+                siblings={shown}
                 tracks={tracks}
                 selected={selected}
                 statuses={statuses}
@@ -258,7 +267,7 @@ export function ProviderRecord({ releases, file, manage, numbers: initial, disab
             {error && <p className="manage-error" role="alert">{error}</p>}
             {someLeft && (
               <div className="manage-error" role="alert">
-                <p>Some of the album's files could not be matched; each says why above.</p>
+                <p>Some of the {set === 'album' ? 'album' : 'season'}'s files could not be matched; each says why above.</p>
                 <button className="secondary-button" type="button" onClick={onResolved} data-tv-focusable="true">Back to the list</button>
               </div>
             )}

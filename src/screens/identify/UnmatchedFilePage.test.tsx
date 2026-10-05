@@ -129,6 +129,38 @@ describe('suggestions, where identifying a file starts', () => {
     screen.getByText('the list');
   });
 
+  it('lists the season\'s other files in the folder and matches the chosen ones to the same series, each by its episode', async () => {
+    const episodeOf = (season: number | null, n: number | null) => [probe({ kind: 'episode', title: `E${n}`, series: 'A Series', season_number: season, episode_number: n })];
+    const { manage } = show(episodeOf(1, 1), { providerResults: [series] });
+    const sibling = (id: string, name: string): UnmatchedFile => ({ ...file, id, path: `/incoming/${name}` });
+    vi.mocked(manage).unmatched = vi.fn(async () => [file, sibling('f2', 'e02.mkv'), sibling('f3', 'e03.mkv'), sibling('f4', 's2e01.mkv'), sibling('f5', 'other.mkv')]);
+    const details: Record<string, MediaProbeCandidate[]> = {
+      f1: episodeOf(1, 1),
+      f2: episodeOf(1, 2),
+      f3: episodeOf(1, null),
+      f4: episodeOf(2, 1),
+      f5: [probe({ kind: 'episode', title: 'X', series: 'Another Series', season_number: 1, episode_number: 5 })],
+    };
+    vi.mocked(manage.unmatchedDetail).mockImplementation(async (id: string) => ({ item: file, probes: details[id] ?? [] }));
+    await settle();
+    const row = rowOf('A Series · 2010', suggestions());
+    fireEvent.click(within(row).getByRole('button', { name: 'Use this' }));
+    await settle();
+    const files = within(row.querySelector('.identify-album-files') as HTMLElement);
+    expect(files.getAllByRole('row').map((tr) => tr.textContent)).toEqual([
+      'some.file.mkv (this file)A Series · episode 1',
+      'e02.mkvA Series · episode 2',
+      'e03.mkvA Series · no episode number',
+    ]);
+    expect((files.getByLabelText('Match e03.mkv') as HTMLInputElement).disabled).toBe(true);
+    fireEvent.click(within(row).getByRole('button', { name: 'Match' }));
+    await settle();
+    expect(vi.mocked(manage.matchProvider).mock.calls).toEqual([
+      ['f1', { ref: 'tmdb:tv:42', season_number: 1, episode_number: 1 }],
+      ['f2', { ref: 'tmdb:tv:42', season_number: 1, episode_number: 2 }],
+    ]);
+  });
+
   it('asks for the episode a series record needs when the file did not say, and its stills once it has it', async () => {
     const { manage } = show([probe({ kind: 'episode', title: 'Pilot', series: 'A Series', season_number: 1, episode_number: null })], { providerResults: [series] });
     await settle();
