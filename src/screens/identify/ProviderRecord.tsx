@@ -112,12 +112,14 @@ export function ProviderRecord({ releases, file, manage, numbers: initial, disab
   const numbers: RecordNumbers = { season: wholeNumber(season), episode: wholeNumber(episode), disc: wholeNumber(disc), track: wholeNumber(track) };
   const target = providerMatchTarget(result, numbers);
   const set: FolderSet | undefined = result.kind === 'album' ? 'album' : result.kind === 'show' ? 'season' : undefined;
-  // A series' files follow only into the season this file is being matched to.
-  const shown = set === 'season' ? siblings?.filter((sibling) => sibling.group === numbers.season) : siblings;
-  /** Where a sibling goes in the record, as this file's numbers say it for this file. */
+  // A series' files follow from the season the file itself names, which a special matched
+  // under season 0 does not change; failing that, the season entered.
+  const folderSeason = initial.season ?? numbers.season;
+  const shown = set === 'season' ? siblings?.filter((sibling) => sibling.group === folderSeason) : siblings;
+  /** Where a sibling goes in the record, by its own numbers. */
   const siblingTarget = (sibling: Sibling) => providerMatchTarget(result, set === 'album'
     ? { track: sibling.number, disc: sibling.group }
-    : { season: numbers.season, episode: sibling.number });
+    : { season: sibling.group, episode: sibling.number });
   // An episode's pictures are its stills, so they are asked for once its numbers are known.
   const picturesKey = open && typeof target !== 'string' ? `${target.season_number ?? ''}|${target.episode_number ?? ''}` : undefined;
 

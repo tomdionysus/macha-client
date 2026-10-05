@@ -174,6 +174,29 @@ describe('suggestions, where identifying a file starts', () => {
     expect(within(row).getByRole('alert').textContent).toBe('TMDB has no season 2 episode 0 of A Series. TMDB lists specials under season 0: enter the special\'s season 0 episode number.');
   });
 
+  it('keeps the folder\'s season when the file is a special matched under season 0, each file by its own numbers', async () => {
+    const episodeOf = (season: number, n: number) => [probe({ kind: 'episode', title: `E${n}`, series: 'A Series', season_number: season, episode_number: n })];
+    const { manage } = show(episodeOf(2, 0), { providerResults: [series] });
+    const sibling = (id: string, name: string): UnmatchedFile => ({ ...file, id, path: `/incoming/${name}` });
+    vi.mocked(manage).unmatched = vi.fn(async () => [file, sibling('f2', 's2e01.mkv'), sibling('f3', 's2e02.mkv')]);
+    const details: Record<string, MediaProbeCandidate[]> = { f1: episodeOf(2, 0), f2: episodeOf(2, 1), f3: episodeOf(2, 2) };
+    vi.mocked(manage.unmatchedDetail).mockImplementation(async (id: string) => ({ item: file, probes: details[id] ?? [] }));
+    await settle();
+    const row = rowOf('A Series · 2010', suggestions());
+    fireEvent.click(within(row).getByRole('button', { name: 'Use this' }));
+    await settle();
+    fireEvent.change(within(row).getByLabelText('Season'), { target: { value: '0' } });
+    fireEvent.change(within(row).getByLabelText('Episode'), { target: { value: '7' } });
+    await settle();
+    fireEvent.click(within(row).getByRole('button', { name: 'Match' }));
+    await settle();
+    expect(vi.mocked(manage.matchProvider).mock.calls).toEqual([
+      ['f1', { ref: 'tmdb:tv:42', season_number: 0, episode_number: 7 }],
+      ['f2', { ref: 'tmdb:tv:42', season_number: 2, episode_number: 1 }],
+      ['f3', { ref: 'tmdb:tv:42', season_number: 2, episode_number: 2 }],
+    ]);
+  });
+
   it('asks for the episode a series record needs when the file did not say, and its stills once it has it', async () => {
     const { manage } = show([probe({ kind: 'episode', title: 'Pilot', series: 'A Series', season_number: 1, episode_number: null })], { providerResults: [series] });
     await settle();
