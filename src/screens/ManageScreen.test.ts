@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { pathBreadcrumbs, sortUnmatched } from './ManageScreen';
+import { endpointFailure, MachaConnectionError, MachaRequestTimeoutError } from '@machafoundation/core';
+import { deleteInTurn, deleteOutcomeText, pathBreadcrumbs, sortUnmatched } from './ManageScreen';
 import { candidateAlreadyCatalogued } from './identify/UnmatchedFilePage';
 import { runBulkOperation } from '../components/ListParts';
 import type { ManageCatalogueMatch, MediaProbeCandidate, UnmatchedFile } from '@machafoundation/core';
@@ -95,5 +96,50 @@ describe('the unmatched list order', () => {
   it('sorts by size and attempts, largest first', () => {
     expect(ids(sortUnmatched(files, { key: 'size', direction: 'desc' }))).toEqual(['b', 'c', 'a']);
     expect(ids(sortUnmatched(files, { key: 'attempts', direction: 'desc' }))).toEqual(['b', 'a', 'c']);
+  });
+});
+
+describe('deleting unmatched files', () => {
+  const gone = Object.assign(new Error('log'), { status: 404 });
+  const stale = Object.assign(new Error('log'), { status: 409, detail: 'The file there has changed.' });
+  const timedOut = endpointFailure('fi-1', 'http://fi-1', new MachaRequestTimeoutError('exceeded 30000 ms', 30_000));
+
+  it('sends one delete at a time, never a burst', async () => {
+    let running = 0;
+    let most = 0;
+    await deleteInTurn(['a', 'b', 'c'], async () => {
+      running += 1;
+      most = Math.max(most, running);
+      await Promise.resolve();
+      running -= 1;
+    }, () => undefined);
+    expect(most).toBe(1);
+  });
+
+  it('counts a file already gone as deleted, and keeps a refusal with its reason', async () => {
+    const failures: Record<string, unknown> = { b: gone, c: stale, d: timedOut };
+    const progress: number[] = [];
+    const outcome = await deleteInTurn(['a', 'b', 'c', 'd'], async (id) => { if (failures[id]) throw failures[id]; }, (done) => progress.push(done));
+    expect(progress).toEqual([0, 1, 2, 3]);
+    expect(outcome).toEqual({ refused: [{ id: 'c', reason: 'The file there has changed.' }], unanswered: ['d'] });
+  });
+
+  it('judges a delete that went unanswered by whether the file is still listed', () => {
+    const outcome = { refused: [], unanswered: ['d'] };
+    expect(deleteOutcomeText(outcome, 4, new Set())).toBeUndefined();
+    expect(deleteOutcomeText(outcome, 4, new Set(['d']))).toBe('1 of 4 files had no answer in time and may still be deleted: refresh in a minute.');
+  });
+
+  it('names each reason once however many files were refused for it', () => {
+    const refusal = (id: string) => ({ id, reason: 'The file there has changed.' });
+    expect(deleteOutcomeText({ refused: [refusal('a'), refusal('b')], unanswered: [] }, 5, new Set()))
+      .toBe('2 of 5 files were not deleted: The file there has changed.');
+  });
+
+  it('calls a refused connection a refusal, since nothing was done', async () => {
+    const refused = endpointFailure('fi-1', 'http://fi-1', new MachaConnectionError('connection refused'));
+    const outcome = await deleteInTurn(['a'], async () => { throw refused; }, () => undefined);
+    expect(outcome.unanswered).toEqual([]);
+    expect(outcome.refused).toHaveLength(1);
   });
 });

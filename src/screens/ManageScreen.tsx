@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type MouseEvent, type ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { routes } from '@machafoundation/core';
+import { mutationOutcomeUnknown, playbackFailureStatus, routes } from '@machafoundation/core';
 import { BulkActions, ListHeading, Pager, runBulkOperation, SelectPageBox, SelectRowBox, useListSelection } from '../components/ListParts';
 import { pageSlice } from '../lists/paging';
 import { SortControl, SortHeader, useListSort } from '../components/ListSortControls';
@@ -72,6 +72,41 @@ function folderOf(path: string): string {
   return slash > 0 ? path.slice(0, slash) : '/';
 }
 
+/** How a run of deletes went: refusals with the node's reason, and deletes that ran out of time and may still finish. */
+export interface DeleteOutcome {
+  refused: { id: string; reason: string }[];
+  unanswered: string[];
+}
+
+/**
+ * Deletes one file after another: a node commits management writes in turn, so a burst sent at
+ * once only queues behind itself. A 404 is the file already gone, which is what was asked.
+ */
+export async function deleteInTurn(ids: readonly string[], remove: (id: string) => Promise<void>, onProgress: (done: number) => void): Promise<DeleteOutcome> {
+  const outcome: DeleteOutcome = { refused: [], unanswered: [] };
+  for (const [index, id] of ids.entries()) {
+    onProgress(index);
+    try {
+      await remove(id);
+    } catch (cause) {
+      if (mutationOutcomeUnknown(cause)) outcome.unanswered.push(id);
+      else if (playbackFailureStatus(cause) !== 404) outcome.refused.push({ id, reason: viewerErrorText(cause) });
+    }
+  }
+  return outcome;
+}
+
+/** What to tell the viewer once the list has been read again; undefined when every file went. */
+export function deleteOutcomeText(outcome: DeleteOutcome, total: number, present: ReadonlySet<string>): string | undefined {
+  const pending = outcome.unanswered.filter((id) => present.has(id)).length;
+  const reasons = [...new Set(outcome.refused.map((refusal) => refusal.reason))];
+  const parts = [
+    outcome.refused.length > 0 ? `${outcome.refused.length} of ${total} files were not deleted: ${reasons.join(' ')}` : undefined,
+    pending > 0 ? `${pending} of ${total} files had no answer in time and may still be deleted: refresh in a minute.` : undefined,
+  ].filter(Boolean);
+  return parts.length > 0 ? parts.join(' ') : undefined;
+}
+
 /** The unmatched files as a sortable, paged list with bulk retry and delete; each file opens on its own page. */
 function UnmatchedManager({ api }: { api: ManageApi }) {
   const navigate = useNavigate();
@@ -85,12 +120,14 @@ function UnmatchedManager({ api }: { api: ManageApi }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const [deleteIds, setDeleteIds] = useState<string[]>([]);
+  const [deleted, setDeleted] = useState<number>();
 
   const reload = useCallback(async () => {
     setError(undefined);
     try {
       const next = await api.unmatched();
       setItems(next);
+      return next;
     } catch (cause) {
       setError(viewerErrorText(cause));
     } finally {
@@ -122,10 +159,13 @@ function UnmatchedManager({ api }: { api: ManageApi }) {
     if (ids.length === 0) return;
     setBusy(true);
     setError(undefined);
-    const failed = await runBulkOperation(ids, (id) => api.deleteUnmatched(id));
+    const outcome = await deleteInTurn(ids, (id) => api.deleteUnmatched(id), setDeleted);
+    setDeleted(undefined);
     setDeleteIds([]);
-    await reload();
-    if (failed) setError(`${failed} of ${ids.length} files could not be deleted.`);
+    const listed = await reload();
+    // Without a list, a delete that went unanswered cannot be called done.
+    const text = deleteOutcomeText(outcome, ids.length, new Set(listed ? listed.map((item) => item.id) : outcome.unanswered));
+    if (text) setError(text);
     setBusy(false);
   }, [api, deleteIds, reload]);
 
@@ -219,6 +259,7 @@ function UnmatchedManager({ api }: { api: ManageApi }) {
         onConfirm={() => void deleteChecked()}
       >
         <p>This permanently removes {deleteIds.length === 1 ? 'the selected file' : 'the selected files'} from MachaDFS.</p>
+        {deleted !== undefined && deleteIds.length > 1 && <p role="status">Deleting {deleted + 1} of {deleteIds.length}…</p>}
       </ConfirmModal>
     </section>
   );

@@ -162,7 +162,7 @@ const JOB_ERRORS: Record<TorrentJobErrorCode, string> = {
   destination_conflict: 'A file of that name is already stored there.',
   namespace_short_write: 'The copy was cut short while it was written.',
   size_mismatch: 'The copy is not the same size as the source.',
-  metadata_unavailable: 'The file\'s details could not be read.',
+  metadata_unavailable: 'The data it needs is on no node that is up right now.',
   filesystem_error: 'A storage error stopped the import.',
   import_failed: 'The import failed.',
   restore_failed: 'The torrent could not be restored after a restart.',
@@ -535,7 +535,7 @@ export function qualityChoiceText(versions: Pick<PlaybackVersions, 'files' | 'au
 }
 
 const AVAILABILITY_NOUN: Record<string, string> = {
-  movie: 'film', show: 'series', season: 'season', episode: 'episode', artist: 'artist\'s music', album: 'album', track: 'track',
+  movie: 'film', show: 'series', season: 'season', episode: 'episode', artist: 'artist\'s music', album: 'album', track: 'track', file: 'file',
 };
 const MEMBER_NOUN: Record<string, string> = { show: 'episodes', season: 'episodes', artist: 'tracks', album: 'tracks' };
 

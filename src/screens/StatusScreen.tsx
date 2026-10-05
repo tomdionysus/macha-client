@@ -490,7 +490,7 @@ export function StatusScreen({ api, endpointRegistry, manageApi, platform, secti
       </div>}
       <div className="metric-grid">
         <MetricTile label="Nodes" value={`${cluster.nodes_online} / ${cluster.nodes_known}`} detail="online" />
-        <MetricTile label="Metadata" value={cluster.metadata_availability === 'writable' ? 'Writable' : cluster.metadata_availability === 'read-only' ? 'Read-only' : 'Unavailable'} detail={`${cluster.metadata_voters_online}/${cluster.metadata_voters} voters · ${cluster.metadata_quorum_required} required`} />
+        <MetricTile label="Metadata" value={cluster.metadata_availability === 'writable' ? 'Writable' : cluster.metadata_availability === 'read-only' ? 'Read-only' : 'Unavailable'} detail={`${cluster.metadata_voters_online}/${cluster.metadata_voters} voters`} />
         <MetricTile label="Durable storage" value={usedOfTotal(cluster.storage_known)} detail={availableOfTotal(cluster.storage_online, cluster.storage_known)} />
         <MetricTile label="Cache" value={cluster.cache_known.capacity_bytes ? usedOfTotal(cluster.cache_known) : 'None'} detail={cluster.cache_known.capacity_bytes ? availableOfTotal(cluster.cache_online, cluster.cache_known) : undefined} />
       </div>
