@@ -89,6 +89,16 @@ each node card and node page shows "Repair", asked of that node through
 nodes run 0.87.0 (both on 0.85.0 at 14:33 local): an album match with a
 real release, and the Repair line on both nodes during playback.
 
+**Metadata editor: unmatch and delete per file** (Tom, 2026-10-05, relayed
+by the Server). The editor already lists a title's files; each gets Unmatch
+(off this title and straight into the unmatched list, no automatic rematch;
+a title left with no files is deleted, with any season, show or album left
+empty) and Delete file (that path only, same clean-up); a delete by content
+removes every path holding it. Server routes to come, then core's wrappers;
+**do not stitch** PATCH media_ids, deletePath and DELETE item together: a
+dropped file is listed nowhere, and a path delete unbinds only at the next
+scan (Server's reading of 0.90.13).
+
 **Two business P0s outrank the rest:** slow artwork (host choice and caching
 fixed 2026-09-24; the server's slow first read and poster size remain, and
 the posters lost with es-1), and scope-ratio titles playing small in a black
