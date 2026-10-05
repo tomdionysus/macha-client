@@ -39,6 +39,21 @@ describe('an item\'s files', () => {
     expect(screen.queryByRole('button', { name: 'Add a file' })).toBeNull();
   });
 
+  it('marks each file that cannot be played in full, with what it means', async () => {
+    const partial = { ...file('m1', '/a.mkv', 1920, 'h264'), availability: { availability: 'partial' } } as PlaybackMediaFacts;
+    const unavailable = { ...file('m2', '/b.mkv', 3840, 'hevc'), availability: { availability: 'unavailable' } } as PlaybackMediaFacts;
+    const complete = { ...file('m3', '/c.mkv', 1920, 'h264'), availability: { availability: 'complete' } } as PlaybackMediaFacts;
+    const facts = { facts: vi.fn(async () => [partial, unavailable, complete]) } as unknown as PlaybackFactsApi;
+    render(<ItemFiles item={item()} facts={facts} />);
+    await settle();
+    const rows = within(screen.getByRole('list')).getAllByRole('listitem');
+    expect(rows.map((row) => row.querySelector('.availability-marker')?.getAttribute('aria-label') ?? 'none')).toEqual([
+      'Part of this file is held only by servers that can\'t be reached right now, so it may stop before the end.',
+      'This file is held only by servers that can\'t be reached right now, so it can\'t be played.',
+      'none',
+    ]);
+  });
+
   it('shows nothing for an item that holds children rather than files', () => {
     const facts = { facts: vi.fn() } as unknown as PlaybackFactsApi;
     const { container } = render(<ItemFiles item={item({ kind: 'show', media_ids: [] })} facts={facts} />);

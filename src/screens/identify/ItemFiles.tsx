@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { identifyUnmatched, type CatalogueItem, type ManageApi, type PlaybackFactsApi, type PlaybackMediaFacts, type UnmatchedFile } from '@machafoundation/core';
+import { AvailabilityMarker } from '../../components/Availability';
 import { Modal } from '../../components/Modal';
 import { fileName, formatBytes } from '../ingest/format';
 import { playbackTimeText, viewerErrorText } from '../../text/viewerText';
@@ -59,7 +60,10 @@ export function ItemFiles({ item, facts, manage }: { item: CatalogueItem; facts:
             <ul className="item-files-list">
               {files.map((file, index) => (
                 <li key={file.mediaId}>
-                  <strong title={file.path}>{nameOf(file.path, `File ${index + 1}`)}</strong>
+                  <strong title={file.path}>
+                    <AvailabilityMarker availability={file.availability?.availability} kind="file" className="availability-inline" />
+                    {nameOf(file.path, `File ${index + 1}`)}
+                  </strong>
                   <span>{[fileSummary(file), file.profile.durationMs ? playbackTimeText(file.profile.durationMs) : '', file.sizeBytes ? formatBytes(file.sizeBytes) : ''].filter(Boolean).join(' · ')}</span>
                 </li>
               ))}

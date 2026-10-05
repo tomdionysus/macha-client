@@ -126,7 +126,7 @@
 .item-files-list, .item-files-candidates { display: grid; gap: .45rem; margin: .8rem 0 0; padding: 0; list-style: none; }
 .item-files-list li { display: grid; gap: .15rem; padding: .55rem .7rem; border: 1px solid #ffffff12; border-radius: .5rem; background: #0b0b0dcc; }
 .item-files-list strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.item-files-list span { color: var(--text-dim); font-size: .85rem; font-variant-numeric: tabular-nums; }
+.item-files-list li > span { color: var(--text-dim); font-size: .85rem; font-variant-numeric: tabular-nums; }
 .item-files-filter { width: 100%; margin: .6rem 0; padding: .5rem .65rem; border: 1px solid #3a3a40; border-radius: .45rem; background: #19191c; color: white; }
 .item-files-candidates { max-height: 50vh; overflow-y: auto; }
 .item-files-candidates li { display: flex; align-items: center; justify-content: space-between; gap: .8rem; }
