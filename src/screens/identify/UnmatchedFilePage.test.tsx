@@ -148,8 +148,8 @@ describe('suggestions, where identifying a file starts', () => {
     await settle();
     const files = within(row.querySelector('.identify-album-files') as HTMLElement);
     expect(files.getAllByRole('row').map((tr) => tr.textContent)).toEqual([
-      'some.file.mkv (this file)A Series · episode 1',
-      'e02.mkvA Series · episode 2',
+      'some.file.mkv (this file)A Series · season 1, episode 1',
+      'e02.mkvA Series · season 1, episode 2',
       'e03.mkvA Series · no episode number',
     ]);
     expect((files.getByLabelText('Match e03.mkv') as HTMLInputElement).disabled).toBe(true);

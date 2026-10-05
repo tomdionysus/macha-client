@@ -16,9 +16,10 @@ export function trackText(track: number | undefined, disc: number | undefined): 
   return disc != null && disc > 1 ? `disc ${disc}, track ${track}` : `track ${track}`;
 }
 
-/** A file's place in the season. */
-function episodeText(episode: number | undefined): string {
-  return episode == null ? 'no episode number' : `episode ${episode}`;
+/** A file's place in the series: a special under season 0 can sit beside a season's episodes. */
+function episodeText(episode: number | undefined, season: number | undefined): string {
+  if (episode == null) return 'no episode number';
+  return season == null ? `episode ${episode}` : `season ${season}, episode ${episode}`;
 }
 
 /** The release's tracks; undefined while read, `unread` with why when they could not be. */
@@ -34,7 +35,7 @@ export function onRelease(tracks: ReleaseTracks | undefined, track: number | und
 }
 
 function placeText(set: FolderSet, tracks: ReleaseTracks | undefined, number: number | undefined, group: number | undefined): string {
-  if (set === 'season') return episodeText(number);
+  if (set === 'season') return episodeText(number, group);
   const place = trackText(number, group);
   const found = onRelease(tracks, number, group);
   if (found === null) return `${place}, which this release does not have`;
