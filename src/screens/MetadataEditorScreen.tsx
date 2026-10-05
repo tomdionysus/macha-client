@@ -323,7 +323,7 @@ function MetadataForm({ api, facts, manage, initial, onBack, onSaved, onCleared,
         </section>
       </div>
 
-      <ItemFiles item={initial} facts={facts} manage={manage} />
+      <ItemFiles item={initial} facts={facts} manage={manage} onChanged={onReload} onTitleRemoved={() => onCleared(initial)} />
 
       <section className="metadata-editor-panel metadata-artwork-panel">
         <h2>Artwork</h2>

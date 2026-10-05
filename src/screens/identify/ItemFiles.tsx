@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { identifyUnmatched, type CatalogueItem, type ManageApi, type PlaybackFactsApi, type PlaybackMediaFacts, type UnmatchedFile } from '@machafoundation/core';
 import { AvailabilityMarker } from '../../components/Availability';
-import { Modal } from '../../components/Modal';
+import { ConfirmModal, Modal } from '../../components/Modal';
 import { fileName, formatBytes } from '../ingest/format';
 import { playbackTimeText, viewerErrorText } from '../../text/viewerText';
 
@@ -24,14 +24,49 @@ export function fileSummary(file: PlaybackMediaFacts): string {
   return parts.join(' · ');
 }
 
+/** What a file's removal does: off this title into the unmatched list, or its bytes deleted. */
+type Removal = { file: PlaybackMediaFacts; action: 'unmatch' | 'delete' };
+
 /**
- * An item's files, each summarised, with a way to attach another version.
- * Attaching adds beside the existing files and never replaces them.
+ * An item's files, each summarised, with a way to attach another version, and for a
+ * manager a way to take a file off the title or delete it. Attaching adds beside the
+ * existing files and never replaces them. A title left with no files is removed by the
+ * server, with any parent left empty; `onTitleRemoved` then leaves the page.
  */
-export function ItemFiles({ item, facts, manage }: { item: CatalogueItem; facts: PlaybackFactsApi; manage?: ManageApi }) {
+export function ItemFiles({ item, facts, manage, onChanged, onTitleRemoved }: {
+  item: CatalogueItem;
+  facts: PlaybackFactsApi;
+  manage?: ManageApi;
+  /** The title changed: read it again. */
+  onChanged?: () => void;
+  onTitleRemoved?: () => void;
+}) {
   const [files, setFiles] = useState<PlaybackMediaFacts[]>();
   const [error, setError] = useState<string>();
   const [adding, setAdding] = useState(false);
+  const [removal, setRemoval] = useState<Removal>();
+  const [removing, setRemoving] = useState(false);
+
+  const remove = async (choice: 'unmatch' | 'path' | 'content') => {
+    if (!manage || !removal) return;
+    setRemoving(true);
+    setError(undefined);
+    try {
+      const { file } = removal;
+      const outcome = choice === 'unmatch' ? await manage.unmatchFile(item.id, file.mediaId, item.revision)
+        : choice === 'path' ? await manage.deleteFilePath(file.path!, item.id)
+          : await manage.deleteFileContent(file.mediaId, item.id);
+      setRemoval(undefined);
+      if (outcome.titleRemoved) onTitleRemoved?.();
+      else if (onChanged) onChanged();
+      else void load();
+    } catch (cause) {
+      setRemoval(undefined);
+      setError(viewerErrorText(cause));
+    } finally {
+      setRemoving(false);
+    }
+  };
 
   const load = useCallback(async () => {
     setError(undefined);
@@ -65,11 +100,45 @@ export function ItemFiles({ item, facts, manage }: { item: CatalogueItem; facts:
                     {nameOf(file.path, `File ${index + 1}`)}
                   </strong>
                   <span>{[fileSummary(file), file.profile.durationMs ? playbackTimeText(file.profile.durationMs) : '', file.sizeBytes ? formatBytes(file.sizeBytes) : ''].filter(Boolean).join(' · ')}</span>
+                  {manage && (
+                    <div className="item-files-actions">
+                      <button className="secondary-button" type="button" onClick={() => setRemoval({ file, action: 'unmatch' })} data-tv-focusable="true">Unmatch</button>
+                      <button className="secondary-button manage-danger" type="button" onClick={() => setRemoval({ file, action: 'delete' })} data-tv-focusable="true">Delete</button>
+                    </div>
+                  )}
                 </li>
               ))}
             </ul>
           )}
       {files && files.length > 1 && <p className="metadata-editor-muted">Each viewer's player picks the version its device plays best.</p>}
+      {removal?.action === 'unmatch' && (
+        <ConfirmModal
+          open
+          title="Unmatch this file?"
+          confirmLabel="Unmatch"
+          busy={removing}
+          onCancel={() => setRemoval(undefined)}
+          onConfirm={() => void remove('unmatch')}
+        >
+          <p>{nameOf(removal.file.path, 'This file')} is taken off {item.title} and listed in Unmatched files, to be identified again. The file itself is kept.</p>
+          {files?.length === 1 && <p>It is this title's only file, so {item.title} is removed too, with any season, series, album or artist left empty.</p>}
+        </ConfirmModal>
+      )}
+      {removal?.action === 'delete' && (
+        <Modal
+          open
+          title="Delete this file?"
+          onClose={removing ? () => undefined : () => setRemoval(undefined)}
+          actions={<>
+            <button className="secondary-button" type="button" disabled={removing} onClick={() => setRemoval(undefined)} data-tv-focusable="true">Cancel</button>
+            <button className="secondary-button manage-danger" type="button" disabled={removing} onClick={() => void remove('content')} data-tv-focusable="true">Delete every copy</button>
+            {removal.file.path && <button className="primary-button manage-danger" type="button" disabled={removing} onClick={() => void remove('path')} data-tv-focusable="true">Delete this file</button>}
+          </>}
+        >
+          <p>{removal.file.path ? <>This permanently deletes <code>{removal.file.path}</code> from MachaDFS.</> : 'This permanently deletes the file from MachaDFS.'} Delete every copy also deletes any other path holding the same file.</p>
+          {files?.length === 1 && <p>It is this title's only file, so {item.title} is removed too, with any season, series, album or artist left empty.</p>}
+        </Modal>
+      )}
       {manage && (
         <AddFileDialog
           open={adding}

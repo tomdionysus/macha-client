@@ -94,4 +94,65 @@ describe('an item\'s files', () => {
     audioOnly.profile.container = 'flac';
     expect(fileSummary(audioOnly)).toBe('FLAC 2ch · FLAC');
   });
+
+  describe('taking a file off the title', () => {
+    const two = () => [file('m1', '/movies/a-film-1080.mkv', 1920, 'h264'), file('m2', '/movies/a-film-2160.mkv', 3840, 'hevc')];
+
+    async function editor(files: PlaybackMediaFacts[], manage: Partial<ManageApi>) {
+      const facts = { facts: vi.fn(async () => files) } as unknown as PlaybackFactsApi;
+      const onChanged = vi.fn();
+      const onTitleRemoved = vi.fn();
+      render(<ItemFiles item={item()} facts={facts} manage={manage as ManageApi} onChanged={onChanged} onTitleRemoved={onTitleRemoved} />);
+      await settle();
+      const row = (name: string) => within(screen.getByRole('list')).getAllByRole('listitem').find((li) => li.textContent?.includes(name))!;
+      return { onChanged, onTitleRemoved, row };
+    }
+
+    it('unmatches one file against the revision on screen, and reads the title again when it still has files', async () => {
+      const unmatchFile = vi.fn(async () => ({ titleRemoved: false, removedItemIds: [], item: undefined }));
+      const { onChanged, onTitleRemoved, row } = await editor(two(), { unmatchFile } as Partial<ManageApi>);
+      fireEvent.click(within(row('a-film-2160.mkv')).getByRole('button', { name: 'Unmatch' }));
+      expect(screen.queryByText(/is removed too/)).toBeNull();
+      fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Unmatch' }));
+      await settle();
+      expect(unmatchFile).toHaveBeenCalledWith('item-1', 'm2', 3);
+      expect(onChanged).toHaveBeenCalled();
+      expect(onTitleRemoved).not.toHaveBeenCalled();
+    });
+
+    it('warns that the title goes with its only file, and leaves when it has', async () => {
+      const unmatchFile = vi.fn(async () => ({ titleRemoved: true, removedItemIds: ['item-1'] }));
+      const { onTitleRemoved, row } = await editor([file('m1', '/a.mkv', 1920, 'h264')], { unmatchFile } as Partial<ManageApi>);
+      fireEvent.click(within(row('a.mkv')).getByRole('button', { name: 'Unmatch' }));
+      screen.getByText(/so A Film is removed too/);
+      fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Unmatch' }));
+      await settle();
+      expect(onTitleRemoved).toHaveBeenCalled();
+    });
+
+    it('deletes this path, or every copy of the file, naming the title on screen', async () => {
+      const deleteFilePath = vi.fn(async () => ({ titleRemoved: false, removedItemIds: [] }));
+      const deleteFileContent = vi.fn(async () => ({ titleRemoved: false, removedItemIds: [], paths: [] }));
+      const { onChanged, row } = await editor(two(), { deleteFilePath, deleteFileContent } as Partial<ManageApi>);
+      fireEvent.click(within(row('a-film-1080.mkv')).getByRole('button', { name: 'Delete' }));
+      fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete this file' }));
+      await settle();
+      expect(deleteFilePath).toHaveBeenCalledWith('/movies/a-film-1080.mkv', 'item-1');
+      fireEvent.click(within(row('a-film-2160.mkv')).getByRole('button', { name: 'Delete' }));
+      fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete every copy' }));
+      await settle();
+      expect(deleteFileContent).toHaveBeenCalledWith('m2', 'item-1');
+      expect(onChanged).toHaveBeenCalledTimes(2);
+    });
+
+    it('says why when the server refuses, and changes nothing', async () => {
+      const unmatchFile = vi.fn(async () => { throw Object.assign(new Error('log'), { status: 404, code: 'media_not_bound', detail: 'That file is not on this title.' }); });
+      const { onChanged, row } = await editor(two(), { unmatchFile } as Partial<ManageApi>);
+      fireEvent.click(within(row('a-film-1080.mkv')).getByRole('button', { name: 'Unmatch' }));
+      fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Unmatch' }));
+      await settle();
+      expect(screen.getByRole('alert').textContent).toBe('That file is not on this title.');
+      expect(onChanged).not.toHaveBeenCalled();
+    });
+  });
 });
