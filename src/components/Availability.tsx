@@ -25,8 +25,9 @@ function Icon({ mark }: { mark: AvailabilityMark }) {
   if (mark === 'partial') {
     return (
       <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M12 2.5 2.5 19h19L12 2.5Z" {...line} />
-        <path d="M12 9v4.5M12 16.2v.1" {...line} />
+        {/* Centred by its centroid (y 12), not its box: a box-centred triangle reads low in a disc. */}
+        <path d="M12 2.2 3.5 16.9h17L12 2.2Z" {...line} />
+        <path d="M12 7.4v3.6M12 13.9v.1" {...line} />
       </svg>
     );
   }
