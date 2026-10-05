@@ -27,4 +27,17 @@ describe('the unmatched list', () => {
     expect(screen.getByRole('heading', { name: /Unmatched files/ }).textContent).toBe('Unmatched files 1');
     expect(screen.getByText('some.file.mkv')).toBeTruthy();
   });
+
+  it('selects and deselects a file by a click anywhere on its row, and opens it only from its name', async () => {
+    const unmatched = vi.fn(async () => [file]);
+    render(<MemoryRouter><ManageScreen api={{ unmatched } as unknown as ManageApi} section="unmatched" users={null} /></MemoryRouter>);
+    await settle();
+    const box = screen.getByRole('checkbox', { name: 'Select some.file.mkv' }) as HTMLInputElement;
+    const size = document.querySelector('td.col-size') as HTMLElement;
+    fireEvent.click(size);
+    expect(box.checked).toBe(true);
+    fireEvent.click(size);
+    expect(box.checked).toBe(false);
+    expect(screen.getByRole('link', { name: 'some.file.mkv' }).getAttribute('href')).toBe('/manage/unmatched/f1');
+  });
 });

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type MouseEvent, type ReactNode } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { mutationOutcomeUnknown, playbackFailureStatus, routes } from '@machafoundation/core';
 import { BulkActions, ListHeading, Pager, runBulkOperation, SelectPageBox, SelectRowBox, useListSelection } from '../components/ListParts';
 import { pageSlice } from '../lists/paging';
@@ -109,7 +109,6 @@ export function deleteOutcomeText(outcome: DeleteOutcome, total: number, present
 
 /** The unmatched files as a sortable, paged list with bulk retry and delete; each file opens on its own page. */
 function UnmatchedManager({ api }: { api: ManageApi }) {
-  const navigate = useNavigate();
   const { sort, setSort, sortBy, page, setPage, search } = useListSort(UNMATCHED_SORT_KEYS, DEFAULT_UNMATCHED_SORT);
   // Undefined until a list has arrived: a first load that fails has no list to show, not an empty one.
   const [items, setItems] = useState<UnmatchedFile[]>();
@@ -188,9 +187,10 @@ function UnmatchedManager({ api }: { api: ManageApi }) {
   }
 
   /** The whole row opens the file, except where a control inside it was the target. */
-  const openRow = (event: MouseEvent<HTMLTableRowElement>, item: UnmatchedFile) => {
-    if ((event.target as HTMLElement).closest('button, a, input, select, label')) return;
-    navigate(`${routes.manageUnmatchedFile(item.id)}${search}`);
+  // A click anywhere on a row selects it; the file's name is the link to its page.
+  const toggleRow = (event: MouseEvent<HTMLTableRowElement>, item: UnmatchedFile) => {
+    if (busy || (event.target as HTMLElement).closest('button, a, input, select, label')) return;
+    selection.setMany([item.id], !checked.has(item.id));
   };
 
   return (
@@ -228,7 +228,7 @@ function UnmatchedManager({ api }: { api: ManageApi }) {
               {rows.map((item) => {
                 const name = fileName(item.path);
                 return (
-                  <tr key={item.id} className={checked.has(item.id) ? 'selected' : undefined} onClick={(event) => openRow(event, item)}>
+                  <tr key={item.id} className={checked.has(item.id) ? 'selected' : undefined} onClick={(event) => toggleRow(event, item)}>
                     <td className="col-check">
                       <SelectRowBox id={item.id} name={name} selection={selection} disabled={busy} />
                     </td>
