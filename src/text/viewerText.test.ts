@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { endpointFailure, MachaAcquisitionApiError, MachaClusterRouteError, MachaConnectionError, MachaPlaybackError, NOT_PLAYABLE_CODE, SESSION_PROVENANCE_UNKNOWN_CODE, START_NO_PROGRESS_CODE, TOO_SLOW_TO_PLAY_CODE, type MediaSummary, type PlaybackNotice, type PlaybackStartProgress, type VersionStep, type PassedOverVersion, type QualityCeiling, type PlaybackStatusDescription, type PlaybackStreamInfo } from '@machafoundation/core';
+import { endpointFailure, MachaAcquisitionApiError, MachaClusterRouteError, MachaConnectionError, MachaPlaybackError, MachaRequestTimeoutError, NOT_PLAYABLE_CODE, SESSION_PROVENANCE_UNKNOWN_CODE, START_NO_PROGRESS_CODE, TOO_SLOW_TO_PLAY_CODE, type MediaSummary, type PlaybackNotice, type PlaybackStartProgress, type VersionStep, type PassedOverVersion, type QualityCeiling, type PlaybackStatusDescription, type PlaybackStreamInfo } from '@machafoundation/core';
 import {
   availabilityText,
   playbackRefusalText,
@@ -87,9 +87,14 @@ describe('what a viewer is told about an error', () => {
     expect(viewerErrorText(new MachaClusterRouteError(['fi-1'], false, new MachaConnectionError('exceeded 30000 ms'), true))).toBe(SERVER_SLOW_TEXT);
   });
 
-  it('says a change one node did not answer may still finish, rather than that something went wrong', () => {
-    const timedOut = endpointFailure('fi-1', 'http://fi-1', new MachaConnectionError('Request exceeded 8000 ms.'));
+  it('says a change one node did not answer in time may still finish, rather than that something went wrong', () => {
+    const timedOut = endpointFailure('fi-1', 'http://fi-1', new MachaRequestTimeoutError('Request exceeded 30000 ms.', 30_000));
     expect(viewerErrorText(timedOut)).toBe(CHANGE_UNANSWERED_TEXT);
+  });
+
+  it('never says a change may still finish when the node could not be reached at all', () => {
+    const refused = endpointFailure('fi-1', 'http://fi-1', new MachaConnectionError('connection refused'));
+    expect(viewerErrorText(refused)).toBe(SERVER_UNREACHABLE_TEXT);
   });
 
   it('gives the server\'s own sentence when the nodes answered and refused', () => {

@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type {
   CatalogueApi, CatalogueItem, CatalogueKind, ManageApi, ManageCatalogueMatch, MediaProbeCandidate, ProviderArtworkOption, ProviderReleaseTrack, ProviderSearchResult, UnmatchedFile,
 } from '@machafoundation/core';
-import { endpointFailure, MachaConnectionError } from '@machafoundation/core';
+import { endpointFailure, MachaConnectionError, MachaRequestTimeoutError } from '@machafoundation/core';
 import { UnmatchedFilePage } from './UnmatchedFilePage';
 import { settle } from '../../test/settle';
 
@@ -274,7 +274,7 @@ describe('suggestions, where identifying a file starts', () => {
     const numbered = (n: number) => [probe({ kind: 'track', title: `T${n}`, artist: 'A Band', album: 'A Record', track_number: n })];
     vi.mocked(manage.unmatchedDetail).mockImplementation(async (id: string) => ({ item: file, probes: id === 'f1' ? [track] : numbered(id === 'f2' ? 3 : 4) }));
     vi.mocked(manage.matchProvider).mockImplementation(async (id: string) => {
-      if (id === 'f2') throw endpointFailure('fi-1', 'http://fi-1', new MachaConnectionError('exceeded 8000 ms'));
+      if (id === 'f2') throw endpointFailure('fi-1', 'http://fi-1', new MachaRequestTimeoutError('exceeded 30000 ms', 30_000));
       return { leaf_item_id: 'leaf-1', items: [] };
     });
     await settle();
@@ -286,6 +286,27 @@ describe('suggestions, where identifying a file starts', () => {
     expect(vi.mocked(manage.matchProvider).mock.calls.map(([id]) => id)).toEqual(['f1', 'f2']);
     const statuses = within(row.querySelector('.identify-album-files') as HTMLElement).getAllByRole('row').map((tr) => tr.lastChild?.textContent);
     expect(statuses[2]).toBe('Not matched: not tried, because the server did not answer the one before.');
+  });
+
+  it('carries on with the album\'s files when a node refused the connection, since nothing was left running', async () => {
+    const { manage } = show([track], { providerResults: [record] });
+    const sibling = (id: string, name: string): UnmatchedFile => ({ ...file, id, path: `/incoming/${name}` });
+    vi.mocked(manage).unmatched = vi.fn(async () => [file, sibling('f2', '02.mp3'), sibling('f3', '03.mp3')]);
+    const numbered = (n: number) => [probe({ kind: 'track', title: `T${n}`, artist: 'A Band', album: 'A Record', track_number: n })];
+    vi.mocked(manage.unmatchedDetail).mockImplementation(async (id: string) => ({ item: file, probes: id === 'f1' ? [track] : numbered(id === 'f2' ? 3 : 4) }));
+    vi.mocked(manage.matchProvider).mockImplementation(async (id: string) => {
+      if (id === 'f2') throw endpointFailure('fi-1', 'http://fi-1', new MachaConnectionError('connection refused'));
+      return { leaf_item_id: 'leaf-1', items: [] };
+    });
+    await settle();
+    const row = rowOf('A Record · 1999', suggestions());
+    fireEvent.click(within(row).getByRole('button', { name: 'Use this' }));
+    await settle();
+    fireEvent.click(within(row).getByRole('button', { name: 'Match' }));
+    await settle();
+    expect(vi.mocked(manage.matchProvider).mock.calls.map(([id]) => id)).toEqual(['f1', 'f2', 'f3']);
+    const statuses = within(row.querySelector('.identify-album-files') as HTMLElement).getAllByRole('row').map((tr) => tr.lastChild?.textContent);
+    expect(statuses[2]).toBe('Matched');
   });
 
   it('says when nothing on TMDB or MusicBrainz matches what the file says', async () => {

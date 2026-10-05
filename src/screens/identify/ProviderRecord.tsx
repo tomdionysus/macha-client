@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import {
   identifyUnmatched,
-  MachaEndpointError,
+  mutationOutcomeUnknown,
   type ManageApi,
   type ManualMetadataResult,
   type ProviderArtworkOption,
@@ -164,7 +164,7 @@ export function ProviderRecord({ releases, file, manage, numbers: initial, disab
       } catch (cause) {
         mark(sibling.file.id, { left: viewerErrorText(cause) });
         left = true;
-        unanswered = cause instanceof MachaEndpointError && cause.kind === 'transport';
+        unanswered = mutationOutcomeUnknown(cause);
       }
     }
     return left;

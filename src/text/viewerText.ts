@@ -1,4 +1,4 @@
-import {
+import { mutationOutcomeUnknown,
   acquisitionError,
   CHOICE_NOT_AVAILABLE_CODE,
   CHOICE_REQUIRED_CODE,
@@ -289,7 +289,9 @@ export function viewerErrorText(error: unknown, fallback = 'Something went wrong
   if (error instanceof MachaConnectionError) return SERVER_UNREACHABLE_TEXT;
   if (error instanceof MachaClusterRouteError && error.slow) return SERVER_SLOW_TEXT;
   if (error instanceof MachaClusterRouteError && error.unreachable) return NO_NODE_ANSWERED_TEXT;
-  if (error instanceof MachaEndpointError && error.kind === 'transport') return CHANGE_UNANSWERED_TEXT;
+  // Only a timeout may have been done; a refused connection certainly was not.
+  if (mutationOutcomeUnknown(error)) return CHANGE_UNANSWERED_TEXT;
+  if (error instanceof MachaEndpointError && error.kind === 'transport') return SERVER_UNREACHABLE_TEXT;
   return fallback;
 }
 
