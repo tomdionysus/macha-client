@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { fireEvent, render, screen } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import { describe, expect, it, vi } from 'vitest';
 import type { CatalogueMediaProfile, MediaApi, MediaDetails, PlaybackMediaFacts, PlaybackVersions, VersionStep } from '@machafoundation/core';
 import { DetailScreen } from './DetailScreen';
@@ -146,5 +147,28 @@ describe('which files can be played', () => {
     expect(container.querySelector('h1 .availability-marker')).toBeNull();
     expect([...container.querySelectorAll('.media-profile-file')].map((line) => line.querySelector('.availability-marker')?.className ?? 'none'))
       .toEqual([expect.stringContaining('availability-partial'), 'none']);
+  });
+});
+
+describe('an episode\'s own page', () => {
+  it('names its series and season as links back, and offers Play, the qualities and Edit as a film does', async () => {
+    const episode = {
+      id: 'ep', kind: 'episode', title: 'Pilot', seasonNumber: 1, episodeNumber: 1, mediaIds: ['macha:big'],
+      playbackContext: { series: { id: 'show-1', title: 'The Show' }, season: { id: 'season-1', title: 'Season 1', seasonNumber: 1 } },
+    } as unknown as MediaDetails;
+    const api = { details: vi.fn(async () => episode) } as unknown as MediaApi;
+    const onEdit = vi.fn();
+    const { container } = render(
+      <MemoryRouter>
+        <DetailScreen api={api} itemId="ep" onBack={vi.fn()} onPlay={vi.fn()} onPlayFromStart={vi.fn()} loadFiles={async () => []} versionsOf={async () => fourK} onPlayVersion={vi.fn()} onEdit={onEdit} />
+      </MemoryRouter>,
+    );
+    await settle();
+    expect(screen.getByRole('link', { name: 'The Show' }).getAttribute('href')).toBe('/series/show-1');
+    expect(screen.getByRole('link', { name: 'Season 1' }).getAttribute('href')).toBe('/series/show-1/seasons/season-1');
+    expect(container.querySelector('.episode-detail-layout')).toBeTruthy();
+    screen.getByTitle('Play');
+    screen.getByTitle('Play at 720p');
+    expect(screen.getByRole('button', { name: /edit/i })).toBeTruthy();
   });
 });

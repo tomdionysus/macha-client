@@ -217,7 +217,7 @@ describe('usePlaybackController season queue', () => {
     const api = { details } as unknown as MediaApi;
 
     const { result } = harness(api, runtime);
-    act(() => { result.current.openSeasonEpisode(episodes[0], episodes, 0, false); });
+    act(() => { result.current.startPlayback(episodes[0], { queue: episodes, queueIndex: 0 }); });
 
     expect(details).not.toHaveBeenCalled();
     expect(result.current.canNext).toBe(true);
@@ -310,7 +310,7 @@ describe('unavailable titles', () => {
       { ...episode('e3', 3), availability: 'unavailable' },
       { ...episode('e4', 4), availability: 'unknown' },
     ];
-    act(() => { result.current.openSeasonEpisode(queue[1], queue, 1, false); });
+    act(() => { result.current.startPlayback(queue[1], { queue, queueIndex: 1 }); });
     expect(play).toHaveBeenCalledTimes(1);
     const stored = queueStore.load();
     expect(stored?.items.map((item) => item.id)).toEqual(['e2', 'e4']);

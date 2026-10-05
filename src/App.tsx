@@ -17,7 +17,7 @@ import { buildPlatformTraits, isTvBuild } from './platform/traits';
 import type { PlaybackResolver } from '@machafoundation/core';
 import { reportClusterReachable, SERVER_REACHABLE_EVENT, SERVER_UNREACHABLE_EVENT } from '@machafoundation/core';
 import { SERVER_UNREACHABLE_TEXT, SIGN_OUT_UNCONFIRMED_TEXT } from './text/viewerText';
-import type { Episode, MediaSummary, PlaybackProgress, SeasonSummary } from '@machafoundation/core';
+import type { MediaSummary, PlaybackProgress, SeasonSummary } from '@machafoundation/core';
 import { ContinueWatchingStore } from '@machafoundation/core';
 import { hasRole, sessionManager, sessionPermits, type UserRole } from '@machafoundation/core';
 import { useCurrentSession } from './app/useCurrentSession';
@@ -161,13 +161,13 @@ function SeriesRoute({ api, onOpenSeason, onEdit }: { api: MediaApi; onOpenSeaso
   );
 }
 
-function SeasonRoute({ api, progress, onPlayEpisode, onEdit }: {
+function SeasonRoute({ api, progress, onEdit }: {
   api: MediaApi;
   progress: Map<string, PlaybackProgress>;
-  onPlayEpisode: (episode: Episode, queue: Episode[], queueIndex: number, fromStart: boolean) => void;
   onEdit?: (id: string) => void;
 }) {
   const { seriesId, seasonId } = useParams();
+  const navigate = useNavigate();
   const back = useMediaRouteBack(api);
   const resolvedSeriesId = required(seriesId, 'seriesId');
   const resolvedSeasonId = required(seasonId, 'seasonId');
@@ -178,7 +178,7 @@ function SeasonRoute({ api, progress, onPlayEpisode, onEdit }: {
       seasonId={resolvedSeasonId}
       onBack={back}
       progress={progress}
-      onPlayEpisode={onPlayEpisode}
+      onOpenEpisode={(episode) => navigate(routes.episode(episode.id))}
       onEdit={onEdit ? () => onEdit(resolvedSeasonId) : undefined}
     />
   );
@@ -705,7 +705,7 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
           <Route path="/movies/:movieId" element={mediaPane(<DetailRoute {...detailRouteProps} parameter="movieId" />)} />
           <Route path={routes.series} element={mediaPane(<LibraryScreen api={api} kind="shows" onOpen={open} />)} />
           <Route path="/series/:seriesId" element={mediaPane(<SeriesRoute api={api} onOpenSeason={open} onEdit={metadataEditingAvailable ? openMetadataEditor : undefined} />)} />
-          <Route path="/series/:seriesId/seasons/:seasonId" element={mediaPane(<SeasonRoute api={api} progress={playback.progressById} onPlayEpisode={playback.openSeasonEpisode} onEdit={metadataEditingAvailable ? openMetadataEditor : undefined} />)} />
+          <Route path="/series/:seriesId/seasons/:seasonId" element={mediaPane(<SeasonRoute api={api} progress={playback.progressById} onEdit={metadataEditingAvailable ? openMetadataEditor : undefined} />)} />
           <Route path="/episodes/:episodeId" element={mediaPane(<DetailRoute {...detailRouteProps} parameter="episodeId" />)} />
           <Route path={routes.music} element={mediaPane(<Navigate to={routes.musicArtists} replace />)} />
           <Route path={routes.musicArtists} element={mediaPane(<MusicScreen api={api} section="artists" onOpen={open} onPlayNow={music.playNow} onAddToPlaylist={music.addToPlaylist} onPlayNext={music.playNext} onPlayLater={music.playLater} onShuffle={music.shuffle} />)} />

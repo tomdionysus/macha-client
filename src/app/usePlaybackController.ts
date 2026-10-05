@@ -9,7 +9,7 @@ import { ContinueWatchingStore } from '@machafoundation/core';
 import { migrateEpisodeContext, needsEpisodeContextMigration } from '@machafoundation/core';
 import { PlaybackQueueStore, type PlaybackQueueState } from '@machafoundation/core';
 import { VolumeStore } from '../state/volume';
-import type { Episode, MediaSummary, PlaybackProgress } from '@machafoundation/core';
+import type { MediaSummary, PlaybackProgress } from '@machafoundation/core';
 import type { StartPlaybackOptions } from './useMusicController';
 import {
   playbackReturnTo,
@@ -298,7 +298,6 @@ export function usePlaybackController(options: {
     removeFromContinueWatching,
     startPlayback,
     openAlbumTrack: (track: MediaSummary, queue: MediaSummary[], queueIndex: number) => startPlayback(track, { queue, queueIndex }),
-    openSeasonEpisode: (episode: Episode, queue: Episode[], queueIndex: number, fromStart: boolean) => startPlayback(episode, { queue, queueIndex, fromStart }),
     persistPlaybackPosition,
     previous,
     next,

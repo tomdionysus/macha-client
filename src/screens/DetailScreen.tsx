@@ -11,6 +11,8 @@ import { useArtworkUrl } from '../hooks/useArtworkUrl';
 import { requestTvDefaultFocus } from '../hooks/useTvNavigation';
 import { buildPlatformTraits } from '../platform/traits';
 import { useEffect } from 'react';
+import { Link } from 'react-router-dom';
+import { routes } from '@machafoundation/core';
 import { EditButton } from '../components/EditButton';
 import { episodeCode, qualityChoiceText } from '../text/viewerText';
 import { MediaPageTitle } from '../components/MediaPageTitle';
@@ -61,7 +63,9 @@ export function DetailScreen({ api, itemId, onBack, onPlay, onPlayFromStart, loa
   // The first file's profile readies playback.
   const firstProfile = profiles.value?.[0];
   const backdrop = useArtworkUrl(api, details.value?.artwork?.backdrop ?? details.value?.artwork?.poster ?? details.value?.artwork?.thumbnail);
-  const poster = useArtworkUrl(api, details.value?.kind === 'movie' ? details.value.artwork?.poster : undefined);
+  // A film's poster, or an episode's still, beside the copy.
+  const poster = useArtworkUrl(api, details.value?.kind === 'movie' ? details.value.artwork?.poster
+    : details.value?.kind === 'episode' ? details.value.artwork?.thumbnail ?? details.value.artwork?.backdrop : undefined);
   useEffect(() => {
     if (details.value && (details.value.kind === 'movie' || details.value.kind === 'episode' || details.value.kind === 'track')) requestTvDefaultFocus();
   }, [details.value]);
@@ -94,7 +98,13 @@ export function DetailScreen({ api, itemId, onBack, onPlay, onPlayFromStart, loa
 
   const copy = (
     <div className="detail-copy">
-      <p className="eyebrow">{media.kind}{media.year ? ` · ${media.year}` : ''}</p>
+      {media.kind === 'episode' && media.playbackContext ? (
+        <p className="eyebrow">
+          <Link to={routes.show(media.playbackContext.series.id)} data-tv-focusable="true">{media.playbackContext.series.title}</Link>
+          {' · '}
+          <Link to={routes.season(media.playbackContext.series.id, media.playbackContext.season.id)} data-tv-focusable="true">{media.playbackContext.season.title}</Link>
+        </p>
+      ) : <p className="eyebrow">{media.kind}{media.year ? ` · ${media.year}` : ''}</p>}
       <MediaPageTitle refreshing={details.refreshing} onRefresh={details.refresh}>{media.title}</MediaPageTitle>
       <AvailabilityNote item={media} />
       {media.kind === 'episode' && episodeCode(media) && <p className="subtitle">{episodeCode(media)}</p>}
@@ -154,14 +164,14 @@ export function DetailScreen({ api, itemId, onBack, onPlay, onPlayFromStart, loa
   );
 
   return (
-    <section className={`detail ${media.kind === 'movie' ? 'movie-detail' : ''}`}>
+    <section className={`detail ${media.kind === 'movie' || media.kind === 'episode' ? 'movie-detail' : ''}`}>
       {backdrop && <div className="detail-backdrop" style={{ backgroundImage: `url(${JSON.stringify(backdrop)})` }} />}
       <div className="detail-content">
         <button className="back-button" data-tv-focusable="true" onClick={onBack} type="button">← Back</button>
         {onEdit && <EditButton onClick={onEdit} />}
         {details.error && <p className="manage-error media-refresh-error">Refresh failed: {details.error.message}</p>}
-        {media.kind === 'movie' ? (
-          <div className={`movie-detail-layout ${poster ? 'has-poster' : ''}`}>
+        {media.kind === 'movie' || media.kind === 'episode' ? (
+          <div className={`movie-detail-layout ${poster ? 'has-poster' : ''}${media.kind === 'episode' ? ' episode-detail-layout' : ''}`}>
             <div className="movie-detail-poster" aria-hidden="true">
               {poster ? <img src={poster} alt="" /> : <div className="movie-detail-poster-placeholder">{media.title.slice(0, 1)}</div>}
             </div>

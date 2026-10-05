@@ -14,11 +14,11 @@ interface Props {
   seasonId: string;
   onBack: () => void;
   progress: Map<string, PlaybackProgress>;
-  onPlayEpisode: (episode: Episode, queue: Episode[], queueIndex: number, fromStart: boolean) => void;
+  onOpenEpisode: (episode: Episode) => void;
   onEdit?: () => void;
 }
 
-export function SeasonScreen({ api, seriesId, seasonId, onBack, progress, onPlayEpisode, onEdit }: Props) {
+export function SeasonScreen({ api, seriesId, seasonId, onBack, progress, onOpenEpisode, onEdit }: Props) {
   const result = useRefreshableAsync(async () => {
     const [seriesResult, seasonResult] = await Promise.all([api.details(seriesId), api.details(seasonId)]);
     if (seriesResult.kind !== 'show' || !('seasons' in seriesResult)) throw new Error('Parent catalogue item is not a series.');
@@ -57,7 +57,7 @@ export function SeasonScreen({ api, seriesId, seasonId, onBack, progress, onPlay
         {season.synopsis && <p className="synopsis">{season.synopsis}</p>}
         <section className="episode-section">
           <h2>Episodes</h2>
-          <EpisodeRail api={api} episodes={season.episodes} progress={progress} onPlayEpisode={onPlayEpisode} />
+          <EpisodeRail api={api} episodes={season.episodes} progress={progress} onOpenEpisode={onOpenEpisode} />
         </section>
       </div>
     </section>

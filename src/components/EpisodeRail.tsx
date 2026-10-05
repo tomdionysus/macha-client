@@ -4,14 +4,13 @@ import type { MediaApi } from '@machafoundation/core';
 import { AvailabilityMarker, openControlProps } from './Availability';
 import { LazyArtwork } from './LazyArtwork';
 import { episodeCode } from '../text/viewerText';
-import { PlayIcon, RestartIcon } from './PlaybackIcons';
 import type { Episode, PlaybackProgress } from '@machafoundation/core';
 
 interface Props {
   api: MediaApi;
   episodes: Episode[];
   progress: Map<string, PlaybackProgress>;
-  onPlayEpisode: (episode: Episode, queue: Episode[], queueIndex: number, fromStart: boolean) => void;
+  onOpenEpisode: (episode: Episode) => void;
 }
 
 interface DragState {
@@ -33,14 +32,11 @@ function resumable(progress?: PlaybackProgress): boolean {
   return Boolean(progress && progress.positionMs > 0 && progress.durationMs > 0);
 }
 
-function EpisodeCard({ api, episode, progress, playbackEpisode, queue, queueIndex, onPlayEpisode }: {
+function EpisodeCard({ api, episode, progress, onOpenEpisode }: {
   api: MediaApi;
   episode: Episode;
   progress?: PlaybackProgress;
-  playbackEpisode: Episode;
-  queue: Episode[];
-  queueIndex: number;
-  onPlayEpisode: (episode: Episode, queue: Episode[], queueIndex: number, fromStart: boolean) => void;
+  onOpenEpisode: (episode: Episode) => void;
 }) {
   const hasProgress = resumable(progress);
   return (
@@ -48,8 +44,8 @@ function EpisodeCard({ api, episode, progress, playbackEpisode, queue, queueInde
       <div className="episode-still-shell">
         <button
           className="episode-still-link"
-          {...openControlProps(episode, () => onPlayEpisode(playbackEpisode, queue, queueIndex, false))}
-          aria-label={`${hasProgress ? 'Resume' : 'Play'} ${episode.title}`}
+          {...openControlProps(episode, () => onOpenEpisode(episode))}
+          aria-label={`Open ${episode.title}`}
           type="button"
         >
           <div className="episode-still">
@@ -68,20 +64,6 @@ function EpisodeCard({ api, episode, progress, playbackEpisode, queue, queueInde
             <AvailabilityMarker availability={episode.availability} kind="episode" />
           </div>
         </button>
-        <div className="episode-play-actions" aria-hidden={!hasProgress}>
-          <span className="episode-play-action episode-play-resume" aria-hidden="true"><PlayIcon /></span>
-          {hasProgress && !!availableToPlay(episode) && (
-            <button
-              className="episode-play-action episode-play-restart"
-              data-tv-focusable="true"
-              aria-label={`Play ${episode.title} from start`}
-              onClick={() => onPlayEpisode(playbackEpisode, queue, queueIndex, true)}
-              type="button"
-            >
-              <RestartIcon />
-            </button>
-          )}
-        </div>
       </div>
       <div className="episode-copy">
         <div className="episode-heading">
@@ -94,7 +76,7 @@ function EpisodeCard({ api, episode, progress, playbackEpisode, queue, queueInde
   );
 }
 
-export function EpisodeRail({ api, episodes, progress, onPlayEpisode }: Props) {
+export function EpisodeRail({ api, episodes, progress, onOpenEpisode }: Props) {
   const railRef = useRef<HTMLDivElement | null>(null);
   const drag = useRef<DragState | undefined>(undefined);
   const suppressClick = useRef(false);
@@ -167,17 +149,9 @@ export function EpisodeRail({ api, episodes, progress, onPlayEpisode }: Props) {
       onClickCapture={onClickCapture}
       onWheel={onWheel}
     >
-      {episodes.map((episode, index) => (
+      {episodes.map((episode) => (
         <div key={episode.id} className="episode-rail-item" role="listitem">
-          <EpisodeCard
-            api={api}
-            episode={episode}
-            progress={progress.get(episode.id)}
-            playbackEpisode={episodes[index]}
-            queue={episodes}
-            queueIndex={index}
-            onPlayEpisode={onPlayEpisode}
-          />
+          <EpisodeCard api={api} episode={episode} progress={progress.get(episode.id)} onOpenEpisode={onOpenEpisode} />
         </div>
       ))}
     </div>
