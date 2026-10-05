@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import type { ArtworkRef, MediaApi } from '@machafoundation/core';
-import { artworkHostOf, createClientLogger } from '@machafoundation/core';
+import { ARTWORK_HEDGE_DELAY_MS, createClientLogger, nextArtworkSource } from '@machafoundation/core';
 import { useViewportArtworkUrl, VISIBLE_ARTWORK_RECOVERY_DELAY_MS } from '../hooks/useViewportArtworkUrl';
 import { observeArtworkProximity } from '../hooks/artworkViewport';
 
@@ -40,17 +40,10 @@ function signedSources(api: MediaApi, artwork: SignedArtwork): string[] {
   return [...new Set(remembered ? [remembered, ...candidates] : candidates)];
 }
 
-/**
- * How long a visible poster may go unloaded before the next node is asked as well. A host
- * that drops packets fails an `<img>` only after ~15 s, and core charges it 8-18 s after it
- * dies; the first request is never cancelled, so a slow but working link still wins.
- */
-export const ARTWORK_HEDGE_DELAY_MS = 2000;
-
 interface Attempt {
   signedBy: string;
   sources: string[];
-  /** Indexes of `sources` in flight, the shown one first. At most two. */
+  /** Indexes of `sources` in flight, the shown one first; at most `ARTWORK_HEDGE_MAX_IN_FLIGHT`. */
   inFlight: number[];
   /** Indexes started, in flight or done. */
   tried: number[];
@@ -64,18 +57,8 @@ function attempt(api: MediaApi, artwork: SignedArtwork): Attempt {
   return { signedBy: artwork.url, sources, inFlight: first, tried: first, loaded: false, failed: false };
 }
 
-const hostOf = (url: string) => artworkHostOf(url) ?? url;
-
-/** The first untried source, or with `hedge`, the first on a host not already in flight. */
-function nextSource(plan: Attempt, hedge: boolean): number | undefined {
-  const busy = new Set(plan.inFlight.map((index) => hostOf(plan.sources[index])));
-  const index = plan.sources.findIndex((url, candidate) =>
-    !plan.tried.includes(candidate) && !(hedge && busy.has(hostOf(url))));
-  return index < 0 ? undefined : index;
-}
-
 function hedged(plan: Attempt): Attempt {
-  const index = plan.inFlight.length === 1 && !plan.loaded ? nextSource(plan, true) : undefined;
+  const index = plan.loaded ? undefined : nextArtworkSource(plan.sources, plan.tried, plan.inFlight, true);
   return index === undefined ? plan : { ...plan, inFlight: [...plan.inFlight, index], tried: [...plan.tried, index] };
 }
 
@@ -134,7 +117,7 @@ function CapabilityArtwork({ api, artwork, alt = '', placeholder, draggable, eag
     if (lastLoadedUrlById.get(artwork.id) === url) lastLoadedUrlById.delete(artwork.id);
     const resigned = artwork.url !== plan.signedBy;
     const others = plan.inFlight.filter((other) => other !== index);
-    const next = others.length === 0 ? nextSource(plan, false) : undefined;
+    const next = others.length === 0 ? nextArtworkSource(plan.sources, plan.tried, plan.inFlight, false) : undefined;
     const exhausted = others.length === 0 && next === undefined;
     log.warn('capability-failed', {
       artworkId: artwork.id,

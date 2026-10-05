@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ArtworkRef, MediaApi } from '@machafoundation/core';
-import { ARTWORK_HEDGE_DELAY_MS, LazyArtwork } from './LazyArtwork';
+import { ARTWORK_HEDGE_DELAY_MS, type ArtworkRef, type MediaApi } from '@machafoundation/core';
+import { LazyArtwork } from './LazyArtwork';
 import { settle } from '../test/settle';
 
 const FUTURE = '?exp=9999999999999&sig=abc';
@@ -449,6 +449,22 @@ describe('LazyArtwork', () => {
         vi.useRealTimers();
       }
     });
+
+    it('does not race signed sources again once every one has failed and the authenticated fetch has taken over', () => withObjectUrls(async () => {
+      vi.useFakeTimers();
+      try {
+        const artworkFetch = vi.fn(() => Promise.resolve(new Blob(['poster-bytes'], { type: 'image/jpeg' })));
+        const { container } = render(
+          <LazyArtwork api={fakeApi(artworkFetch, ['http://a', 'http://b'])} artwork={{ id, mimeType: 'image/jpeg', url: A }} alt="Movie poster" placeholder={<span>placeholder</span>} eager />,
+        );
+        fireEvent.error(poster());
+        fireEvent.error(poster());
+        elapse(ARTWORK_HEDGE_DELAY_MS * 2);
+        expect(sources(container).filter((url) => url.startsWith('http://'))).toEqual([]);
+      } finally {
+        vi.useRealTimers();
+      }
+    }));
 
     it('does not start the clock for a lazy poster until it nears the viewport', () => {
       vi.useFakeTimers();

@@ -1,4 +1,4 @@
-import { mutationOutcomeUnknown,
+import { MachaNoReachableEndpointError, mutationOutcomeUnknown,
   acquisitionError,
   CHOICE_NOT_AVAILABLE_CODE,
   CHOICE_REQUIRED_CODE,
@@ -263,6 +263,7 @@ export function serverStatusText(status: { code: string | null; detail: string |
 export const PLAYLIST_TOO_LARGE_TEXT = 'The playlist is full, so those tracks were not added. Remove some to make room.';
 export const SIGN_OUT_UNCONFIRMED_TEXT = 'You are signed out on this device, but the server could not be reached to end the session, so it stays valid there until it expires.';
 
+export const INSECURE_FROM_SECURE_PAGE_TEXT = 'Every Macha server here has a plain http address, which a browser will not reach from this https page. Open the client over http, or give the servers https addresses.';
 export const SERVER_UNREACHABLE_TEXT = 'The Macha server cannot be reached. Check that the server is running and that the API address is correct.';
 
 /** Every node was tried and none answered within core's wait. Usually passing, so it says to try again first. */
@@ -286,6 +287,7 @@ export function viewerErrorText(error: unknown, fallback = 'Something went wrong
   if (codeText) return codeText;
   const detail = playbackFailureDetail(error);
   if (detail) return detail;
+  if (error instanceof MachaNoReachableEndpointError) return INSECURE_FROM_SECURE_PAGE_TEXT;
   if (error instanceof MachaConnectionError) return SERVER_UNREACHABLE_TEXT;
   if (error instanceof MachaClusterRouteError && error.slow) return SERVER_SLOW_TEXT;
   if (error instanceof MachaClusterRouteError && error.unreachable) return NO_NODE_ANSWERED_TEXT;

@@ -22,8 +22,10 @@ const android = import.meta.env.MODE === 'android';
 // object arguments to `[object Object]`.
 if (android) installLogcatConsoleBridge();
 installAbortControllerPolyfill(window);
-// Core auto-detects everything but the origin, which relative artwork and stream URLs resolve against.
-configureMachaHost({ origin: window.location.origin });
+// Core auto-detects everything but the origin, which relative artwork and stream URLs resolve
+// against, and whether http nodes are blocked. Only an https page blocks them: `isSecureContext`
+// is also true for http://localhost and the TVs' file:// pages, which reach http nodes fine.
+configureMachaHost({ origin: window.location.origin, secureContext: window.location.protocol === 'https:' });
 configureClientDiagnostics({
   level: samsung ? 'warn' : diagnosticsSettings.playbackLogLevel,
   console: samsung ? false : diagnosticsSettings.playbackConsole,

@@ -285,3 +285,10 @@ describe('repair pace, as each node states its own', () => {
     expect(screen.getByText('Repair').nextSibling?.textContent).toBe('Paced for loading');
   });
 });
+
+describe('a node this page may not reach', () => {
+  it('says an http node is blocked from an https page, ahead of any health it has', () => {
+    const blocked: EndpointCandidate = { ...candidate({ consecutiveFailures: 0, lastSuccessAt: 1 } as EndpointCandidate['health']), blockedByHost: 'insecure_from_secure_page' };
+    expect(clientEndpointHealth(blocked).label).toBe('Blocked: http from an https page');
+  });
+});

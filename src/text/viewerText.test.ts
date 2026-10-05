@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { endpointFailure, MachaAcquisitionApiError, MachaClusterRouteError, MachaConnectionError, MachaPlaybackError, MachaRequestTimeoutError, NOT_PLAYABLE_CODE, SESSION_PROVENANCE_UNKNOWN_CODE, START_NO_PROGRESS_CODE, TOO_SLOW_TO_PLAY_CODE, type MediaSummary, type PlaybackNotice, type PlaybackStartProgress, type VersionStep, type PassedOverVersion, type QualityCeiling, type PlaybackStatusDescription, type PlaybackStreamInfo } from '@machafoundation/core';
+import { endpointFailure, MachaAcquisitionApiError, MachaClusterRouteError, MachaConnectionError, MachaPlaybackError, MachaRequestTimeoutError, MachaNoReachableEndpointError, NOT_PLAYABLE_CODE, SESSION_PROVENANCE_UNKNOWN_CODE, START_NO_PROGRESS_CODE, TOO_SLOW_TO_PLAY_CODE, type MediaSummary, type PlaybackNotice, type PlaybackStartProgress, type VersionStep, type PassedOverVersion, type QualityCeiling, type PlaybackStatusDescription, type PlaybackStreamInfo } from '@machafoundation/core';
 import {
   availabilityText,
   playbackRefusalText,
@@ -8,7 +8,7 @@ import {
   jobErrorText,
   serverStatusText,
   albumLabel, alphabetIndexKeyText, cardSubtitle, episodeCode, episodeLabel, playbackFailureCodeText, playbackNoticeText,
-  playbackTimeText, qualityChoiceText, qualitySteppedDownText, tooSlowToPlayText, CHANGE_UNANSWERED_TEXT, NO_NODE_ANSWERED_TEXT, SERVER_SLOW_TEXT, SERVER_UNREACHABLE_TEXT, sortChoiceLabel, startProgressText, streamStatusText, trackNumberLabel, viewerErrorText,
+  playbackTimeText, qualityChoiceText, qualitySteppedDownText, tooSlowToPlayText, CHANGE_UNANSWERED_TEXT, INSECURE_FROM_SECURE_PAGE_TEXT, NO_NODE_ANSWERED_TEXT, SERVER_SLOW_TEXT, SERVER_UNREACHABLE_TEXT, sortChoiceLabel, startProgressText, streamStatusText, trackNumberLabel, viewerErrorText,
 } from './viewerText';
 
 const item = (overrides: Partial<MediaSummary>) => ({ id: 'i', kind: 'movie', title: 'T', mediaIds: [], ...overrides }) as MediaSummary;
@@ -95,6 +95,10 @@ describe('what a viewer is told about an error', () => {
   it('never says a change may still finish when the node could not be reached at all', () => {
     const refused = endpointFailure('fi-1', 'http://fi-1', new MachaConnectionError('connection refused'));
     expect(viewerErrorText(refused)).toBe(SERVER_UNREACHABLE_TEXT);
+  });
+
+  it('says why when every node is plain http and the page is https, rather than that none answered', () => {
+    expect(viewerErrorText(new MachaNoReachableEndpointError(['fi-1', 'gbni-1']))).toBe(INSECURE_FROM_SECURE_PAGE_TEXT);
   });
 
   it('gives the server\'s own sentence when the nodes answered and refused', () => {

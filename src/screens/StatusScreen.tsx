@@ -169,6 +169,7 @@ export function StatusHeader({ eyebrow, title = 'Status', health, refreshing, on
  */
 export function clientEndpointHealth(candidate: EndpointCandidate): { className: string; label: string } {
   const { health, ready } = candidate;
+  if (candidate.blockedByHost === 'insecure_from_secure_page') return { className: 'cooling', label: 'Blocked: http from an https page' };
   if (health.consecutiveFailures > 0) {
     return ready
       ? { className: 'degraded', label: 'Retry eligible' }
