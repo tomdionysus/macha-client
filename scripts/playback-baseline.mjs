@@ -111,7 +111,7 @@ for (const item of items) {
 await fetch(`${NODE}/api/v1/session`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } })
   .catch((error) => console.error(`  (session revoke failed: ${error.message})`));
 
-console.log(`\n# Playback instruction baseline — ${probed} probed, ${failed} unavailable`);
+console.log(`\n# Playback instruction baseline: ${probed} probed, ${failed} unavailable`);
 console.log(`# node ${NODE}  policy ${arg('policy', 'none')}\n`);
 for (const [key, rows] of [...buckets.entries()].sort()) {
   console.log(`## ${key}   (${rows.length})`);

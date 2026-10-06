@@ -27,7 +27,7 @@ describe('navigation role gating', () => {
     expect(visibleSections(['manage_users'])).toEqual(['Manage']);
   });
 
-  it('gives a library manager Manage, but not Status — that is its own role now', () => {
+  it('gives a library manager Manage, but not Status, which is its own role now', () => {
     expect(visibleSections(['manager'])).toEqual(['Manage']);
   });
 

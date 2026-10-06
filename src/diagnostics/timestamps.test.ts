@@ -3,7 +3,7 @@ import { presentedTime, presentedTimeOfDay, zuluTimestamp } from './timestamps';
 
 const INSTANT = Date.UTC(2026, 8, 21, 15, 51, 52);
 
-describe('zuluTimestamp — the interchange form', () => {
+describe('zuluTimestamp: the interchange form', () => {
   it('writes the instant in UTC and says so', () => {
     expect(zuluTimestamp(INSTANT)).toBe('2026-09-21 15:51:52Z');
   });
@@ -20,19 +20,19 @@ describe('zuluTimestamp — the interchange form', () => {
   });
 
   it('treats "never observed" as not stated rather than as 1970', () => {
-    expect(zuluTimestamp(0)).toBe('—');
-    expect(zuluTimestamp(undefined)).toBe('—');
-    expect(zuluTimestamp(null)).toBe('—');
+    expect(zuluTimestamp(0)).toBe('-');
+    expect(zuluTimestamp(undefined)).toBe('-');
+    expect(zuluTimestamp(null)).toBe('-');
   });
 
   it('refuses a value that is not a time', () => {
-    expect(zuluTimestamp(Number.NaN)).toBe('—');
-    expect(zuluTimestamp(Number.POSITIVE_INFINITY)).toBe('—');
-    expect(zuluTimestamp(-1)).toBe('—');
+    expect(zuluTimestamp(Number.NaN)).toBe('-');
+    expect(zuluTimestamp(Number.POSITIVE_INFINITY)).toBe('-');
+    expect(zuluTimestamp(-1)).toBe('-');
   });
 });
 
-describe('presentedTime — the only place a zone belongs', () => {
+describe('presentedTime: the only place a zone belongs', () => {
   it('renders in the reader\'s own zone rather than in UTC', () => {
     const shown = presentedTime(INSTANT);
     const at = new Date(INSTANT);
@@ -51,9 +51,9 @@ describe('presentedTime — the only place a zone belongs', () => {
   });
 
   it('treats never-stated as not stated', () => {
-    expect(presentedTime(0)).toBe('—');
-    expect(presentedTime(undefined)).toBe('—');
-    expect(presentedTimeOfDay(null)).toBe('—');
+    expect(presentedTime(0)).toBe('-');
+    expect(presentedTime(undefined)).toBe('-');
+    expect(presentedTimeOfDay(null)).toBe('-');
   });
 
   it('drops the date but keeps the zone in the short form', () => {

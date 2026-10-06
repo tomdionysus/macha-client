@@ -71,7 +71,7 @@ When the video catches up to the sound, it plays."
 | errors raised | none |
 
 One such run in 511 samples. 184 scattered single-frame audio-only gaps also
-occurred and are normal — video decodes in bursts. The 5.40 s run is
+occurred and are normal: video decodes in bursts. The 5.40 s run is
 contiguous and is the only one.
 
 The element was at `currentTime` 0, the generation's own start, so it had not
@@ -86,7 +86,7 @@ The reading that would separate these is per-track `SourceBuffer.buffered`
 ## 3. Failure message does not match the recorded cause
 
 **Reported:** the screen says "Playback failed: The node no longer has this
-source, and the buffer has run out" — "and that's also not true."
+source, and the buffer has run out", "and that's also not true."
 
 **Recorded log sequence:**
 

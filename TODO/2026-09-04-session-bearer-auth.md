@@ -14,7 +14,7 @@ document gives both a concrete shape and folds in one more open item
 
 - **Authorization**: a single, static, operator-configured Bearer token
   (`catalogue.api.token_file`) is sent on every request that needs elevated
-  access. It's a shared secret, not a session — no expiry, no scope, no
+  access. It's a shared secret, not a session: no expiry, no scope, no
   per-client identity.
 - **Viewer/session correlation**: a client-generated `Macha-Viewer-Session`
   header is sent alongside playback-session creation to identify the calling
@@ -23,7 +23,7 @@ document gives both a concrete shape and folds in one more open item
   playback-session creation so a retried POST after an ambiguous response
   (timeout, dropped connection) doesn't create a duplicate lease.
 - **"Is management available?" is a pure client-side guess.** Today
-  `managementAvailable` in `useMachaServices` is `!demo && !apiOverride` — it
+  `managementAvailable` in `useMachaServices` is `!demo && !apiOverride`; it
   has nothing to do with whether the server would actually authorize a
   management call. The client shows management UI and finds out server-side
   whether it's actually allowed only when a request fails. There is no real
@@ -35,13 +35,13 @@ document gives both a concrete shape and folds in one more open item
 Replace all of the above with one standard REST session resource and a bearer
 flow:
 
-- `POST /api/v1/sessions` — create a session. Returns a bearer token, its
+- `POST /api/v1/sessions`: create a session. Returns a bearer token, its
   granted permission scope(s) (at minimum: viewer vs. management), and an
   expiry.
-- `PUT`/`PATCH /api/v1/sessions/{id}` — refresh/extend a session before it
+- `PUT`/`PATCH /api/v1/sessions/{id}`: refresh/extend a session before it
   expires, so a long browsing/playback session doesn't die mid-stream. The
   client will refresh proactively ahead of expiry, not reactively after a 401.
-- `DELETE /api/v1/sessions/{id}` — end a session (logout / explicit revoke).
+- `DELETE /api/v1/sessions/{id}`: end a session (logout / explicit revoke).
 - `Authorization: Bearer <session-token>` on every subsequent request,
   replacing today's static configured token for ordinary API traffic.
 
@@ -62,7 +62,7 @@ and should be dropped entirely, not kept alongside.
 IETF `Idempotency-Key` header draft's semantics (mandated response-replay/
 caching behavior) when all we actually need is an opaque string the server
 keys on for deduplication. A query parameter is plain, loggable, curl-able,
-and — since these are both non-cacheable POSTs — carries no caching-hazard
+and, since these are both non-cacheable POSTs, carries no caching-hazard
 downside from being in the URL. No client-side idempotency-key *generation*
 logic changes; only where it's attached.
 
@@ -76,11 +76,11 @@ failover work was built to avoid.
 initial `POST /api/v1/sessions` call itself? Our instinct is that today's
 configured secret becomes a one-time bootstrap credential presented only in
 that one call (never on ordinary per-request traffic afterward), but the
-credential/pairing model is your call — flag back if you have a different
+credential/pairing model is your call; flag back if you have a different
 shape in mind (e.g. per-device pairing).
 
 **Mixed-version tolerance.** Older nodes without session support need a
-defined fallback — presumably: a node that doesn't advertise the session
+defined fallback, presumably: a node that doesn't advertise the session
 capability keeps accepting the current static-token-per-request path, same
 tolerance philosophy used elsewhere in this cluster work.
 
@@ -88,19 +88,19 @@ tolerance philosophy used elsewhere in this cluster work.
 
 Signed artwork/stream capability URLs (shipped 2026-09-04, see
 `COMPLETED.md`) are unrelated and unaffected. Those exist because a plain
-`<img>`/media element load can't carry an `Authorization` header at all —
+`<img>`/media element load can't carry an `Authorization` header at all:
 different problem, different mechanism. This ask is only about JS-orchestrated
 `fetch()` calls.
 
 ## Summary of removals once this lands
 
-- `Macha-Viewer-Session` header — removed, replaced by the bearer token's own
+- `Macha-Viewer-Session` header: removed, replaced by the bearer token's own
   identity.
 - Static per-request `Authorization: Bearer <configured-token>` on ordinary
-  traffic — removed, replaced by the session bearer token. (Whether the
+  traffic: removed, replaced by the session bearer token. (Whether the
   static secret survives as a one-time bootstrap credential is the server
   team's call, per above.)
-- `Idempotency-Key` header — removed, replaced by an `idempotency_key` query
+- `Idempotency-Key` header: removed, replaced by an `idempotency_key` query
   parameter on the same endpoints.
-- Client-side `managementAvailable` heuristic — removed, replaced by reading
+- Client-side `managementAvailable` heuristic: removed, replaced by reading
   the actual granted scope from the session response.

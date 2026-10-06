@@ -194,7 +194,7 @@ describe("a torrent's own page", () => {
     await settle();
     const nodes = [...document.querySelectorAll('tbody td.col-node')].map((cell) => cell.textContent);
     // A node the list does not name is shown by the start of its id.
-    expect(nodes.sort()).toEqual(['gbni-1', 'gbni-1 → Node fi-node', '—']);
+    expect(nodes.sort()).toEqual(['-', 'gbni-1', 'gbni-1 → Node fi-node']);
   });
 
   it('reports the facts the list has no room for: hash, node, ratio and cataloguing outcome', async () => {

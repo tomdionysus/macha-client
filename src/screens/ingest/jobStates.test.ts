@@ -23,10 +23,10 @@ describe('a cluster torrent (server 0.64.0)', () => {
   });
 
   it('shows figures its node has not reported as unknown, not as nothing', () => {
-    expect(formatBytes(null)).toBe('—');
+    expect(formatBytes(null)).toBe('-');
     expect(formatBytes(0)).toBe('0 B');
-    expect(formatRate(null)).toBe('—');
-    expect(formatCount(null)).toBe('—');
+    expect(formatRate(null)).toBe('-');
+    expect(formatCount(null)).toBe('-');
     expect(formatCount(0)).toBe('0');
   });
 });

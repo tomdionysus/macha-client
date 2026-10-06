@@ -67,7 +67,7 @@ interface Props {
  */
 export function startWaitNotice(starting: boolean, elapsedMs: number, stage?: string): string | undefined {
   if (!starting || elapsedMs < uiSettings.playerStartWaitNoticeMs) return undefined;
-  return `${stage ?? 'Waiting for the node to start the stream'} — ${Math.floor(elapsedMs / 1_000)}s`;
+  return `${stage ?? 'Waiting for the node to start the stream'} · ${Math.floor(elapsedMs / 1_000)}s`;
 }
 
 /**

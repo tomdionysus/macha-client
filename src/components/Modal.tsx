@@ -65,7 +65,7 @@ interface FormModalProps {
   children: ReactNode;
   submitLabel?: string;
   busy?: boolean;
-  /** Nothing to save — a pristine form, or one the viewer has not filled in. */
+  /** Nothing to save: a pristine form, or one the viewer has not filled in. */
   submitDisabled?: boolean;
   /** A failure that belongs to the dialogue as a whole rather than to one field. */
   error?: ReactNode;

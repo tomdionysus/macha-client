@@ -133,13 +133,13 @@ export function SettingsScreen({ api, serverApi, bootstrapEndpoints, usingHost, 
           <span className="settings-status-label">Catalogue</span>
           <strong>{catalogueState}</strong>
           <dl>
-            <div><dt>Items</dt><dd>{catalogue.value?.items ?? '—'}</dd></div>
+            <div><dt>Items</dt><dd>{catalogue.value?.items ?? '-'}</dd></div>
             <div>
               <dt>Artwork</dt>
-              <dd>{catalogue.value ? `${catalogue.value.local_artwork_objects}/${catalogue.value.artwork_objects} local` : '—'}</dd>
+              <dd>{catalogue.value ? `${catalogue.value.local_artwork_objects}/${catalogue.value.artwork_objects} local` : '-'}</dd>
             </div>
-            <div><dt>Generation</dt><dd>{catalogue.value?.metadata_generation ?? '—'}</dd></div>
-            <div><dt>Last sync</dt><dd>{catalogue.value ? formatLastSync(catalogue.value.last_sync_unix_ms) : '—'}</dd></div>
+            <div><dt>Generation</dt><dd>{catalogue.value?.metadata_generation ?? '-'}</dd></div>
+            <div><dt>Last sync</dt><dd>{catalogue.value ? formatLastSync(catalogue.value.last_sync_unix_ms) : '-'}</dd></div>
           </dl>
           {(catalogue.error || catalogue.value?.error) && (
             <p className="settings-status-error">{catalogue.error ? viewerErrorText(catalogue.error) : catalogue.value?.error}</p>

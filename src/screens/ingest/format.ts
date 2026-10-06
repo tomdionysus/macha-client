@@ -7,9 +7,9 @@ export function fileName(path: string): string {
   return slash >= 0 ? path.slice(slash + 1) : path;
 }
 
-/** Null (the job's node is not in view) is unknown and reads "—", not "0 B". */
+/** Null (the job's node is not in view) is unknown and reads "-", not "0 B". */
 export function formatBytes(value: number | null): string {
-  if (value === null) return '—';
+  if (value === null) return '-';
   if (!Number.isFinite(value) || value <= 0) return '0 B';
   const units = ['B', 'KB', 'MB', 'GB', 'TB'];
   let amount = value;
@@ -23,7 +23,7 @@ export function formatBytes(value: number | null): string {
 }
 
 export function formatRate(value: number | null): string {
-  return value !== null && value > 0 ? `${formatBytes(value)}/s` : '—';
+  return value !== null && value > 0 ? `${formatBytes(value)}/s` : '-';
 }
 
 const DURATION_UNITS = [
@@ -49,7 +49,7 @@ function longDuration(seconds: number, round: (value: number) => number): string
 }
 
 export function formatEta(value: number | null): string {
-  if (value === null || value < 0 || !Number.isFinite(value)) return '—';
+  if (value === null || value < 0 || !Number.isFinite(value)) return '-';
   if (value < 60) return `${Math.ceil(value)}s`;
   if (value < 3600) return `${Math.ceil(value / 60)}m`;
   return longDuration(value, Math.ceil);
@@ -62,7 +62,7 @@ export function percent(progress: number | null, completed: number | null, total
 }
 
 export function formatPercent(value: number | null): string {
-  return value === null ? '—' : `${value >= 99.95 || value === 0 ? Math.round(value) : value.toFixed(1)}%`;
+  return value === null ? '-' : `${value >= 99.95 || value === 0 ? Math.round(value) : value.toFixed(1)}%`;
 }
 
 export function formatTimestamp(value: number): string {
@@ -71,7 +71,7 @@ export function formatTimestamp(value: number): string {
 
 // Floored, where an ETA rounds up: an age counts only what has gone by.
 export function formatAge(value: number, now: number): string {
-  if (!value) return '—';
+  if (!value) return '-';
   const seconds = Math.floor((now - value) / 1000);
   if (seconds < 60) return 'just now';
   if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
@@ -85,9 +85,9 @@ const STATE_LABELS: Record<string, string> = {
   awaiting_node: 'Waiting for a node',
 };
 
-/** A count the server may not know (null), as "—". */
+/** A count the server may not know (null), as "-". */
 export function formatCount(value: number | null): string {
-  return value === null ? '—' : String(value);
+  return value === null ? '-' : String(value);
 }
 
 export function stateLabel(state: string): string {
@@ -101,5 +101,5 @@ export function ratioOf(job: TorrentJob): number | null {
 
 export function formatRatio(job: TorrentJob): string {
   const ratio = ratioOf(job);
-  return ratio === null ? '—' : ratio.toFixed(2);
+  return ratio === null ? '-' : ratio.toFixed(2);
 }

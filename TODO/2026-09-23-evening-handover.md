@@ -1,4 +1,4 @@
-# 2026-09-23 (evening) — handover
+# 2026-09-23 (evening): handover
 
 Written for a context clear, at the end of the session that followed this
 morning's [handover](2026-09-23-session-handover.md). `ACTIVE.md` is current

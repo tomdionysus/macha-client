@@ -1,4 +1,4 @@
-# 2026-09-23 — handover
+# 2026-09-23: handover
 
 Written for a context clear, at the end of the session that rationalised the
 backlog after the previous collapse, released and deployed 0.18.0, and
@@ -23,7 +23,7 @@ this is the record of the session.
 
 **0.18.0 is on all three nodes and both public names**, deployed 2026-09-21
 22:53 UTC: `index-CKNh5Q9D.js`, 633,692 bytes, `shasum` `eff197072a8e`,
-built from `main` at the tag against the *published* core — the first
+built from `main` at the tag against the *published* core, the first
 deployed bundle ever built that way. Backups at
 `/etc/macha/web.bak-20260921-225245.tar.gz` on each node. Old and new
 bundles share the lazy `hls-Bt6kO1A0.js` chunk, so the additive deploy could
@@ -70,7 +70,7 @@ now states `startup_timeout_ms` 15000, `segment_timeout_ms` 6000,
 `transcode_entitlement_idle_ms` 300000, `max_sessions` 64,
 `max_sessions_per_account` 32. The per-account cap (0.48.0) has replaced
 one-session-per-bearer, which supersedes the "a same-node handover cannot
-work at any lead time" finding — noted in the handover P0, not re-measured.
+work at any lead time" finding, noted in the handover P0, not re-measured.
 `corvus-fi-1` reports `hosts_extents: false`. No node record carries a
 `name`; `host` is a DNS name on two nodes and a machine name on the third.
 
@@ -85,14 +85,14 @@ the test cluster behaves" in `ACTIVE.md`.
    became a deletion rather than a feature; five finished P1s moved to
    `COMPLETED.md`; the docs lost `Macha-Viewer-Session` and `Idempotency-Key`,
    which core no longer sends.
-2. **Released 0.18.0** — merge to `main`, registry core, gate, tag, push
+2. **Released 0.18.0**: merge to `main`, registry core, gate, tag, push
    (`ce74408`). **Relinked `develop`** (`8ca7760`).
 3. **Deployed** to all three nodes (`8fdebb2` records it).
 4. **Answered the `Macha Server` session's torrent contract** (`95cb3a0`):
    keep the hex `node_id`; add a `name` to `/api/v1/status` nodes rather
    than to the torrents route; the default placement is arbitrary and the
    always-present `node_id` on the 202 is what makes that acceptable; and
-   two questions — can a `hosts_extents: false` node take a job, and is
+   two questions: can a `hosts_extents: false` node take a job, and is
    `node_id` accepted exactly as status reports `id`. **No reply had
    arrived** when this was written. The torrent detail pane's fixture, which
    asserted a node id reads `gbni-2`, was corrected to a real 32-hex id.
@@ -101,11 +101,11 @@ the test cluster behaves" in `ACTIVE.md`.
 
 1. **The foregrounded check of the deployed client** (above). Ten minutes,
    and it either closes the deploy or opens a P0.
-2. **Delete `useNodeIdentity` and wire `selectNode` to `moveTo`** — the
+2. **Delete `useNodeIdentity` and wire `selectNode` to `moveTo`**: the
    first P1. The deletion is now urgent rather than tidy, because the hook is
    deployed and calls the membership call.
-3. **Instrument the `readyState` 0 stall** — the P0 with the recorder spec.
-4. **The reap run** — a thirty-minute pause against 0.48.2.
+3. **Instrument the `readyState` 0 stall**: the P0 with the recorder spec.
+4. **The reap run**: a thirty-minute pause against 0.48.2.
 5. **The torrent node control**, once the server session says which version
    deploys the contract. Design sketched in its P1.
 
@@ -132,6 +132,6 @@ the test cluster behaves" in `ACTIVE.md`.
   `document.visibilityState`, and measure the same thing from outside the
   browser before believing a log line.
 - **Answer a contract question by reading what the client would render.** The
-  torrent feedback's one real finding — the Node row is unreadable hex and
-  nothing on the wire can name it — came from opening the component and the
+  torrent feedback's one real finding (the Node row is unreadable hex and
+  nothing on the wire can name it) came from opening the component and the
   fixture, not from reading the proposal.

@@ -79,7 +79,7 @@ export function AccountMenu({ session, onSignOut }: Props) {
       >
         {/* `logout()` revokes this one token; the account's other sessions keep working. */}
         <p>
-          This signs <strong>{who}</strong> out on this device only — anywhere else stays signed in.
+          This signs <strong>{who}</strong> out on this device only; anywhere else stays signed in.
           Anything playing here will stop.
         </p>
       </ConfirmModal>

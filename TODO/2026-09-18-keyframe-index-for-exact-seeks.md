@@ -9,8 +9,8 @@ client is the thing that would use it.
 > before the request and reports the remainder as `seek_offset_ms`, and
 > transcode does not snap at all. The overshoot table below is therefore the old
 > forward-snapping behaviour and no content is skipped any more. Everything this
-> file argues for is unaffected — the client still cannot tell in advance
-> whether a seek will be exact — but read the seek P0 in `ACTIVE.md` and the
+> file argues for is unaffected (the client still cannot tell in advance
+> whether a seek will be exact) but read the seek P0 in `ACTIVE.md` and the
 > server's `2026-09-18-seek-does-what-it-is-told-plan.md` first.
 
 ## The finding
@@ -25,7 +25,7 @@ So every seek this client issues is blind. It names a millisecond, sends it,
 and discovers afterwards how far the node had to travel to reach a keyframe it
 can actually start a stream on.
 
-## Why it matters — measured, not argued
+## Why it matters: measured, not argued
 
 Four generations created for a seek or a recovery on 2026-09-17/18, remux, one
 episode of 3,951,957 ms, against `10.34.1.50` and `10.35.1.50`:
@@ -44,8 +44,8 @@ viewer about 9.1 s of film at a generation cut, measured two independent ways
 (the handover's own join arithmetic, and a 100 ms sampler that knows nothing
 of it, agreeing to within 0.2 s).
 
-At the time these were measured the server aligned *forward* — to the first
-indexed keyframe at or after the request — which silently removed the content
+At the time these were measured the server aligned *forward*, to the first
+indexed keyframe at or after the request, which silently removed the content
 between. That behaviour is being changed (see
 `2026-09-17-paused-session-reaped.md` and the `seek_ms` / `seek_offset_ms`
 work), so the content loss goes away. **The blindness does not.** The client
@@ -60,8 +60,8 @@ both remux and transcode.** That is the opt-in to an exact, cheap seek, and
 the client cannot currently take it because it does not know where those
 points are.
 
-The server derives them from the demuxer's index at open time — libavformat's
-`AVIndexEntry` with the keyframe flag — so this is serialising a structure it
+The server derives them from the demuxer's index at open time (libavformat's
+`AVIndexEntry` with the keyframe flag) so this is serialising a structure it
 already holds, not computing a new one.
 
 ## The cost, estimated
@@ -77,7 +77,7 @@ already holds, not computing a new one.
 Gzip roughly halves the JSON, so the densest realistic case is ~20–25 KB on
 the wire. One 4 s segment at Original quality on this library runs to a couple
 of megabytes, which makes the whole index for a three-hour film **one to two
-percent of a single segment** — and unlike a segment it is immutable per file,
+percent of a single segment**, and unlike a segment it is immutable per file,
 so it is fetched once and cached indefinitely rather than per session.
 
 The measured gaps above point at the 5–10 s rows for this content. Note those
@@ -87,16 +87,16 @@ should not be read straight off it.
 
 ## Container support
 
-**MP4/MOV — complete and immediate.** The `stss` sync sample table in `stbl`
+**MP4/MOV: complete and immediate.** The `stss` sync sample table in `stbl`
 names every sync sample; with `stts` it converts to timestamps. It lives in
 `moov`, which the demuxer parses before it can play anything, so the list is
 in memory already. About 4 bytes per entry. An absent `stss` means every
 sample is a sync sample.
 
-**MKV — quick, but possibly a subset.** The Cues element is the seek index and
+**MKV: quick, but possibly a subset.** The Cues element is the seek index and
 `SeekHead` points at it, so it is one seek away even when written at the end.
 But Matroska marks keyframes per block, in the SimpleBlock flags, and Cues are
-not obliged to name all of them — muxers vary between cueing every video
+not obliged to name all of them: muxers vary between cueing every video
 keyframe, one per cluster, or on an interval. A provably complete list means
 walking every cluster, which is reading the whole file.
 
@@ -113,7 +113,7 @@ server is adding cue-density logging.
   where the client asked and `seek_offset_ms` is zero. No content skipped, no
   re-plan on the node, and the node's seek fast path becomes reachable.
 - [ ] Consider snapping the scrubber itself to those points while dragging,
-  the way an editor snaps to cuts — the viewer lands on a frame the stream can
+  the way an editor snaps to cuts: the viewer lands on a frame the stream can
   actually start on, and the seek is exact by construction rather than by
   negotiation.
 - [ ] Decide whether snapping is unconditional or a preference. Snapping

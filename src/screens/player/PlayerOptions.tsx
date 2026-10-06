@@ -65,8 +65,8 @@ function instructionNote(instruction: PlaybackInstructionReport | undefined): st
     // Say why nothing could be read, so the viewer can tell a broken file from a busy node.
     const cause = describeFactsError(instruction.factsError);
     return cause
-      ? `Chosen without facts — transcoding because this file's details could not be read: ${cause}`
-      : 'Chosen without facts — transcoding because nothing could be reasoned from.';
+      ? `Chosen without facts: transcoding because this file's details could not be read: ${cause}`
+      : 'Chosen without facts: transcoding because nothing could be reasoned from.';
   }
   const reasons = instruction.reasons.map((reason) => REASON_TEXT[reason] ?? reason);
   return reasons.length > 0 ? `Chosen automatically: ${reasons.join('; ')}.` : 'Chosen automatically.';

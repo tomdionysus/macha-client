@@ -140,7 +140,7 @@ running stream which resolves if you press play."** Not a pause at all, and it
 is the same stage 2.
 
 Stage 1 is only one of several doors into a failover. A stall, a fatal hls.js
-error, a premature source end — any of them hands the coordinator a generation
+error, a premature source end: any of them hands the coordinator a generation
 to replace, which is correct and is the feature working. What follows is
 identical every time: the failed node is excluded, the only remaining candidate
 is the discovered plain-http LAN address, an https page cannot fetch it, and the
@@ -163,8 +163,8 @@ places: a judgement about whether a node is failing the viewer may only be made
 while there is a viewer to fail.
 
 1. **`WebPlayer.pause()` calls `stallWatchdog.suspend()`.** Core already had the
-   method and the other half of it — `note()`'s `resumed` branch re-arms on the
-   first report after a resume — so a node that dies mid-pause is still judged
+   method and the other half of it (`note()`'s `resumed` branch re-arms on the
+   first report after a resume) so a node that dies mid-pause is still judged
    the moment anyone waits on it again. Stood down, not switched off.
 2. **A fatal hls.js error raised while paused parks the load instead of being
    judged.** The decision is in `managedHlsErrorAction`, which gained a
@@ -172,7 +172,7 @@ while there is a viewer to fail.
    the judging behaviour) and a new `park-paused` action. `WebPlayer` answers it
    with `hls.stopLoad()` and a flag that `resume()` clears by calling
    `hls.startLoad(video.currentTime)` before it asks the element to play. No
-   budget is spent, nothing is torn down, and the error — if it is still true —
+   budget is spent, nothing is torn down, and the error, if it is still true,
    is met again with the viewer present.
 
    Deliberately every fatal class, not just the network one. And deliberately
@@ -206,7 +206,7 @@ transcode instruction as the failures above.
 
 **`document.visibilityState` confirmed `visible` throughout, and
 `document.hasFocus()` was `false` for the first half of the pause.** That is the
-condition Tom set — a pause must hold whether or not the tab has focus — and it
+condition Tom set (a pause must hold whether or not the tab has focus) and it
 is the confound that made the first attempt worthless: with the window occluded
 the element sat at `readyState 0` for over a minute and the watchdogs banked no
 time at all, so nothing was being tested.
@@ -235,7 +235,7 @@ right moment.
 
 **The start watchdog is left alone.** `MediaStartWatchdog` fires at 20 s of
 visible time against a source that never delivered a byte, and it is armed for
-element-owned fetches whether or not the element is paused — so a generation
+element-owned fetches whether or not the element is paused, so a generation
 attached paused (a failover completing, or a seek, while the viewer had paused)
 that never receives anything is judged the same way. Observed directly: with the
 stall watchdog suspended, the first version of the pause test failed instead on
@@ -246,13 +246,13 @@ element still fetches, so the window is narrow. And the obvious fix is wrong:
 core exposes only `stop()`/`start()`, not a suspend that remembers whether bytes
 ever arrived, so re-arming on resume would start a fresh 20 s budget against an
 element that resumes from a full buffer and may not fire `progress` for longer
-than that — turning a working resume into a false failure. Worth a core seam,
+than that, turning a working resume into a false failure. Worth a core seam,
 not a client workaround.
 
 **Degradation while paused still prepares a standby.** A non-fatal network error
 while paused still reaches `degradeSourceGeneration`, so core may prepare an
-alternate that expires unused during a long pause. Parking bounds it — once the
-load stops, no further errors arrive — and the cost is a session held briefly on
+alternate that expires unused during a long pause. Parking bounds it (once the
+load stops, no further errors arrive) and the cost is a session held briefly on
 another node rather than a viewer-visible fault. Noted rather than changed.
 
 ## Evidence trail

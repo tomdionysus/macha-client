@@ -10,7 +10,7 @@ describe('how long, in the largest units that fit', () => {
     expect(formatEta(48 * 3600)).toBe('2d');
     expect(formatEta(24 * 3600 + 1)).toBe('1d 1h');
     expect(formatEta(10 * 86_400)).toBe('1w 3d');
-    expect(formatEta(null)).toBe('—');
+    expect(formatEta(null)).toBe('-');
   });
 
   it('gives an age the same way, counting only what has gone by', () => {

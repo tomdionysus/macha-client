@@ -287,13 +287,13 @@ export function IngestScreen({ api, section }: Props) {
                       <td className="col-name">
                         <Link to={torrentPath(job.id, search)} data-tv-focusable="true" title={name}>{name}</Link>
                       </td>
-                      <td className="col-size">{job.bytes_total !== null && job.bytes_total > 0 ? formatBytes(job.bytes_total) : '—'}</td>
+                      <td className="col-size">{job.bytes_total !== null && job.bytes_total > 0 ? formatBytes(job.bytes_total) : '-'}</td>
                       <td className="col-progress">
                         <Progress value={progress} />
                         <span>{formatPercent(progress)}</span>
                       </td>
                       <td className={`col-status${failure ? ' has-error' : ''}`} title={failure}>{intentNote(job, now, refreshIntervalMs) ?? heldStatus(job) ?? storingStatus(job) ?? stateLabel(state)}</td>
-                      <td className="col-node" title={job.ingest_node_id && job.ingest_node_id !== job.node_id ? 'Downloading on the first, importing on the second' : undefined}>{jobNodesText(job, nodeHosts) ?? '—'}</td>
+                      <td className="col-node" title={job.ingest_node_id && job.ingest_node_id !== job.node_id ? 'Downloading on the first, importing on the second' : undefined}>{jobNodesText(job, nodeHosts) ?? '-'}</td>
                       <td className="col-rate">{formatRate(job.download_rate)}</td>
                       <td className="col-rate col-optional">{formatRate(job.upload_rate)}</td>
                       <td className="col-eta">{formatEta(job.eta_seconds)}</td>

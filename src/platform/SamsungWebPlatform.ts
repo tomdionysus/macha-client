@@ -18,8 +18,8 @@ export class SamsungWebPlatform implements Platform {
     // Native player, paired with the MPEG-TS preference below. In fMP4 HLS, per stream:
     //
     //             native player          hls.js / MediaSource
-    //   h264      plays                  —
-    //   HEVC      black screen           —
+    //   h264      plays                  -
+    //   HEVC      black screen           -
     //   E-AC-3    0.2s every ~20s        stream rejected outright
     //   AAC       silent                 plays
     //

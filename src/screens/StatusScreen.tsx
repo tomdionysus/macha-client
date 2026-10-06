@@ -41,7 +41,7 @@ function formatBytes(value: number): string {
 }
 
 function formatDuration(ms?: number | null): string {
-  if (ms == null || !Number.isFinite(ms)) return '—';
+  if (ms == null || !Number.isFinite(ms)) return '-';
   if (ms < 1000) return 'just now';
   const seconds = Math.floor(ms / 1000);
   if (seconds < 60) return `${seconds}s`;
@@ -230,7 +230,7 @@ function ClientApiEndpoints({ registry }: { registry: EndpointRegistry }) {
 }
 
 function endpointLabel(endpoint?: { host: string; port: number }): string {
-  if (!endpoint?.host || !endpoint.port) return '—';
+  if (!endpoint?.host || !endpoint.port) return '-';
   return `${endpoint.host}:${endpoint.port}`;
 }
 
@@ -248,10 +248,10 @@ function PublicConnectivity({ connectivity }: { connectivity: PublicConnectivity
   const upnp = connectivity.upnp;
   const external = upnp.external_address && upnp.external_port
     ? `${upnp.external_address}:${upnp.external_port}`
-    : upnp.external_address ?? '—';
+    : upnp.external_address ?? '-';
   const internal = upnp.lan_address && upnp.internal_port
     ? `${upnp.lan_address}:${upnp.internal_port}`
-    : upnp.lan_address ?? '—';
+    : upnp.lan_address ?? '-';
   const source = connectivity.advertised.source || 'configured';
 
   return (
@@ -284,7 +284,7 @@ function PublicConnectivity({ connectivity }: { connectivity: PublicConnectivity
         {(connectivity.external_ip.enabled || connectivity.external_ip.attempted) && <article className="node-detail-card"><h2>External IP fallback</h2><dl>
           <DetailItem label="Enabled">{yesNo(connectivity.external_ip.enabled)}</DetailItem>
           <DetailItem label="Attempted">{yesNo(connectivity.external_ip.attempted)}</DetailItem>
-          <DetailItem label="Address"><code>{connectivity.external_ip.address ?? '—'}</code></DetailItem>
+          <DetailItem label="Address"><code>{connectivity.external_ip.address ?? '-'}</code></DetailItem>
           {diagnosticErrorText(connectivity.external_ip) && <DetailItem label="Lookup error"><span className="cluster-connectivity-error">{diagnosticErrorText(connectivity.external_ip)}</span></DetailItem>}
         </dl></article>}
       </div>
@@ -305,21 +305,21 @@ function NodeCard({ node, repair, canManage, resetting, onReset }: { node: Clust
         {/* Version is on the card so nodes that have drifted apart show at a glance. */}
         <div className="cluster-node-meta">
           <span>{node.roles.length ? node.roles.join(' · ') : 'node'}</span>
-          <span className="cluster-node-version">{node.version || '—'}</span>
+          <span className="cluster-node-version">{node.version || '-'}</span>
           <span className={telemetryAgeClassName(node)}>{freshnessLabel(node)}</span>
         </div>
         <dl className="cluster-node-stats">
-          <div><dt>Version</dt><dd>{node.version || '—'}</dd></div>
-          <div><dt>Uptime</dt><dd>{node.runtime.uptime_ms != null ? formatDuration(node.runtime.uptime_ms) : '—'}</dd></div>
+          <div><dt>Version</dt><dd>{node.version || '-'}</dd></div>
+          <div><dt>Uptime</dt><dd>{node.runtime.uptime_ms != null ? formatDuration(node.runtime.uptime_ms) : '-'}</dd></div>
           <div><dt>Storage</dt><dd>{formatBytes(node.storage.used_bytes)} / {formatBytes(node.storage.capacity_bytes)}</dd></div>
-          <div><dt>Cache</dt><dd>{node.cache.capacity_bytes ? `${formatBytes(node.cache.used_bytes)} / ${formatBytes(node.cache.capacity_bytes)}` : '—'}</dd></div>
-          <div><dt>Load</dt><dd>{node.runtime.load1 != null ? node.runtime.load1.toFixed(2) : '—'}</dd></div>
+          <div><dt>Cache</dt><dd>{node.cache.capacity_bytes ? `${formatBytes(node.cache.used_bytes)} / ${formatBytes(node.cache.capacity_bytes)}` : '-'}</dd></div>
+          <div><dt>Load</dt><dd>{node.runtime.load1 != null ? node.runtime.load1.toFixed(2) : '-'}</dd></div>
           {/* Cores beside Load: load1 is only readable against the core count. Memory is the machine's RAM. */}
-          <div><dt>Cores</dt><dd>{node.runtime.cpu_cores ?? '—'}</dd></div>
-          <div><dt>Memory</dt><dd>{memory != null ? formatBytes(memory) : '—'}</dd></div>
-          <div><dt>Cluster traffic</dt><dd>{clusterTrafficText(node.traffic) ?? '—'}</dd></div>
-          <div><dt>Peers</dt><dd>{node.runtime.peers_active != null ? `${node.runtime.peers_active}/${node.runtime.peers_known ?? node.runtime.peers_active}` : '—'}</dd></div>
-          <div><dt>Repair</dt><dd>{repairPaceText(repair) ?? '—'}</dd></div>
+          <div><dt>Cores</dt><dd>{node.runtime.cpu_cores ?? '-'}</dd></div>
+          <div><dt>Memory</dt><dd>{memory != null ? formatBytes(memory) : '-'}</dd></div>
+          <div><dt>Cluster traffic</dt><dd>{clusterTrafficText(node.traffic) ?? '-'}</dd></div>
+          <div><dt>Peers</dt><dd>{node.runtime.peers_active != null ? `${node.runtime.peers_active}/${node.runtime.peers_known ?? node.runtime.peers_active}` : '-'}</dd></div>
+          <div><dt>Repair</dt><dd>{repairPaceText(repair) ?? '-'}</dd></div>
         </dl>
       </Link>
       {canManage && <div className="cluster-node-actions">
@@ -600,7 +600,7 @@ export function trafficClassLabel(code: string): string {
 }
 
 function trafficRateText(bytesPerSecond: number | null): string {
-  return bytesPerSecond == null ? '—' : `${formatBytes(bytesPerSecond)}/s`;
+  return bytesPerSecond == null ? '-' : `${formatBytes(bytesPerSecond)}/s`;
 }
 
 /**
@@ -701,47 +701,47 @@ export function NodeStatusScreen({ api }: { api: ClusterStatusApi }) {
       <div className="node-detail-grid">
         <article className="node-detail-card"><h2>Overview</h2><dl>
           <DetailItem label="Node ID"><code>{node.id}</code></DetailItem>
-          <DetailItem label="Version">{node.version || '—'}</DetailItem>
+          <DetailItem label="Version">{node.version || '-'}</DetailItem>
           {/* The RPC `host:port` is the internal bind address, often one port from
               the API, and what an identity reset is keyed on. No endpoint means
               the node has no HTTP API for clients, whatever its inbound capability. */}
           <DetailItem label="API endpoint">{node.api_endpoint?.includes('://') ? node.api_endpoint : 'None advertised'}</DetailItem>
-          <DetailItem label="RPC address">{node.host ? `${node.host}:${node.port}` : '—'}</DetailItem>
-          {/* A No is a normal topology, not a fault; an em dash is a node that did not report the field. */}
+          <DetailItem label="RPC address">{node.host ? `${node.host}:${node.port}` : '-'}</DetailItem>
+          {/* A No is a normal topology, not a fault; a hyphen is a node that did not report the field. */}
           <DetailItem label="Inbound RPC connections">
-            {inboundCapable === undefined ? '—' : yesNo(inboundCapable)}
+            {inboundCapable === undefined ? '-' : yesNo(inboundCapable)}
           </DetailItem>
-          <DetailItem label="Failure domain">{node.failure_domain || '—'}</DetailItem>
-          <DetailItem label="Roles">{node.roles.join(', ') || '—'}</DetailItem>
+          <DetailItem label="Failure domain">{node.failure_domain || '-'}</DetailItem>
+          <DetailItem label="Roles">{node.roles.join(', ') || '-'}</DetailItem>
           <DetailItem label="Telemetry"><span className={telemetryAgeClassName(node)}>{freshnessLabel(node)}</span></DetailItem>
-          <DetailItem label="Repair">{repairPaceText(nodeId ? repair[nodeId] : undefined) ?? '—'}</DetailItem>
-          <DetailItem label="Uptime">{runtime.uptime_ms != null ? formatDuration(runtime.uptime_ms) : '—'}</DetailItem>
+          <DetailItem label="Repair">{repairPaceText(nodeId ? repair[nodeId] : undefined) ?? '-'}</DetailItem>
+          <DetailItem label="Uptime">{runtime.uptime_ms != null ? formatDuration(runtime.uptime_ms) : '-'}</DetailItem>
         </dl></article>
         <article className="node-detail-card"><h2>Storage</h2><dl>
           <DetailItem label="MachaDFS used">{formatBytes(node.storage.used_bytes)}</DetailItem>
           <DetailItem label="Capacity">{formatBytes(node.storage.capacity_bytes)}</DetailItem>
           <DetailItem label="Free">{formatBytes(node.storage.free_bytes)}</DetailItem>
           <DetailItem label="Backends online">{node.storage_backends_online}</DetailItem>
-          <DetailItem label="Cache used">{node.cache.capacity_bytes ? formatBytes(node.cache.used_bytes) : '—'}</DetailItem>
-          <DetailItem label="Cache capacity">{node.cache.capacity_bytes ? formatBytes(node.cache.capacity_bytes) : '—'}</DetailItem>
+          <DetailItem label="Cache used">{node.cache.capacity_bytes ? formatBytes(node.cache.used_bytes) : '-'}</DetailItem>
+          <DetailItem label="Cache capacity">{node.cache.capacity_bytes ? formatBytes(node.cache.capacity_bytes) : '-'}</DetailItem>
         </dl></article>
         <article className="node-detail-card"><h2>Runtime</h2><dl>
-          <DetailItem label="CPU">{runtime.process_cpu_percent != null ? `${runtime.process_cpu_percent.toFixed(1)}%` : '—'}</DetailItem>
-          <DetailItem label="Cores">{runtime.cpu_cores ?? '—'}</DetailItem>
-          <DetailItem label="Load (1m)">{runtime.load1 != null ? runtime.load1.toFixed(2) : '—'}</DetailItem>
-          <DetailItem label="System memory">{memory != null ? formatBytes(memory) : '—'}</DetailItem>
+          <DetailItem label="CPU">{runtime.process_cpu_percent != null ? `${runtime.process_cpu_percent.toFixed(1)}%` : '-'}</DetailItem>
+          <DetailItem label="Cores">{runtime.cpu_cores ?? '-'}</DetailItem>
+          <DetailItem label="Load (1m)">{runtime.load1 != null ? runtime.load1.toFixed(2) : '-'}</DetailItem>
+          <DetailItem label="System memory">{memory != null ? formatBytes(memory) : '-'}</DetailItem>
           {/* "Process RSS", to tell it from the machine memory directly above. */}
-          <DetailItem label="Process RSS">{runtime.rss_bytes != null ? formatBytes(runtime.rss_bytes) : '—'}</DetailItem>
-          <DetailItem label="Peers">{runtime.peers_active != null ? `${runtime.peers_active}/${runtime.peers_known ?? runtime.peers_active} active` : '—'}</DetailItem>
-          <DetailItem label="RPC reused">{runtime.rpc_connections_reused ?? '—'}</DetailItem>
-          <DetailItem label="RPC canonical">{runtime.rpc_connections_canonical ?? '—'}</DetailItem>
+          <DetailItem label="Process RSS">{runtime.rss_bytes != null ? formatBytes(runtime.rss_bytes) : '-'}</DetailItem>
+          <DetailItem label="Peers">{runtime.peers_active != null ? `${runtime.peers_active}/${runtime.peers_known ?? runtime.peers_active} active` : '-'}</DetailItem>
+          <DetailItem label="RPC reused">{runtime.rpc_connections_reused ?? '-'}</DetailItem>
+          <DetailItem label="RPC canonical">{runtime.rpc_connections_canonical ?? '-'}</DetailItem>
         </dl></article>
         <TrafficCard traffic={node.traffic} />
         <article className="node-detail-card"><h2>Metadata</h2><dl>
           <DetailItem label="Generation">{node.metadata_generation}</DetailItem>
           <DetailItem label="Voter">{node.roles.includes('metadata-voter') ? 'Yes' : 'No'}</DetailItem>
           <DetailItem label="Observed">{presentedTime(node.observed_at_unix_ms)}</DetailItem>
-          <DetailItem label="Live age"><span className={telemetryAgeClassName(node)}>{node.live_age_ms != null ? formatDuration(node.live_age_ms) : '—'}</span></DetailItem>
+          <DetailItem label="Live age"><span className={telemetryAgeClassName(node)}>{node.live_age_ms != null ? formatDuration(node.live_age_ms) : '-'}</span></DetailItem>
           {node.identity_association_reset && <>
             <DetailItem label="Last identity reset">{presentedTime(node.identity_association_reset.reset_at_unix_ms)}</DetailItem>
             <DetailItem label="Reset epoch">{node.identity_association_reset.epoch}</DetailItem>

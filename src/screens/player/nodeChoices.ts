@@ -84,8 +84,8 @@ export function playerNodeChoices(
       endpointIds: group.map((candidate) => candidate.endpoint.id),
       label: group.map((candidate) => nameOf?.(candidate.endpoint.id)).find(Boolean) ?? nodeLabel(preferredAddress(group), shared),
       detail: active
-        ? `${addresses.join(', ')} — serving this stream`
-        : ready ? addresses.join(', ') : `${addresses.join(', ')} — cooling down after a failure`,
+        ? `${addresses.join(', ')} (serving this stream)`
+        : ready ? addresses.join(', ') : `${addresses.join(', ')} (cooling down after a failure)`,
       active,
       ready,
     };
