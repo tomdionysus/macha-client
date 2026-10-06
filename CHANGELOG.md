@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.21.0
+
+Released against `@machafoundation/core` **0.22.0** from the registry (published gitHead `6e78168`). Built and tested against core's linked tree on its `experiment/object-ledger` and then `develop`; `main` resolves the published package, and the suite, typecheck and web, Samsung and Android builds were run against that copy before the merge. Closes the object-ledger experiment, whose 0.20.1 was tagged there and never merged.
+
+- **Every title, episode, track and file says whether it can be played.** An outline mark on its card or row: a yellow triangle when part is held only by unreachable nodes, a red crossed circle when none of it is, a yellow question mark when not yet checked, each with a tooltip. An unavailable title cannot be opened, played or queued. A detail page marks each file rather than the title, and the metadata editor marks each of a title's files.
+- **Each episode has its own page**, as a film has: its still, its series and season as links back, its synopsis and files, Play, Play from start, the qualities, and Edit. A season's episodes open it rather than playing.
+- **Matching a file brings its folder with it.** An album record lists the folder's other unmatched files with the release's own title for each track and refuses a track the release lacks; a series record does the same for the season the file names, each file by its own season and episode, so a special matched under season 0 keeps its season's episodes. A refused match names the episode or track the provider lacks, and for an episode 0 says that TMDB lists specials under season 0.
+- **A title's files can be taken off it or deleted** from the metadata editor: Unmatch puts a file back in Unmatched files; Delete removes that path or every copy. A title left with no files goes, with any parent left empty, and the editor leaves.
+- **Unmatched files**: a click anywhere on a row selects it; the name opens it. Deletes go one at a time with progress, and a file already gone counts as deleted.
+- **Status shows each node's repair pace** and what repair is giving way to.
+- **Posters do not wait out a silent node.** One not loaded after 2 s near the viewport is raced against another node; the first request keeps going.
+- **A plain-http node is left out only from an https page**, keyed on the page's protocol: `http://localhost` and the TVs' `file://` pages reach http nodes.
+- **Changes wait as long as the node takes** (30 s), and only a timeout reads "It may still finish"; a refused connection says the server cannot be reached. TMDB or MusicBrainz out of reach is worded from its code.
+- **A playlist too large to save says so**, and Play all plays regardless.
+- "Converting streams…" replaces the decode fallback's sentence.
+- No real titles anywhere committed; documentation and comments rationalised.
+
 ## 0.20.1
 
 Tagged on `experiment/object-ledger`, not merged into `develop` or `main`. Built and tested against core's linked tree on its own `experiment/object-ledger` (`f794364`), not against a published core: it uses core types and errors that 0.21.0 does not carry, so it cannot resolve core from the registry until core's next release.

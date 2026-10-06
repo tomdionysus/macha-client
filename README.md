@@ -1,6 +1,6 @@
 # Macha Client
 
-_v0.20.1_
+_v0.21.0_
 
 The web and television client for **Macha**, a self-hosted, clustered media
 system. It browses a Macha node's catalogue, decides how each title should be
