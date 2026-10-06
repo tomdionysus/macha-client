@@ -56,6 +56,12 @@ const NOT_ACCEPTING: Record<string, string> = {
  * A node in the add form's selector: host, load or why it is not accepting, and its own staging
  * room. A node not accepting can still be chosen; the torrent waits for it.
  */
+/** The node a job runs on, by host, as the node list names it; undefined while no node has claimed it. */
+export function jobNodeName(nodeId: string | null | undefined, hosts: ReadonlyMap<string, string>): string | undefined {
+  if (!nodeId) return undefined;
+  return hosts.get(nodeId) || `Node ${nodeId.slice(0, 8)}`;
+}
+
 export function torrentNodeLabel(node: Pick<TorrentNode, 'host' | 'node_id' | 'accepting' | 'not_accepting_reason' | 'active_jobs' | 'max_active'> & { staging?: Pick<TorrentNode['staging'], 'free_bytes' | 'limit_bytes'> }): string {
   const name = node.host || node.node_id;
   const load = node.accepting

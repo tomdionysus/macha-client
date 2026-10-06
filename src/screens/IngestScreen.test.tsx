@@ -185,14 +185,22 @@ describe("a torrent's own page", () => {
   const tile = (label: string) => [...document.querySelectorAll('.metric-tile')]
     .find((node) => node.querySelector('span')?.textContent === label)?.querySelector('strong')?.textContent;
 
+  it('names the node each torrent is downloading on, by host, and none while no node has claimed it', async () => {
+    renderAt('/ingest/torrents', snapshot([torrentJob({ id: 'tor-1', node_id: 'gbni' }), torrentJob({ id: 'tor-2', node_id: null, name: 'Waiting.One' })]));
+    await settle();
+    const nodes = [...document.querySelectorAll('tbody td.col-node')].map((cell) => cell.textContent);
+    expect(nodes.sort()).toEqual(['gbni-1', '—']);
+  });
+
   it('reports the facts the list has no room for: hash, node, ratio and cataloguing outcome', async () => {
-    renderAt('/ingest/torrents/tor-1', snapshot([torrentJob()]));
+    renderAt('/ingest/torrents/tor-1', snapshot([torrentJob({ node_id: 'gbni' })]));
     await settle();
     screen.getByRole('heading', { name: 'Some.Release.2024.1080p' });
     const identity = document.querySelector('.detail-card')!;
 
     expect(fact(identity, 'Info hash')).toBe('c2a1f0e9b8d7c6b5a4938271605f4e3d2c1b0a99');
-    expect(fact(identity, 'Node')).toBe('855716bd8bb0ad12b0c4f876386699de');
+    // By host, as the node list names it.
+    expect(fact(identity, 'Node')).toBe('gbni-1');
     // 250 MB served against the 1 GB this node actually holds.
     expect(tile('Ratio')).toBe('0.25');
     expect(tile('Added')).toBe('1h ago');

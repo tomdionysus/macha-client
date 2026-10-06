@@ -2,7 +2,7 @@ import { useMemo, useState, type ChangeEvent, type FormEvent, type MouseEvent } 
 import { Link, useNavigate } from 'react-router-dom';
 import { routes, torrentHeldBy, type AcquisitionApi, type IngestJob, type TorrentJob } from '@machafoundation/core';
 import { JobControls, Progress } from './ingest/JobControls';
-import { intentNote, REMOVE_AFTER_CHOICES, staleSourceNotes, removeAfterDefaultLabel, torrentNodeLabel } from './ingest/clusterTorrents';
+import { intentNote, jobNodeName, REMOVE_AFTER_CHOICES, staleSourceNotes, removeAfterDefaultLabel, torrentNodeLabel } from './ingest/clusterTorrents';
 import { useAsync } from '../hooks/useAsync';
 import { formatAge, formatBytes, formatCount, formatEta, formatPercent, formatRate, formatRatio, formatTimestamp, percent, stateLabel } from './ingest/format';
 import { canPause, canResume, canRetryImport, displayStateOf, heldStatus, jobKey, linkedIngestOf, storingOf, storingPercent, storingStallText } from './ingest/jobs';
@@ -155,9 +155,10 @@ export function IngestScreen({ api, section }: Props) {
   const torrentBuilt = snapshot?.torrentStatus.build_available ?? false;
   const now = Date.now();
   const refreshIntervalMs = snapshot?.refreshIntervalMs ?? 5_000;
+  const nodeHosts = new Map(torrentNodes.value?.nodes.map((node) => [node.node_id, node.host]) ?? []);
   const staleNotes = staleSourceNotes(
     (section === 'torrents' ? snapshot?.torrentSources : snapshot?.ingestSources) ?? [],
-    new Map(torrentNodes.value?.nodes.map((node) => [node.node_id, node.host]) ?? []),
+    nodeHosts,
     now,
   );
 
@@ -260,6 +261,7 @@ export function IngestScreen({ api, section }: Props) {
                   <SortHeader label="Size" sortKey="size" sort={sort} onSort={sortBy} className="col-size" />
                   <SortHeader label="Progress" sortKey="progress" sort={sort} onSort={sortBy} className="col-progress" />
                   <SortHeader label="Status" sortKey="status" sort={sort} onSort={sortBy} className="col-status" />
+                  <th scope="col" className="col-node">Node</th>
                   <SortHeader label="Down" sortKey="down" sort={sort} onSort={sortBy} className="col-rate" />
                   <SortHeader label="Up" sortKey="up" sort={sort} onSort={sortBy} className="col-rate col-optional" />
                   <SortHeader label="ETA" sortKey="eta" sort={sort} onSort={sortBy} className="col-eta" />
@@ -291,6 +293,7 @@ export function IngestScreen({ api, section }: Props) {
                         <span>{formatPercent(progress)}</span>
                       </td>
                       <td className={`col-status${failure ? ' has-error' : ''}`} title={failure}>{intentNote(job, now, refreshIntervalMs) ?? heldStatus(job) ?? storingStatus(job) ?? stateLabel(state)}</td>
+                      <td className="col-node">{jobNodeName(job.node_id, nodeHosts) ?? '—'}</td>
                       <td className="col-rate">{formatRate(job.download_rate)}</td>
                       <td className="col-rate col-optional">{formatRate(job.upload_rate)}</td>
                       <td className="col-eta">{formatEta(job.eta_seconds)}</td>

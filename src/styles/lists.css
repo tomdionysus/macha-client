@@ -49,6 +49,7 @@
 .data-table .col-progress { width: 9.8rem; }
 .data-table .col-size { width: 5rem; }
 .data-table .col-rate { width: 6.1rem; }
+.data-table .col-node { width: 8rem; max-width: 8rem; overflow: hidden; text-overflow: ellipsis; color: var(--text-dim); }
 .data-table .col-eta { width: 5.3rem; }
 .data-table .col-peers { width: 3.4rem; }
 .data-table .col-ratio { width: 4.1rem; }

@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { routes, type AcquisitionApi, type IngestJob, type TorrentJob } from '@machafoundation/core';
 import { JobControls, Progress } from './ingest/JobControls';
-import { intentNote } from './ingest/clusterTorrents';
+import { intentNote, jobNodeName } from './ingest/clusterTorrents';
 import { placementRefusalText, TorrentPlacement } from './ingest/TorrentPlacement';
 import { useAsync } from '../hooks/useAsync';
 import { formatAge, formatBytes, formatCount, formatEta, formatPercent, formatRate, formatRatio, formatTimestamp, percent, stateLabel } from './ingest/format';
@@ -36,7 +36,7 @@ function StageCard({ stage, title, number, progress, summary, rows }: {
 }
 
 /** Everything the server reports about one torrent: progress, peers, and its three stages into the library. */
-function TorrentBody({ job, linkedIngest }: { job: TorrentJob; linkedIngest?: IngestJob }) {
+function TorrentBody({ job, linkedIngest, nodeHosts }: { job: TorrentJob; linkedIngest?: IngestJob; nodeHosts: ReadonlyMap<string, string> }) {
   const now = Date.now();
   const [download, importStage, catalogueStage] = torrentStages(job, linkedIngest);
   const downloaded = download.status === 'done';
@@ -133,8 +133,8 @@ function TorrentBody({ job, linkedIngest }: { job: TorrentJob; linkedIngest?: In
         <Facts rows={[
           ['Info hash', <code>{job.info_hash || 'Not yet known'}</code>],
           // A torrent is the cluster's until a node claims it.
-          ['Node', job.node_id ? <code>{job.node_id}</code> : 'Not yet claimed by a node'],
-          ...(job.pinned_node_id ? [['Pinned to', <code>{job.pinned_node_id}</code>] as const] : []),
+          ['Node', jobNodeName(job.node_id, nodeHosts) ?? 'Not yet claimed by a node'],
+          ...(job.pinned_node_id ? [['Pinned to', jobNodeName(job.pinned_node_id, nodeHosts)!] as const] : []),
           ...(job.remove_at_unix_ms ? [['Removed at', formatTimestamp(job.remove_at_unix_ms)] as const] : []),
           ['Added', formatTimestamp(job.created_unix_ms)],
           ['Job', <code>{job.id}</code>],
@@ -219,7 +219,7 @@ export function TorrentDetailScreen({ api }: { api: AcquisitionApi }) {
         onChanged={() => { setError(undefined); void refresh(); }}
         onError={(reason) => setError(placementRefusalText(reason))}
       />
-      <TorrentBody job={job} linkedIngest={linked} />
+      <TorrentBody job={job} linkedIngest={linked} nodeHosts={new Map(torrentNodes.value?.nodes.map((node) => [node.node_id, node.host]) ?? [])} />
     </section>
   );
 }

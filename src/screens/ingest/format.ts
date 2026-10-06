@@ -26,13 +26,33 @@ export function formatRate(value: number | null): string {
   return value !== null && value > 0 ? `${formatBytes(value)}/s` : '—';
 }
 
+const DURATION_UNITS = [
+  { suffix: 'w', seconds: 604_800 },
+  { suffix: 'd', seconds: 86_400 },
+  { suffix: 'h', seconds: 3_600 },
+  { suffix: 'm', seconds: 60 },
+] as const;
+
+/**
+ * An hour or more as its two largest units, such as "1d 1h" or "2w 3d", the smaller left
+ * out when zero. `round` applies to the smaller unit: an ETA rounds up, an age down.
+ */
+function longDuration(seconds: number, round: (value: number) => number): string {
+  const index = DURATION_UNITS.findIndex((unit) => seconds >= unit.seconds);
+  const large = DURATION_UNITS[index];
+  const small = DURATION_UNITS[index + 1];
+  const smalls = round(seconds / small.seconds);
+  const per = large.seconds / small.seconds;
+  const count = Math.floor(smalls / per);
+  const rest = smalls % per;
+  return rest ? `${count}${large.suffix} ${rest}${small.suffix}` : `${count}${large.suffix}`;
+}
+
 export function formatEta(value: number | null): string {
   if (value === null || value < 0 || !Number.isFinite(value)) return '—';
   if (value < 60) return `${Math.ceil(value)}s`;
   if (value < 3600) return `${Math.ceil(value / 60)}m`;
-  const hours = Math.floor(value / 3600);
-  const minutes = Math.ceil((value % 3600) / 60);
-  return minutes ? `${hours}h ${minutes}m` : `${hours}h`;
+  return longDuration(value, Math.ceil);
 }
 
 export function percent(progress: number | null, completed: number | null, total: number | null): number | null {
@@ -55,10 +75,7 @@ export function formatAge(value: number, now: number): string {
   const seconds = Math.floor((now - value) / 1000);
   if (seconds < 60) return 'just now';
   if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
-  const hours = Math.floor(seconds / 3600);
-  if (hours >= 48) return `${Math.floor(hours / 24)}d ago`;
-  const minutes = Math.floor((seconds % 3600) / 60);
-  return minutes ? `${hours}h ${minutes}m ago` : `${hours}h ago`;
+  return `${longDuration(seconds, Math.floor)} ago`;
 }
 
 /** States whose code does not read as words. */
