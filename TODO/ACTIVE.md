@@ -22,23 +22,22 @@ are related. Core is addressed as the `Macha Client Core` session.
 
 **Read [2026-10-04-handover.md](2026-10-04-handover.md) first.**
 
-**Where the repo is.** All work is on **`experiment/object-ledger`** (Tom,
-2026-10-01): never commit to, merge into or push `develop` or `main`. It is
-**ahead of `origin`, unpushed** (`git log origin/experiment/object-ledger..`), which holds the tag
-**0.20.1** (`74a5caf`, pushed 2026-10-02 on Tom's word, tagged on the
-experiment and not merged). It links core's tree on core's own
-`experiment/object-ledger` (`e864856`), whose types the published core
-0.21.0 lacks, so it cannot resolve core from npm until core's next release.
-`main` is `1fa0bc4` (0.20.0), `develop` `e543e0e`. Suite **734**,
-typecheck and build clean.
+**Where the repo is.** The object-ledger experiment is closed (Tom,
+2026-10-06): `develop` was fast-forwarded to it and pushed, and
+`experiment/object-ledger` deleted here and on GitHub; its tag **0.20.1**
+(`74a5caf`) stays. Work is on **`develop`**. **Do not touch `main`** (Tom,
+2026-10-06): it is `1fa0bc4` (0.20.0), and it cannot follow until core
+publishes the types this client uses, since `develop` links core's tree
+(`file:../macha-ts`, core `852514e`), which the published 0.21.0 lacks.
+Suite **749**, typecheck and build clean.
 
 **The cluster.** Corvus FI-1 (10.35.1.50:7438, also .10) and Corvus GBNI-1
 (10.44.1.50:7438; **macnessa.macha.network is GBNI-1's public front, not a
 third node**) run server **0.84.0**. Node names come from the server
 (`node_name`). es-1 and `ramaroja` have been down since 2026-09-24. Both
-nodes serve `index-BWpi26Hu.js` from `a904024` (deployed 2026-10-06 00:37
-local, on Tom's word, against core `cb55882`; backups
-`/etc/macha/web.bak-20261006-003709.tar.gz` on each node). FI-1 runs torrents as well as GBNI-1. FI-1's catalogue
+nodes serve `index-Cs3kXvyM.js` from `d4aa879` (deployed 2026-10-06 09:49
+local, on Tom's word, against core `852514e`; backups
+`/etc/macha/web.bak-20261006-094949.tar.gz` on each node). FI-1 runs torrents as well as GBNI-1. FI-1's catalogue
 conflict loop (section "Identify and edit") logged its last conflict at
 17:03Z on 2026-10-03; none since its restart onto 0.84.0. Matching is
 untested since.
