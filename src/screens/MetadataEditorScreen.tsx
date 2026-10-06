@@ -304,7 +304,7 @@ function MetadataForm({ api, facts, manage, initial, onBack, onSaved, onCleared,
               <strong>Clear all catalogue metadata?</strong>
               <p>
                 This removes the catalogue match, descriptive metadata and artwork for this {entityLabel(draft.kind).toLowerCase()}.
-                {' '}Dependent catalogue entries are also removed where necessary so the underlying media becomes unbound and can be probed and matched again by the cataloguer.
+                {' '}Everything beneath it is removed too, and its files are listed in Unmatched files to be identified by hand; nothing is matched again automatically.
               </p>
               <div>
                 <button className="secondary-button" data-tv-focusable="true" disabled={saving} onClick={() => setConfirmClear(false)} type="button">Cancel</button>

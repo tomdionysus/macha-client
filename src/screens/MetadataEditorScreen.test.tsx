@@ -38,6 +38,14 @@ describe('the metadata editor', () => {
     expect(api.get).toHaveBeenCalledTimes(2);
   });
 
+  it('says a cleared title\'s files go to Unmatched files, not back through the matcher', async () => {
+    show(episode());
+    await settle();
+    fireEvent.click(screen.getByRole('button', { name: 'Clear metadata' }));
+    const confirm = screen.getByRole('alertdialog');
+    expect(confirm.textContent).toContain('its files are listed in Unmatched files to be identified by hand; nothing is matched again automatically.');
+  });
+
   it('holds uploads while there are unsaved changes, and says why', async () => {
     show(episode());
     await settle();
