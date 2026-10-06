@@ -186,10 +186,15 @@ describe("a torrent's own page", () => {
     .find((node) => node.querySelector('span')?.textContent === label)?.querySelector('strong')?.textContent;
 
   it('names the node each torrent is downloading on, by host, and none while no node has claimed it', async () => {
-    renderAt('/ingest/torrents', snapshot([torrentJob({ id: 'tor-1', node_id: 'gbni' }), torrentJob({ id: 'tor-2', node_id: null, name: 'Waiting.One' })]));
+    renderAt('/ingest/torrents', snapshot([
+      torrentJob({ id: 'tor-1', node_id: 'gbni' }),
+      torrentJob({ id: 'tor-2', node_id: null, name: 'Waiting.One' }),
+      torrentJob({ id: 'tor-3', node_id: 'gbni', ingest_node_id: 'fi-node', name: 'Importing.Elsewhere' }),
+    ]));
     await settle();
     const nodes = [...document.querySelectorAll('tbody td.col-node')].map((cell) => cell.textContent);
-    expect(nodes.sort()).toEqual(['gbni-1', '—']);
+    // A node the list does not name is shown by the start of its id.
+    expect(nodes.sort()).toEqual(['gbni-1', 'gbni-1 → Node fi-node', '—']);
   });
 
   it('reports the facts the list has no room for: hash, node, ratio and cataloguing outcome', async () => {
@@ -201,6 +206,7 @@ describe("a torrent's own page", () => {
     expect(fact(identity, 'Info hash')).toBe('c2a1f0e9b8d7c6b5a4938271605f4e3d2c1b0a99');
     // By host, as the node list names it.
     expect(fact(identity, 'Node')).toBe('gbni-1');
+    expect(fact(identity, 'Importing on')).toBeUndefined();
     // 250 MB served against the 1 GB this node actually holds.
     expect(tile('Ratio')).toBe('0.25');
     expect(tile('Added')).toBe('1h ago');
@@ -209,6 +215,14 @@ describe("a torrent's own page", () => {
     expect(catalogue.querySelector('.torrent-stage-status')?.textContent).toBe('Completed with issues');
     expect(fact(catalogue, 'Catalogued')).toBe('1 / 2');
     expect(fact(catalogue, 'No match')).toBe('1');
+  });
+
+  it('names the node importing a torrent, and its swarm, on its page', async () => {
+    renderAt('/ingest/torrents/tor-1', snapshot([torrentJob({ node_id: 'gbni', ingest_node_id: 'gbni', swarm: { seeds: 3, peers: 12, availability: 0.82 } })]));
+    await settle();
+    const identity = document.querySelector('.detail-card')!;
+    expect(fact(identity, 'Importing on')).toBe('gbni-1');
+    expect(fact(identity, 'Swarm')).toBe('0.82 available · 3 seeds · 12 peers');
   });
 
   it('shows the import as still to come for a torrent that has not been handed to ingest', async () => {

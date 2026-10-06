@@ -135,6 +135,8 @@ function TorrentBody({ job, linkedIngest, nodeHosts }: { job: TorrentJob; linked
           // A torrent is the cluster's until a node claims it.
           ['Node', jobNodeName(job.node_id, nodeHosts) ?? 'Not yet claimed by a node'],
           ...(job.pinned_node_id ? [['Pinned to', jobNodeName(job.pinned_node_id, nodeHosts)!] as const] : []),
+          ...(job.ingest_node_id ? [['Importing on', jobNodeName(job.ingest_node_id, nodeHosts)!] as const] : []),
+          ...(job.swarm ? [['Swarm', swarmText(job.swarm)] as const] : []),
           ...(job.remove_at_unix_ms ? [['Removed at', formatTimestamp(job.remove_at_unix_ms)] as const] : []),
           ['Added', formatTimestamp(job.created_unix_ms)],
           ['Job', <code>{job.id}</code>],
@@ -150,11 +152,24 @@ function TorrentBody({ job, linkedIngest, nodeHosts }: { job: TorrentJob; linked
  * a time: `verify_queued` waits for another's check, `verifying` is its own,
  * with `eta_seconds` for the check. `progress` is valid pieces over the total.
  */
-export function downloadStageText(job: Pick<TorrentJob, 'state' | 'bytes_completed' | 'bytes_total' | 'eta_seconds'>, remaining: number): { doing: string; detail: string } {
+/** The trackers' count of the swarm, and how much of the torrent the connected peers hold between them. */
+export function swarmText(swarm: NonNullable<TorrentJob['swarm']>): string {
+  return [
+    `${swarm.availability.toFixed(2)} available`,
+    swarm.seeds !== null ? `${swarm.seeds} seeds` : undefined,
+    swarm.peers !== null ? `${swarm.peers} peers` : undefined,
+  ].filter(Boolean).join(' · ');
+}
+
+/** Said under a download whose connected peers lack a piece between them: the reason it crawls or stops. */
+export const PIECES_MISSING_TEXT = 'Some of it is held by no connected peer, so it cannot finish until one joins.';
+
+export function downloadStageText(job: Pick<TorrentJob, 'state' | 'bytes_completed' | 'bytes_total' | 'eta_seconds' | 'swarm'>, remaining: number): { doing: string; detail: string } {
   const of = `${formatBytes(job.bytes_completed)} of ${job.bytes_total !== null && job.bytes_total > 0 ? formatBytes(job.bytes_total) : 'unknown size'}`;
   if (job.state === 'verify_queued') return { doing: 'Waiting to verify', detail: 'Waiting for another torrent\'s check to finish' };
   if (job.state === 'verifying') return { doing: 'Verifying data already on disk', detail: `${of} verified · ETA ${formatEta(job.eta_seconds)}` };
-  return { doing: 'Downloading', detail: `${of}${remaining > 0 ? ` · ${formatBytes(remaining)} to go · ETA ${formatEta(job.eta_seconds)}` : ''}` };
+  const missing = remaining > 0 && job.swarm && job.swarm.availability < 1 ? ` · ${PIECES_MISSING_TEXT}` : '';
+  return { doing: 'Downloading', detail: `${of}${remaining > 0 ? ` · ${formatBytes(remaining)} to go · ETA ${formatEta(job.eta_seconds)}` : ''}${missing}` };
 }
 
 /** One torrent's page. The way back carries the list's sort in the address. */

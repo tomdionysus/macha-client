@@ -56,6 +56,16 @@ const NOT_ACCEPTING: Record<string, string> = {
  * A node in the add form's selector: host, load or why it is not accepting, and its own staging
  * room. A node not accepting can still be chosen; the torrent waits for it.
  */
+/**
+ * Where a job is: the node downloading it, then the node importing it where that differs,
+ * as "gbni-1 → fi-1"; undefined while no node holds either.
+ */
+export function jobNodesText(job: Pick<TorrentJob, 'node_id' | 'ingest_node_id'>, hosts: ReadonlyMap<string, string>): string | undefined {
+  const download = jobNodeName(job.node_id, hosts);
+  const ingest = job.ingest_node_id && job.ingest_node_id !== job.node_id ? jobNodeName(job.ingest_node_id, hosts) : undefined;
+  return download && ingest ? `${download} → ${ingest}` : download ?? ingest;
+}
+
 /** The node a job runs on, by host, as the node list names it; undefined while no node has claimed it. */
 export function jobNodeName(nodeId: string | null | undefined, hosts: ReadonlyMap<string, string>): string | undefined {
   if (!nodeId) return undefined;

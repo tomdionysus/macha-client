@@ -2,7 +2,7 @@ import { useMemo, useState, type ChangeEvent, type FormEvent, type MouseEvent } 
 import { Link, useNavigate } from 'react-router-dom';
 import { routes, torrentHeldBy, type AcquisitionApi, type IngestJob, type TorrentJob } from '@machafoundation/core';
 import { JobControls, Progress } from './ingest/JobControls';
-import { intentNote, jobNodeName, REMOVE_AFTER_CHOICES, staleSourceNotes, removeAfterDefaultLabel, torrentNodeLabel } from './ingest/clusterTorrents';
+import { intentNote, jobNodesText, REMOVE_AFTER_CHOICES, staleSourceNotes, removeAfterDefaultLabel, torrentNodeLabel } from './ingest/clusterTorrents';
 import { useAsync } from '../hooks/useAsync';
 import { formatAge, formatBytes, formatCount, formatEta, formatPercent, formatRate, formatRatio, formatTimestamp, percent, stateLabel } from './ingest/format';
 import { canPause, canResume, canRetryImport, displayStateOf, heldStatus, jobKey, linkedIngestOf, storingOf, storingPercent, storingStallText } from './ingest/jobs';
@@ -293,7 +293,7 @@ export function IngestScreen({ api, section }: Props) {
                         <span>{formatPercent(progress)}</span>
                       </td>
                       <td className={`col-status${failure ? ' has-error' : ''}`} title={failure}>{intentNote(job, now, refreshIntervalMs) ?? heldStatus(job) ?? storingStatus(job) ?? stateLabel(state)}</td>
-                      <td className="col-node">{jobNodeName(job.node_id, nodeHosts) ?? '—'}</td>
+                      <td className="col-node" title={job.ingest_node_id && job.ingest_node_id !== job.node_id ? 'Downloading on the first, importing on the second' : undefined}>{jobNodesText(job, nodeHosts) ?? '—'}</td>
                       <td className="col-rate">{formatRate(job.download_rate)}</td>
                       <td className="col-rate col-optional">{formatRate(job.upload_rate)}</td>
                       <td className="col-eta">{formatEta(job.eta_seconds)}</td>
