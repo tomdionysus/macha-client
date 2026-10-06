@@ -98,6 +98,23 @@ removes every path holding it. Server routes to come, then core's wrappers;
 dropped file is listed nowhere, and a path delete unbinds only at the next
 scan (Server's reading of 0.90.13).
 
+**Status: "Imports and torrents in 0 B/s" while a torrent downloads at 10 MB/s+**
+(Tom, 2026-10-06, on gbni-1). Not established as a server fault: the line is
+the node's `traffic` for class `loader`, which the server documents as
+"Macha's traffic between nodes only" (macha `docs/operations.md`, "nodes[].traffic"):
+the bytes an import, torrent or publication moves to or from other nodes, not
+what a torrent downloads from its swarm. So 0 B/s is right until the import
+publishes pieces to the other node. The client's wording misleads: the card
+says "Cluster traffic" and the class is labelled "Imports and torrents"
+(`StatusScreen.tsx`, `TRAFFIC_CLASS_LABELS`). To do: (1) say "between nodes"
+on the traffic line and its classes; (2) show what Tom expected, each node's
+torrent download and upload rate, by summing `download_rate`/`upload_rate`
+of the torrent jobs whose `node_id` is that node (the acquisition API has
+them; a client-side sum, no server change), or ask the Server for a node's
+own swarm rates if a sum over jobs is not trusted. (3) Before calling it
+right, check on gbni-1 during a torrent's import that `loader` out does rise
+above 0 when pieces are published; if it stays 0 then, it is the server's.
+
 **Two business P0s outrank the rest:** slow artwork (host choice and caching
 fixed 2026-09-24; the server's slow first read and poster size remain, and
 the posters lost with es-1), and scope-ratio titles playing small in a black
