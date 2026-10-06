@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import { endpointFailure, MachaConnectionError, MachaRequestTimeoutError } from '@machafoundation/core';
-import { deleteInTurn, deleteOutcomeText, pathBreadcrumbs, sortUnmatched } from './ManageScreen';
+import { browserOrder, deleteInTurn, deleteOutcomeText, pathBreadcrumbs, sortUnmatched } from './ManageScreen';
 import { candidateAlreadyCatalogued } from './identify/UnmatchedFilePage';
 import { runBulkOperation } from '../components/ListParts';
-import type { ManageCatalogueMatch, MediaProbeCandidate, UnmatchedFile } from '@machafoundation/core';
+import type { MachaDfsEntry, ManageCatalogueMatch, MediaProbeCandidate, UnmatchedFile } from '@machafoundation/core';
 
 function probe(overrides: Partial<MediaProbeCandidate> = {}): MediaProbeCandidate {
   return {
@@ -141,5 +141,13 @@ describe('deleting unmatched files', () => {
     const outcome = await deleteInTurn(['a'], async () => { throw refused; }, () => undefined);
     expect(outcome.unanswered).toEqual([]);
     expect(outcome.refused).toHaveLength(1);
+  });
+});
+
+describe('a folder in the file browser', () => {
+  it('lists folders first, then by name, whatever order the server sends', () => {
+    const entry = (name: string, type: 'file' | 'directory') => ({ name, type, path: `/${name}` }) as unknown as MachaDfsEntry;
+    expect(browserOrder([entry('b.mkv', 'file'), entry('Season 10', 'directory'), entry('a.mkv', 'file'), entry('Season 2', 'directory')]).map((e) => e.name))
+      .toEqual(['Season 2', 'Season 10', 'a.mkv', 'b.mkv']);
   });
 });

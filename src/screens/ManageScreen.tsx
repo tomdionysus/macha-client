@@ -72,6 +72,12 @@ function folderOf(path: string): string {
   return slash > 0 ? path.slice(0, slash) : '/';
 }
 
+/** A folder's entries as the browser shows them: folders first, then by name, numbers in number order. */
+export function browserOrder(entries: readonly MachaDfsEntry[]): MachaDfsEntry[] {
+  return [...entries].sort((a, b) => Number(b.type === 'directory') - Number(a.type === 'directory')
+    || a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
+}
+
 /** How a run of deletes went: refusals with the node's reason, and deletes that ran out of time and may still finish. */
 export interface DeleteOutcome {
   refused: { id: string; reason: string }[];
@@ -333,7 +339,7 @@ function FileManager({ api }: { api: ManageApi }) {
             </div>
           </div>
           <div className="manage-fs-list" role="list">
-            {directory.entries.map((entry) => (
+            {browserOrder(directory.entries).map((entry) => (
               <div key={entry.path} className={`manage-fs-row${selected?.path === entry.path ? ' selected' : ''}`} role="listitem">
                 <button className="manage-fs-select" type="button" onClick={() => {
                   setSelected(entry);

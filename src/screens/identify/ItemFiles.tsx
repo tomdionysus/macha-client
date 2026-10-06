@@ -174,7 +174,9 @@ function AddFileDialog({ open, item, manage, onClose, onAdded }: {
 
   const shown = useMemo(() => {
     const words = filter.toLowerCase().split(/\s+/).filter(Boolean);
-    return (unmatched ?? []).filter((file) => words.every((word) => file.path.toLowerCase().includes(word))).slice(0, 50);
+    return (unmatched ?? []).filter((file) => words.every((word) => file.path.toLowerCase().includes(word)))
+      .sort((a, b) => a.path.localeCompare(b.path, undefined, { numeric: true, sensitivity: 'base' }))
+      .slice(0, 50);
   }, [filter, unmatched]);
 
   const add = async (file: UnmatchedFile) => {

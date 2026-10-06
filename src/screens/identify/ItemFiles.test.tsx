@@ -77,6 +77,8 @@ describe('an item\'s files', () => {
     const dialog = screen.getByRole('dialog', { name: 'Add a file to A Film' });
     await settle();
     within(dialog).getByText('other-thing.mkv');
+    // By path, whatever order the server lists them in.
+    expect([...dialog.querySelectorAll('.item-files-candidates li')].map((li) => li.textContent?.includes('a-film-2160.mkv'))).toEqual([true, false]);
     fireEvent.change(within(dialog).getByLabelText('Filter unmatched files'), { target: { value: '2160' } });
     expect(within(dialog).queryByText('other-thing.mkv')).toBeNull();
 
