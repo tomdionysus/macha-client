@@ -99,21 +99,20 @@ dropped file is listed nowhere, and a path delete unbinds only at the next
 scan (Server's reading of 0.90.13).
 
 **Status: "Imports and torrents in 0 B/s" while a torrent downloads at 10 MB/s+**
-(Tom, 2026-10-06, on gbni-1). Not established as a server fault: the line is
-the node's `traffic` for class `loader`, which the server documents as
-"Macha's traffic between nodes only" (macha `docs/operations.md`, "nodes[].traffic"):
-the bytes an import, torrent or publication moves to or from other nodes, not
-what a torrent downloads from its swarm. So 0 B/s is right until the import
-publishes pieces to the other node. The client's wording misleads: the card
-says "Cluster traffic" and the class is labelled "Imports and torrents"
-(`StatusScreen.tsx`, `TRAFFIC_CLASS_LABELS`). To do: (1) say "between nodes"
-on the traffic line and its classes; (2) show what Tom expected, each node's
-torrent download and upload rate, by summing `download_rate`/`upload_rate`
-of the torrent jobs whose `node_id` is that node (the acquisition API has
-them; a client-side sum, no server change), or ask the Server for a node's
-own swarm rates if a sum over jobs is not trusted. (3) Before calling it
-right, check on gbni-1 during a torrent's import that `loader` out does rise
-above 0 when pieces are published; if it stays 0 then, it is the server's.
+(Tom, 2026-10-06, on gbni-1). The line is the node's `traffic` for class
+`loader`, which the server counts as "Macha's traffic between nodes only"
+(macha `docs/operations.md`, "nodes[].traffic"), so a torrent's swarm download
+is not in it. Tom's ruling (2026-10-07): "between nodes" is not a useful class
+of readout. Each kind of traffic has one natural link: maintenance (repair,
+sync) is always node to node, a torrent is always external, playback is always
+to the viewer. So the readout is by activity, each measured on its own link,
+not node-to-node frames sorted by class. Not "say between nodes" in the client.
+To do: ask the Server for per-activity traffic measured at that boundary
+(playback as bytes served to viewers, torrents as swarm in and out, repair and
+sync as node-to-node), then show those in the Traffic card. Only the server
+sees playback bytes to viewers, so this is not a client-side sum; summing the
+torrent jobs' `download_rate`/`upload_rate` per node could stand in for the
+torrent line meanwhile.
 
 **Two business P0s outrank the rest:** slow artwork (host choice and caching
 fixed 2026-09-24; the server's slow first read and poster size remain, and
