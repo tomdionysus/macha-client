@@ -176,5 +176,8 @@ describe('the status line while a new stream is prepared behind the one playing'
   it('keeps the sentence it always had for a node that reports no progress', () => {
     expect(preparingStreamText(undefined, 'fi-1')).toBe('Preparing new stream on fi-1…');
     expect(preparingStreamText(undefined, undefined)).toBe('Preparing new stream…');
+    expect(preparingStreamText(undefined, 'fi-1', 'remux')).toBe('Switching to Remux on fi-1…');
+    expect(preparingStreamText(undefined, undefined, 'transcode')).toBe('Switching to Transcode…');
+    expect(preparingStreamText(undefined, undefined, 'choose')).toBe('Preparing new stream…');
   });
 });

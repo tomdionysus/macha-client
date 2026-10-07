@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent } from 'react';
-import type { EndpointCandidate, MediaApi, PlaybackCapabilities } from '@machafoundation/core';
+import type { EndpointCandidate, MediaApi, PlaybackCapabilities, PlaybackMode } from '@machafoundation/core';
 import { PlayIcon, RestartIcon } from '../components/PlaybackIcons';
 import { Loading } from '../components/Status';
 import { createClientLogger } from '@machafoundation/core';
@@ -75,11 +75,18 @@ export function startWaitNotice(starting: boolean, elapsedMs: number, stage?: st
  * serving node, so that node is named; a start (a failover included) is on a node this line
  * cannot name, since the endpoint it holds is the one being replaced.
  */
-export function preparingStreamText(progress: PlaybackStartProgress | undefined, endpoint: string | undefined): string {
+export function preparingStreamText(
+  progress: PlaybackStartProgress | undefined,
+  endpoint: string | undefined,
+  mode?: PlaybackMode | 'choose',
+): string {
   const stage = progress && startProgressText({ ...progress, kind: 'change' }, progress.kind === 'change' ? endpoint : undefined, true);
   if (stage) return stage;
-  return endpoint ? `Preparing new stream on ${endpoint}…` : 'Preparing new stream…';
+  const what = mode && mode !== 'choose' ? `Switching to ${MODE_NAMES[mode]}` : 'Preparing new stream';
+  return endpoint ? `${what} on ${endpoint}…` : `${what}…`;
 }
+
+const MODE_NAMES: Record<PlaybackMode, string> = { direct: 'Direct', remux: 'Remux', transcode: 'Transcode' };
 
 export function firstUsableDurationMs(...candidates: (number | undefined)[]): number {
   for (const candidate of candidates) {
@@ -853,7 +860,7 @@ function PlayerSession({ api, media, platform, runtime, startPositionMs, present
               <small>{playbackNotice}</small>
             ) : playback.preparingSource ? (
               // The endpoint named is the one currently held; it flips to the replacement when that generation activates.
-              <small>{preparingStreamText(playback.startProgress, streamStatus?.endpoint)}</small>
+              <small>{preparingStreamText(playback.startProgress, streamStatus?.endpoint, playback.pendingPreferences?.mode)}</small>
             ) : (
               <>
                 {/* `CONTAINER : endpoint` on one line. An absent half is omitted, never defaulted: a default
