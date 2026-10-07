@@ -250,6 +250,7 @@ describe("a node's traffic to and from the other nodes (server 0.73.0)", () => {
 
 describe('repair pace, as each node states its own', () => {
   it('says what repair is giving way to, and shows a code it does not know as it came', () => {
+    expect(repairPaceText({ pace: 'paced', paced_by: ['viewer', 'peer_viewer', 'loader'] })).toBe('Paced for viewers here, a viewer on another node, loading');
     expect(repairPaceText({ pace: 'paced', paced_by: ['playback', 'peer_playback'] })).toBe('Paced for playback here, playback on another node');
     expect(repairPaceText({ pace: 'paced', paced_by: ['mounted_filesystem', 'loader', 'ingest_v2'] })).toBe('Paced for a mounted filesystem, loading, ingest_v2');
     expect(repairPaceText({ pace: 'paced', paced_by: [] })).toBe('Paced');
