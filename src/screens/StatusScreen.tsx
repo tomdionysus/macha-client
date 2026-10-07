@@ -550,13 +550,10 @@ const REPAIR_PACE_LABELS: Record<string, string> = {
   unknown: 'Not yet run',
 };
 
-/** From server 0.90.35 `viewer` covers playback and the mount alike; the older codes come from older nodes. */
 const REPAIR_PACED_BY_LABELS: Record<string, string> = {
-  viewer: 'viewers here',
-  peer_viewer: 'a viewer on another node',
-  loader: 'loading',
   playback: 'playback here',
   peer_playback: 'playback on another node',
+  loader: 'loading',
   mounted_filesystem: 'a mounted filesystem',
 };
 
