@@ -50,6 +50,7 @@ import { SettingsScreen } from './screens/SettingsScreen';
 import { SponsorScreen } from './screens/SponsorScreen';
 import { MetadataEditorScreen } from './screens/MetadataEditorScreen';
 import { IngestScreen } from './screens/IngestScreen';
+import { IngestJobDetailScreen } from './screens/IngestJobDetailScreen';
 import { TorrentDetailScreen } from './screens/TorrentDetailScreen';
 import { ManageScreen, type ManageSection } from './screens/ManageScreen';
 import { UnmatchedFilePage } from './screens/identify/UnmatchedFilePage';
@@ -721,7 +722,8 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
           <Route path={routes.search} element={mediaPane(<SearchScreen api={api} onOpen={open} />)} />
           <Route path={routes.ingest} element={<Navigate to={routes.ingestTorrents} replace />} />
           <Route path={routes.ingestTorrents} element={permits('importer') ? <IngestScreen api={acquisitionApi} section="torrents" /> : <Navigate to={landing} replace />} />
-          <Route path={routes.ingestFiles} element={permits('importer') ? <IngestScreen api={acquisitionApi} section="files" /> : <Navigate to={landing} replace />} />
+          <Route path={routes.ingestFiles} element={permits('importer') ? <IngestScreen api={acquisitionApi} section="files" statusApi={clusterStatusApi} /> : <Navigate to={landing} replace />} />
+          <Route path={`${routes.ingestFiles}/:jobId`} element={permits('importer') ? <IngestJobDetailScreen api={acquisitionApi} statusApi={clusterStatusApi} /> : <Navigate to={landing} replace />} />
           <Route path={`${routes.ingestTorrents}/:torrentId`} element={permits('importer') ? <TorrentDetailScreen api={acquisitionApi} /> : <Navigate to={landing} replace />} />
           <Route path={routes.status} element={permits('view_status') ? <StatusScreen api={clusterStatusApi} endpointRegistry={endpointRegistry} platform={platform} manageApi={libraryManagementAvailable ? manageApi : undefined} section="overview" auth={auth} /> : <Navigate to={landing} replace />} />
           <Route path={routes.statusClient} element={permits('view_status') ? <StatusScreen api={clusterStatusApi} endpointRegistry={endpointRegistry} platform={platform} manageApi={libraryManagementAvailable ? manageApi : undefined} section="client" auth={auth} /> : <Navigate to={landing} replace />} />

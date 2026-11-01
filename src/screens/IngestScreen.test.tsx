@@ -2,9 +2,10 @@
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { endpointFailure, MachaAcquisitionApiError, type AcquisitionApi, type AcquisitionSnapshot, type IngestJob, type TorrentJob } from '@machafoundation/core';
+import { endpointFailure, MachaAcquisitionApiError, type AcquisitionApi, type AcquisitionSnapshot, type ClusterStatusApi, type IngestJob, type TorrentJob } from '@machafoundation/core';
 import { IngestScreen } from './IngestScreen';
 import { TorrentDetailScreen } from './TorrentDetailScreen';
+import { IngestJobDetailScreen } from './IngestJobDetailScreen';
 import { settle } from '../test/settle';
 
 function torrentJob(overrides: Partial<TorrentJob> = {}): TorrentJob {
@@ -75,7 +76,8 @@ const importing: IngestJob = {
   source_ref: 'tor-1',
   display_name: 'Some.Release.2024.1080p',
   source_path: '/srv/staging/tor-1',
-  remove_source_on_complete: true,
+  source_owned: true,
+  delete_source_on_clear: true,
   state: 'importing',
   bytes_total: 4_000_000_000,
   bytes_completed: 2_000_000_000,
@@ -101,13 +103,14 @@ function Where() {
   return <output data-testid="where">{location.pathname + location.search}</output>;
 }
 
-function renderAt(path: string, value: AcquisitionSnapshot, api = fakeApi(value)) {
+function renderAt(path: string, value: AcquisitionSnapshot, api = fakeApi(value), statusApi?: ClusterStatusApi) {
   render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
         <Route path="/ingest/torrents" element={<IngestScreen api={api} section="torrents" />} />
-        <Route path="/ingest/files" element={<IngestScreen api={api} section="files" />} />
+        <Route path="/ingest/files" element={<IngestScreen api={api} section="files" statusApi={statusApi} />} />
         <Route path="/ingest/torrents/:torrentId" element={<TorrentDetailScreen api={api} />} />
+        <Route path="/ingest/files/:jobId" element={<IngestJobDetailScreen api={api} statusApi={statusApi} />} />
       </Routes>
       <Where />
     </MemoryRouter>,
@@ -547,5 +550,83 @@ describe('whether torrents can be added, from the cluster not the node that answ
     renderAt('/ingest/torrents', noTorrentsHere(), api);
     await settle();
     expect(screen.getByText('This server was built without libtorrent-rasterbar.')).toBeTruthy();
+  });
+});
+
+describe('file imports, placed on a node', () => {
+  const fi = '0f1e2d3c4b5a69788796a5b4c3d2e1f0';
+  const gbni = '1a2b3c4d5e6f708192a3b4c5d6e7f809';
+  const member = (id: string, host: string, version = '0.91.1') => ({ id, host, node_name: host, state: 'online', version });
+  const statusOf = (...nodes: ReturnType<typeof member>[]) => ({ status: () => Promise.resolve({ nodes }) }) as unknown as ClusterStatusApi;
+  const copying: IngestJob = { ...importing, id: 'ing-2', node_id: gbni, source_type: 'filesystem', source_ref: null, display_name: 'Movies', source_path: '/mnt/import/Movies', source_owned: false, delete_source_on_clear: false };
+  const enterPath = (value: string) => fireEvent.change(screen.getByLabelText('Server file or folder path'), { target: { value } });
+  const importButton = () => screen.getByRole('button', { name: 'Import path' }) as HTMLButtonElement;
+
+  it('asks which node when there are several, and sends the one chosen', async () => {
+    const submitPath = vi.fn(async () => ({ id: 'ing-9', nodeId: gbni }));
+    renderAt('/ingest/files', snapshot([]), fakeApi(snapshot([]), { submitPath }), statusOf(member(fi, 'fi-1'), member(gbni, 'gbni-1')));
+    await settle();
+    enterPath('/mnt/import/Movies');
+    expect(importButton().disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText('Import on'), { target: { value: gbni } });
+    fireEvent.click(importButton());
+    await settle();
+    expect(submitPath).toHaveBeenCalledWith('/mnt/import/Movies', { nodeId: gbni });
+    screen.getByText('Import queued on gbni-1: /mnt/import/Movies');
+  });
+
+  it('places on the only node there is without asking', async () => {
+    const submitPath = vi.fn(async () => ({ id: 'ing-9', nodeId: fi }));
+    renderAt('/ingest/files', snapshot([]), fakeApi(snapshot([]), { submitPath }), statusOf(member(fi, 'fi-1')));
+    await settle();
+    expect(screen.queryByLabelText('Import on')).toBeNull();
+    enterPath('/mnt/diskA/Movies');
+    fireEvent.click(importButton());
+    await settle();
+    expect(submitPath).toHaveBeenCalledWith('/mnt/diskA/Movies', { nodeId: fi });
+  });
+
+  it('shows the running node\'s own sentence when it refuses the path', async () => {
+    const submitPath = vi.fn(async () => { throw new MachaAcquisitionApiError('refused', 400, 'bad_request', 'path is outside ingest.source_roots'); });
+    renderAt('/ingest/files', snapshot([]), fakeApi(snapshot([]), { submitPath }), statusOf(member(fi, 'fi-1')));
+    await settle();
+    enterPath('/home/somewhere');
+    fireEvent.click(importButton());
+    await settle();
+    expect(screen.getByRole('alert').textContent).toBe('path is outside ingest.source_roots');
+  });
+
+  it('names each import\'s node, and opens its page from the row', async () => {
+    renderAt('/ingest/files', snapshot([], [copying]), undefined, statusOf(member(fi, 'fi-1'), member(gbni, 'gbni-1')));
+    await settle();
+    const table = screen.getByRole('table', { name: /file and folder imports/i });
+    expect(table.querySelector('tbody td.col-node')?.textContent).toBe('gbni-1');
+    fireEvent.click(table.querySelector('tbody td.col-size') as HTMLElement);
+    await settle();
+    expect(screen.getByTestId('where').textContent).toBe('/ingest/files/ing-2');
+  });
+
+  it('shows an import\'s files and how each catalogued on its page', async () => {
+    const ingestJob = vi.fn(async () => ({
+      ...copying,
+      files: [
+        { source_path: '/mnt/import/Movies/one.mkv', destination_path: '/Movies/One/one.mkv', size: 100, copied: 100, completed: true, skipped: false, catalogue_candidate: true },
+        { source_path: '/mnt/import/Movies/two.mkv', destination_path: '/Movies/Two/two.mkv', size: 100, copied: 40, completed: false, skipped: false, catalogue_candidate: true },
+      ],
+      catalogue: { total: 1, pending: 0, catalogued: 1, no_match: 0, failed: 0, state: 'processing' as const, items: [
+        { id: 'h1', path: '/movies/one/one.mkv', state: 'catalogued', provider: null, media_id: null, result: null, priority: 0, attempts: 1, error_code: null, error: null, catalogue_item_ids: ['item-1'] },
+      ] },
+    }));
+    renderAt('/ingest/files/ing-2', snapshot([], [copying]), fakeApi(snapshot([], [copying]), { ingestJob }), statusOf(member(gbni, 'gbni-1')));
+    await settle();
+    await settle();
+    expect(ingestJob).toHaveBeenCalledWith('ing-2');
+    const files = screen.getByRole('table', { name: /files/i });
+    const rows = [...files.querySelectorAll('tbody tr')].map((row) => [...row.querySelectorAll('td')].map((cell) => cell.textContent));
+    expect(rows).toEqual([
+      ['one.mkv', '100 B', 'Copied', 'Catalogued'],
+      ['two.mkv', '100 B', '40 B of 100 B', '-'],
+    ]);
+    expect(screen.getByRole('link', { name: 'one.mkv' }).getAttribute('href')).toBe('/items/item-1');
   });
 });

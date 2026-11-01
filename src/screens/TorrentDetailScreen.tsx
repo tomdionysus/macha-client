@@ -13,7 +13,7 @@ import { canRetryImport, displayStateOf, heldStatus, jobKey, linkedIngestOf, sto
 import { useAcquisition } from './ingest/useAcquisition';
 
 /** One stage of the way in: where it stands, how far it has got, and what it is doing now. */
-function StageCard({ stage, title, number, progress, summary, rows }: {
+export function StageCard({ stage, title, number, progress, summary, rows }: {
   stage: TorrentStage;
   title: string;
   number: number;

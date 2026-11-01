@@ -114,18 +114,25 @@ export function torrentStages(job: TorrentJob, linkedIngest?: IngestJob): Torren
       ? { status: 'active', label: 'Storing in the cluster' }
       : { status: 'waiting', label: downloaded ? 'Starting' : 'After the download' };
 
-  const catalogue = job.catalogue;
-  const catalogueStage: Pick<TorrentStage, 'status' | 'label'> = !catalogue || catalogue.state === 'waiting'
-    ? { status: 'waiting', label: 'After the import' }
-    : catalogue.state === 'processing'
-      ? { status: 'active', label: 'Cataloguing' }
-      : catalogue.state === 'completed_with_issues'
-        ? { status: 'issues', label: 'Completed with issues' }
-        : { status: 'done', label: 'Complete' };
-
   return [
     { key: 'download', ...download },
     { key: 'import', ...importStage },
-    { key: 'catalogue', ...catalogueStage },
+    { key: 'catalogue', ...catalogueStageOf(job.catalogue) },
+  ];
+}
+
+function catalogueStageOf(catalogue: IngestJob['catalogue']): Pick<TorrentStage, 'status' | 'label'> {
+  if (!catalogue || catalogue.state === 'waiting') return { status: 'waiting', label: 'After the import' };
+  if (catalogue.state === 'processing') return { status: 'active', label: 'Cataloguing' };
+  if (catalogue.state === 'completed_with_issues') return { status: 'issues', label: 'Completed with issues' };
+  return { status: 'done', label: 'Complete' };
+}
+
+/** A file import's stages into the library: the copy, then the catalogue, as on a torrent's page. */
+export function ingestStages(job: IngestJob): TorrentStage[] {
+  const copied = job.state === 'completed' || job.state === 'cataloguing';
+  return [
+    { key: 'import', ...stageOf(job.state, copied) },
+    { key: 'catalogue', ...catalogueStageOf(job.catalogue) },
   ];
 }

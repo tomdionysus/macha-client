@@ -236,6 +236,7 @@ const PLACEMENT_REASONS: Record<string, string> = {
   missing_uri: 'There was no magnet link to pass on.',
   add_failed: 'That node could not add the torrent.',
   node_not_torrent_capable: 'That node cannot run torrents.',
+  node_not_ingest_capable: 'That node cannot run imports until it is on server 0.91.1 or later.',
 };
 
 /** A second add of a torrent is refused while a node holds a job for it, in whatever state. */
