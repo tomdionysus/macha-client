@@ -6,7 +6,13 @@ export type AvailabilityMark = 'partial' | 'unavailable' | 'unknown';
 
 const MARKS: readonly string[] = ['partial', 'unavailable', 'unknown'];
 
-export function availabilityMark(availability: Availability | undefined): AvailabilityMark | undefined {
+/**
+ * A set (a show, season, artist or album) with any member held in full carries no mark, though the
+ * server calls it partial: something in it plays whole. A title needs no such rule, since the
+ * server already takes the best of its files.
+ */
+export function availabilityMark(availability: Availability | undefined, members?: AvailabilityMembers): AvailabilityMark | undefined {
+  if (members && members.complete > 0) return undefined;
   return availability !== undefined && MARKS.includes(availability) ? availability as AvailabilityMark : undefined;
 }
 
@@ -55,7 +61,7 @@ export function AvailabilityMarker({ availability, members, kind, className }: {
   kind?: MediaKind | 'file';
   className?: string;
 }) {
-  const mark = availabilityMark(availability);
+  const mark = availabilityMark(availability, members);
   if (!mark) return null;
   const text = availabilityText(mark, kind, members);
   return (
@@ -76,7 +82,7 @@ export function AvailabilityNote({ item }: { item: { availability?: Availability
  * only when none of them can play, partial when some of them are short, else unknown or none.
  */
 export function filesMark(availabilities: readonly (Availability | undefined)[]): AvailabilityMark | undefined {
-  const marks = availabilities.map(availabilityMark);
+  const marks = availabilities.map((availability) => availabilityMark(availability));
   if (marks.length > 0 && marks.every((mark) => mark === 'unavailable')) return 'unavailable';
   if (marks.some((mark) => mark === 'partial' || mark === 'unavailable')) return 'partial';
   return marks.includes('unknown') ? 'unknown' : undefined;
