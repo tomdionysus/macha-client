@@ -170,6 +170,7 @@ const JOB_ERRORS: Record<TorrentJobErrorCode, string> = {
   ingest_cancelled: 'Its import was cancelled.',
   torrent_error: 'The torrent reported an error.',
   staging_full: 'Waiting for room in staging.',
+  staging_unavailable: 'The node\'s staging folder is missing. It carries on by itself when the folder is back.',
   ingest_submit_failed: 'It could not be handed over for import.',
   ingest_failed: 'Its import failed.',
   torrent_failed: 'The download failed.',
