@@ -667,7 +667,7 @@ describe('one file of an import', () => {
     await settle();
     const buttons = (name: string) => [...within(row(name)).queryAllByRole('button')].map((button) => button.textContent);
     expect([buttons('f0'), buttons('f1'), buttons('f2')]).toEqual([['Pause', 'Cancel'], ['Resume', 'Cancel'], []]);
-    expect(within(row('f1')).getAllByRole('cell')[2].textContent).toBe('Paused');
+    expect(row('f1').querySelector('td.col-status')?.textContent).toBe('Paused');
   });
 
   it('pauses the file by its index, then shows what the node did', async () => {
@@ -680,7 +680,7 @@ describe('one file of an import', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Pause f0.mkv' }));
     await settle();
     expect(pauseIngestFile).toHaveBeenCalledWith('ing-2', 0);
-    expect(within(row('f0')).getAllByRole('cell')[2].textContent).toBe('Paused');
+    expect(row('f0').querySelector('td.col-status')?.textContent).toBe('Paused');
   });
 
   it('cancels a file only once the viewer confirms', async () => {
@@ -694,6 +694,42 @@ describe('one file of an import', () => {
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel file' }));
     await settle();
     expect(cancelIngestFile).toHaveBeenCalledWith('ing-2', 0);
+  });
+
+  it('pauses every ticked file that can pause, and cancels several after one confirmation', async () => {
+    const ingestJob = vi.fn(async () => detailOf([file(0, 'queued'), file(1, 'importing'), file(2, 'paused'), file(3, 'completed')]));
+    const pauseIngestFile = vi.fn(async () => copying);
+    const cancelIngestFile = vi.fn(async () => copying);
+    renderAt('/ingest/files/ing-2', snapshot([], [copying]), fakeApi(snapshot([], [copying]), { ingestJob, pauseIngestFile, cancelIngestFile }));
+    await settle();
+    await settle();
+    expect(screen.queryByRole('checkbox', { name: 'Select f3.mkv' })).toBeNull();
+    for (const name of ['f0.mkv', 'f1.mkv', 'f2.mkv']) fireEvent.click(screen.getByRole('checkbox', { name: `Select ${name}` }));
+    const bar = () => screen.getByRole('group', { name: 'Selected file actions' });
+    fireEvent.click(within(bar()).getByRole('button', { name: 'Pause' }));
+    await settle();
+    expect(pauseIngestFile.mock.calls.map((call) => (call as unknown[])[1]).sort()).toEqual([0, 1]);
+
+    for (const name of ['f0.mkv', 'f2.mkv']) fireEvent.click(screen.getByRole('checkbox', { name: `Select ${name}` }));
+    fireEvent.click(within(bar()).getByRole('button', { name: 'Cancel' }));
+    fireEvent.click(within(screen.getByRole('dialog', { name: 'Cancel 2 files?' })).getByRole('button', { name: 'Cancel files' }));
+    await settle();
+    expect(cancelIngestFile.mock.calls.map((call) => (call as unknown[])[1]).sort()).toEqual([0, 2]);
+  });
+
+  it('counts the files a bulk action could not reach', async () => {
+    const ingestJob = vi.fn(async () => detailOf([file(0, 'queued'), file(1, 'queued')]));
+    const pauseIngestFile = vi.fn(async (_job: string, index: number) => {
+      if (index === 1) throw new MachaAcquisitionApiError('refused', 409, 'invalid_state');
+      return copying;
+    });
+    renderAt('/ingest/files/ing-2', snapshot([], [copying]), fakeApi(snapshot([], [copying]), { ingestJob, pauseIngestFile }));
+    await settle();
+    await settle();
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select this page' }));
+    fireEvent.click(within(screen.getByRole('group', { name: 'Selected file actions' })).getByRole('button', { name: 'Pause' }));
+    await settle();
+    expect(screen.getByRole('alert').textContent).toBe('1 of 2 files could not be paused.');
   });
 
   it('offers no file actions when the node names no index (before 0.91.2)', async () => {

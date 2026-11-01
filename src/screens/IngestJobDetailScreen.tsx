@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { ingestNodes, routes, type AcquisitionApi, type ClusterStatusApi, type IngestCatalogueItem, type IngestJob, type IngestJobDetail, type IngestJobFile } from '@machafoundation/core';
 import { JobControls, Progress } from './ingest/JobControls';
@@ -8,7 +8,7 @@ import { usePollingTask } from '../hooks/usePollingTask';
 import { fileName, formatAge, formatBytes, formatEta, formatPercent, formatRate, formatTimestamp, percent, stateLabel } from './ingest/format';
 import { codeWords, jobErrorText } from '../text/viewerText';
 import { MetricTile } from '../components/MetricTile';
-import { DetailCard, DetailHeader, Facts, Pager } from '../components/ListParts';
+import { BulkActions, DetailCard, DetailHeader, Facts, Pager, SelectPageBox, SelectRowBox, useListSelection } from '../components/ListParts';
 import { pageSlice } from '../lists/paging';
 import { ingestStages, jobKey } from './ingest/jobs';
 import { useAcquisition } from './ingest/useAcquisition';
@@ -43,6 +43,7 @@ export function fileActions(file: IngestJobFile): FileAction[] {
 }
 
 const FILE_ACTION_LABELS: Record<FileAction, string> = { pause: 'Pause', resume: 'Resume', cancel: 'Cancel' };
+const FILE_ACTION_DONE: Record<FileAction, string> = { pause: 'paused', resume: 'resumed', cancel: 'cancelled' };
 
 const CATALOGUE_STATES: Record<string, string> = {
   queued: 'Waiting',
@@ -60,25 +61,65 @@ export function fileCatalogueText(file: IngestJobFile, item: IngestCatalogueItem
   return CATALOGUE_STATES[item.state] ?? codeWords(item.state);
 }
 
-/** A page at a time: an import can hold thousands of files. */
+/** How many files are asked at once in a bulk action: the server takes one file per request. */
+const FILE_ACTION_CONCURRENCY = 4;
+
+/** Runs `operation` on every item, at most `limit` at a time; resolves to how many failed. */
+export async function runInBatches<T>(items: readonly T[], limit: number, operation: (item: T) => Promise<unknown>): Promise<number> {
+  let next = 0;
+  let failed = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const item = items[next++];
+      try { await operation(item); } catch { failed += 1; }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return failed;
+}
+
+const fileId = (file: IngestJobFile) => String(file.index);
+
+/** A page at a time: an import can hold thousands of files. Files are ticked across pages, as jobs are. */
 function FilesCard({ detail, busy, onAction }: {
   detail: IngestJobDetail;
-  /** The index of the file an action is under way on. */
-  busy?: number;
-  onAction: (file: IngestJobFile, action: FileAction) => void;
+  /** The indexes of the files an action is under way on. */
+  busy: ReadonlySet<number>;
+  onAction: (files: readonly IngestJobFile[], action: FileAction) => Promise<boolean>;
 }) {
   const [page, setPage] = useState(0);
-  const [confirmCancel, setConfirmCancel] = useState<IngestJobFile>();
+  const [confirmCancel, setConfirmCancel] = useState<readonly IngestJobFile[]>();
   const controlled = detail.files.some((file) => file.index !== undefined);
+  const actionable = useMemo(() => detail.files.filter((file) => fileActions(file).length > 0), [detail.files]);
+  const selectable = useMemo(() => actionable.map((file) => ({ id: fileId(file) })), [actionable]);
+  const selection = useListSelection(selectable);
+  const ticked = actionable.filter((file) => selection.checked.has(fileId(file)));
+  const able = (action: FileAction) => ticked.filter((file) => fileActions(file).includes(action));
+  const working = busy.size > 0;
   const shown = pageSlice(detail.files, page);
   // Paths compared ignoring case, as the server compares destinations.
   const items = new Map((detail.catalogue?.items ?? []).map((item) => [item.path.toLowerCase(), item]));
+  const act = (files: readonly IngestJobFile[], action: FileAction) => {
+    void onAction(files, action).then((done) => { if (done && files.length > 1) selection.clear(); });
+  };
   return (
     <DetailCard id="ingest-files-heading" title={`Files (${detail.files.length})`}>
+      {controlled && (
+        <BulkActions label="Selected file actions" selection={selection} disabled={working}>
+          <button className="secondary-button" type="button" disabled={working || able('pause').length === 0} onClick={() => act(able('pause'), 'pause')} data-tv-focusable="true">Pause</button>
+          <button className="secondary-button" type="button" disabled={working || able('resume').length === 0} onClick={() => act(able('resume'), 'resume')} data-tv-focusable="true">Resume</button>
+          <button className="secondary-button ingest-delete-button" type="button" disabled={working || able('cancel').length === 0} onClick={() => setConfirmCancel(able('cancel'))} data-tv-focusable="true">Cancel</button>
+        </BulkActions>
+      )}
       <div className="data-table-scroll">
         <table className="data-table" aria-labelledby="ingest-files-heading">
           <thead>
             <tr>
+              {controlled && (
+                <th scope="col" className="col-check">
+                  <SelectPageBox ids={shown.items.filter((file) => fileActions(file).length > 0).map(fileId)} selection={selection} disabled={working} />
+                </th>
+              )}
               <th scope="col" className="col-name">File</th>
               <th scope="col" className="col-size">Size</th>
               <th scope="col" className="col-status">Copy</th>
@@ -90,10 +131,17 @@ function FilesCard({ detail, busy, onAction }: {
             {shown.items.map((file) => {
               const item = items.get(file.destination_path.toLowerCase());
               const titleId = item?.catalogue_item_ids[0];
+              const name = fileName(file.source_path);
+              const actions = fileActions(file);
               return (
-                <tr key={file.source_path}>
+                <tr key={file.source_path} className={selection.checked.has(fileId(file)) ? 'selected' : undefined}>
+                  {controlled && (
+                    <td className="col-check">
+                      {actions.length > 0 && <SelectRowBox id={fileId(file)} name={name} selection={selection} disabled={working} />}
+                    </td>
+                  )}
                   <td className="col-name" title={`${file.source_path}\nInto: ${file.destination_path}`}>
-                    {titleId ? <Link to={routes.item(titleId)} data-tv-focusable="true">{fileName(file.source_path)}</Link> : fileName(file.source_path)}
+                    {titleId ? <Link to={routes.item(titleId)} data-tv-focusable="true">{name}</Link> : name}
                   </td>
                   <td className="col-size">{formatBytes(file.size)}</td>
                   <td className="col-status">{fileCopyText(file)}</td>
@@ -101,17 +149,17 @@ function FilesCard({ detail, busy, onAction }: {
                   {controlled && (
                     <td className="col-file-actions">
                       <div className="ingest-job-actions ingest-job-actions-row">
-                        {fileActions(file).map((action) => (
+                        {actions.map((action) => (
                           <button
                             key={action}
                             type="button"
                             className={`secondary-button${action === 'cancel' ? ' ingest-delete-button' : ''}`}
                             data-tv-focusable="true"
-                            disabled={busy !== undefined}
-                            aria-label={`${FILE_ACTION_LABELS[action]} ${fileName(file.source_path)}`}
-                            onClick={() => (action === 'cancel' ? setConfirmCancel(file) : onAction(file, action))}
+                            disabled={working}
+                            aria-label={`${FILE_ACTION_LABELS[action]} ${name}`}
+                            onClick={() => (action === 'cancel' ? setConfirmCancel([file]) : act([file], action))}
                           >
-                            {busy === file.index ? '…' : FILE_ACTION_LABELS[action]}
+                            {file.index !== undefined && busy.has(file.index) ? '…' : FILE_ACTION_LABELS[action]}
                           </button>
                         ))}
                       </div>
@@ -127,17 +175,20 @@ function FilesCard({ detail, busy, onAction }: {
       {detail.catalogue?.items === null && <p className="list-note">Its node could not be asked, so how each file catalogued is not shown.</p>}
       <ConfirmModal
         open={confirmCancel !== undefined}
-        title="Cancel this file?"
-        confirmLabel="Cancel file"
+        title={confirmCancel?.length === 1 ? 'Cancel this file?' : `Cancel ${confirmCancel?.length ?? 0} files?`}
+        confirmLabel={confirmCancel?.length === 1 ? 'Cancel file' : 'Cancel files'}
         destructive
-        busy={busy !== undefined}
+        busy={working}
         onCancel={() => setConfirmCancel(undefined)}
         onConfirm={() => {
-          if (confirmCancel) onAction(confirmCancel, 'cancel');
+          if (confirmCancel) act(confirmCancel, 'cancel');
           setConfirmCancel(undefined);
         }}
       >
-        <p>{confirmCancel ? fileName(confirmCancel.source_path) : ''} is not imported, and what has been copied of it is removed. Its source is left as it is.</p>
+        <p>
+          {confirmCancel?.length === 1 ? `${fileName(confirmCancel[0].source_path)} is not imported, and what has been copied of it is removed.` : 'They are not imported, and what has been copied of them is removed.'}
+          {' '}{confirmCancel?.length === 1 ? 'Its source is left as it is.' : 'Their sources are left as they are.'}
+        </p>
       </ConfirmModal>
     </DetailCard>
   );
@@ -147,8 +198,8 @@ function IngestBody({ job, detail, nodeName, fileBusy, onFileAction }: {
   job: IngestJob;
   detail?: IngestJobDetail;
   nodeName?: string;
-  fileBusy?: number;
-  onFileAction: (file: IngestJobFile, action: FileAction) => void;
+  fileBusy: ReadonlySet<number>;
+  onFileAction: (files: readonly IngestJobFile[], action: FileAction) => Promise<boolean>;
 }) {
   const now = Date.now();
   const [copyStage, catalogueStage] = ingestStages(job);
@@ -229,7 +280,7 @@ export function IngestJobDetailScreen({ api, statusApi }: { api: AcquisitionApi;
   const { jobId = '' } = useParams();
   const navigate = useNavigate();
   const { snapshot, loading, error, setError, refresh, busyByJob, confirmRemove, setConfirmRemove, act } = useAcquisition(api);
-  const [fileBusy, setFileBusy] = useState<number>();
+  const [fileBusy, setFileBusy] = useState<ReadonlySet<number>>(() => new Set());
   const nodes = useAsync(() => statusApi ? statusApi.status().then(ingestNodes) : Promise.resolve(undefined), [statusApi]);
   const [detail, setDetail] = useState<IngestJobDetail>();
   const back = routes.ingestFiles;
@@ -245,21 +296,32 @@ export function IngestJobDetailScreen({ api, statusApi }: { api: AcquisitionApi;
     enabled: Boolean(listed),
   });
 
-  /** One file's action, then the job and its files read again so the row shows what the node did. */
-  const actOnFile = async (file: IngestJobFile, action: FileAction) => {
-    if (file.index === undefined) return;
-    setFileBusy(file.index);
+  /**
+   * Files' action, a few at a time, then the job and its files read again so the rows show what the
+   * node did. One file's refusal is the node's words; several are counted. Resolves to whether all took.
+   */
+  const actOnFiles = async (files: readonly IngestJobFile[], action: FileAction): Promise<boolean> => {
+    const indexes = files.flatMap((file) => (file.index === undefined ? [] : [file.index]));
+    if (indexes.length === 0) return true;
+    setFileBusy(new Set(indexes));
     setError(undefined);
+    const call = action === 'pause' ? api.pauseIngestFile : action === 'resume' ? api.resumeIngestFile : api.cancelIngestFile;
+    let refusal: unknown;
+    const failed = await runInBatches(indexes, FILE_ACTION_CONCURRENCY, (index) => call.call(api, jobId, index).catch((reason: unknown) => {
+      refusal = reason;
+      throw reason;
+    }));
     try {
-      const call = action === 'pause' ? api.pauseIngestFile : action === 'resume' ? api.resumeIngestFile : api.cancelIngestFile;
-      await call.call(api, jobId, file.index);
       setDetail(await api.ingestJob(jobId));
       await refresh();
     } catch (reason: unknown) {
-      setError(ingestRefusalText(reason));
-    } finally {
-      setFileBusy(undefined);
+      refusal ??= reason;
     }
+    if (failed > 0) {
+      setError(indexes.length === 1 ? ingestRefusalText(refusal) : `${failed} of ${indexes.length} files could not be ${FILE_ACTION_DONE[action]}.`);
+    }
+    setFileBusy(new Set());
+    return failed === 0;
   };
 
   if (!listed) {
@@ -303,7 +365,7 @@ export function IngestJobDetailScreen({ api, statusApi }: { api: AcquisitionApi;
       />
       {error && <p className="ingest-page-error" role="alert">{error}</p>}
       {failure && <p className="ingest-job-error">{failure}</p>}
-      <IngestBody job={job} detail={detail?.id === job.id ? detail : undefined} nodeName={jobNodeName(job.node_id, names)} fileBusy={fileBusy} onFileAction={(file, action) => { void actOnFile(file, action); }} />
+      <IngestBody job={job} detail={detail?.id === job.id ? detail : undefined} nodeName={jobNodeName(job.node_id, names)} fileBusy={fileBusy} onFileAction={actOnFiles} />
     </section>
   );
 }
