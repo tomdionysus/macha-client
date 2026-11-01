@@ -586,6 +586,18 @@ describe('file imports, placed on a node', () => {
     expect(submitPath).toHaveBeenCalledWith('/mnt/diskA/Movies', { nodeId: fi });
   });
 
+  it('holds the picker on a node too old to place on, and lets the node that takes it run the import', async () => {
+    const submitPath = vi.fn(async () => ({ id: 'ing-9', nodeId: null }));
+    renderAt('/ingest/files', snapshot([]), fakeApi(snapshot([]), { submitPath }), statusOf(member(fi, 'fi-1', '0.91.0')));
+    await settle();
+    const picker = screen.getByLabelText('Import on') as HTMLSelectElement;
+    expect([picker.disabled, picker.selectedOptions[0].textContent]).toEqual([true, 'fi-1 (needs server 0.91.1)']);
+    enterPath('/mnt/diskA/Movies');
+    fireEvent.click(importButton());
+    await settle();
+    expect(submitPath).toHaveBeenCalledWith('/mnt/diskA/Movies', undefined);
+  });
+
   it('shows the running node\'s own sentence when it refuses the path', async () => {
     const submitPath = vi.fn(async () => { throw new MachaAcquisitionApiError('refused', 400, 'bad_request', 'path is outside ingest.source_roots'); });
     renderAt('/ingest/files', snapshot([]), fakeApi(snapshot([]), { submitPath }), statusOf(member(fi, 'fi-1')));

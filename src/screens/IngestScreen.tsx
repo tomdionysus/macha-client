@@ -249,7 +249,8 @@ export function IngestScreen({ api, section, statusApi }: Props) {
               disabled={!ingestEnabled || submitting === 'path'}
             />
             {(importNodes.value?.length ?? 0) > 0 && (
-              <select aria-label="Import on" data-tv-focusable="true" value={importNode} onChange={(event) => setPathNode(event.target.value)} disabled={submitting === 'path'}>
+              // No node able to take a placed import (all before 0.91.1): shown, held, and the import runs where it is taken.
+              <select aria-label="Import on" data-tv-focusable="true" value={importNode || (placeable.length === 0 ? importNodes.value?.[0].nodeId : '')} onChange={(event) => setPathNode(event.target.value)} disabled={submitting === 'path' || placeable.length === 0}>
                 <option value="" disabled>Choose a node</option>
                 {importNodes.value?.map((node) => <option key={node.nodeId} value={node.nodeId} disabled={!node.placeable}>{ingestNodeLabel(node)}</option>)}
               </select>
