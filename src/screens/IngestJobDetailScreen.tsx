@@ -13,13 +13,36 @@ import { pageSlice } from '../lists/paging';
 import { ingestStages, jobKey } from './ingest/jobs';
 import { useAcquisition } from './ingest/useAcquisition';
 import { StageCard } from './TorrentDetailScreen';
+import { ConfirmModal } from '../components/Modal';
+import { ingestRefusalText } from './ingest/fileImports';
 
-/** Where one file stands: copied, skipped, or how far its copy has got. */
+const FILE_STATES: Record<string, string> = {
+  queued: 'Waiting',
+  paused: 'Paused',
+  completed: 'Copied',
+  skipped: 'Skipped',
+  cancelled: 'Cancelled',
+};
+
+/** Where one file stands: by its state from server 0.91.2, else copied, skipped, or how far its copy has got. */
 export function fileCopyText(file: IngestJobFile): string {
+  if (file.state && file.state !== 'importing') return FILE_STATES[file.state] ?? codeWords(file.state);
   if (file.skipped) return 'Skipped';
   if (file.completed) return 'Copied';
   return `${formatBytes(file.copied)} of ${formatBytes(file.size)}`;
 }
+
+export type FileAction = 'pause' | 'resume' | 'cancel';
+
+/** What one file can be asked to do now; nothing from an owner before 0.91.2, which names no index. */
+export function fileActions(file: IngestJobFile): FileAction[] {
+  if (file.index === undefined) return [];
+  if (file.state === 'queued' || file.state === 'importing') return ['pause', 'cancel'];
+  if (file.state === 'paused') return ['resume', 'cancel'];
+  return [];
+}
+
+const FILE_ACTION_LABELS: Record<FileAction, string> = { pause: 'Pause', resume: 'Resume', cancel: 'Cancel' };
 
 const CATALOGUE_STATES: Record<string, string> = {
   queued: 'Waiting',
@@ -38,8 +61,15 @@ export function fileCatalogueText(file: IngestJobFile, item: IngestCatalogueItem
 }
 
 /** A page at a time: an import can hold thousands of files. */
-function FilesCard({ detail }: { detail: IngestJobDetail }) {
+function FilesCard({ detail, busy, onAction }: {
+  detail: IngestJobDetail;
+  /** The index of the file an action is under way on. */
+  busy?: number;
+  onAction: (file: IngestJobFile, action: FileAction) => void;
+}) {
   const [page, setPage] = useState(0);
+  const [confirmCancel, setConfirmCancel] = useState<IngestJobFile>();
+  const controlled = detail.files.some((file) => file.index !== undefined);
   const shown = pageSlice(detail.files, page);
   // Paths compared ignoring case, as the server compares destinations.
   const items = new Map((detail.catalogue?.items ?? []).map((item) => [item.path.toLowerCase(), item]));
@@ -53,6 +83,7 @@ function FilesCard({ detail }: { detail: IngestJobDetail }) {
               <th scope="col" className="col-size">Size</th>
               <th scope="col" className="col-status">Copy</th>
               <th scope="col" className="col-status">Catalogue</th>
+              {controlled && <th scope="col" className="col-file-actions"><span className="visually-hidden">Actions</span></th>}
             </tr>
           </thead>
           <tbody>
@@ -67,6 +98,25 @@ function FilesCard({ detail }: { detail: IngestJobDetail }) {
                   <td className="col-size">{formatBytes(file.size)}</td>
                   <td className="col-status">{fileCopyText(file)}</td>
                   <td className={`col-status${item?.state === 'failed' ? ' has-error' : ''}`} title={item?.error ?? undefined}>{fileCatalogueText(file, item)}</td>
+                  {controlled && (
+                    <td className="col-file-actions">
+                      <div className="ingest-job-actions ingest-job-actions-row">
+                        {fileActions(file).map((action) => (
+                          <button
+                            key={action}
+                            type="button"
+                            className={`secondary-button${action === 'cancel' ? ' ingest-delete-button' : ''}`}
+                            data-tv-focusable="true"
+                            disabled={busy !== undefined}
+                            aria-label={`${FILE_ACTION_LABELS[action]} ${fileName(file.source_path)}`}
+                            onClick={() => (action === 'cancel' ? setConfirmCancel(file) : onAction(file, action))}
+                          >
+                            {busy === file.index ? '…' : FILE_ACTION_LABELS[action]}
+                          </button>
+                        ))}
+                      </div>
+                    </td>
+                  )}
                 </tr>
               );
             })}
@@ -75,11 +125,31 @@ function FilesCard({ detail }: { detail: IngestJobDetail }) {
       </div>
       <Pager label="File pages" {...shown} total={detail.files.length} onPage={setPage} />
       {detail.catalogue?.items === null && <p className="list-note">Its node could not be asked, so how each file catalogued is not shown.</p>}
+      <ConfirmModal
+        open={confirmCancel !== undefined}
+        title="Cancel this file?"
+        confirmLabel="Cancel file"
+        destructive
+        busy={busy !== undefined}
+        onCancel={() => setConfirmCancel(undefined)}
+        onConfirm={() => {
+          if (confirmCancel) onAction(confirmCancel, 'cancel');
+          setConfirmCancel(undefined);
+        }}
+      >
+        <p>{confirmCancel ? fileName(confirmCancel.source_path) : ''} is not imported, and what has been copied of it is removed. Its source is left as it is.</p>
+      </ConfirmModal>
     </DetailCard>
   );
 }
 
-function IngestBody({ job, detail, nodeName }: { job: IngestJob; detail?: IngestJobDetail; nodeName?: string }) {
+function IngestBody({ job, detail, nodeName, fileBusy, onFileAction }: {
+  job: IngestJob;
+  detail?: IngestJobDetail;
+  nodeName?: string;
+  fileBusy?: number;
+  onFileAction: (file: IngestJobFile, action: FileAction) => void;
+}) {
   const now = Date.now();
   const [copyStage, catalogueStage] = ingestStages(job);
   const copyProgress = copyStage.status === 'done' ? 100 : percent(job.progress, job.bytes_completed, job.bytes_total);
@@ -139,7 +209,7 @@ function IngestBody({ job, detail, nodeName }: { job: IngestJob; detail?: Ingest
         />
       </div>
 
-      {detail && detail.files.length > 0 && <FilesCard detail={detail} />}
+      {detail && detail.files.length > 0 && <FilesCard detail={detail} busy={fileBusy} onAction={onFileAction} />}
 
       <DetailCard id="ingest-identity-heading" title="Import">
         <Facts rows={[
@@ -158,7 +228,8 @@ function IngestBody({ job, detail, nodeName }: { job: IngestJob; detail?: Ingest
 export function IngestJobDetailScreen({ api, statusApi }: { api: AcquisitionApi; statusApi?: ClusterStatusApi }) {
   const { jobId = '' } = useParams();
   const navigate = useNavigate();
-  const { snapshot, loading, error, busyByJob, confirmRemove, setConfirmRemove, act } = useAcquisition(api);
+  const { snapshot, loading, error, setError, refresh, busyByJob, confirmRemove, setConfirmRemove, act } = useAcquisition(api);
+  const [fileBusy, setFileBusy] = useState<number>();
   const nodes = useAsync(() => statusApi ? statusApi.status().then(ingestNodes) : Promise.resolve(undefined), [statusApi]);
   const [detail, setDetail] = useState<IngestJobDetail>();
   const back = routes.ingestFiles;
@@ -173,6 +244,23 @@ export function IngestJobDetailScreen({ api, statusApi }: { api: AcquisitionApi;
     dependencies: [api, jobId, snapshot?.refreshIntervalMs],
     enabled: Boolean(listed),
   });
+
+  /** One file's action, then the job and its files read again so the row shows what the node did. */
+  const actOnFile = async (file: IngestJobFile, action: FileAction) => {
+    if (file.index === undefined) return;
+    setFileBusy(file.index);
+    setError(undefined);
+    try {
+      const call = action === 'pause' ? api.pauseIngestFile : action === 'resume' ? api.resumeIngestFile : api.cancelIngestFile;
+      await call.call(api, jobId, file.index);
+      setDetail(await api.ingestJob(jobId));
+      await refresh();
+    } catch (reason: unknown) {
+      setError(ingestRefusalText(reason));
+    } finally {
+      setFileBusy(undefined);
+    }
+  };
 
   if (!listed) {
     return (
@@ -215,7 +303,7 @@ export function IngestJobDetailScreen({ api, statusApi }: { api: AcquisitionApi;
       />
       {error && <p className="ingest-page-error" role="alert">{error}</p>}
       {failure && <p className="ingest-job-error">{failure}</p>}
-      <IngestBody job={job} detail={detail?.id === job.id ? detail : undefined} nodeName={jobNodeName(job.node_id, names)} />
+      <IngestBody job={job} detail={detail?.id === job.id ? detail : undefined} nodeName={jobNodeName(job.node_id, names)} fileBusy={fileBusy} onFileAction={(file, action) => { void actOnFile(file, action); }} />
     </section>
   );
 }

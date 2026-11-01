@@ -620,7 +620,7 @@ describe('file imports, placed on a node', () => {
 
   it('lists a large import\'s files a page at a time', async () => {
     const files = Array.from({ length: 120 }, (_, n) => ({ source_path: `/mnt/import/Movies/f${n}.mkv`, destination_path: `/Movies/f${n}.mkv`, size: 1, copied: 0, completed: false, skipped: false, catalogue_candidate: true }));
-    const ingestJob = vi.fn(async () => ({ ...copying, files }));
+    const ingestJob = vi.fn(async () => ({ ...copying, files, catalogue: undefined }));
     renderAt('/ingest/files/ing-2', snapshot([], [copying]), fakeApi(snapshot([], [copying]), { ingestJob }), statusOf(member(gbni, 'gbni-1')));
     await settle();
     await settle();
@@ -651,5 +651,56 @@ describe('file imports, placed on a node', () => {
       ['two.mkv', '100 B', '40 B of 100 B', '-'],
     ]);
     expect(screen.getByRole('link', { name: 'one.mkv' }).getAttribute('href')).toBe('/items/item-1');
+  });
+});
+
+describe('one file of an import', () => {
+  const copying: IngestJob = { ...importing, id: 'ing-2', source_type: 'filesystem', source_ref: null, display_name: 'Movies', source_path: '/mnt/import/Movies', source_owned: false, delete_source_on_clear: false };
+  const file = (index: number, state: string, extra: object = {}) => ({ index, state, source_path: `/mnt/import/Movies/f${index}.mkv`, destination_path: `/Movies/f${index}.mkv`, size: 10, copied: 0, completed: state === 'completed', skipped: false, catalogue_candidate: true, ...extra });
+  const detailOf = (files: object[]) => ({ ...copying, files, catalogue: undefined }) as never;
+  const row = (name: string) => screen.getByRole('table', { name: /files/i }).querySelector(`tbody tr:nth-child(${Number(name.slice(1)) + 1})`) as HTMLElement;
+
+  it('offers pause and cancel to a waiting file, resume and cancel to a paused one, and nothing to a copied one', async () => {
+    const ingestJob = vi.fn(async () => detailOf([file(0, 'queued'), file(1, 'paused'), file(2, 'completed')]));
+    renderAt('/ingest/files/ing-2', snapshot([], [copying]), fakeApi(snapshot([], [copying]), { ingestJob }));
+    await settle();
+    await settle();
+    const buttons = (name: string) => [...within(row(name)).queryAllByRole('button')].map((button) => button.textContent);
+    expect([buttons('f0'), buttons('f1'), buttons('f2')]).toEqual([['Pause', 'Cancel'], ['Resume', 'Cancel'], []]);
+    expect(within(row('f1')).getAllByRole('cell')[2].textContent).toBe('Paused');
+  });
+
+  it('pauses the file by its index, then shows what the node did', async () => {
+    let files = [file(0, 'importing')];
+    const ingestJob = vi.fn(async () => detailOf(files));
+    const pauseIngestFile = vi.fn(async () => { files = [file(0, 'paused')]; return copying; });
+    renderAt('/ingest/files/ing-2', snapshot([], [copying]), fakeApi(snapshot([], [copying]), { ingestJob, pauseIngestFile }));
+    await settle();
+    await settle();
+    fireEvent.click(screen.getByRole('button', { name: 'Pause f0.mkv' }));
+    await settle();
+    expect(pauseIngestFile).toHaveBeenCalledWith('ing-2', 0);
+    expect(within(row('f0')).getAllByRole('cell')[2].textContent).toBe('Paused');
+  });
+
+  it('cancels a file only once the viewer confirms', async () => {
+    const ingestJob = vi.fn(async () => detailOf([file(0, 'queued')]));
+    const cancelIngestFile = vi.fn(async () => copying);
+    renderAt('/ingest/files/ing-2', snapshot([], [copying]), fakeApi(snapshot([], [copying]), { ingestJob, cancelIngestFile }));
+    await settle();
+    await settle();
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel f0.mkv' }));
+    expect(cancelIngestFile).not.toHaveBeenCalled();
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel file' }));
+    await settle();
+    expect(cancelIngestFile).toHaveBeenCalledWith('ing-2', 0);
+  });
+
+  it('offers no file actions when the node names no index (before 0.91.2)', async () => {
+    const ingestJob = vi.fn(async () => detailOf([{ ...file(0, 'queued'), index: undefined, state: undefined }]));
+    renderAt('/ingest/files/ing-2', snapshot([], [copying]), fakeApi(snapshot([], [copying]), { ingestJob }));
+    await settle();
+    await settle();
+    expect(within(row('f0')).queryAllByRole('button')).toHaveLength(0);
   });
 });

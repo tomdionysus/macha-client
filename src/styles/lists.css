@@ -65,6 +65,8 @@
 .data-table tr.state-paused td.col-status { color: #cbbf8a; }
 .data-table td.col-added { color: var(--text-faint); }
 .data-table .col-actions { width: 13.2rem; padding-right: .35rem; text-align: right; }
+/* Two buttons at most: Pause or Resume, and Cancel. */
+.data-table .col-file-actions { width: 10.5rem; padding-right: .35rem; text-align: right; }
 .data-table .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 /* The back button is a link, so it carries the list's sort home. */
 .detail-screen > .back-button { display: inline-block; margin-bottom: .6rem; text-decoration: none; }
