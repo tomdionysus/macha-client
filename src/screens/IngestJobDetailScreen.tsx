@@ -8,7 +8,8 @@ import { usePollingTask } from '../hooks/usePollingTask';
 import { fileName, formatAge, formatBytes, formatEta, formatPercent, formatRate, formatTimestamp, percent, stateLabel } from './ingest/format';
 import { codeWords, jobErrorText } from '../text/viewerText';
 import { MetricTile } from '../components/MetricTile';
-import { DetailCard, DetailHeader, Facts } from '../components/ListParts';
+import { DetailCard, DetailHeader, Facts, Pager } from '../components/ListParts';
+import { pageSlice } from '../lists/paging';
 import { ingestStages, jobKey } from './ingest/jobs';
 import { useAcquisition } from './ingest/useAcquisition';
 import { StageCard } from './TorrentDetailScreen';
@@ -36,7 +37,10 @@ export function fileCatalogueText(file: IngestJobFile, item: IngestCatalogueItem
   return CATALOGUE_STATES[item.state] ?? codeWords(item.state);
 }
 
+/** A page at a time: an import can hold thousands of files. */
 function FilesCard({ detail }: { detail: IngestJobDetail }) {
+  const [page, setPage] = useState(0);
+  const shown = pageSlice(detail.files, page);
   // Paths compared ignoring case, as the server compares destinations.
   const items = new Map((detail.catalogue?.items ?? []).map((item) => [item.path.toLowerCase(), item]));
   return (
@@ -52,7 +56,7 @@ function FilesCard({ detail }: { detail: IngestJobDetail }) {
             </tr>
           </thead>
           <tbody>
-            {detail.files.map((file) => {
+            {shown.items.map((file) => {
               const item = items.get(file.destination_path.toLowerCase());
               const titleId = item?.catalogue_item_ids[0];
               return (
@@ -69,6 +73,7 @@ function FilesCard({ detail }: { detail: IngestJobDetail }) {
           </tbody>
         </table>
       </div>
+      <Pager label="File pages" {...shown} total={detail.files.length} onPage={setPage} />
       {detail.catalogue?.items === null && <p className="list-note">Its node could not be asked, so how each file catalogued is not shown.</p>}
     </DetailCard>
   );

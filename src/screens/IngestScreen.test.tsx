@@ -618,6 +618,17 @@ describe('file imports, placed on a node', () => {
     expect(screen.getByTestId('where').textContent).toBe('/ingest/files/ing-2');
   });
 
+  it('lists a large import\'s files a page at a time', async () => {
+    const files = Array.from({ length: 120 }, (_, n) => ({ source_path: `/mnt/import/Movies/f${n}.mkv`, destination_path: `/Movies/f${n}.mkv`, size: 1, copied: 0, completed: false, skipped: false, catalogue_candidate: true }));
+    const ingestJob = vi.fn(async () => ({ ...copying, files }));
+    renderAt('/ingest/files/ing-2', snapshot([], [copying]), fakeApi(snapshot([], [copying]), { ingestJob }), statusOf(member(gbni, 'gbni-1')));
+    await settle();
+    await settle();
+    expect(screen.getByRole('table', { name: /files/i }).querySelectorAll('tbody tr')).toHaveLength(50);
+    fireEvent.click(within(screen.getByRole('navigation', { name: 'File pages' })).getByRole('button', { name: 'Next' }));
+    expect(screen.getByRole('table', { name: /files/i }).querySelector('tbody td')?.textContent).toBe('f50.mkv');
+  });
+
   it('shows an import\'s files and how each catalogued on its page', async () => {
     const ingestJob = vi.fn(async () => ({
       ...copying,
