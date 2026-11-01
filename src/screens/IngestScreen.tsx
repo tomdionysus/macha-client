@@ -347,7 +347,7 @@ export function IngestScreen({ api, section }: Props) {
               <thead>
                 <tr>
                   <th scope="col" className="col-name">Name</th>
-                  <th scope="col" className="col-size">Copied</th>
+                  <th scope="col" className="col-size col-copied">Copied</th>
                   <th scope="col" className="col-progress">Progress</th>
                   <th scope="col" className="col-status">Status</th>
                   <th scope="col" className="col-rate">Rate</th>
@@ -364,7 +364,7 @@ export function IngestScreen({ api, section }: Props) {
                   return [
                     <tr key={job.id} className={`state-${job.state}`}>
                       <td className="col-name" title={job.current_file ? `${job.source_path}\nCurrent: ${job.current_file}` : job.source_path}>{name}</td>
-                      <td className="col-size">{formatBytes(job.bytes_completed)} / {formatBytes(job.bytes_total)}</td>
+                      <td className="col-size col-copied">{formatBytes(job.bytes_completed)} / {formatBytes(job.bytes_total)}</td>
                       <td className="col-progress">
                         <Progress value={progress} />
                         <span>{formatPercent(progress)}</span>

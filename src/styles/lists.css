@@ -48,6 +48,8 @@
  */
 .data-table .col-progress { width: 9.8rem; }
 .data-table .col-size { width: 5rem; }
+/* Two sizes, "1023 MB / 1023 MB" at the longest. */
+.data-table .col-size.col-copied { width: 10rem; }
 .data-table .col-rate { width: 6.1rem; }
 .data-table .col-node { width: 8rem; max-width: 8rem; overflow: hidden; text-overflow: ellipsis; color: var(--text-dim); }
 .data-table .col-eta { width: 5.3rem; }
