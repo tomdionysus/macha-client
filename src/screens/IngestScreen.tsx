@@ -248,8 +248,8 @@ export function IngestScreen({ api, section, statusApi }: Props) {
               placeholder="/media/usb/Movies"
               disabled={!ingestEnabled || submitting === 'path'}
             />
-            {(importNodes.value?.length ?? 0) > 1 && (
-              <select aria-label="Import on" data-tv-focusable="true" value={pathNode} onChange={(event) => setPathNode(event.target.value)} disabled={submitting === 'path'}>
+            {(importNodes.value?.length ?? 0) > 0 && (
+              <select aria-label="Import on" data-tv-focusable="true" value={importNode} onChange={(event) => setPathNode(event.target.value)} disabled={submitting === 'path'}>
                 <option value="" disabled>Choose a node</option>
                 {importNodes.value?.map((node) => <option key={node.nodeId} value={node.nodeId} disabled={!node.placeable}>{ingestNodeLabel(node)}</option>)}
               </select>

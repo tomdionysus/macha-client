@@ -575,11 +575,11 @@ describe('file imports, placed on a node', () => {
     screen.getByText('Import queued on gbni-1: /mnt/import/Movies');
   });
 
-  it('places on the only node there is without asking', async () => {
+  it('picks the only node there is, and shows it', async () => {
     const submitPath = vi.fn(async () => ({ id: 'ing-9', nodeId: fi }));
     renderAt('/ingest/files', snapshot([]), fakeApi(snapshot([]), { submitPath }), statusOf(member(fi, 'fi-1')));
     await settle();
-    expect(screen.queryByLabelText('Import on')).toBeNull();
+    expect((screen.getByLabelText('Import on') as HTMLSelectElement).value).toBe(fi);
     enterPath('/mnt/diskA/Movies');
     fireEvent.click(importButton());
     await settle();
