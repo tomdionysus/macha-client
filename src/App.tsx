@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore, type ReactElement } from 'react';
-import { Navigate, NavLink, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom';
+import { Navigate, NavLink, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import type { CatalogueApi, CatalogueMediaProfile, ManageApi, PlaybackFactsApi, PlaybackMediaFacts } from '@machafoundation/core';
 import type { MediaApi } from '@machafoundation/core';
 import { AppLogo } from './components/AppLogo';
 import { MusicNav } from './components/MusicNav';
+import { BooksNav } from './components/BooksNav';
 import { StatusNav } from './components/StatusNav';
 import { ManageNav } from './components/ManageNav';
 import { ImportNav } from './components/ImportNav';
@@ -45,6 +46,10 @@ import { SeriesScreen } from './screens/SeriesScreen';
 import { SeasonScreen } from './screens/SeasonScreen';
 import { ArtistScreen } from './screens/ArtistScreen';
 import { AlbumScreen } from './screens/AlbumScreen';
+import { BooksScreen } from './screens/BooksScreen';
+import { BookScreen } from './screens/BookScreen';
+import { BookCollectionScreen } from './screens/BookCollectionScreen';
+import { ReaderScreen } from './screens/ReaderScreen';
 import { PlayerHost } from './screens/PlayerScreen';
 import { SettingsScreen } from './screens/SettingsScreen';
 import { SponsorScreen } from './screens/SponsorScreen';
@@ -55,7 +60,7 @@ import { TorrentDetailScreen } from './screens/TorrentDetailScreen';
 import { ManageScreen, type ManageSection } from './screens/ManageScreen';
 import { UnmatchedFilePage } from './screens/identify/UnmatchedFilePage';
 import { NodeStatusScreen, StatusScreen } from './screens/StatusScreen';
-import { pathForMedia, routes } from '@machafoundation/core';
+import { isBookKind, pathForMedia, routes } from '@machafoundation/core';
 import { playerRouteItemId } from '@machafoundation/core';
 import { useMachaServices } from './app/useMachaServices';
 import { useSession } from './app/useSession';
@@ -92,6 +97,7 @@ export const navItems = [
   { to: routes.movies, label: 'Movies', end: false, needs: 'media_viewer' },
   { to: routes.series, label: 'TV Shows', end: false, needs: 'media_viewer' },
   { to: routes.music, label: 'Music', end: false, needs: 'media_viewer' },
+  { to: routes.books, label: 'Books', end: false, needs: 'media_viewer' },
   { to: routes.search, label: 'Search', end: false, needs: 'media_viewer' },
   { to: routes.ingest, label: 'Import', end: false, needs: 'importer' },
   { to: routes.status, label: 'Status', end: false, needs: 'view_status' },
@@ -243,6 +249,46 @@ function AlbumRoute({ api, onPlay, onPlayAll, onOpenTrack, onAddToPlaylist, onPl
   );
 }
 
+function BookRoute({ api, catalogue, onEdit }: { api: MediaApi; catalogue: CatalogueApi; onEdit?: (id: string) => void }) {
+  const { bookId } = useParams();
+  const navigate = useNavigate();
+  const back = useMediaRouteBack(api);
+  const resolvedBookId = required(bookId, 'bookId');
+  return (
+    <BookScreen
+      api={api}
+      catalogue={catalogue}
+      bookId={resolvedBookId}
+      onBack={back}
+      onRead={(id, mediaId) => navigate(`${routes.reader(id)}?${new URLSearchParams({ file: mediaId })}`)}
+      onEdit={onEdit ? () => onEdit(resolvedBookId) : undefined}
+    />
+  );
+}
+
+function BookCollectionRoute({ api, kind, onOpenBook, onEdit }: {
+  api: MediaApi;
+  kind: 'author' | 'series';
+  onOpenBook: (book: MediaSummary) => void;
+  onEdit?: (id: string) => void;
+}) {
+  const { collectionId } = useParams();
+  const back = useMediaRouteBack(api);
+  const id = required(collectionId, 'collectionId');
+  return <BookCollectionScreen api={api} kind={kind} id={id} onBack={back} onOpenBook={onOpenBook} onEdit={onEdit ? () => onEdit(id) : undefined} />;
+}
+
+/** The file read is `?file=`, one of the book's media ids. */
+function ReaderRoute({ api, catalogue }: { api: MediaApi; catalogue: CatalogueApi }) {
+  const { bookId } = useParams();
+  const [search] = useSearchParams();
+  const navigate = useNavigate();
+  const resolvedBookId = required(bookId, 'bookId');
+  const mediaId = search.get('file');
+  if (!mediaId) return <Navigate to={routes.book(resolvedBookId)} replace />;
+  return <ReaderScreen api={api} catalogue={catalogue} bookId={resolvedBookId} mediaId={mediaId} onBack={() => navigate(routes.book(resolvedBookId))} />;
+}
+
 function MetadataEditorRoute({ api, facts, manage }: { api: CatalogueApi; facts: PlaybackFactsApi; manage?: ManageApi }) {
   const { itemId } = useParams();
   const navigate = useNavigate();
@@ -259,7 +305,9 @@ function MetadataEditorRoute({ api, facts, manage }: { api: CatalogueApi; facts:
           ? routes.movies
           : (item.kind === 'show' || item.kind === 'season' || item.kind === 'episode')
             ? routes.series
-            : routes.music;
+            : isBookKind(item.kind)
+              ? routes.books
+              : routes.music;
         navigate(destination, { replace: true });
       }}
     />
@@ -632,6 +680,7 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
   </div>;
 
   const musicSectionActive = location.pathname === routes.music || location.pathname.startsWith(`${routes.music}/`);
+  const booksSectionActive = location.pathname === routes.books || location.pathname.startsWith(`${routes.books}/`);
   const statusSectionActive = location.pathname === routes.status || location.pathname.startsWith(`${routes.status}/`);
   const manageSectionActive = location.pathname === routes.manage || location.pathname.startsWith(`${routes.manage}/`);
   const importSectionActive = location.pathname === routes.ingest || location.pathname.startsWith(`${routes.ingest}/`);
@@ -648,8 +697,8 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
           {navItems.map((item) => {
             if (item.to === routes.manage && !libraryManagementAvailable && !usersAvailable) return null;
             if (item.needs && !permits(item.needs)) return null;
-            // Importing needs a keyboard and a file browser, which a remote cannot offer.
-            if (item.to === routes.ingest && isTvBuild) return null;
+            // Importing needs a keyboard and a file browser, which a remote cannot offer, and the TV has no reader.
+            if ((item.to === routes.ingest || item.to === routes.books) && isTvBuild) return null;
             return (
               <NavLink
                 key={item.to}
@@ -688,15 +737,13 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
           <button className="secondary-button" type="button" onClick={music.dismissPlaylistNotice} data-tv-focusable="true">Dismiss</button>
         </p>
       )}
-      {!playback.playerRouteActive && (musicSectionActive || statusSectionActive || manageSectionActive || importSectionActive) && (
+      {!playback.playerRouteActive && (musicSectionActive || booksSectionActive || statusSectionActive || manageSectionActive || importSectionActive) && (
         <div className="section-nav-slot">
-          {musicSectionActive
-            ? <MusicNav />
-            : statusSectionActive
-              ? <StatusNav />
-              : importSectionActive
-                ? <ImportNav />
-                : <ManageNav managementAvailable={libraryManagementAvailable} usersAvailable={usersAvailable} />}
+          {musicSectionActive ? <MusicNav />
+            : booksSectionActive ? <BooksNav />
+              : statusSectionActive ? <StatusNav />
+                : importSectionActive ? <ImportNav />
+                  : <ManageNav managementAvailable={libraryManagementAvailable} usersAvailable={usersAvailable} />}
         </div>
       )}
       <main>
@@ -716,10 +763,18 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
           <Route path="/music/artists/:artistId" element={mediaPane(<ArtistRoute api={api} onOpenAlbum={open} onAddToPlaylist={music.addToPlaylist} onPlayNext={music.playNext} onPlayLater={music.playLater} onShuffle={music.shuffle} onEdit={metadataEditingAvailable ? openMetadataEditor : undefined} />)} />
           <Route path="/music/albums/:albumId" element={mediaPane(<AlbumRoute api={api} onPlay={playback.openAlbumTrack} onPlayAll={music.playAlbumAll} onOpenTrack={open} onAddToPlaylist={music.addToPlaylist} onPlayNext={music.playNext} onPlayLater={music.playLater} onShuffle={music.shuffle} onEdit={metadataEditingAvailable ? openMetadataEditor : undefined} />)} />
           <Route path="/music/tracks/:trackId" element={mediaPane(<DetailRoute {...detailRouteProps} parameter="trackId" />)} />
+          <Route path={routes.books} element={mediaPane(<Navigate to={routes.bookTitles} replace />)} />
+          <Route path={routes.bookTitles} element={mediaPane(<BooksScreen api={api} section="titles" onOpen={open} />)} />
+          <Route path={routes.bookAuthors} element={mediaPane(<BooksScreen api={api} section="authors" onOpen={open} />)} />
+          <Route path={routes.bookSeriesList} element={mediaPane(<BooksScreen api={api} section="series" onOpen={open} />)} />
+          <Route path={`${routes.bookTitles}/:bookId`} element={mediaPane(<BookRoute api={api} catalogue={catalogueApi} onEdit={metadataEditingAvailable ? openMetadataEditor : undefined} />)} />
+          <Route path={`${routes.bookAuthors}/:collectionId`} element={mediaPane(<BookCollectionRoute api={api} kind="author" onOpenBook={open} onEdit={metadataEditingAvailable ? openMetadataEditor : undefined} />)} />
+          <Route path={`${routes.bookSeriesList}/:collectionId`} element={mediaPane(<BookCollectionRoute api={api} kind="series" onOpenBook={open} onEdit={metadataEditingAvailable ? openMetadataEditor : undefined} />)} />
+          <Route path="/read/:bookId" element={mediaPane(<ReaderRoute api={api} catalogue={catalogueApi} />)} />
           <Route path="/play/:itemId" element={<div className="player-route-placeholder" aria-hidden="true" />} />
           <Route path="/items/:itemId" element={mediaPane(<DetailRoute {...detailRouteProps} parameter="itemId" />)} />
           <Route path="/items/:itemId/edit" element={metadataEditingAvailable ? <MetadataEditorRoute api={catalogueApi} facts={playbackFactsApi} manage={libraryManagementAvailable ? manageApi : undefined} /> : <Navigate to={landing} replace />} />
-          <Route path={routes.search} element={mediaPane(<SearchScreen api={api} onOpen={open} />)} />
+          <Route path={routes.search} element={mediaPane(<SearchScreen api={api} onOpen={open} books={!isTvBuild} />)} />
           <Route path={routes.ingest} element={<Navigate to={routes.ingestTorrents} replace />} />
           <Route path={routes.ingestTorrents} element={permits('importer') ? <IngestScreen api={acquisitionApi} section="torrents" /> : <Navigate to={landing} replace />} />
           <Route path={routes.ingestFiles} element={permits('importer') ? <IngestScreen api={acquisitionApi} section="files" statusApi={clusterStatusApi} /> : <Navigate to={landing} replace />} />

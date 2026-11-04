@@ -19,10 +19,10 @@ import { viewerErrorText } from '../../text/viewerText';
 import { NumberField, numberText, wholeNumber } from './fields';
 import { pacedArtwork, pictureRelease } from './providerLookup';
 
-export const PROVIDER_LABEL: Record<string, string> = { tmdb: 'TMDB', musicbrainz: 'MusicBrainz' };
+export const PROVIDER_LABEL: Record<string, string> = { tmdb: 'TMDB', musicbrainz: 'MusicBrainz', openlibrary: 'Open Library' };
 
-/** The picture a match is chosen with: poster, episode still or album cover. The cover goes on the album, the others on the file's own item. */
-const ARTWORK_ROLE: Record<ProviderSearchResult['kind'], ProviderArtworkRole> = { movie: 'poster', show: 'still', album: 'cover' };
+/** The picture a match is chosen with: poster, episode still, album or book cover. An album's cover goes on the album, the others on the file's own item. */
+const ARTWORK_ROLE: Record<ProviderSearchResult['kind'], ProviderArtworkRole> = { movie: 'poster', show: 'still', album: 'cover', book: 'cover' };
 
 /** The item a chosen picture goes on, from what the match wrote. */
 export function artworkItemId(kind: ProviderSearchResult['kind'], written: ManualMetadataResult): string | undefined {
@@ -66,7 +66,7 @@ export function matchRefusalText(cause: unknown, record: Pick<ProviderSearchResu
 }
 
 /**
- * One TMDB or MusicBrainz record a file could be. "Use this" asks for the
+ * One TMDB, MusicBrainz or Open Library record a file could be. "Use this" asks for the
  * numbers that pick the file out of it, offers the record's pictures, and
  * matches; the server builds the hierarchy and binds the file, as a scan match does.
  */
@@ -244,7 +244,7 @@ export function ProviderRecord({ releases, file, manage, numbers: initial, disab
       <div>
         <strong>{[result.title, result.year].filter(Boolean).join(' · ')}</strong>
         <span className="identify-record-meta">{[
-          result.artist,
+          result.artist ?? result.author,
           PROVIDER_LABEL[result.provider] ?? result.provider,
           releases.length > 1 ? `${releases.length} releases` : undefined,
           releases.some((release) => release.catalogue_item_id) ? 'already in the catalogue' : undefined,

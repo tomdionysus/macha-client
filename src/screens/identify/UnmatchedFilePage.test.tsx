@@ -612,3 +612,58 @@ describe('where a manual entry goes', () => {
     expect(sent(manage)).toEqual({ kind: 'episode', series_id: 'tmdb:tv:42', season_number: 1, episode_number: 2, title: 'Pilot', synopsis: undefined });
   });
 });
+
+describe('a book', () => {
+  const AUTHOR = item('author:an-author', 'author', 'An Author');
+  const novel = probe({ kind: 'book', title: 'A Novel', year: null, authors: ['An Author'], author: 'An Author', series_name: 'A Series', series_index: 3 });
+
+  it('says what the file names, and creates it by its authors and series in one press', async () => {
+    const { manage } = show([novel]);
+    await settle();
+    fromFile();
+    fireEvent.click(within(rowOf('An Author · A Series, book 3 · A Novel')).getByRole('button', { name: 'Create' }));
+    await settle();
+    expect(sent(manage)).toEqual({ kind: 'book', title: 'A Novel', authors: ['An Author'], series: 'A Series', series_index: 3 });
+  });
+
+  it('searches Open Library by the title, narrowed by the author', async () => {
+    const { manage } = show([novel]);
+    await settle();
+    const panel = within(screen.getByRole('tabpanel'));
+    expect((panel.getByLabelText('Author') as HTMLInputElement).value).toBe('An Author');
+    fireEvent.click(panel.getByRole('button', { name: 'Search' }));
+    await settle();
+    expect(manage.providerSearch).toHaveBeenLastCalledWith('A Novel', 'book', { year: undefined, limit: 20, author: 'An Author' });
+  });
+
+  it('is entered by hand with several authors and a novella\'s place between two books', async () => {
+    const { manage } = show([]);
+    await settle();
+    fireEvent.click(screen.getByRole('tab', { name: 'Enter manually' }));
+    fireEvent.change(screen.getByLabelText('Type'), { target: { value: 'book' } });
+    save();
+    await settle();
+    expect(alert()).toBe('Name the book.');
+    fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'A Novella' } });
+    fireEvent.change(screen.getByLabelText('Authors separated by semicolons'), { target: { value: 'One Author; Another Author' } });
+    fireEvent.change(screen.getByLabelText('Series'), { target: { value: 'A Series' } });
+    fireEvent.change(screen.getByLabelText('Number in series'), { target: { value: '8.5' } });
+    save();
+    await settle();
+    expect(sent(manage)).toMatchObject({ kind: 'book', title: 'A Novella', authors: ['One Author', 'Another Author'], series: 'A Series', series_index: 8.5 });
+  });
+
+  it('goes under an author found in the catalogue, by the author\'s id', async () => {
+    const { manage, catalogue } = show([novel], { found: [AUTHOR] });
+    await settle();
+    fireEvent.click(screen.getByRole('tab', { name: 'Search the catalogue' }));
+    await settle();
+    for (const kind of ['series', 'author', 'book']) expect(catalogue.search).toHaveBeenCalledWith('a film', 8, undefined, { kinds: [kind] });
+    fireEvent.click(screen.getByRole('button', { name: 'Add a book by this author' }));
+    expect((screen.getByLabelText('An author in the catalogue') as HTMLInputElement).checked).toBe(true);
+    save();
+    await settle();
+    expect(sent(manage)).toMatchObject({ kind: 'book', title: 'A Novel', author_id: 'author:an-author', series: 'A Series', series_index: 3 });
+    expect(sent(manage)).not.toHaveProperty('authors');
+  });
+});

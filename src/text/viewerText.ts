@@ -69,6 +69,37 @@ export function albumLabel(context: MusicHierarchyContext): string {
   return context.album.year ? `${context.album.title} (${context.album.year})` : context.album.title;
 }
 
+/** A book's authors by name, in credited order: "A and B", "A, B and C". Unnamed authors are left out. */
+export function bookAuthorsText(item: Pick<MediaSummary, 'bookContext'>): string | undefined {
+  const names = (item.bookContext?.authors ?? []).map((author) => author.title).filter((name): name is string => Boolean(name));
+  if (names.length === 0) return undefined;
+  return names.length === 1 ? names[0] : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+}
+
+/** A book's place in a series: "Book 3", "Book 8.5". */
+export function bookNumberLabel(index: number | null | undefined): string | undefined {
+  return index == null ? undefined : `Book ${index}`;
+}
+
+/** A series named with a book's place in it: "A Series, book 3", or the name alone. */
+export function seriesPlaceText(series: string, index: number | null | undefined): string {
+  return index == null ? series : `${series}, book ${index}`;
+}
+
+const BOOK_FORMATS: Record<string, string> = {
+  'application/epub+zip': 'EPUB',
+  'application/pdf': 'PDF',
+  'application/x-mobipocket-ebook': 'MOBI',
+  'application/vnd.amazon.ebook': 'AZW3',
+  'application/x-fictionbook+xml': 'FB2',
+  'application/vnd.comicbook+zip': 'CBZ',
+};
+
+/** A book file's format, from the type the server gives it; undefined for a type it does not name. */
+export function bookFormatName(contentType: string | undefined): string | undefined {
+  return contentType ? BOOK_FORMATS[contentType.split(';')[0].trim().toLowerCase()] : undefined;
+}
+
 /**
  * An ordinary card's second line, telling this item from others of its name: a movie or show's
  * year, an episode's code, a season's series, an album's artist, a track's number.
@@ -84,6 +115,9 @@ export function cardSubtitle(item: MediaSummary): string | undefined {
     case 'album': return item.musicContext?.artist?.title ?? (item.year !== undefined ? String(item.year) : undefined);
     case 'track': return trackNumberLabel(item);
     case 'artist': return undefined;
+    case 'book': return bookAuthorsText(item);
+    case 'author':
+    case 'series': return undefined;
     default: return item.year !== undefined ? String(item.year) : undefined;
   }
 }
@@ -104,6 +138,7 @@ const CATEGORY_LABELS: Record<SearchCategoryKey, string> = {
   movies: 'Movies',
   shows: 'TV Shows',
   music: 'Music',
+  books: 'Books',
 };
 
 export function searchCategoryLabel(key: SearchCategoryKey): string {
@@ -541,8 +576,11 @@ export function qualityChoiceText(versions: Pick<PlaybackVersions, 'files' | 'au
 
 const AVAILABILITY_NOUN: Record<string, string> = {
   movie: 'film', show: 'series', season: 'season', episode: 'episode', artist: 'artist\'s music', album: 'album', track: 'track', file: 'file',
+  book: 'book', series: 'series',
 };
-const MEMBER_NOUN: Record<string, string> = { show: 'episodes', season: 'episodes', artist: 'tracks', album: 'tracks' };
+const MEMBER_NOUN: Record<string, string> = { show: 'episodes', season: 'episodes', artist: 'tracks', album: 'tracks', author: 'books', series: 'books' };
+/** Books are read, not played. */
+const READ_KINDS: ReadonlySet<string> = new Set(['book', 'author', 'series']);
 
 /**
  * An availability marker's tooltip. Unavailable means no reachable node holds the pieces, which is
@@ -555,13 +593,15 @@ export function availabilityText(
 ): string {
   const noun = (kind && AVAILABILITY_NOUN[kind]) || 'title';
   const memberNoun = kind ? MEMBER_NOUN[kind] : undefined;
-  if (mark === 'unknown') return `Macha hasn't yet checked which servers hold this ${noun}. It plays as normal.`;
+  const read = kind !== undefined && READ_KINDS.has(kind);
+  if (mark === 'unknown') return `Macha hasn't yet checked which servers hold this ${noun}. It ${read ? 'opens' : 'plays'} as normal.`;
   if (mark === 'unavailable') {
+    if (kind === 'author') return 'Every book by this author is held only by servers that can\'t be reached right now, so none of them can be opened.';
     return memberNoun
-      ? `Everything in this ${noun} is held only by servers that can't be reached right now, so none of it can be played.`
-      : `This ${noun} is held only by servers that can't be reached right now, so it can't be played.`;
+      ? `Everything in this ${noun} is held only by servers that can't be reached right now, so none of it can be ${read ? 'opened' : 'played'}.`
+      : `This ${noun} is held only by servers that can't be reached right now, so it can't be ${read ? 'opened' : 'played'}.`;
   }
-  if (!memberNoun) return `Part of this ${noun} is held only by servers that can't be reached right now, so it may stop before the end.`;
+  if (!memberNoun) return `Part of this ${noun} is held only by servers that can't be reached right now, so it ${read ? 'may not open' : 'may stop before the end'}.`;
   const counts = members && members.total > 0
     ? [
       members.complete > 0 ? `${members.complete} of ${members.total} ${memberNoun} in full` : undefined,
@@ -570,5 +610,5 @@ export function availabilityText(
       members.unknown > 0 ? `${members.unknown} not yet checked` : undefined,
     ].filter(Boolean).join(', ')
     : '';
-  return `Some of this ${noun} is held only by servers that can't be reached right now${counts ? `: ${counts}` : ''}.`;
+  return `${kind === 'author' ? 'Some books by this author are' : `Some of this ${noun} is`} held only by servers that can't be reached right now${counts ? `: ${counts}` : ''}.`;
 }

@@ -1,9 +1,9 @@
 import { Fragment } from 'react';
-import { availableToPlay } from '@machafoundation/core';
+import { availableToPlay, isPlayableKind } from '@machafoundation/core';
 import { Link } from 'react-router-dom';
 import type { MediaApi } from '@machafoundation/core';
 import { routes } from '@machafoundation/core';
-import { albumLabel, cardSubtitle, episodeLabel, seasonLabel, trackNumberLabel } from '../text/viewerText';
+import { albumLabel, cardSubtitle, episodeLabel, seasonLabel, seriesPlaceText, trackNumberLabel } from '../text/viewerText';
 import type { MediaSummary } from '@machafoundation/core';
 import { AvailabilityMarker, openControlProps } from './Availability';
 import { CardCloseButton } from './CardCloseButton';
@@ -26,6 +26,8 @@ interface Props {
   progress?: number;
   /** `in-context` names an episode's series and season, or a track's artist and album, for a list that is neither's. */
   variant?: 'default' | 'continue-watching' | 'in-context';
+  /** The second line, in place of the kind's own: a book's place on a series page. */
+  subtitle?: string;
   elementRef?: (element: HTMLButtonElement | null) => void;
 }
 
@@ -67,7 +69,8 @@ type ContextLink = { to: string; label: string };
 
 /**
  * An item's parents as links, one line per entry: an episode's series, then
- * its season mark; a track's artist and album together.
+ * its season mark; a track's artist and album together; a book's authors,
+ * then its series with its place in each.
  */
 function contextLines(item: MediaSummary): ContextLink[][] | undefined {
   if (item.kind === 'episode' && item.playbackContext) {
@@ -84,7 +87,21 @@ function contextLines(item: MediaSummary): ContextLink[][] | undefined {
       { to: routes.album(album.id), label: albumLabel(item.musicContext) },
     ]];
   }
+  if (item.kind === 'book' && item.bookContext) {
+    const authors = item.bookContext.authors.filter((author) => author.title).map((author) => ({ to: routes.bookAuthor(author.id), label: author.title as string }));
+    const series = item.bookContext.series.filter((entry) => entry.title).map((entry) => ({
+      to: routes.bookSeries(entry.id),
+      label: seriesPlaceText(entry.title as string, entry.index),
+    }));
+    const lines = [authors, series].filter((line) => line.length > 0);
+    return lines.length > 0 ? lines : undefined;
+  }
   return undefined;
+}
+
+/** What opening a card does, for its label: a book is read, not played. */
+function openVerb(item: MediaSummary): string {
+  return isPlayableKind(item.kind) ? 'Play' : 'Open';
 }
 
 function ContextLinks({ lines }: { lines: ReadonlyArray<ReadonlyArray<ContextLink>> }) {
@@ -139,7 +156,7 @@ function InContextCard({ api, item, onOpen, elementRef, lines }: Props & { lines
         ref={elementRef}
         className="continue-card-open"
         {...openControlProps(item, () => onOpen(item))}
-        aria-label={`Play ${item.title}`}
+        aria-label={`${openVerb(item)} ${item.title}`}
       >
         <Poster api={api} item={item} />
         <span className="card-title">{item.title}</span>
@@ -204,7 +221,7 @@ function ActionableMediaCard({ api, item, onOpen, actions = [], progress, elemen
   );
 }
 
-export function MediaCard({ api, item, onOpen, onRemoveFromContinueWatching, actions, progress, variant = 'default', elementRef }: Props) {
+export function MediaCard({ api, item, onOpen, onRemoveFromContinueWatching, actions, progress, variant = 'default', subtitle, elementRef }: Props) {
   if (variant === 'continue-watching') {
     if (item.kind === 'episode') {
       return (
@@ -253,7 +270,7 @@ export function MediaCard({ api, item, onOpen, onRemoveFromContinueWatching, act
     <button ref={elementRef} className={cardClass(item)} {...openControlProps(item, () => onOpen(item))}>
       <Poster api={api} item={item} progress={progress} />
       <span className="card-title">{item.title}</span>
-      {cardSubtitle(item) && <span className="card-subtitle">{cardSubtitle(item)}</span>}
+      {(subtitle ?? cardSubtitle(item)) && <span className="card-subtitle">{subtitle ?? cardSubtitle(item)}</span>}
     </button>
   );
 }

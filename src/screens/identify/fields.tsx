@@ -9,6 +9,13 @@ export function wholeNumber(value: string): number | undefined {
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
+/** Undefined for an empty field or anything that is not a number; keeps a fraction, as a novella's place in a series has. */
+export function decimalNumber(value: string): number | undefined {
+  if (!value.trim()) return undefined;
+  const parsed = Number(value.trim());
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
 export function numberText(value: number | null | undefined): string {
   return value == null ? '' : String(value);
 }
@@ -27,15 +34,17 @@ export function TextField({ label, value, onChange, disabled, required }: {
   );
 }
 
-export function NumberField({ label, value, onChange, disabled }: {
+export function NumberField({ label, value, onChange, disabled, decimal }: {
   label: ReactNode;
   value: string;
   onChange: (value: string) => void;
   disabled?: boolean;
+  /** Offers a decimal point on a touch keyboard. */
+  decimal?: boolean;
 }) {
   return (
     <label><span>{label}</span>
-      <input inputMode="numeric" value={value} onChange={(event) => onChange(event.target.value)} disabled={disabled} data-tv-focusable="true" />
+      <input inputMode={decimal ? 'decimal' : 'numeric'} value={value} onChange={(event) => onChange(event.target.value)} disabled={disabled} data-tv-focusable="true" />
     </label>
   );
 }

@@ -23,18 +23,21 @@ import { searchCategoryLabel, sortChoiceLabel } from '../text/viewerText';
 interface Props {
   api: MediaApi;
   onOpen: (item: MediaSummary) => void;
+  /** Whether this client can open a book. Core leaves books out of a search unless asked. */
+  books?: boolean;
 }
 
-export function SearchScreen({ api, onOpen }: Props) {
+export function SearchScreen({ api, onOpen, books = false }: Props) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<MediaSummary[]>([]);
   const [error, setError] = useState<string>();
   const [refreshToken, setRefreshToken] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const [sort, setSort] = useState<MediaSortKey>(DEFAULT_SEARCH_SORT);
-  const [categories, setCategories] = useState<readonly SearchCategoryKey[]>(DEFAULT_SEARCH_CATEGORIES);
+  const offered = useMemo(() => SEARCH_CATEGORIES.filter((category) => books || category.key !== 'books'), [books]);
+  const [categories, setCategories] = useState<readonly SearchCategoryKey[]>(() => books ? offered.map((category) => category.key) : DEFAULT_SEARCH_CATEGORIES);
   // Any combination, including none; kept in core's order so the same set is the same array.
-  const toggleCategory = (key: SearchCategoryKey) => setCategories((current) => SEARCH_CATEGORIES
+  const toggleCategory = (key: SearchCategoryKey) => setCategories((current) => offered
     .map((category) => category.key)
     .filter((candidate) => (candidate === key) !== current.includes(candidate)));
   const ordered = useMemo(() => orderMedia(results, sort), [results, sort]);
@@ -88,7 +91,7 @@ export function SearchScreen({ api, onOpen }: Props) {
           </select>
         </div>
         <div className="search-type-filter" role="group" aria-label="Title types">
-          {SEARCH_CATEGORIES.map((category) => (
+          {offered.map((category) => (
             <button
               key={category.key}
               type="button"

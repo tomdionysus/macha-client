@@ -27,6 +27,10 @@ const KIND_ARTWORK_ROLES: Record<CatalogueKind, readonly string[]> = {
   artist: [],
   album: ['cover'],
   track: ['cover'],
+  book: ['cover'],
+  // Without a picture of their own, an author or series shows one of its books'.
+  author: [],
+  series: [],
 };
 
 const INTERNAL_EXTERNAL_ID_PREFIX = 'macha_';
@@ -44,6 +48,10 @@ function providerLabel(key: string): string {
     case 'musicbrainz': return 'MusicBrainz';
     case 'musicbrainz_release': return 'MusicBrainz release';
     case 'musicbrainz_release_group': return 'MusicBrainz release group';
+    case 'isbn13': return 'ISBN';
+    case 'openlibrary_edition': return 'Open Library edition';
+    case 'openlibrary_work': return 'Open Library work';
+    case 'openlibrary_author': return 'Open Library author';
     default: return key;
   }
 }
@@ -51,6 +59,7 @@ function providerLabel(key: string): string {
 function entityLabel(kind: CatalogueKind): string {
   switch (kind) {
     case 'show': return 'Series';
+    case 'series': return 'Book series';
     default: return kind.charAt(0).toUpperCase() + kind.slice(1);
   }
 }
@@ -74,7 +83,7 @@ function reorderArtwork(items: CatalogueArtwork[], selected: Record<string, stri
 }
 
 /** The fields this editor changes; everything else on an item it leaves alone. */
-const EDITED_FIELDS = ['title', 'sort_title', 'year', 'season_number', 'episode_number', 'disc_number', 'track_number', 'synopsis', 'aliases'] as const;
+const EDITED_FIELDS = ['title', 'sort_title', 'year', 'season_number', 'episode_number', 'disc_number', 'track_number', 'synopsis', 'aliases', 'language', 'publisher', 'published'] as const;
 
 /**
  * Only the changed fields, for a partial save that cannot overwrite what something else wrote
@@ -268,6 +277,13 @@ function MetadataForm({ api, facts, manage, initial, onBack, onSaved, onCleared,
             <>
               <NumberField label="Disc number" value={numberText(draft.disc_number)} onChange={(value) => update('disc_number', wholeNumber(value) ?? null)} />
               <NumberField label="Track number" value={numberText(draft.track_number)} onChange={(value) => update('track_number', wholeNumber(value) ?? null)} />
+            </>
+          )}
+          {draft.kind === 'book' && (
+            <>
+              <TextField label="Publisher" value={draft.publisher ?? ''} onChange={(value) => update('publisher', value || null)} />
+              <TextField label={<>Published <small>as a date, e.g. 1987-11-01</small></>} value={draft.published ?? ''} onChange={(value) => update('published', value || null)} />
+              <TextField label={<>Language <small>a code, e.g. en</small></>} value={draft.language ?? ''} onChange={(value) => update('language', value || null)} />
             </>
           )}
           <TextAreaField className="metadata-editor-wide-field" label="Synopsis" rows={8} value={draft.synopsis} onChange={(value) => update('synopsis', value)} />

@@ -19,7 +19,7 @@ function visibleSections(roles: UserRole[] | undefined): string[] {
 
 describe('navigation role gating', () => {
   it('shows an ordinary viewer the catalogue and nothing administrative', () => {
-    expect(visibleSections(['media_viewer'])).toEqual(['Home', 'Movies', 'TV Shows', 'Music', 'Search']);
+    expect(visibleSections(['media_viewer'])).toEqual(['Home', 'Movies', 'TV Shows', 'Music', 'Books', 'Search']);
   });
 
   it('hides every catalogue section from an account that may not read it', () => {
@@ -34,7 +34,7 @@ describe('navigation role gating', () => {
   it('gives Status to the role that exists for it, and nothing else', () => {
     expect(visibleSections(['view_status'])).toEqual(['Status']);
     expect(visibleSections(['media_viewer', 'view_status']))
-      .toEqual(['Home', 'Movies', 'TV Shows', 'Music', 'Search', 'Status']);
+      .toEqual(['Home', 'Movies', 'TV Shows', 'Music', 'Books', 'Search', 'Status']);
   });
 
   it('shows Import only to an importer', () => {
@@ -49,7 +49,7 @@ describe('navigation role gating', () => {
   it('hides nothing while the roles are unknown', () => {
     // Unknown is not "none": emptying the navigation on silence is worse than a section that later 401s.
     expect(visibleSections(undefined)).toEqual(
-      ['Home', 'Movies', 'TV Shows', 'Music', 'Search', 'Import', 'Status', 'Manage'],
+      ['Home', 'Movies', 'TV Shows', 'Music', 'Books', 'Search', 'Import', 'Status', 'Manage'],
     );
   });
 });

@@ -11,20 +11,21 @@ import {
 } from '@machafoundation/core';
 import { viewerErrorText } from '../../text/viewerText';
 import { applyCandidatePicture, pictureSource, type CandidatePicture } from './providerLookup';
-import { NumberField, TextAreaField, TextField, wholeNumber } from './fields';
+import { decimalNumber, NumberField, numberText, TextAreaField, TextField, wholeNumber } from './fields';
 import { ParentPicker } from './ParentPicker';
 import { likelyKind } from './ProviderMatch';
 
 type ManualKind = ManualMetadata['kind'];
 
 /** The roles the server's own cataloguer uses for each kind's picture. */
-const ARTWORK_ROLE: Record<ManualKind, string> = { movie: 'poster', episode: 'still', track: 'cover' };
+const ARTWORK_ROLE: Record<ManualKind, string> = { movie: 'poster', episode: 'still', track: 'cover', book: 'cover' };
 
 /**
- * Where a new episode or track goes: under a catalogue item, sent by id, or under parents named
- * here, which the server finds or creates by name.
+ * Where a new episode, track or book goes: under a catalogue item, sent by id, or under parents
+ * named here, which the server finds or creates by name. A book has no parent, but names an
+ * author and a series, either of which can be one the catalogue holds.
  */
-export type Placement = 'album' | 'artist' | 'series' | 'new';
+export type Placement = 'album' | 'artist' | 'series' | 'author' | 'bookSeries' | 'new';
 
 const TRACK_PLACEMENTS: ReadonlyArray<readonly [Placement, string]> = [
   ['album', 'An album in the catalogue'],
@@ -35,9 +36,19 @@ const EPISODE_PLACEMENTS: ReadonlyArray<readonly [Placement, string]> = [
   ['series', 'A series in the catalogue'],
   ['new', 'A new series'],
 ];
+const BOOK_PLACEMENTS: ReadonlyArray<readonly [Placement, string]> = [
+  ['new', 'Authors and series by name'],
+  ['author', 'An author in the catalogue'],
+  ['bookSeries', 'A series in the catalogue'],
+];
+
+/** The names typed for a book's authors, in credited order. */
+export function authorNames(text: string): string[] {
+  return text.split(';').map((name) => name.trim()).filter(Boolean);
+}
 
 /** The placement a parent chosen elsewhere (a catalogue search) puts the form in. */
-const PLACEMENT_OF: Partial<Record<CatalogueKind, Placement>> = { album: 'album', artist: 'artist', show: 'series', season: 'series' };
+const PLACEMENT_OF: Partial<Record<CatalogueKind, Placement>> = { album: 'album', artist: 'artist', show: 'series', season: 'series', author: 'author', series: 'bookSeries' };
 
 /**
  * Manual entry, applied through core. `probe` seeds the fields, `parent` is one already chosen from
@@ -53,12 +64,17 @@ export function ManualEntry({ detail, probe, picture, parent, manage, catalogue,
   onResolved: () => void;
 }) {
   const [kind, setKind] = useState<ManualKind>(() => (
-    parent ? (parent.kind === 'album' || parent.kind === 'artist' ? 'track' : 'episode') : likelyKind(detail, probe)
+    parent ? (parent.kind === 'album' || parent.kind === 'artist' ? 'track' : parent.kind === 'author' || parent.kind === 'series' ? 'book' : 'episode') : likelyKind(detail, probe)
   ));
   const [placement, setPlacement] = useState<Placement>(() => (parent && PLACEMENT_OF[parent.kind]) || 'new');
   const [seriesItem, setSeriesItem] = useState(parent?.kind === 'show' || parent?.kind === 'season' ? parent : undefined);
   const [artistItem, setArtistItem] = useState(parent?.kind === 'artist' ? parent : undefined);
   const [albumItem, setAlbumItem] = useState(parent?.kind === 'album' ? parent : undefined);
+  const [authorItem, setAuthorItem] = useState(parent?.kind === 'author' ? parent : undefined);
+  const [bookSeriesItem, setBookSeriesItem] = useState(parent?.kind === 'series' ? parent : undefined);
+  const [authors, setAuthors] = useState(() => (probe?.authors?.length ? probe.authors : probe?.author ? [probe.author] : []).join('; '));
+  const [bookSeries, setBookSeries] = useState(probe?.series_name ?? '');
+  const [seriesIndex, setSeriesIndex] = useState(numberText(probe?.series_index));
   const [title, setTitle] = useState(probe?.title ?? '');
   const [year, setYear] = useState(probe?.year?.toString() ?? '');
   const [synopsis, setSynopsis] = useState('');
@@ -93,6 +109,23 @@ export function ManualEntry({ detail, probe, picture, parent, manage, catalogue,
         episode_number: episode,
         title: title.trim() || undefined,
         synopsis: synopsis.trim() || undefined,
+      };
+    }
+    if (kind === 'book') {
+      if (placement === 'author' && !authorItem) return 'Choose the author of this book.';
+      if (placement === 'bookSeries' && !bookSeriesItem) return 'Choose the series this book belongs to.';
+      if (!title.trim()) return 'Name the book.';
+      const names = authorNames(authors);
+      const index = decimalNumber(seriesIndex);
+      const place = index !== undefined ? { series_index: index } : {};
+      return {
+        kind,
+        title: title.trim(),
+        year: wholeNumber(year),
+        synopsis: synopsis.trim() || undefined,
+        ...(placement === 'author' && authorItem ? { author_id: authorItem.id } : names.length > 0 ? { authors: names } : {}),
+        ...(placement === 'bookSeries' && bookSeriesItem ? { series_id: bookSeriesItem.id, ...place }
+          : bookSeries.trim() ? { series: bookSeries.trim(), ...place } : {}),
       };
     }
     if (placement === 'album' && !albumItem) return 'Choose the album this track belongs to.';
@@ -145,7 +178,7 @@ export function ManualEntry({ detail, probe, picture, parent, manage, catalogue,
   // The candidate's picture fits only its own kind, and never goes on an album the catalogue already holds.
   const offered = picture && picture.kind === kind && !(kind === 'track' && placement === 'album') ? picture : undefined;
 
-  const placements = kind === 'track' ? TRACK_PLACEMENTS : kind === 'episode' ? EPISODE_PLACEMENTS : [];
+  const placements = kind === 'track' ? TRACK_PLACEMENTS : kind === 'episode' ? EPISODE_PLACEMENTS : kind === 'book' ? BOOK_PLACEMENTS : [];
   const changeKind = (next: ManualKind) => { setKind(next); setPlacement('new'); setError(undefined); };
 
   return (
@@ -155,11 +188,12 @@ export function ManualEntry({ detail, probe, picture, parent, manage, catalogue,
           <option value="movie">Movie</option>
           <option value="episode">TV episode</option>
           <option value="track">Music track</option>
+          <option value="book">Book</option>
         </select>
       </label>
       {placements.length > 0 && (
         <fieldset className="identify-placement" disabled={busy}>
-          <legend>{kind === 'track' ? 'Where this track goes' : 'Where this episode goes'}</legend>
+          <legend>{kind === 'track' ? 'Where this track goes' : kind === 'book' ? 'Who wrote it, and its series' : 'Where this episode goes'}</legend>
           {placements.map(([value, label]) => (
             <label key={value}>
               <input type="radio" name="placement" value={value} checked={placement === value} onChange={() => { setPlacement(value); setError(undefined); }} data-tv-focusable="true" />
@@ -190,6 +224,19 @@ export function ManualEntry({ detail, probe, picture, parent, manage, catalogue,
           {placement === 'artist' && <ParentPicker label="Artist" find={findIn(['artist'])} chosen={artistItem} onChoose={setArtistItem} disabled={busy} />}
           {placement === 'new' && <TextField label="Artist" value={artist} onChange={setArtist} disabled={busy} />}
           {placement !== 'album' && <TextField label={placement === 'artist' ? 'New album' : 'Album'} value={album} onChange={setAlbum} disabled={busy} />}
+        </>
+      )}
+      {kind === 'book' && (
+        <>
+          {placement === 'author'
+            ? <ParentPicker label="Author" find={findIn(['author'])} chosen={authorItem} onChoose={setAuthorItem} disabled={busy} />
+            : <TextField label={<>Authors <small>separated by semicolons</small></>} value={authors} onChange={setAuthors} disabled={busy} />}
+          <div className="manage-field-row">
+            {placement === 'bookSeries'
+              ? <ParentPicker label="Series" find={findIn(['series'])} chosen={bookSeriesItem} onChoose={setBookSeriesItem} disabled={busy} />
+              : <TextField label="Series" value={bookSeries} onChange={setBookSeries} disabled={busy} />}
+            <NumberField label="Number in series" value={seriesIndex} onChange={setSeriesIndex} disabled={busy} decimal />
+          </div>
         </>
       )}
       <TextField label={kind === 'episode' ? 'Episode title' : kind === 'track' ? 'Track title' : 'Title'} value={title} onChange={setTitle} disabled={busy} />

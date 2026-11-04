@@ -19,6 +19,7 @@ export interface Lookup {
   query: string;
   searchKind: ProviderSearchKind;
   year?: number;
+  /** An album's artist or a book's author. */
   artist?: string;
   /** The numbers that pick the file out of the record, where the candidate states them. */
   season_number?: number;
@@ -27,7 +28,10 @@ export interface Lookup {
   track_number?: number;
 }
 
-/** A movie by its title, an episode by its series, a track by its album; undefined when the candidate names none (a track with no album). */
+/**
+ * A movie by its title, an episode by its series, a track by its album, a book by its title and
+ * first author; undefined when the candidate names none (a track with no album).
+ */
 export function recordLookup(candidate: MediaProbeCandidate): Lookup | undefined {
   if (candidate.kind === 'movie') {
     if (!candidate.title) return undefined;
@@ -39,6 +43,11 @@ export function recordLookup(candidate: MediaProbeCandidate): Lookup | undefined
       key: `show|${candidate.series}`, query: candidate.series, searchKind: 'show',
       season_number: candidate.season_number ?? undefined, episode_number: candidate.episode_number ?? undefined,
     };
+  }
+  if (candidate.kind === 'book') {
+    if (!candidate.title) return undefined;
+    const author = candidate.author || candidate.authors?.[0] || undefined;
+    return { key: `book|${author ?? ''}|${candidate.title}`, query: candidate.title, searchKind: 'book', artist: author };
   }
   if (!candidate.album) return undefined;
   return {
@@ -83,11 +92,18 @@ function searchOnce(manage: ManageApi, lookup: Lookup): Promise<ProviderSearchRe
   return found;
 }
 
-/** The results that are the thing the lookup named: its title and, for an album, its artist. */
+/** Who a record credits: an album's artist, a book's author. */
+export function recordCredit(result: Pick<ProviderSearchResult, 'artist' | 'author'>): string | undefined {
+  return result.artist ?? result.author;
+}
+
+/** The results that are the thing the lookup named: its title and, for an album or a book, its artist or author. */
 export async function agreeingRecords(manage: ManageApi, lookup: Lookup): Promise<ProviderSearchResult[]> {
   const results = await searchOnce(manage, lookup);
-  return results.filter((result) => sameTitle(lookup.query, result.title)
-    && (!lookup.artist || !result.artist || sameTitle(lookup.artist, result.artist)));
+  return results.filter((result) => {
+    const credit = recordCredit(result);
+    return sameTitle(lookup.query, result.title) && (!lookup.artist || !credit || sameTitle(lookup.artist, credit));
+  });
 }
 
 /**
@@ -97,7 +113,7 @@ export async function agreeingRecords(manage: ManageApi, lookup: Lookup): Promis
 export function groupRecords(results: readonly ProviderSearchResult[]): ProviderSearchResult[][] {
   const groups = new Map<string, ProviderSearchResult[]>();
   for (const result of results) {
-    const key = [result.provider, result.kind, comparableTitle(result.title), comparableTitle(result.artist ?? ''), result.year ?? ''].join('|');
+    const key = [result.provider, result.kind, comparableTitle(result.title), comparableTitle(recordCredit(result) ?? ''), result.year ?? ''].join('|');
     const group = groups.get(key);
     if (group) group.push(result);
     else groups.set(key, [result]);
@@ -158,7 +174,7 @@ export function recordThumbnail(manage: ManageApi, result: Pick<ProviderSearchRe
   if (!asked) { asked = new Map(); thumbnails.set(manage, asked); }
   let found = asked.get(result.ref);
   if (!found) {
-    found = pacedArtwork(manage, result.ref, result.kind === 'album' ? 'cover' : 'poster')
+    found = pacedArtwork(manage, result.ref, result.kind === 'album' || result.kind === 'book' ? 'cover' : 'poster')
       .then(([option]) => option?.preview_url, () => undefined);
     asked.set(result.ref, found);
   }
@@ -175,9 +191,10 @@ export interface CandidatePicture {
   episode_number?: number;
 }
 
-/** The source as named to the viewer: TMDB, or the Cover Art Archive for a MusicBrainz release. */
+/** The source as named to the viewer: TMDB, Open Library, or the Cover Art Archive for a MusicBrainz release. */
 export function pictureSource(picture: Pick<CandidatePicture, 'ref'>): string {
-  return picture.ref.startsWith('tmdb:') ? 'TMDB' : 'the Cover Art Archive';
+  if (picture.ref.startsWith('tmdb:')) return 'TMDB';
+  return picture.ref.startsWith('openlibrary:') ? 'Open Library' : 'the Cover Art Archive';
 }
 
 /** How many agreeing records are asked for a picture before giving up. */
@@ -217,9 +234,9 @@ export function findCandidatePictures(manage: ManageApi, candidates: readonly Me
   });
 }
 
-/** Puts the picture on what a manual entry wrote: a cover on the album, otherwise on the leaf item. */
+/** Puts the picture on what a manual entry wrote: a track's cover on its album, otherwise on the leaf item (a book's cover on the book). */
 export async function applyCandidatePicture(manage: ManageApi, picture: CandidatePicture, written: ManualMetadataResult): Promise<void> {
-  const itemId = picture.role === 'cover' ? written.items.find((item) => item.kind === 'album')?.id : written.leaf_item_id;
+  const itemId = picture.kind === 'track' ? written.items.find((item) => item.kind === 'album')?.id : written.leaf_item_id;
   if (!itemId) return;
   await manage.chooseArtwork(itemId, picture.role, picture.option.option_id, {
     ref: picture.ref, season_number: picture.season_number, episode_number: picture.episode_number,

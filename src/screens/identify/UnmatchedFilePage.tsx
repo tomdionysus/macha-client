@@ -16,7 +16,7 @@ import {
 import { DetailCard, DetailHeader, Facts } from '../../components/ListParts';
 import { ConfirmModal } from '../../components/Modal';
 import { fileName, formatAge, formatBytes, formatTimestamp } from '../ingest/format';
-import { hintResultLabel, viewerErrorText } from '../../text/viewerText';
+import { hintResultLabel, seriesPlaceText, viewerErrorText } from '../../text/viewerText';
 import { applyCandidatePicture, comparableTitle, findCandidatePictures, type CandidatePicture } from './providerLookup';
 import { Suggestions } from './Suggestions';
 import { ManualEntry } from './ManualEntry';
@@ -29,6 +29,11 @@ export function candidateSummary(candidate: MediaProbeCandidate): string {
       ? `S${String(candidate.season_number).padStart(2, '0')}E${String(candidate.episode_number).padStart(2, '0')}`
       : '';
     return [candidate.series, position, candidate.title].filter(Boolean).join(' · ');
+  }
+  if (candidate.kind === 'book') {
+    const author = candidate.authors?.length ? candidate.authors.join(', ') : candidate.author;
+    const series = candidate.series_name ? seriesPlaceText(candidate.series_name, candidate.series_index) : undefined;
+    return [author, series, candidate.title].filter(Boolean).join(' · ');
   }
   return [candidate.artist, candidate.album, candidate.title].filter(Boolean).join(' · ');
 }
@@ -54,6 +59,7 @@ export function candidateAlreadyCatalogued(candidate: MediaProbeCandidate, match
 
 const KIND_NAME: Record<CatalogueKind, string> = {
   movie: 'movie', show: 'series', season: 'season', episode: 'episode', artist: 'artist', album: 'album', track: 'track',
+  book: 'book', author: 'author', series: 'book series',
 };
 
 /**
@@ -64,6 +70,7 @@ const SEARCH_KINDS: Record<MediaProbeCandidate['kind'], CatalogueKind[]> = {
   movie: ['movie'],
   episode: ['season', 'show', 'episode'],
   track: ['album', 'artist', 'track'],
+  book: ['series', 'author', 'book'],
 };
 const PER_KIND = 8;
 
@@ -72,6 +79,7 @@ const SQUARE_ART: ReadonlySet<CatalogueKind> = new Set(['artist', 'album', 'trac
 
 const GROUP_NAME: Record<CatalogueKind, string> = {
   movie: 'Movies', show: 'Series', season: 'Seasons', episode: 'Episodes', artist: 'Artists', album: 'Albums', track: 'Tracks',
+  book: 'Books', author: 'Authors', series: 'Book series',
 };
 
 type Found = ReadonlyArray<readonly [CatalogueKind, CatalogueItem[]]>;
@@ -79,6 +87,7 @@ type Found = ReadonlyArray<readonly [CatalogueKind, CatalogueItem[]]>;
 /** The action offered on a parent result, which opens manual entry with it chosen; a playable item takes the file instead. */
 const PLACE_UNDER: Partial<Record<CatalogueKind, string>> = {
   album: 'Add a track to this album', artist: 'Add a new album by this artist', show: 'Add an episode to this series', season: 'Add an episode to this season',
+  author: 'Add a book by this author', series: 'Add a book to this series',
 };
 
 function matchSubtitle(match: CatalogueItem): string {

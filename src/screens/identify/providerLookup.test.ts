@@ -18,6 +18,25 @@ describe('a candidate\'s picture', () => {
     expect(recordLookup(probe({ album: '' }))).toBeUndefined();
   });
 
+  it('asks for a book by its title, with its first author to tell editions of one title apart', () => {
+    expect(recordLookup(probe({ kind: 'book', title: 'A Novel', authors: ['An Author', 'A Second'], album: '' })))
+      .toMatchObject({ query: 'A Novel', searchKind: 'book', artist: 'An Author' });
+    expect(recordLookup(probe({ kind: 'book', title: '', album: '' }))).toBeUndefined();
+  });
+
+  it('takes a book by its author, loosely, and its cover from Open Library', async () => {
+    const manage = {
+      providerSearch: vi.fn(async () => [
+        { ref: 'openlibrary:work:other', provider: 'openlibrary', kind: 'book', title: 'A Novel', author: 'Someone Else', year: 1990 },
+        { ref: 'openlibrary:work:w1', provider: 'openlibrary', kind: 'book', title: 'A Novel', author: 'Author', year: 1987 },
+      ]),
+      providerArtwork: vi.fn(async () => [option]),
+    } as unknown as ManageApi;
+    const [found] = await Promise.all(findCandidatePictures(manage, [probe({ kind: 'book', title: 'A Novel', author: 'An Author', album: '' })]));
+    expect(found).toMatchObject({ ref: 'openlibrary:work:w1', role: 'cover' });
+    expect(manage.providerArtwork).toHaveBeenCalledWith('openlibrary:work:w1', 'cover', expect.anything());
+  });
+
   it('takes the provider\'s first result only when its title is the one named', () => {
     expect(sameTitle('A Record', 'A Record (Deluxe Edition)')).toBe(true);
     expect(sameTitle('Unknown Album', 'A Record')).toBe(false);
@@ -67,5 +86,12 @@ describe('a candidate\'s picture', () => {
     expect(manage.chooseArtwork).toHaveBeenCalledWith('manual:album:1', 'cover', 'o1', { ref: 'musicbrainz:release:r1', season_number: undefined, episode_number: undefined });
     await applyCandidatePicture(manage, { ...cover, kind: 'movie', role: 'poster', ref: 'tmdb:movie:1' }, written);
     expect(manage.chooseArtwork).toHaveBeenLastCalledWith('manual:track:1', 'poster', 'o1', expect.objectContaining({ ref: 'tmdb:movie:1' }));
+  });
+
+  it('puts a book\'s cover on the book, which has no album', async () => {
+    const manage = { chooseArtwork: vi.fn(async () => ({})) } as unknown as ManageApi;
+    const written = { leaf_item_id: 'manual:book:1', items: [{ id: 'manual:book:1', kind: 'book' }, { id: 'author:an-author', kind: 'author' }] } as never;
+    await applyCandidatePicture(manage, { kind: 'book', ref: 'openlibrary:work:w1', role: 'cover', option: option as never }, written);
+    expect(manage.chooseArtwork).toHaveBeenCalledWith('manual:book:1', 'cover', 'o1', expect.objectContaining({ ref: 'openlibrary:work:w1' }));
   });
 });

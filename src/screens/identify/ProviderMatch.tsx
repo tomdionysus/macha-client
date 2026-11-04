@@ -5,17 +5,17 @@ import { NumberField, numberText, TextField, wholeNumber } from './fields';
 import { groupRecords, sameTitle } from './providerLookup';
 import { ProviderRecord, type RecordNumbers } from './ProviderRecord';
 
-const KIND_LABEL: Record<ProviderSearchKind, string> = { movie: 'Movie', show: 'TV series', album: 'Music album' };
+const KIND_LABEL: Record<ProviderSearchKind, string> = { movie: 'Movie', show: 'TV series', album: 'Music album', book: 'Book' };
 
 /** What a file most likely is: what its candidate says, else the library it came in through. */
 export function likelyKind(detail: UnmatchedDetail, probe?: MediaProbeCandidate): MediaProbeCandidate['kind'] {
-  return probe?.kind ?? (detail.item.provider === 'tv' ? 'episode' : detail.item.provider === 'music' ? 'track' : 'movie');
+  return probe?.kind ?? (detail.item.provider === 'tv' ? 'episode' : detail.item.provider === 'music' ? 'track' : detail.item.provider === 'books' ? 'book' : 'movie');
 }
 
-/** The provider record a file of that kind is found under: an episode's series, a track's album. */
+/** The provider record a file of that kind is found under: an episode's series, a track's album, a book's own. */
 function providerKindFor(detail: UnmatchedDetail, probe?: MediaProbeCandidate): ProviderSearchKind {
   const kind = likelyKind(detail, probe);
-  return kind === 'episode' ? 'show' : kind === 'track' ? 'album' : 'movie';
+  return kind === 'episode' ? 'show' : kind === 'track' ? 'album' : kind === 'book' ? 'book' : 'movie';
 }
 
 /** The words to search the provider with first: the candidate's name for the thing a provider lists. */
@@ -46,7 +46,8 @@ export function ProviderMatch({ detail, probe, manage, onResolved }: {
   const [kind, setKind] = useState<ProviderSearchKind>(() => providerKindFor(detail, probe));
   const [query, setQuery] = useState(() => initialQuery(kind, probe));
   const [year, setYear] = useState(() => numberText(kind === 'movie' ? probe?.year : undefined));
-  const [artist, setArtist] = useState(probe?.artist ?? '');
+  // An album's artist or a book's author: the one name a provider search narrows by.
+  const [artist, setArtist] = useState((probe?.kind === 'book' ? probe.author ?? probe.authors?.[0] : probe?.artist) ?? '');
   const [results, setResults] = useState<ProviderSearchResult[]>();
   const [busy, setBusy] = useState(false);
   const grouped = useMemo(() => results && groupRecords(results), [results]);
@@ -57,11 +58,12 @@ export function ProviderMatch({ detail, probe, manage, onResolved }: {
     setBusy(true);
     setError(undefined);
     try {
-      const found = await manage.providerSearch(query.trim(), kind, { year: wholeNumber(year), limit: 20 });
-      // The artist narrows here, loosely: the provider's own filter is exact
+      const by = kind === 'album' || kind === 'book' ? artist.trim() : '';
+      // A book's author goes to the provider, whose author search is loose.
+      const found = await manage.providerSearch(query.trim(), kind, { year: wholeNumber(year), limit: 20, ...(kind === 'book' && by ? { author: by } : {}) });
+      // An album's artist narrows here, loosely: the provider's own filter is exact
       // and finds nothing for "DJ Someone" where it credits "Someone".
-      const by = kind === 'album' ? artist.trim() : '';
-      setResults(by ? found.filter((result) => !result.artist || sameTitle(by, result.artist)) : found);
+      setResults(kind === 'album' && by ? found.filter((result) => !result.artist || sameTitle(by, result.artist)) : found);
     } catch (cause) {
       setError(viewerErrorText(cause));
     } finally {
@@ -71,7 +73,7 @@ export function ProviderMatch({ detail, probe, manage, onResolved }: {
 
   return (
     <div className="identify-provider">
-      <form className="manage-manual-form" aria-label="Search TMDB and MusicBrainz" onSubmit={(event) => { event.preventDefault(); void search(); }}>
+      <form className="manage-manual-form" aria-label="Search TMDB, MusicBrainz and Open Library" onSubmit={(event) => { event.preventDefault(); void search(); }}>
         <label>Type
           <select value={kind} onChange={(event) => { setKind(event.target.value as ProviderSearchKind); setResults(undefined); }} disabled={busy} data-tv-focusable="true">
             {(Object.keys(KIND_LABEL) as ProviderSearchKind[]).map((key) => <option key={key} value={key}>{KIND_LABEL[key]}</option>)}
@@ -80,7 +82,7 @@ export function ProviderMatch({ detail, probe, manage, onResolved }: {
         <TextField label="Search for" value={query} onChange={setQuery} disabled={busy} />
         <div className="manage-field-row">
           <NumberField label="Year" value={year} onChange={setYear} disabled={busy} />
-          {kind === 'album' && <TextField label="Artist" value={artist} onChange={setArtist} disabled={busy} />}
+          {(kind === 'album' || kind === 'book') && <TextField label={kind === 'book' ? 'Author' : 'Artist'} value={artist} onChange={setArtist} disabled={busy} />}
         </div>
         <button className="secondary-button" type="submit" disabled={busy || !query.trim()} data-tv-focusable="true">Search</button>
       </form>
