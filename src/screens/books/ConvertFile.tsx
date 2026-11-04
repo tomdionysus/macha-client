@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   awaitConversion,
+  CONVERSION_FORMATS,
   CONVERSION_UNAVAILABLE_CODE,
+  isConvertibleSource,
   playbackFailureCode,
   type CatalogueApi,
   type CatalogueConversion,
@@ -15,7 +17,7 @@ import { readableHere, saveBlob } from './bookFiles';
 const FAILED_TEXT = 'The conversion did not work for this file.';
 
 /** Why a conversion failed, in the viewer's words; a code not named here reads as a plain failure. */
-export const CONVERSION_FAILURE_TEXT: Record<ConversionFailureCode | 'encrypted' | 'unsupported_source', string> = {
+export const CONVERSION_FAILURE_TEXT: Record<ConversionFailureCode, string> = {
   conversion_failed: FAILED_TEXT,
   conversion_timed_out: 'The conversion took too long and was stopped.',
   source_unreadable: 'The server could not read this file to convert it.',
@@ -35,15 +37,9 @@ export function conversionRefusalText(cause: unknown): string {
   return viewerErrorText(cause);
 }
 
-/**
- * Server 0.92.1 converts Kindle files (MOBI, AZW3) to EPUB and nothing else; every other
- * format it refuses. Narrower than core's format list, which predates that.
- */
-const CONVERTS_TO_EPUB: ReadonlySet<string> = new Set(['MOBI', 'AZW3']);
-
-/** The formats a file of this one can become on the server. */
+/** The formats a file of this one can become on the server: none unless core says the format converts. */
 export function conversionTargets(format: string | undefined): ConversionFormat[] {
-  return format !== undefined && CONVERTS_TO_EPUB.has(format) ? ['epub'] : [];
+  return format !== undefined && isConvertibleSource(format) ? [...CONVERSION_FORMATS] : [];
 }
 
 type State =
