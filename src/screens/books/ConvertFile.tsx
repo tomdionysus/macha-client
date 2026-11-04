@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   awaitConversion,
-  CONVERSION_FORMATS,
   CONVERSION_UNAVAILABLE_CODE,
   playbackFailureCode,
   type CatalogueApi,
@@ -13,13 +12,22 @@ import { viewerErrorText } from '../../text/viewerText';
 import { formatBytes } from '../ingest/format';
 import { readableHere, saveBlob } from './bookFiles';
 
-/** Why a conversion failed, in the viewer's words. */
-export const CONVERSION_FAILURE_TEXT: Record<ConversionFailureCode, string> = {
-  conversion_failed: 'The conversion did not work for this file.',
+const FAILED_TEXT = 'The conversion did not work for this file.';
+
+/** Why a conversion failed, in the viewer's words; a code not named here reads as a plain failure. */
+export const CONVERSION_FAILURE_TEXT: Record<ConversionFailureCode | 'encrypted' | 'unsupported_source', string> = {
+  conversion_failed: FAILED_TEXT,
   conversion_timed_out: 'The conversion took too long and was stopped.',
   source_unreadable: 'The server could not read this file to convert it.',
   source_too_large: 'This file is too large to convert.',
+  encrypted: 'This file is locked by its seller (DRM), so it cannot be converted.',
+  unsupported_source: 'The server cannot convert files of this format.',
 };
+
+/** The viewer's sentence for a failed conversion's code. */
+export function conversionFailureText(code: string | null | undefined): string {
+  return (code && (CONVERSION_FAILURE_TEXT as Record<string, string>)[code]) || FAILED_TEXT;
+}
 
 /** A refused conversion: no node with conversion switched on gets this client's sentence, anything else the usual one. */
 export function conversionRefusalText(cause: unknown): string {
@@ -27,9 +35,15 @@ export function conversionRefusalText(cause: unknown): string {
   return viewerErrorText(cause);
 }
 
-/** The formats a file of this one can become: every conversion format but its own. */
+/**
+ * Server 0.92.1 converts Kindle files (MOBI, AZW3) to EPUB and nothing else; every other
+ * format it refuses. Narrower than core's format list, which predates that.
+ */
+const CONVERTS_TO_EPUB: ReadonlySet<string> = new Set(['MOBI', 'AZW3']);
+
+/** The formats a file of this one can become on the server. */
 export function conversionTargets(format: string | undefined): ConversionFormat[] {
-  return CONVERSION_FORMATS.filter((target) => target !== format?.toLowerCase());
+  return format !== undefined && CONVERTS_TO_EPUB.has(format) ? ['epub'] : [];
 }
 
 type State =
@@ -51,13 +65,12 @@ export function ConvertFile({ catalogue, mediaId, format, title, onRead }: {
   onRead: (mediaId: string, format: ConversionFormat) => void;
 }) {
   const targets = conversionTargets(format);
-  const [target, setTarget] = useState<ConversionFormat>(targets[0] ?? 'epub');
   const [state, setState] = useState<State>({ phase: 'idle' });
   const [saving, setSaving] = useState(false);
   const running = useRef<AbortController | undefined>(undefined);
   useEffect(() => () => running.current?.abort(), []);
 
-  const convert = async () => {
+  const convert = async (target: ConversionFormat) => {
     running.current?.abort();
     const controller = new AbortController();
     running.current = controller;
@@ -68,7 +81,7 @@ export function ConvertFile({ catalogue, mediaId, format, title, onRead }: {
       if (controller.signal.aborted) return;
       setState(done.status === 'ready'
         ? { phase: 'ready', conversion: done }
-        : { phase: 'failed', text: done.errorCode ? CONVERSION_FAILURE_TEXT[done.errorCode] : 'The conversion did not work for this file.' });
+        : { phase: 'failed', text: conversionFailureText(done.errorCode) });
     } catch (cause) {
       if (!controller.signal.aborted) setState({ phase: 'failed', text: conversionRefusalText(cause) });
     }
@@ -90,15 +103,11 @@ export function ConvertFile({ catalogue, mediaId, format, title, onRead }: {
   const busy = state.phase === 'converting';
   return (
     <div className="book-convert">
-      <label>
-        <span>Convert to</span>
-        <select value={target} disabled={busy} onChange={(event) => { setTarget(event.target.value as ConversionFormat); setState({ phase: 'idle' }); }} data-tv-focusable="true">
-          {targets.map((option) => <option key={option} value={option}>{option.toUpperCase()}</option>)}
-        </select>
-      </label>
-      <button className="secondary-button" type="button" disabled={busy} onClick={() => void convert()} data-tv-focusable="true">
-        {busy ? `Converting to ${state.format.toUpperCase()}…` : 'Convert'}
-      </button>
+      {targets.map((target) => (
+        <button key={target} className="secondary-button" type="button" disabled={busy} onClick={() => void convert(target)} data-tv-focusable="true">
+          {busy && state.format === target ? `Converting to ${target.toUpperCase()}…` : `Convert to ${target.toUpperCase()}`}
+        </button>
+      ))}
       {state.phase === 'ready' && (
         <>
           <span className="book-file-size">{state.conversion.format.toUpperCase()}{state.conversion.size !== null ? `, ${formatBytes(state.conversion.size)}` : ''}</span>

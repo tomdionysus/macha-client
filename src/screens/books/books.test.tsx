@@ -13,7 +13,7 @@ import { availabilityText, bookAuthorsText, bookFormatName, cardSubtitle, series
 import { downloadName, readableHere } from './bookFiles';
 import { ReaderScreen } from '../ReaderScreen';
 import { lockBookScripts, READER_SCRIPT_POLICY } from './readerSecurity';
-import { conversionRefusalText, conversionTargets } from './ConvertFile';
+import { conversionRefusalText, conversionFailureText, conversionTargets } from './ConvertFile';
 import type { ReaderPlace } from './BookReader';
 
 /** What the reader was last given; the real one needs a browser's layout, which jsdom lacks. */
@@ -190,16 +190,14 @@ describe('converting a book\'s file', () => {
     return { catalogue, onRead };
   }
 
-  it('offers every other format, waits on the server, then reads the converted copy', async () => {
+  it('offers EPUB for a Kindle file, waits on the server, then reads the converted copy', async () => {
     const state = { mediaId: 'macha:mobi', format: 'epub', endpointId: 'node-a', size: null, mimeType: null, errorCode: null } as const;
     const { catalogue, onRead } = showConvertible({
       convert: vi.fn(async () => ({ ...state, status: 'converting', retryAfterMs: 0 })),
       conversion: vi.fn(async () => ({ ...state, status: 'ready', size: 3072, mimeType: 'application/epub+zip' })),
     } as Partial<CatalogueApi>);
     await settle();
-    const select = screen.getByLabelText('Convert to') as HTMLSelectElement;
-    expect([...select.options].map((option) => option.textContent)).toEqual(['EPUB', 'AZW3', 'PDF', 'FB2']);
-    fireEvent.click(screen.getByRole('button', { name: 'Convert' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Convert to EPUB' }));
     await settle();
     expect(screen.getByRole('button', { name: 'Converting to EPUB…' })).toBeTruthy();
     expect(catalogue.convert).toHaveBeenCalledWith('macha:mobi', 'epub', expect.anything());
@@ -215,15 +213,19 @@ describe('converting a book\'s file', () => {
       convert: vi.fn(async () => ({ mediaId: 'macha:mobi', format: 'epub', status: 'failed', size: null, mimeType: null, errorCode: 'source_too_large' })),
     } as Partial<CatalogueApi>);
     await settle();
-    fireEvent.click(screen.getByRole('button', { name: 'Convert' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Convert to EPUB' }));
     await settle();
     expect(screen.getByRole('alert').textContent).toBe('This file is too large to convert.');
+    expect(conversionFailureText('encrypted')).toBe('This file is locked by its seller (DRM), so it cannot be converted.');
+    expect(conversionFailureText('something_new')).toBe('The conversion did not work for this file.');
   });
 
   it('names conversion being off rather than passing on the server\'s words', () => {
     expect(conversionRefusalText(Object.assign(new Error('log'), { status: 503, code: 'conversion_unavailable' })))
       .toBe('No server here can convert books: conversion is switched on per server.');
-    expect(conversionTargets('PDF')).toEqual(['epub', 'azw3', 'mobi', 'fb2']);
+    expect(conversionTargets('AZW3')).toEqual(['epub']);
+    expect(conversionTargets('PDF')).toEqual([]);
+    expect(conversionTargets('EPUB')).toEqual([]);
   });
 
   it('reads a converted copy from the server, keeping its place apart from the original\'s', async () => {
