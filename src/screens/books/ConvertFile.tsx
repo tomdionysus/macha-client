@@ -3,7 +3,7 @@ import {
   awaitConversion,
   CONVERSION_FORMATS,
   CONVERSION_UNAVAILABLE_CODE,
-  isConvertibleSource,
+  isConvertibleContentType,
   playbackFailureCode,
   type CatalogueApi,
   type CatalogueConversion,
@@ -37,9 +37,9 @@ export function conversionRefusalText(cause: unknown): string {
   return viewerErrorText(cause);
 }
 
-/** The formats a file of this one can become on the server: none unless core says the format converts. */
-export function conversionTargets(format: string | undefined): ConversionFormat[] {
-  return format !== undefined && isConvertibleSource(format) ? [...CONVERSION_FORMATS] : [];
+/** The formats a file served as this type can become on the server: none unless core says the type converts. */
+export function conversionTargets(contentType: string): ConversionFormat[] {
+  return isConvertibleContentType(contentType) ? [...CONVERSION_FORMATS] : [];
 }
 
 type State =
@@ -52,15 +52,15 @@ type State =
  * Converts one of a book's files to another format on the server, then reads or downloads the
  * result. The server converts in its own time, so this waits on it, on the node that took the job.
  */
-export function ConvertFile({ catalogue, mediaId, format, title, onRead }: {
+export function ConvertFile({ catalogue, mediaId, contentType, title, onRead }: {
   catalogue: CatalogueApi;
   mediaId: string;
-  /** The file's own format, as named here ("EPUB"); undefined when unnamed. */
-  format: string | undefined;
+  /** The type the server serves the file as, which says whether it converts. */
+  contentType: string;
   title: string;
   onRead: (mediaId: string, format: ConversionFormat) => void;
 }) {
-  const targets = conversionTargets(format);
+  const targets = conversionTargets(contentType);
   const [state, setState] = useState<State>({ phase: 'idle' });
   const [saving, setSaving] = useState(false);
   const running = useRef<AbortController | undefined>(undefined);

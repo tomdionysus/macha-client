@@ -9,7 +9,7 @@ import { BooksScreen } from '../BooksScreen';
 import { SearchScreen } from '../SearchScreen';
 import { MediaCard } from '../../components/MediaCard';
 import { settle } from '../../test/settle';
-import { availabilityText, bookAuthorsText, bookFormatName, cardSubtitle, seriesPlaceText } from '../../text/viewerText';
+import { availabilityText, bookAuthorsText, bookFormatName, cardSubtitle, publishedText, seriesPlaceText } from '../../text/viewerText';
 import { downloadName, readableHere } from './bookFiles';
 import { ReaderScreen } from '../ReaderScreen';
 import { lockBookScripts, READER_SCRIPT_POLICY } from './readerSecurity';
@@ -223,9 +223,9 @@ describe('converting a book\'s file', () => {
   it('names conversion being off rather than passing on the server\'s words', () => {
     expect(conversionRefusalText(Object.assign(new Error('log'), { status: 503, code: 'conversion_unavailable' })))
       .toBe('No server here can convert books: conversion is switched on per server.');
-    expect(conversionTargets('AZW3')).toEqual(['epub']);
-    expect(conversionTargets('PDF')).toEqual([]);
-    expect(conversionTargets('EPUB')).toEqual([]);
+    expect(conversionTargets('application/vnd.amazon.ebook')).toEqual(['epub']);
+    expect(conversionTargets('application/pdf')).toEqual([]);
+    expect(conversionTargets('application/epub+zip')).toEqual([]);
   });
 
   it('reads a converted copy from the server, keeping its place apart from the original\'s', async () => {
@@ -265,6 +265,23 @@ describe('the Books lists', () => {
     render(<MemoryRouter><BooksScreen api={mediaApi()} section="titles" onOpen={vi.fn()} /></MemoryRouter>);
     await settle();
     expect(screen.getByText(/No books yet/)).toBeTruthy();
+  });
+
+  it('says no series yet, not no books, when books name no series', async () => {
+    render(<MemoryRouter><BooksScreen api={mediaApi()} section="series" onOpen={vi.fn()} /></MemoryRouter>);
+    await settle();
+    expect(screen.getByText(/^No series yet/)).toBeTruthy();
+    expect(screen.queryByText(/No books yet/)).toBeNull();
+  });
+
+  it('says when a book was published as a reader would', () => {
+    expect(publishedText('2005')).toBe('2005');
+    expect(publishedText('2005-09')).toBe('September 2005');
+    expect(publishedText('2005-09-13')).toBe('13 September 2005');
+    // Local midnight a zone east of UTC, stored as the evening before.
+    expect(publishedText('2005-09-12T23:00:00+00:00')).toBe('13 September 2005');
+    expect(publishedText('2005-09-13T01:00:00+00:00')).toBe('13 September 2005');
+    expect(publishedText('Autumn 2005')).toBe('Autumn 2005');
   });
 
   it('asks for authors and series from their own lists', async () => {

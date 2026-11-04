@@ -9,7 +9,7 @@ import { ErrorMessage, Loading } from '../components/Status';
 import { useArtworkUrl } from '../hooks/useArtworkUrl';
 import { useAsync } from '../hooks/useAsync';
 import { useRefreshableAsync } from '../hooks/useRefreshableAsync';
-import { seriesPlaceText, viewerErrorText } from '../text/viewerText';
+import { seriesPlaceText, viewerErrorText, publishedText } from '../text/viewerText';
 import { formatBytes } from './ingest/format';
 import { downloadBookFile, languageName, readableHere, readBookFile, type BookFile } from './books/bookFiles';
 import { ConvertFile } from './books/ConvertFile';
@@ -83,7 +83,7 @@ export function BookScreen({ api, catalogue, positions, bookId, onBack, onRead, 
   };
   const facts: Array<readonly [string, string]> = [
     ...(context?.publisher ? [['Publisher', context.publisher] as const] : []),
-    ...(context?.published ? [['Published', context.published] as const] : []),
+    ...(context?.published ? [['Published', publishedText(context.published)] as const] : []),
     ...(context?.language ? [['Language', languageName(context.language) ?? context.language] as const] : []),
     ...(context?.isbn13 ? [['ISBN', context.isbn13] as const] : []),
   ];
@@ -127,7 +127,7 @@ export function BookScreen({ api, catalogue, positions, bookId, onBack, onRead, 
                     <button className="secondary-button" type="button" data-tv-focusable="true" disabled={downloading !== undefined} onClick={() => void download(file)}>
                       {downloading === file.mediaId ? 'Downloading…' : 'Download'}
                     </button>
-                    <ConvertFile catalogue={catalogue} mediaId={file.mediaId} format={file.format} title={book.title} onRead={(mediaId, as) => onRead(book.id, mediaId, as)} />
+                    <ConvertFile catalogue={catalogue} mediaId={file.mediaId} contentType={file.contentType} title={book.title} onRead={(mediaId, as) => onRead(book.id, mediaId, as)} />
                   </div>
                 ))}
               {files.value && !files.value.some((file) => !('error' in file) && readableHere(file)) && files.value.some((file) => !('error' in file)) && (

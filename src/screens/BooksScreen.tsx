@@ -14,6 +14,13 @@ const HEADINGS: Record<BooksSection, string> = { titles: 'Titles', authors: 'Aut
 /** Said when a list is empty: books appear only once a node with books turned on has scanned some. */
 export const NO_BOOKS_TEXT = 'No books yet. Books appear once their files are in a node\'s books folder and that node has catalogued them.';
 
+/** What each list says when it is empty: books with no author or series named leave those lists empty. */
+const EMPTY_TEXT: Record<BooksSection, string> = {
+  titles: NO_BOOKS_TEXT,
+  authors: 'No authors yet. An author appears once a book names one.',
+  series: 'No series yet. A series appears once a book names the series it belongs to.',
+};
+
 interface Props {
   api: MediaApi;
   section: BooksSection;
@@ -40,7 +47,7 @@ export function BooksScreen({ api, section, onOpen }: Props) {
       <MediaPageTitle refreshing={result.refreshing} onRefresh={result.refresh}>Books</MediaPageTitle>
       {result.error && <p className="manage-error media-refresh-error">Refresh failed: {result.error.message}</p>}
       <h2 className="music-browser-heading">{HEADINGS[section]}</h2>
-      {items.length === 0 && <p className="list-note">{NO_BOOKS_TEXT}</p>}
+      {items.length === 0 && <p className="list-note">{EMPTY_TEXT[section]}</p>}
       <div className="media-grid">
         {items.map((item) => (
           <MediaCard

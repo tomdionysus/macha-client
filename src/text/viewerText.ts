@@ -612,3 +612,25 @@ export function availabilityText(
     : '';
   return `${kind === 'author' ? 'Some books by this author are' : `Some of this ${noun} is`} held only by servers that can't be reached right now${counts ? `: ${counts}` : ''}.`;
 }
+
+const MONTH_YEAR = new Intl.DateTimeFormat('en-GB', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+const DAY_MONTH_YEAR = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
+
+/**
+ * A book's publication date as a reader says it: "2005", "September 2005", "13 September 2005".
+ * A date with a time is a day that a time zone has shifted (local midnight stored as 23:00 the
+ * day before), so it rounds to the nearest day. Anything else is shown as given.
+ */
+export function publishedText(value: string): string {
+  const text = value.trim();
+  if (/^\d{4}$/.test(text)) return text;
+  const month = /^(\d{4})-(\d{2})$/.exec(text);
+  if (month) return MONTH_YEAR.format(Date.UTC(Number(month[1]), Number(month[2]) - 1, 1));
+  const day = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
+  if (day) return DAY_MONTH_YEAR.format(Date.UTC(Number(day[1]), Number(day[2]) - 1, Number(day[3])));
+  if (!/^\d{4}-\d{2}-\d{2}T/.test(text)) return text;
+  const time = Date.parse(text);
+  if (Number.isNaN(time)) return text;
+  const DAY_MS = 86_400_000;
+  return DAY_MONTH_YEAR.format(Math.round(time / DAY_MS) * DAY_MS);
+}
