@@ -19,9 +19,12 @@ export async function readBookFile(catalogue: Pick<CatalogueApi, 'content'>, med
   return { mediaId, contentType: read.contentType, format: bookFormatName(read.contentType), totalBytes: read.totalBytes };
 }
 
-/** Whether this browser shows the format itself. A PDF opens in the browser's own viewer. */
+/** The formats the reader opens: a PDF in the browser's own viewer, the rest in pages with foliate-js. */
+const READABLE: ReadonlySet<string> = new Set(['EPUB', 'MOBI', 'AZW3', 'FB2', 'CBZ', 'PDF']);
+
+/** Whether this client can show the format itself. */
 export function readableHere(file: Pick<BookFile, 'format'>): boolean {
-  return file.format === 'PDF';
+  return file.format !== undefined && READABLE.has(file.format);
 }
 
 /** A file name for a download: the title, without characters a file system refuses, and the format's extension. */

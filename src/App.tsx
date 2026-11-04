@@ -23,7 +23,7 @@ import { ContinueWatchingStore } from '@machafoundation/core';
 import { hasRole, sessionManager, sessionPermits, type UserRole } from '@machafoundation/core';
 import { useCurrentSession } from './app/useCurrentSession';
 import { PlaybackQueueStore } from '@machafoundation/core';
-import { MusicPlaylistStore } from '@machafoundation/core';
+import { MusicPlaylistStore, ReadingPositionStore } from '@machafoundation/core';
 import { VolumeStore } from './state/volume';
 import {
   getClientId,
@@ -249,7 +249,7 @@ function AlbumRoute({ api, onPlay, onPlayAll, onOpenTrack, onAddToPlaylist, onPl
   );
 }
 
-function BookRoute({ api, catalogue, onEdit }: { api: MediaApi; catalogue: CatalogueApi; onEdit?: (id: string) => void }) {
+function BookRoute({ api, catalogue, positions, onEdit }: { api: MediaApi; catalogue: CatalogueApi; positions: ReadingPositionStore; onEdit?: (id: string) => void }) {
   const { bookId } = useParams();
   const navigate = useNavigate();
   const back = useMediaRouteBack(api);
@@ -258,6 +258,7 @@ function BookRoute({ api, catalogue, onEdit }: { api: MediaApi; catalogue: Catal
     <BookScreen
       api={api}
       catalogue={catalogue}
+      positions={positions}
       bookId={resolvedBookId}
       onBack={back}
       onRead={(id, mediaId) => navigate(`${routes.reader(id)}?${new URLSearchParams({ file: mediaId })}`)}
@@ -279,14 +280,14 @@ function BookCollectionRoute({ api, kind, onOpenBook, onEdit }: {
 }
 
 /** The file read is `?file=`, one of the book's media ids. */
-function ReaderRoute({ api, catalogue }: { api: MediaApi; catalogue: CatalogueApi }) {
+function ReaderRoute({ api, catalogue, positions }: { api: MediaApi; catalogue: CatalogueApi; positions: ReadingPositionStore }) {
   const { bookId } = useParams();
   const [search] = useSearchParams();
   const navigate = useNavigate();
   const resolvedBookId = required(bookId, 'bookId');
   const mediaId = search.get('file');
   if (!mediaId) return <Navigate to={routes.book(resolvedBookId)} replace />;
-  return <ReaderScreen api={api} catalogue={catalogue} bookId={resolvedBookId} mediaId={mediaId} onBack={() => navigate(routes.book(resolvedBookId))} />;
+  return <ReaderScreen api={api} catalogue={catalogue} positions={positions} bookId={resolvedBookId} mediaId={mediaId} onBack={() => navigate(routes.book(resolvedBookId))} />;
 }
 
 function MetadataEditorRoute({ api, facts, manage }: { api: CatalogueApi; facts: PlaybackFactsApi; manage?: ManageApi }) {
@@ -343,6 +344,7 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
   const queueStore = useMemo(() => new PlaybackQueueStore(clientId), [clientId]);
   const playlistStore = useMemo(() => new MusicPlaylistStore(clientId), [clientId]);
   const volumeStore = useMemo(() => new VolumeStore(clientId), [clientId]);
+  const readingPositions = useMemo(() => new ReadingPositionStore(clientId), [clientId]);
   // Per device, at core's key, so every client keeps the setting alike.
   const qualityPreferences = useMemo(() => new QualityPreferenceStore(), []);
   // The setting to offer versions this device cannot play: live for the player, read on demand elsewhere.
@@ -767,10 +769,10 @@ export default function App({ platform, apiOverride, playbackOverride }: Props) 
           <Route path={routes.bookTitles} element={mediaPane(<BooksScreen api={api} section="titles" onOpen={open} />)} />
           <Route path={routes.bookAuthors} element={mediaPane(<BooksScreen api={api} section="authors" onOpen={open} />)} />
           <Route path={routes.bookSeriesList} element={mediaPane(<BooksScreen api={api} section="series" onOpen={open} />)} />
-          <Route path={`${routes.bookTitles}/:bookId`} element={mediaPane(<BookRoute api={api} catalogue={catalogueApi} onEdit={metadataEditingAvailable ? openMetadataEditor : undefined} />)} />
+          <Route path={`${routes.bookTitles}/:bookId`} element={mediaPane(<BookRoute api={api} catalogue={catalogueApi} positions={readingPositions} onEdit={metadataEditingAvailable ? openMetadataEditor : undefined} />)} />
           <Route path={`${routes.bookAuthors}/:collectionId`} element={mediaPane(<BookCollectionRoute api={api} kind="author" onOpenBook={open} onEdit={metadataEditingAvailable ? openMetadataEditor : undefined} />)} />
           <Route path={`${routes.bookSeriesList}/:collectionId`} element={mediaPane(<BookCollectionRoute api={api} kind="series" onOpenBook={open} onEdit={metadataEditingAvailable ? openMetadataEditor : undefined} />)} />
-          <Route path="/read/:bookId" element={mediaPane(<ReaderRoute api={api} catalogue={catalogueApi} />)} />
+          <Route path="/read/:bookId" element={mediaPane(<ReaderRoute api={api} catalogue={catalogueApi} positions={readingPositions} />)} />
           <Route path="/play/:itemId" element={<div className="player-route-placeholder" aria-hidden="true" />} />
           <Route path="/items/:itemId" element={mediaPane(<DetailRoute {...detailRouteProps} parameter="itemId" />)} />
           <Route path="/items/:itemId/edit" element={metadataEditingAvailable ? <MetadataEditorRoute api={catalogueApi} facts={playbackFactsApi} manage={libraryManagementAvailable ? manageApi : undefined} /> : <Navigate to={landing} replace />} />

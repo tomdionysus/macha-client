@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { describe, expect, it, vi } from 'vitest';
-import type { BookContext, BookSeriesDetails, CatalogueApi, MediaApi, MediaSummary } from '@machafoundation/core';
+import { ReadingPositionStore, type BookContext, type BookSeriesDetails, type CatalogueApi, type MediaApi, type MediaSummary } from '@machafoundation/core';
 import { BookScreen } from '../BookScreen';
 import { BookCollectionScreen } from '../BookCollectionScreen';
 import { BooksScreen } from '../BooksScreen';
@@ -11,6 +11,26 @@ import { MediaCard } from '../../components/MediaCard';
 import { settle } from '../../test/settle';
 import { availabilityText, bookAuthorsText, bookFormatName, cardSubtitle, seriesPlaceText } from '../../text/viewerText';
 import { downloadName, readableHere } from './bookFiles';
+import { ReaderScreen } from '../ReaderScreen';
+import { lockBookScripts, READER_SCRIPT_POLICY } from './readerSecurity';
+import type { ReaderPlace } from './BookReader';
+
+/** What the reader was last given; the real one needs a browser's layout, which jsdom lacks. */
+const readerProps: { file?: File; start?: string; onPlace?: (place: ReaderPlace) => void } = {};
+vi.mock('./BookReader', async (original) => ({
+  ...(await original<typeof import('./BookReader')>()),
+  BookReader: (props: typeof readerProps) => { Object.assign(readerProps, props); return null; },
+}));
+
+/** Storage that lives as long as the test. */
+function memoryStorage() {
+  const values = new Map<string, string>();
+  return {
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => { values.set(key, value); },
+    removeItem: (key: string) => { values.delete(key); },
+  };
+}
 
 const context = (overrides: Partial<BookContext> = {}): BookContext => ({
   authors: [{ id: 'author:one', title: 'One Author' }],
@@ -53,12 +73,12 @@ describe('book wording', () => {
     expect(cardSubtitle(book('b1', 'A Novel'))).toBe('One Author');
   });
 
-  it('names the formats the server types, and opens only a PDF here', () => {
+  it('names the formats the server types, and opens every one the reader takes', () => {
     expect(bookFormatName('application/epub+zip')).toBe('EPUB');
     expect(bookFormatName('application/pdf; charset=binary')).toBe('PDF');
     expect(bookFormatName('application/octet-stream')).toBeUndefined();
-    expect(readableHere({ format: 'PDF' })).toBe(true);
-    expect(readableHere({ format: 'EPUB' })).toBe(false);
+    for (const format of ['EPUB', 'MOBI', 'AZW3', 'FB2', 'CBZ', 'PDF']) expect(readableHere({ format })).toBe(true);
+    expect(readableHere({ format: undefined })).toBe(false);
   });
 
   it('saves a file under its title, without characters a file system refuses', () => {
@@ -77,8 +97,9 @@ describe('a book\'s page', () => {
     const api = mediaApi({ details: vi.fn(async () => item) });
     const catalogue = catalogueOf(files);
     const onRead = vi.fn();
-    render(<MemoryRouter><BookScreen api={api} catalogue={catalogue} bookId={item.id} onBack={vi.fn()} onRead={onRead} /></MemoryRouter>);
-    return { catalogue, onRead };
+    const positions = new ReadingPositionStore('test-client', memoryStorage());
+    render(<MemoryRouter><BookScreen api={api} catalogue={catalogue} positions={positions} bookId={item.id} onBack={vi.fn()} onRead={onRead} /></MemoryRouter>);
+    return { catalogue, onRead, positions };
   }
 
   it('names its authors and its place in each series, as links', async () => {
@@ -89,7 +110,7 @@ describe('a book\'s page', () => {
     expect(screen.getByRole('link', { name: 'A Series, book 2' }).getAttribute('href')).toBe('/books/series/series%3Aa');
   });
 
-  it('lists each file by format and size from its first byte, reading a PDF here and offering every one for download', async () => {
+  it('lists each file by format and size from its first byte, to read here or download', async () => {
     const { catalogue, onRead } = showBook(book('b1', 'A Novel', { mediaIds: ['macha:epub', 'macha:pdf'] }), {
       'macha:epub': { type: 'application/epub+zip', size: 2048 },
       'macha:pdf': { type: 'application/pdf', size: 4096 },
@@ -98,20 +119,59 @@ describe('a book\'s page', () => {
     expect(catalogue.content).toHaveBeenCalledWith('macha:epub', expect.objectContaining({ range: { start: 0, end: 0 } }));
     const files = within(screen.getByLabelText('Files'));
     const rows = files.getAllByRole('button', { name: 'Download' }).map((button) => button.closest('.book-file')?.textContent);
-    expect(rows).toEqual(['EPUB2.00 KBDownload', 'PDF4.00 KBReadDownload']);
-    fireEvent.click(files.getByRole('button', { name: 'Read' }));
+    expect(rows).toEqual(['EPUB2.00 KBReadDownload', 'PDF4.00 KBReadDownload']);
+    fireEvent.click(files.getAllByRole('button', { name: 'Read' })[1]);
     expect(onRead).toHaveBeenCalledWith('b1', 'macha:pdf');
   });
 
   it('says when no file can be shown here, and which file could not be read', async () => {
-    showBook(book('b1', 'A Novel', { mediaIds: ['macha:epub', 'macha:gone'] }), {
-      'macha:epub': { type: 'application/epub+zip', size: 2048 },
+    showBook(book('b1', 'A Novel', { mediaIds: ['macha:other', 'macha:gone'] }), {
+      'macha:other': { type: 'application/octet-stream', size: 2048 },
       'macha:gone': new Error('No node can read this file.'),
     });
     await settle();
     expect(screen.getByText(/cannot show these formats yet/)).toBeTruthy();
     expect(screen.getByText(/A file could not be read/)).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Read' })).toBeNull();
+  });
+});
+
+describe('reading a book', () => {
+  it('offers to continue a file from where this device left it, or to read it again once finished', async () => {
+    const item = book('b1', 'A Novel', { mediaIds: ['macha:epub'] });
+    const api = mediaApi({ details: vi.fn(async () => item) });
+    const positions = new ReadingPositionStore('test-client', memoryStorage());
+    positions.set({ mediaId: 'macha:epub', itemId: 'b1', position: 'epubcfi(/6/4)', progressPermille: 347, finished: false });
+    render(<MemoryRouter><BookScreen api={api} catalogue={catalogueOf({ 'macha:epub': { type: 'application/epub+zip', size: 10 } })} positions={positions} bookId="b1" onBack={vi.fn()} onRead={vi.fn()} /></MemoryRouter>);
+    await settle();
+    expect(screen.getByRole('button', { name: 'Continue, 34%' })).toBeTruthy();
+    act(() => { positions.set({ mediaId: 'macha:epub', position: 'epubcfi(/6/90)', progressPermille: 1000, finished: true }); });
+    expect(screen.getByRole('button', { name: 'Read again' })).toBeTruthy();
+  });
+
+  it('opens a file at its place and keeps each new one, per file', async () => {
+    const positions = new ReadingPositionStore('test-client', memoryStorage());
+    positions.set({ mediaId: 'macha:epub', position: 'epubcfi(/6/4)', progressPermille: 100, finished: false });
+    const catalogue = catalogueOf({ 'macha:epub': { type: 'application/epub+zip', size: 10 } });
+    const api = mediaApi({ details: vi.fn(async () => book('b1', 'A Novel')) });
+    render(<MemoryRouter><ReaderScreen api={api} catalogue={catalogue} positions={positions} bookId="b1" mediaId="macha:epub" onBack={vi.fn()} /></MemoryRouter>);
+    await settle();
+    expect(readerProps.start).toBe('epubcfi(/6/4)');
+    expect(readerProps.file?.name).toBe('book.epub');
+    act(() => readerProps.onPlace?.({ position: 'epubcfi(/6/8)', fraction: 0.5, chapter: 'Two' }));
+    expect(positions.get('macha:epub')).toMatchObject({ itemId: 'b1', position: 'epubcfi(/6/8)', progressPermille: 500, finished: false });
+    act(() => readerProps.onPlace?.({ position: 'epubcfi(/6/99)', fraction: 0.999 }));
+    expect(positions.get('macha:epub')?.finished).toBe(true);
+  });
+
+  it('allows only the app\'s own scripts once a book is opened, put on the page once', () => {
+    lockBookScripts();
+    lockBookScripts();
+    const policies = document.head.querySelectorAll('meta[http-equiv="Content-Security-Policy"]');
+    expect(policies).toHaveLength(1);
+    expect(policies[0].getAttribute('content')).toBe(READER_SCRIPT_POLICY);
+    expect(READER_SCRIPT_POLICY).toMatch(/script-src 'self';/);
+    expect(READER_SCRIPT_POLICY).not.toMatch(/unsafe-inline|script-src[^;]*blob:/);
   });
 });
 

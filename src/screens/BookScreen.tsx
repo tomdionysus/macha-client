@@ -1,6 +1,6 @@
-import { Fragment, useState } from 'react';
+import { Fragment, useState, useSyncExternalStore } from 'react';
 import { Link } from 'react-router-dom';
-import { routes, type CatalogueApi, type MediaApi } from '@machafoundation/core';
+import { routes, type CatalogueApi, type MediaApi, type ReadingPositionStore } from '@machafoundation/core';
 import { AvailabilityNote } from '../components/Availability';
 import { EditButton } from '../components/EditButton';
 import { Facts } from '../components/ListParts';
@@ -16,6 +16,8 @@ import { downloadBookFile, languageName, readableHere, readBookFile, type BookFi
 interface Props {
   api: MediaApi;
   catalogue: CatalogueApi;
+  /** Where this device left each file. */
+  positions: ReadingPositionStore;
   bookId: string;
   onBack: () => void;
   onRead: (bookId: string, mediaId: string) => void;
@@ -33,11 +35,18 @@ function AuthorLinks({ authors }: { authors: ReadonlyArray<{ id: string; title?:
   ));
 }
 
+/** What the read button says: where this device is in the file, if it has started it. */
+export function readLabel(place: { progressPermille: number; finished: boolean } | undefined): string {
+  if (!place) return 'Read';
+  if (place.finished) return 'Read again';
+  return `Continue, ${Math.floor(place.progressPermille / 10)}%`;
+}
+
 /**
  * A book: its cover, who wrote it, where it sits in each series, and its files, each read here
  * where the browser can show its format, or downloaded.
  */
-export function BookScreen({ api, catalogue, bookId, onBack, onRead, onEdit }: Props) {
+export function BookScreen({ api, catalogue, positions, bookId, onBack, onRead, onEdit }: Props) {
   const details = useRefreshableAsync((signal) => api.details(bookId, signal), [api, bookId]);
   const book = details.value?.kind === 'book' ? details.value : undefined;
   const cover = useArtworkUrl(api, book?.artwork?.poster ?? book?.artwork?.thumbnail);
@@ -46,6 +55,7 @@ export function BookScreen({ api, catalogue, bookId, onBack, onRead, onEdit }: P
     (signal) => Promise.all(mediaIds.map((mediaId) => readBookFile(catalogue, mediaId, signal).catch((cause: unknown) => ({ mediaId, error: viewerErrorText(cause) })))),
     [catalogue, mediaIds.join('\n')],
   );
+  const places = useSyncExternalStore(positions.subscribe, positions.getSnapshot);
   const [downloading, setDownloading] = useState<string>();
   const [error, setError] = useState<string>();
 
@@ -108,7 +118,9 @@ export function BookScreen({ api, catalogue, bookId, onBack, onRead, onEdit }: P
                     <span className="book-file-format">{file.format ?? 'File'}</span>
                     {file.totalBytes !== undefined && <span className="book-file-size">{formatBytes(file.totalBytes)}</span>}
                     {readableHere(file) && (
-                      <button className="primary-button" type="button" data-tv-focusable="true" onClick={() => onRead(book.id, file.mediaId)}>Read</button>
+                      <button className="primary-button" type="button" data-tv-focusable="true" onClick={() => onRead(book.id, file.mediaId)}>
+                        {readLabel(places.find((place) => place.mediaId === file.mediaId))}
+                      </button>
                     )}
                     <button className="secondary-button" type="button" data-tv-focusable="true" disabled={downloading !== undefined} onClick={() => void download(file)}>
                       {downloading === file.mediaId ? 'Downloading…' : 'Download'}
