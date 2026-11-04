@@ -1,6 +1,6 @@
 import { Fragment, useState, useSyncExternalStore } from 'react';
 import { Link } from 'react-router-dom';
-import { routes, type CatalogueApi, type MediaApi, type ReadingPositionStore } from '@machafoundation/core';
+import { routes, type CatalogueApi, type ConversionFormat, type MediaApi, type ReadingPositionStore } from '@machafoundation/core';
 import { AvailabilityNote } from '../components/Availability';
 import { EditButton } from '../components/EditButton';
 import { Facts } from '../components/ListParts';
@@ -12,6 +12,7 @@ import { useRefreshableAsync } from '../hooks/useRefreshableAsync';
 import { seriesPlaceText, viewerErrorText } from '../text/viewerText';
 import { formatBytes } from './ingest/format';
 import { downloadBookFile, languageName, readableHere, readBookFile, type BookFile } from './books/bookFiles';
+import { ConvertFile } from './books/ConvertFile';
 
 interface Props {
   api: MediaApi;
@@ -20,7 +21,8 @@ interface Props {
   positions: ReadingPositionStore;
   bookId: string;
   onBack: () => void;
-  onRead: (bookId: string, mediaId: string) => void;
+  /** `as` reads the file converted to that format. */
+  onRead: (bookId: string, mediaId: string, as?: ConversionFormat) => void;
   onEdit?: () => void;
 }
 
@@ -125,10 +127,11 @@ export function BookScreen({ api, catalogue, positions, bookId, onBack, onRead, 
                     <button className="secondary-button" type="button" data-tv-focusable="true" disabled={downloading !== undefined} onClick={() => void download(file)}>
                       {downloading === file.mediaId ? 'Downloading…' : 'Download'}
                     </button>
+                    <ConvertFile catalogue={catalogue} mediaId={file.mediaId} format={file.format} title={book.title} onRead={(mediaId, as) => onRead(book.id, mediaId, as)} />
                   </div>
                 ))}
               {files.value && !files.value.some((file) => !('error' in file) && readableHere(file)) && files.value.some((file) => !('error' in file)) && (
-                <p className="list-note">This browser cannot show these formats yet: download a file to read it in an e-book app.</p>
+                <p className="list-note">This file cannot be shown here: convert it, or download it to read in an e-book app.</p>
               )}
               {error && <p className="manage-error" role="alert">{error}</p>}
             </div>

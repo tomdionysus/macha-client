@@ -39,10 +39,15 @@ export function downloadName(title: string, format: string | undefined): string 
  */
 export async function downloadBookFile(catalogue: Pick<CatalogueApi, 'content'>, mediaId: string, title: string): Promise<void> {
   const read = await catalogue.content(mediaId);
-  const url = URL.createObjectURL(read.body);
+  saveBlob(read.body, title, bookFormatName(read.contentType));
+}
+
+/** Hands bytes already fetched to the browser as a download named for the book. */
+export function saveBlob(body: Blob, title: string, format: string | undefined): void {
+  const url = URL.createObjectURL(body);
   const link = document.createElement('a');
   link.href = url;
-  link.download = downloadName(title, bookFormatName(read.contentType));
+  link.download = downloadName(title, format);
   document.body.append(link);
   link.click();
   link.remove();

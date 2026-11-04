@@ -667,6 +667,11 @@ h2 { font-size: clamp(1.2rem, 2vw, 1.75rem); letter-spacing: -.01em; margin: 1.1
 .book-file-format { min-width: 3.5rem; color: #e2e2e6; font-weight: 600; letter-spacing: .04em; }
 .book-file-size { min-width: 5rem; color: var(--text-dim); font-variant-numeric: tabular-nums; }
 .book-file-error { color: #e49a9f; }
+.book-convert { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; flex-basis: 100%; padding-left: 4.1rem; }
+.book-convert label { display: flex; align-items: center; gap: .4rem; color: var(--text-dim); font-size: .85rem; }
+.book-convert select { padding: .35rem .5rem; border: 1px solid #3a3a40; border-radius: .4rem; background: #19191c; color: #d7d7da; }
+.book-convert button { margin: 0; }
+@media (max-width: 600px) { .book-convert { padding-left: 0; } }
 .reader-screen { display: flex; flex-direction: column; gap: .6rem; width: 100%; }
 .reader-frame { width: 100%; height: calc(100vh - 9rem); border: 0; border-radius: .5rem; background: #fff; }
 .book-reader { display: grid; grid-template-columns: 3rem minmax(0, 1fr) 3rem; grid-template-rows: calc(100vh - 11rem) auto; align-items: center; gap: 0 .5rem; }

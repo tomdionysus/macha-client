@@ -13,6 +13,7 @@ import { availabilityText, bookAuthorsText, bookFormatName, cardSubtitle, series
 import { downloadName, readableHere } from './bookFiles';
 import { ReaderScreen } from '../ReaderScreen';
 import { lockBookScripts, READER_SCRIPT_POLICY } from './readerSecurity';
+import { conversionRefusalText, conversionTargets } from './ConvertFile';
 import type { ReaderPlace } from './BookReader';
 
 /** What the reader was last given; the real one needs a browser's layout, which jsdom lacks. */
@@ -118,9 +119,11 @@ describe('a book\'s page', () => {
     await settle();
     expect(catalogue.content).toHaveBeenCalledWith('macha:epub', expect.objectContaining({ range: { start: 0, end: 0 } }));
     const files = within(screen.getByLabelText('Files'));
-    const rows = files.getAllByRole('button', { name: 'Download' }).map((button) => button.closest('.book-file')?.textContent);
+    // The file's own row, without its conversion controls.
+    const rows = [...document.querySelectorAll('.book-file')].map((row) => [...row.children].filter((part) => !part.classList.contains('book-convert')).map((part) => part.textContent).join(''));
     expect(rows).toEqual(['EPUB2.00 KBReadDownload', 'PDF4.00 KBReadDownload']);
     fireEvent.click(files.getAllByRole('button', { name: 'Read' })[1]);
+    expect(onRead).toHaveBeenCalledTimes(1);
     expect(onRead).toHaveBeenCalledWith('b1', 'macha:pdf');
   });
 
@@ -130,7 +133,7 @@ describe('a book\'s page', () => {
       'macha:gone': new Error('No node can read this file.'),
     });
     await settle();
-    expect(screen.getByText(/cannot show these formats yet/)).toBeTruthy();
+    expect(screen.getByText(/cannot be shown here: convert it, or download it/)).toBeTruthy();
     expect(screen.getByText(/A file could not be read/)).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Read' })).toBeNull();
   });
@@ -172,6 +175,71 @@ describe('reading a book', () => {
     expect(policies[0].getAttribute('content')).toBe(READER_SCRIPT_POLICY);
     expect(READER_SCRIPT_POLICY).toMatch(/script-src 'self';/);
     expect(READER_SCRIPT_POLICY).not.toMatch(/unsafe-inline|script-src[^;]*blob:/);
+  });
+});
+
+describe('converting a book\'s file', () => {
+  const mobi = { 'macha:mobi': { type: 'application/x-mobipocket-ebook', size: 10 } };
+
+  function showConvertible(conversion: Partial<CatalogueApi>) {
+    const catalogue = { ...catalogueOf(mobi), ...conversion } as CatalogueApi;
+    const onRead = vi.fn();
+    const positions = new ReadingPositionStore('test-client', memoryStorage());
+    const api = mediaApi({ details: vi.fn(async () => book('b1', 'A Novel', { mediaIds: ['macha:mobi'] })) });
+    render(<MemoryRouter><BookScreen api={api} catalogue={catalogue} positions={positions} bookId="b1" onBack={vi.fn()} onRead={onRead} /></MemoryRouter>);
+    return { catalogue, onRead };
+  }
+
+  it('offers every other format, waits on the server, then reads the converted copy', async () => {
+    const state = { mediaId: 'macha:mobi', format: 'epub', endpointId: 'node-a', size: null, mimeType: null, errorCode: null } as const;
+    const { catalogue, onRead } = showConvertible({
+      convert: vi.fn(async () => ({ ...state, status: 'converting', retryAfterMs: 0 })),
+      conversion: vi.fn(async () => ({ ...state, status: 'ready', size: 3072, mimeType: 'application/epub+zip' })),
+    } as Partial<CatalogueApi>);
+    await settle();
+    const select = screen.getByLabelText('Convert to') as HTMLSelectElement;
+    expect([...select.options].map((option) => option.textContent)).toEqual(['EPUB', 'AZW3', 'PDF', 'FB2']);
+    fireEvent.click(screen.getByRole('button', { name: 'Convert' }));
+    await settle();
+    expect(screen.getByRole('button', { name: 'Converting to EPUB…' })).toBeTruthy();
+    expect(catalogue.convert).toHaveBeenCalledWith('macha:mobi', 'epub', expect.anything());
+    await waitFor(() => expect(screen.getByText('EPUB, 3.00 KB')).toBeTruthy(), { timeout: 3000 });
+    expect(catalogue.conversion).toHaveBeenCalledWith(expect.objectContaining({ endpointId: 'node-a' }), expect.anything());
+    const convert = within(document.querySelector('.book-convert') as HTMLElement);
+    fireEvent.click(convert.getByRole('button', { name: 'Read' }));
+    expect(onRead).toHaveBeenCalledWith('b1', 'macha:mobi', 'epub');
+  });
+
+  it('says why a conversion failed, and when no server can convert', async () => {
+    showConvertible({
+      convert: vi.fn(async () => ({ mediaId: 'macha:mobi', format: 'epub', status: 'failed', size: null, mimeType: null, errorCode: 'source_too_large' })),
+    } as Partial<CatalogueApi>);
+    await settle();
+    fireEvent.click(screen.getByRole('button', { name: 'Convert' }));
+    await settle();
+    expect(screen.getByRole('alert').textContent).toBe('This file is too large to convert.');
+  });
+
+  it('names conversion being off rather than passing on the server\'s words', () => {
+    expect(conversionRefusalText(Object.assign(new Error('log'), { status: 503, code: 'conversion_unavailable' })))
+      .toBe('No server here can convert books: conversion is switched on per server.');
+    expect(conversionTargets('PDF')).toEqual(['epub', 'azw3', 'mobi', 'fb2']);
+  });
+
+  it('reads a converted copy from the server, keeping its place apart from the original\'s', async () => {
+    const positions = new ReadingPositionStore('test-client', memoryStorage());
+    positions.set({ mediaId: 'macha:mobi', position: 'epubcfi(/6/4)', progressPermille: 100, finished: false });
+    const catalogue = {
+      ...catalogueOf({}),
+      conversionContent: vi.fn(async () => ({ body: new Blob(['x']), contentType: 'application/epub+zip' })),
+    } as unknown as CatalogueApi;
+    render(<MemoryRouter><ReaderScreen api={mediaApi({ details: vi.fn(async () => book('b1', 'A Novel')) })} catalogue={catalogue} positions={positions} bookId="b1" mediaId="macha:mobi" as="epub" onBack={vi.fn()} /></MemoryRouter>);
+    await settle();
+    expect(catalogue.conversionContent).toHaveBeenCalledWith({ mediaId: 'macha:mobi', format: 'epub' }, expect.anything());
+    expect(readerProps.start).toBeUndefined();
+    act(() => readerProps.onPlace?.({ position: 'epubcfi(/6/8)', fraction: 0.2 }));
+    expect(positions.get('macha:mobi#epub')?.position).toBe('epubcfi(/6/8)');
+    expect(positions.get('macha:mobi')?.position).toBe('epubcfi(/6/4)');
   });
 });
 

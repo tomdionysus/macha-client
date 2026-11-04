@@ -60,7 +60,7 @@ import { TorrentDetailScreen } from './screens/TorrentDetailScreen';
 import { ManageScreen, type ManageSection } from './screens/ManageScreen';
 import { UnmatchedFilePage } from './screens/identify/UnmatchedFilePage';
 import { NodeStatusScreen, StatusScreen } from './screens/StatusScreen';
-import { isBookKind, pathForMedia, routes } from '@machafoundation/core';
+import { isBookKind, isConversionFormat, pathForMedia, routes } from '@machafoundation/core';
 import { playerRouteItemId } from '@machafoundation/core';
 import { useMachaServices } from './app/useMachaServices';
 import { useSession } from './app/useSession';
@@ -261,7 +261,7 @@ function BookRoute({ api, catalogue, positions, onEdit }: { api: MediaApi; catal
       positions={positions}
       bookId={resolvedBookId}
       onBack={back}
-      onRead={(id, mediaId) => navigate(`${routes.reader(id)}?${new URLSearchParams({ file: mediaId })}`)}
+      onRead={(id, mediaId, as) => navigate(`${routes.reader(id)}?${new URLSearchParams({ file: mediaId, ...(as ? { as } : {}) })}`)}
       onEdit={onEdit ? () => onEdit(resolvedBookId) : undefined}
     />
   );
@@ -279,15 +279,16 @@ function BookCollectionRoute({ api, kind, onOpenBook, onEdit }: {
   return <BookCollectionScreen api={api} kind={kind} id={id} onBack={back} onOpenBook={onOpenBook} onEdit={onEdit ? () => onEdit(id) : undefined} />;
 }
 
-/** The file read is `?file=`, one of the book's media ids. */
+/** The file read is `?file=`, one of the book's media ids; `?as=` reads it converted to that format. */
 function ReaderRoute({ api, catalogue, positions }: { api: MediaApi; catalogue: CatalogueApi; positions: ReadingPositionStore }) {
   const { bookId } = useParams();
   const [search] = useSearchParams();
   const navigate = useNavigate();
   const resolvedBookId = required(bookId, 'bookId');
   const mediaId = search.get('file');
+  const as = search.get('as') ?? undefined;
   if (!mediaId) return <Navigate to={routes.book(resolvedBookId)} replace />;
-  return <ReaderScreen api={api} catalogue={catalogue} positions={positions} bookId={resolvedBookId} mediaId={mediaId} onBack={() => navigate(routes.book(resolvedBookId))} />;
+  return <ReaderScreen api={api} catalogue={catalogue} positions={positions} bookId={resolvedBookId} mediaId={mediaId} as={as !== undefined && isConversionFormat(as) ? as : undefined} onBack={() => navigate(routes.book(resolvedBookId))} />;
 }
 
 function MetadataEditorRoute({ api, facts, manage }: { api: CatalogueApi; facts: PlaybackFactsApi; manage?: ManageApi }) {
